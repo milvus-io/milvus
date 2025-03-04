@@ -47,6 +47,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
+	defer cdata.ReleaseCArrowSchema(&cas)
 
 	cBufferSize := C.int64_t(bufferSize)
 
@@ -82,6 +83,8 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 
 	cArr := (*C.struct_ArrowArray)(unsafe.Pointer(&caa))
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
+	defer cdata.ReleaseCArrowSchema(&cas)
+	defer cdata.ReleaseCArrowArray(&caa)
 
 	status := C.WriteRecordBatch(pw.cPackedWriter, cArr, cSchema)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
