@@ -35,7 +35,7 @@ import (
 
 // TaskQueue is a queue used to store tasks.
 type TaskQueue interface {
-	utChan() <-chan int
+	utChan() <-chan struct{}
 	utEmpty() bool
 	utFull() bool
 	addUnissuedTask(t task) error
@@ -56,12 +56,12 @@ type IndexTaskQueue struct {
 	// maxTaskNum should keep still
 	maxTaskNum int64
 
-	utBufChan chan int // to block scheduler
+	utBufChan chan struct{} // to block scheduler
 
 	sched *TaskScheduler
 }
 
-func (queue *IndexTaskQueue) utChan() <-chan int {
+func (queue *IndexTaskQueue) utChan() <-chan struct{} {
 	return queue.utBufChan
 }
 
@@ -81,7 +81,10 @@ func (queue *IndexTaskQueue) addUnissuedTask(t task) error {
 		return errors.New("IndexNode task queue is full")
 	}
 	queue.unissuedTasks.PushBack(t)
-	queue.utBufChan <- 1
+	select {
+	case queue.utBufChan <- struct{}{}:
+	default:
+	}
 	return nil
 }
 
@@ -161,7 +164,7 @@ func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 		activeTasks:   make(map[string]task),
 		maxTaskNum:    1024,
 
-		utBufChan: make(chan int, 1024),
+		utBufChan: make(chan struct{}, 1024),
 		sched:     sched,
 	}
 }

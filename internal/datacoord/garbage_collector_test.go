@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func Test_garbageCollector_basic(t *testing.T) {
@@ -476,6 +477,45 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 			},
 		},
 	}
+	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	segIdx0 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx0.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1026,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              1,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      10,
+		IndexFileKeys:       []string{"file1", "file2"},
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx1.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 1,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1026,
+		IndexID:             indexID,
+		BuildID:             buildID + 1,
+		NodeID:              1,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      10,
+		IndexFileKeys:       []string{"file1", "file2"},
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIndexes.Insert(segID, segIdx0)
+	segIndexes.Insert(segID+1, segIdx1)
 	meta := &meta{
 		RWMutex:     lock.RWMutex{},
 		ctx:         ctx,
@@ -483,47 +523,8 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 		collections: nil,
 		segments:    NewSegmentsInfo(),
 		indexMeta: &indexMeta{
-			catalog: catalog,
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-				segID: {
-					indexID: {
-						SegmentID:           segID,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             1026,
-						IndexID:             indexID,
-						BuildID:             buildID,
-						NodeID:              1,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_Finished,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      10,
-						IndexFileKeys:       []string{"file1", "file2"},
-						IndexSerializedSize: 0,
-						WriteHandoff:        false,
-					},
-				},
-				segID + 1: {
-					indexID: {
-						SegmentID:           segID + 1,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             1026,
-						IndexID:             indexID,
-						BuildID:             buildID + 1,
-						NodeID:              1,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_Finished,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      10,
-						IndexFileKeys:       []string{"file1", "file2"},
-						IndexSerializedSize: 0,
-						WriteHandoff:        false,
-					},
-				},
-			},
+			catalog:          catalog,
+			segmentIndexes:   segIndexes,
 			indexes:          map[UniqueID]map[UniqueID]*model.Index{},
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
 		},
@@ -641,6 +642,45 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 			},
 		},
 	}
+	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	segIdx0 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx0.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1026,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              1,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      10,
+		IndexFileKeys:       []string{"file1", "file2"},
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx1.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 1,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1026,
+		IndexID:             indexID,
+		BuildID:             buildID + 1,
+		NodeID:              1,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_InProgress,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      10,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIndexes.Insert(segID, segIdx0)
+	segIndexes.Insert(segID+1, segIdx1)
 	meta := &meta{
 		RWMutex:     lock.RWMutex{},
 		ctx:         ctx,
@@ -648,47 +688,8 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 		collections: nil,
 		segments:    NewSegmentsInfo(),
 		indexMeta: &indexMeta{
-			catalog: catalog,
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-				segID: {
-					indexID: {
-						SegmentID:           segID,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             1026,
-						IndexID:             indexID,
-						BuildID:             buildID,
-						NodeID:              1,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_Finished,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      10,
-						IndexFileKeys:       []string{"file1", "file2"},
-						IndexSerializedSize: 0,
-						WriteHandoff:        false,
-					},
-				},
-				segID + 1: {
-					indexID: {
-						SegmentID:           segID + 1,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             1026,
-						IndexID:             indexID,
-						BuildID:             buildID + 1,
-						NodeID:              1,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_InProgress,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      10,
-						IndexFileKeys:       nil,
-						IndexSerializedSize: 0,
-						WriteHandoff:        false,
-					},
-				},
-			},
+			catalog:        catalog,
+			segmentIndexes: segIndexes,
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
 					indexID: {
@@ -1043,52 +1044,53 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			},
 		},
 	}
+	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	segIdx0 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx0.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             5000,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       []string{"file1", "file2"},
+		IndexSerializedSize: 1024,
+		WriteHandoff:        false,
+	})
+	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx1.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID + 1,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             5000,
+		IndexID:             indexID,
+		BuildID:             buildID + 1,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       []string{"file3", "file4"},
+		IndexSerializedSize: 1024,
+		WriteHandoff:        false,
+	})
+	segIndexes.Insert(segID, segIdx0)
+	segIndexes.Insert(segID+1, segIdx1)
 	m := &meta{
 		catalog:    catalog,
 		channelCPs: channelCPs,
 		segments:   NewSegmentsInfo(),
 		indexMeta: &indexMeta{
-			catalog: catalog,
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-				segID: {
-					indexID: {
-						SegmentID:           segID,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             5000,
-						IndexID:             indexID,
-						BuildID:             buildID,
-						NodeID:              0,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_Finished,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      0,
-						IndexFileKeys:       []string{"file1", "file2"},
-						IndexSerializedSize: 1024,
-						WriteHandoff:        false,
-					},
-				},
-				segID + 1: {
-					indexID: {
-						SegmentID:           segID + 1,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             5000,
-						IndexID:             indexID,
-						BuildID:             buildID + 1,
-						NodeID:              0,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_Finished,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      0,
-						IndexFileKeys:       []string{"file3", "file4"},
-						IndexSerializedSize: 1024,
-						WriteHandoff:        false,
-					},
-				},
-			},
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			catalog:          catalog,
+			segmentIndexes:   segIndexes,
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
