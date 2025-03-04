@@ -17,6 +17,7 @@
 #include <memory>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 #include <chrono>
@@ -16105,4 +16106,52 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     EXPECT_EQ(final.count(), N);
+
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
+        std::vector<proto::plan::GenericValue>(),
+        false);
+    plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 0);
+
+    using DT = std::conditional_t<
+        std::is_same_v<typename TestFixture::DataType, std::string>,
+        std::string_view,
+        typename TestFixture::DataType>;
+    std::vector<proto::plan::GenericValue> vals;
+    int expect_count = 10;
+    if constexpr (std::is_same_v<DT, bool>) {
+        proto::plan::GenericValue val;
+        val.set_bool_val(true);
+        vals.push_back(val);
+        val.set_bool_val(false);
+        vals.push_back(val);
+        expect_count = N;
+    } else {
+        for (int i = 0; i < expect_count; ++i) {
+            proto::plan::GenericValue val;
+
+            auto v = jsons[i].at<DT>(this->json_path).value();
+            if constexpr (std::is_same_v<DT, int64_t>) {
+                val.set_int64_val(v);
+            } else if constexpr (std::is_same_v<DT, double>) {
+                val.set_float_val(v);
+            } else if constexpr (std::is_same_v<DT, std::string_view>) {
+                val.set_string_val(std::string(v));
+            } else if constexpr (std::is_same_v<DT, bool>) {
+                val.set_bool_val(i % 2 == 0);
+            }
+            vals.push_back(val);
+        }
+    }
+    term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
+        vals,
+        false);
+    plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), expect_count);
 }
