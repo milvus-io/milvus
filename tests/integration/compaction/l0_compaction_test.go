@@ -230,7 +230,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 
 	// drop collection
 	// status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
-	//	 CollectionName: collectionName,
+	// 	CollectionName: collectionName,
 	// })
 	// err = merr.CheckRPCCall(status, err)
 	// s.NoError(err)
