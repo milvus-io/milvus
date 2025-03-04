@@ -61,6 +61,7 @@ indexCoordinator:
       cpu: "0.1"
       memory: 50Mi
 indexNode:
+  enabled: false
   disk:
     enabled: true
   resources:

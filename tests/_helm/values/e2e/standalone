@@ -60,6 +60,16 @@ indexCoordinator:
     requests:
       cpu: "0.1"
       memory: 50Mi
+indexNode:
+  enabled: false
+  disk:
+    enabled: true
+  resources:
+    limits:
+      cpu: "2"
+    requests:
+      cpu: "0.5"
+      memory: 500Mi
 kafka:
   affinity:
     nodeAffinity:
