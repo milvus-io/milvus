@@ -155,6 +155,7 @@ func (c *Client) DescribeRole(ctx context.Context, option DescribeRoleOption, ca
 				RoleName:   g.GetRole().GetName(),
 				Grantor:    g.GetGrantor().GetUser().GetName(),
 				Privilege:  g.GetGrantor().GetPrivilege().GetName(),
+				DbName:     g.GetDbName(),
 			}
 		})
 
