@@ -61,7 +61,13 @@ func (c *Knapsack[T]) tryPack(size, maxLeftSize, minSegs, maxSegs int64) (bitset
 	}
 
 	nSelections := selection.Count()
-	if left > maxLeftSize || nSelections < uint(minSegs) {
+	var minUSegs uint
+	if minSegs < 0 {
+		minUSegs = 0
+	} else {
+		minUSegs = uint(minSegs)
+	}
+	if left > maxLeftSize || nSelections < uint(minUSegs) {
 		selection.ClearAll()
 		left = size
 	}
