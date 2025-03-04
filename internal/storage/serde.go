@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"io"
 	"math"
+	"strconv"
 	"sync"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type Record interface {
@@ -408,7 +410,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 	}
 
-	m[schemapb.DataType_Array] = byteEntry
+	m[schemapb.DataType_Array] = eagerArrayEntry
 	m[schemapb.DataType_JSON] = byteEntry
 
 	fixedSizeDeserializer := func(a arrow.Array, i int) (any, bool) {
@@ -713,8 +715,9 @@ type singleFieldRecordWriter struct {
 	schema      *arrow.Schema
 	writerProps *parquet.WriterProperties
 
-	numRows             int
-	writtenUncompressed uint64
+	numRows              int
+	writtenUncompressed  uint64
+	memoryExpansionRatio int
 }
 
 func (sfw *singleFieldRecordWriter) Write(r Record) error {
@@ -728,21 +731,45 @@ func (sfw *singleFieldRecordWriter) Write(r Record) error {
 }
 
 func (sfw *singleFieldRecordWriter) GetWrittenUncompressed() uint64 {
-	return sfw.writtenUncompressed
+	return sfw.writtenUncompressed * uint64(sfw.memoryExpansionRatio)
 }
 
 func (sfw *singleFieldRecordWriter) Close() error {
 	return sfw.fw.Close()
 }
 
-func newSingleFieldRecordWriter(fieldId FieldID, field arrow.Field, writer io.Writer, opts ...RecordWriterOptions) (*singleFieldRecordWriter, error) {
+func newSingleFieldRecordWriter(field *schemapb.FieldSchema, writer io.Writer, opts ...RecordWriterOptions) (*singleFieldRecordWriter, error) {
+	// calculate memory expansion ratio
+	// arrays are serialized by protobuf, where int values may be compacted, see https://protobuf.dev/reference/go/size
+	// to correct the actual size, we need to multiply the memory expansion ratio accordingly.
+	determineMemoryExpansionRatio := func(field *schemapb.FieldSchema) int {
+		if field.DataType == schemapb.DataType_Array {
+			switch field.GetElementType() {
+			case schemapb.DataType_Int16:
+				return 2
+			case schemapb.DataType_Int32:
+				return 4
+			case schemapb.DataType_Int64:
+				return 8
+			}
+		}
+		return 1
+	}
+	dim, _ := typeutil.GetDim(field)
 	w := &singleFieldRecordWriter{
-		fieldId: fieldId,
-		schema:  arrow.NewSchema([]arrow.Field{field}, nil),
+		fieldId: field.FieldID,
+		schema: arrow.NewSchema([]arrow.Field{
+			{
+				Name:     strconv.Itoa(int(field.FieldID)),
+				Type:     serdeMap[field.DataType].arrowType(int(dim)),
+				Nullable: true, // No nullable check here.
+			},
+		}, nil),
 		writerProps: parquet.NewWriterProperties(
 			parquet.WithMaxRowGroupLength(math.MaxInt64), // No additional grouping for now.
 			parquet.WithCompression(compress.Codecs.Zstd),
 			parquet.WithCompressionLevel(3)),
+		memoryExpansionRatio: determineMemoryExpansionRatio(field),
 	}
 	for _, o := range opts {
 		o(w)

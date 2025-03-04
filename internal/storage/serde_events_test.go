@@ -97,9 +97,13 @@ func TestBinlogStreamWriter(t *testing.T) {
 	t.Run("test write", func(t *testing.T) {
 		size := 3
 
-		field := arrow.Field{Name: "bool", Type: arrow.FixedWidthTypes.Boolean}
+		field := &schemapb.FieldSchema{
+			FieldID:  1,
+			DataType: schemapb.DataType_Bool,
+		}
+
 		var w bytes.Buffer
-		rw, err := newSingleFieldRecordWriter(1, field, &w)
+		rw, err := newSingleFieldRecordWriter(field, &w)
 		assert.NoError(t, err)
 
 		builder := array.NewBooleanBuilder(memory.DefaultAllocator)
@@ -108,7 +112,7 @@ func TestBinlogStreamWriter(t *testing.T) {
 		defer arr.Release()
 		ar := array.NewRecord(
 			arrow.NewSchema(
-				[]arrow.Field{field},
+				[]arrow.Field{{Name: "bool", Type: arrow.FixedWidthTypes.Boolean}},
 				nil,
 			),
 			[]arrow.Array{arr},
@@ -210,6 +214,43 @@ func TestBinlogSerializeWriter(t *testing.T) {
 			value := reader.Value()
 			assertTestData(t, i, value)
 		}
+	})
+}
+
+func TestSize(t *testing.T) {
+	t.Run("test array", func(t *testing.T) {
+		size := 100
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     18,
+				Name:        "array",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int32,
+			},
+		}}
+
+		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 7)
+		assert.NoError(t, err)
+
+		for i := 0; i < size; i++ {
+			d := []int32{int32(i), int32(i), int32(i), int32(i), int32(i), int32(i), int32(i), int32(i)}
+			value := &Value{
+				Value: map[FieldID]any{
+					18: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: d},
+						},
+					},
+				},
+			}
+			err := writer.Write(value)
+			assert.NoError(t, err)
+		}
+
+		err = writer.Close()
+		assert.NoError(t, err)
+		assert.Greater(t, writer.WrittenMemorySize(), uint64(8*4*size)) // written memory size should greater than data size
 	})
 }
 
