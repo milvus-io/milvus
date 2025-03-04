@@ -494,6 +494,7 @@ message SegmentAssignmentMeta {
     string vchannel              = 4;
     SegmentAssignmentState state = 5;
     SegmentAssignmentStat stat   = 6;
+    int64 storage_version        = 7;
 }
 
 // SegmentAssignmentState is the state of segment assignment.

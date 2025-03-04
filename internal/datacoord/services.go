@@ -223,7 +223,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 
 		// Have segment manager allocate and return the segment allocation info.
 		segmentAllocations, err := s.segmentManager.AllocSegment(ctx,
-			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
+			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count), r.GetStorageVersion())
 		if err != nil {
 			log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err))
 			assigns = append(assigns, &datapb.SegmentIDAssignment{
@@ -273,7 +273,7 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 	}
 
 	// Alloc new growing segment and return the segment info.
-	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(ctx, req.GetCollectionId(), req.GetPartitionId(), req.GetSegmentId(), req.GetVchannel())
+	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(ctx, req.GetCollectionId(), req.GetPartitionId(), req.GetSegmentId(), req.GetVchannel(), req.GetStorageVersion())
 	if err != nil {
 		return &datapb.AllocSegmentResponse{Status: merr.Status(err)}, nil
 	}

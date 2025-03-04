@@ -224,6 +224,10 @@ func (pw *packedRecordWriter) GetWrittenUncompressed() uint64 {
 	return pw.writtenUncompressed
 }
 
+func (pw *packedRecordWriter) GetColumnGroupWrittenUncompressed(columnGroup int) uint64 {
+	return pw.columnGroupUncompressed[columnGroup]
+}
+
 func (pw *packedRecordWriter) GetWrittenPaths() []string {
 	return pw.paths
 }

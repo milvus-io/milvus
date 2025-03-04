@@ -74,10 +74,10 @@ type Manager interface {
 	// CreateSegment create new segment when segment not exist
 
 	// Deprecated: AllocSegment allocates rows and record the allocation, will be deprecated after enabling streamingnode.
-	AllocSegment(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error)
+	AllocSegment(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64, storageVersion int64) ([]*Allocation, error)
 
 	// AllocNewGrowingSegment allocates segment for streaming node.
-	AllocNewGrowingSegment(ctx context.Context, collectionID, partitionID, segmentID UniqueID, channelName string) (*SegmentInfo, error)
+	AllocNewGrowingSegment(ctx context.Context, collectionID, partitionID, segmentID UniqueID, channelName string, storageVersion int64) (*SegmentInfo, error)
 
 	// DropSegment drops the segment from manager.
 	DropSegment(ctx context.Context, channel string, segmentID UniqueID)
@@ -287,7 +287,7 @@ func (s *SegmentManager) genLastExpireTsForSegments() (Timestamp, error) {
 
 // AllocSegment allocate segment per request collcation, partication, channel and rows
 func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID,
-	partitionID UniqueID, channelName string, requestRows int64,
+	partitionID UniqueID, channelName string, requestRows int64, storageVersion int64,
 ) ([]*Allocation, error) {
 	log := log.Ctx(ctx).
 		With(zap.Int64("collectionID", collectionID)).
@@ -331,7 +331,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		return nil, err
 	}
 	for _, allocation := range newSegmentAllocations {
-		segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName)
+		segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, storageVersion)
 		if err != nil {
 			log.Error("Failed to open new segment for segment allocation")
 			return nil, err
@@ -367,13 +367,13 @@ func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
 }
 
 // AllocNewGrowingSegment allocates segment for streaming node.
-func (s *SegmentManager) AllocNewGrowingSegment(ctx context.Context, collectionID, partitionID, segmentID UniqueID, channelName string) (*SegmentInfo, error) {
+func (s *SegmentManager) AllocNewGrowingSegment(ctx context.Context, collectionID, partitionID, segmentID UniqueID, channelName string, storageVersion int64) (*SegmentInfo, error) {
 	s.channelLock.Lock(channelName)
 	defer s.channelLock.Unlock(channelName)
-	return s.openNewSegmentWithGivenSegmentID(ctx, collectionID, partitionID, segmentID, channelName)
+	return s.openNewSegmentWithGivenSegmentID(ctx, collectionID, partitionID, segmentID, channelName, storageVersion)
 }
 
-func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) (*SegmentInfo, error) {
+func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, storageVersion int64) (*SegmentInfo, error) {
 	log := log.Ctx(ctx)
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
 	defer sp.End()
@@ -382,10 +382,10 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		log.Error("failed to open new segment while AllocID", zap.Error(err))
 		return nil, err
 	}
-	return s.openNewSegmentWithGivenSegmentID(ctx, collectionID, partitionID, id, channelName)
+	return s.openNewSegmentWithGivenSegmentID(ctx, collectionID, partitionID, id, channelName, storageVersion)
 }
 
-func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelName string) (*SegmentInfo, error) {
+func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelName string, storageVersion int64) (*SegmentInfo, error) {
 	maxNumOfRows, err := s.estimateMaxNumOfRows(collectionID)
 	if err != nil {
 		log.Error("failed to open new segment while estimateMaxNumOfRows", zap.Error(err))
@@ -402,6 +402,7 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, c
 		MaxRowNum:      int64(maxNumOfRows),
 		Level:          datapb.SegmentLevel_L1,
 		LastExpireTime: 0,
+		StorageVersion: storageVersion,
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	if err := s.meta.AddSegment(ctx, segment); err != nil {
