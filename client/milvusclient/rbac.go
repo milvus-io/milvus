@@ -155,6 +155,7 @@ func (c *Client) DescribeRole(ctx context.Context, option DescribeRoleOption, ca
 				RoleName:   g.GetRole().GetName(),
 				Grantor:    g.GetGrantor().GetUser().GetName(),
 				Privilege:  g.GetGrantor().GetPrivilege().GetName(),
+				DbName:     g.GetDbName(),
 			}
 		})
 
@@ -181,7 +182,7 @@ func (c *Client) RevokePrivilege(ctx context.Context, option RevokePrivilegeOpti
 	})
 }
 
-func (c *Client) GrantV2(ctx context.Context, option GrantV2Option, callOptions ...grpc.CallOption) error {
+func (c *Client) GrantPrivilegeV2(ctx context.Context, option GrantV2Option, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
 	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
@@ -190,7 +191,7 @@ func (c *Client) GrantV2(ctx context.Context, option GrantV2Option, callOptions 
 	})
 }
 
-func (c *Client) RevokeV2(ctx context.Context, option RevokeV2Option, callOptions ...grpc.CallOption) error {
+func (c *Client) RevokePrivilegeV2(ctx context.Context, option RevokeV2Option, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
 	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
