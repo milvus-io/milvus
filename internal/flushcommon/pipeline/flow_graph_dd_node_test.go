@@ -27,7 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/datanode/compaction"
+	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
@@ -83,7 +83,7 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 				droppedSegIDs,
 				test.inSealedSegs,
 				test.inGrowingSegs,
-				compaction.NewExecutor(),
+				compactor.NewExecutor(),
 				nil,
 			)
 			require.NotNil(t, ddNode)
@@ -198,7 +198,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 					ctx:                context.Background(),
 					collectionID:       test.ddnCollID,
 					vChannelName:       "ddn_drop_msg",
-					compactionExecutor: compaction.NewExecutor(),
+					compactionExecutor: compactor.NewExecutor(),
 				}
 
 				var dropCollMsg msgstream.TsMsg = &msgstream.DropCollectionMsg{
@@ -251,7 +251,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 					ctx:                context.Background(),
 					collectionID:       test.ddnCollID,
 					vChannelName:       "ddn_drop_msg",
-					compactionExecutor: compaction.NewExecutor(),
+					compactionExecutor: compactor.NewExecutor(),
 				}
 
 				var dropPartMsg msgstream.TsMsg = &msgstream.DropPartitionMsg{

@@ -24,7 +24,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/compaction"
+	"github.com/milvus-io/milvus/internal/compaction"
+	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
@@ -64,8 +65,8 @@ type DataSyncService struct {
 	broker  broker.Broker
 	syncMgr syncmgr.SyncManager
 
-	timetickSender util.StatsUpdater   // reference to TimeTickSender
-	compactor      compaction.Executor // reference to compaction executor
+	timetickSender util.StatsUpdater  // reference to TimeTickSender
+	compactor      compactor.Executor // reference to compaction executor
 
 	dispClient   msgdispatcher.Client
 	chunkManager storage.ChunkManager

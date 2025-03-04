@@ -1,4 +1,4 @@
-package compaction
+package compactor
 
 import "github.com/milvus-io/milvus/internal/storage"
 
