@@ -1521,52 +1521,6 @@ func (_c *IMetaTable_GetDatabaseByName_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// GetGeneralCount provides a mock function with given fields: ctx
-func (_m *IMetaTable) GetGeneralCount(ctx context.Context) int {
-	ret := _m.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetGeneralCount")
-	}
-
-	var r0 int
-	if rf, ok := ret.Get(0).(func(context.Context) int); ok {
-		r0 = rf(ctx)
-	} else {
-		r0 = ret.Get(0).(int)
-	}
-
-	return r0
-}
-
-// IMetaTable_GetGeneralCount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetGeneralCount'
-type IMetaTable_GetGeneralCount_Call struct {
-	*mock.Call
-}
-
-// GetGeneralCount is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *IMetaTable_Expecter) GetGeneralCount(ctx interface{}) *IMetaTable_GetGeneralCount_Call {
-	return &IMetaTable_GetGeneralCount_Call{Call: _e.mock.On("GetGeneralCount", ctx)}
-}
-
-func (_c *IMetaTable_GetGeneralCount_Call) Run(run func(ctx context.Context)) *IMetaTable_GetGeneralCount_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
-	})
-	return _c
-}
-
-func (_c *IMetaTable_GetGeneralCount_Call) Return(_a0 int) *IMetaTable_GetGeneralCount_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *IMetaTable_GetGeneralCount_Call) RunAndReturn(run func(context.Context) int) *IMetaTable_GetGeneralCount_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetPChannelInfo provides a mock function with given fields: ctx, pchannel
 func (_m *IMetaTable) GetPChannelInfo(ctx context.Context, pchannel string) *rootcoordpb.GetPChannelInfoResponse {
 	ret := _m.Called(ctx, pchannel)
@@ -1671,6 +1625,52 @@ func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) Return(_a0 []*milvuspb.RoleEnt
 }
 
 func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) RunAndReturn(run func(context.Context, string) ([]*milvuspb.RoleEntity, error)) *IMetaTable_GetPrivilegeGroupRoles_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetTotalPartitionNumber provides a mock function with given fields: ctx
+func (_m *IMetaTable) GetTotalPartitionNumber(ctx context.Context) int {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTotalPartitionNumber")
+	}
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(context.Context) int); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// IMetaTable_GetTotalPartitionNumber_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTotalPartitionNumber'
+type IMetaTable_GetTotalPartitionNumber_Call struct {
+	*mock.Call
+}
+
+// GetTotalPartitionNumber is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *IMetaTable_Expecter) GetTotalPartitionNumber(ctx interface{}) *IMetaTable_GetTotalPartitionNumber_Call {
+	return &IMetaTable_GetTotalPartitionNumber_Call{Call: _e.mock.On("GetTotalPartitionNumber", ctx)}
+}
+
+func (_c *IMetaTable_GetTotalPartitionNumber_Call) Run(run func(ctx context.Context)) *IMetaTable_GetTotalPartitionNumber_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetTotalPartitionNumber_Call) Return(_a0 int) *IMetaTable_GetTotalPartitionNumber_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_GetTotalPartitionNumber_Call) RunAndReturn(run func(context.Context) int) *IMetaTable_GetTotalPartitionNumber_Call {
 	_c.Call.Return(run)
 	return _c
 }

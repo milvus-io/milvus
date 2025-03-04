@@ -79,7 +79,7 @@ type IMetaTable interface {
 	ListAliases(ctx context.Context, dbName string, collectionName string, ts Timestamp) ([]string, error)
 	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error
 	RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error
-	GetGeneralCount(ctx context.Context) int
+	GetTotalPartitionNumber(ctx context.Context) int
 
 	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
 	IsAlias(ctx context.Context, db, name string) bool
@@ -121,7 +121,7 @@ type MetaTable struct {
 	dbName2Meta map[string]*model.Database              // database name ->  db meta
 	collID2Meta map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
 
-	generalCnt int // sum of product of partition number and shard number
+	partitionNumber int // sum of product of partition number
 
 	// collections *collectionDb
 	names   *nameDb
@@ -206,7 +206,7 @@ func (mt *MetaTable) reload() error {
 			if collection.Available() {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)
 				pn := collection.GetPartitionNum(true)
-				mt.generalCnt += pn * int(collection.ShardsNum)
+				mt.partitionNumber += pn
 				collectionNum++
 				partitionNum += int64(pn)
 			}
@@ -250,7 +250,7 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 		if collection.Available() {
 			mt.names.insert(util.DefaultDBName, collection.Name, collection.CollectionID)
 			pn := collection.GetPartitionNum(true)
-			mt.generalCnt += pn * int(collection.ShardsNum)
+			mt.partitionNumber += pn
 			collectionNum++
 			partitionNum += int64(pn)
 		}
@@ -470,11 +470,11 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 
 	switch state {
 	case pb.CollectionState_CollectionCreated:
-		mt.generalCnt += pn * int(coll.ShardsNum)
+		mt.partitionNumber += pn
 		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Inc()
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(pn))
 	case pb.CollectionState_CollectionDropping:
-		mt.generalCnt -= pn * int(coll.ShardsNum)
+		mt.partitionNumber -= pn
 		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
 	}
@@ -990,11 +990,11 @@ func (mt *MetaTable) ChangePartitionState(ctx context.Context, collectionID Uniq
 
 			switch state {
 			case pb.PartitionState_PartitionCreated:
-				mt.generalCnt += int(coll.ShardsNum) // 1 partition * shardNum
+				mt.partitionNumber += 1
 				// support Dynamic load/release partitions
 				metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
 			case pb.PartitionState_PartitionDropping:
-				mt.generalCnt -= int(coll.ShardsNum) // 1 partition * shardNum
+				mt.partitionNumber -= 1
 				metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
 			}
 
@@ -1298,11 +1298,11 @@ func (mt *MetaTable) ListAliasesByID(ctx context.Context, collID UniqueID) []str
 }
 
 // GetGeneralCount gets the general count(sum of product of partition number and shard number).
-func (mt *MetaTable) GetGeneralCount(ctx context.Context) int {
+func (mt *MetaTable) GetTotalPartitionNumber(ctx context.Context) int {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
-	return mt.generalCnt
+	return mt.partitionNumber
 }
 
 // AddCredential add credential
