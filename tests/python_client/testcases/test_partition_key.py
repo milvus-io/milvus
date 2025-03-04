@@ -107,7 +107,7 @@ class TestPartitionKeyParams(TestcaseBase):
         # flush
         collection_w.flush()
         # build index
-        collection_w.create_index(field_name=vector_field.name, index_params=ct.default_index)
+        collection_w.create_index(field_name=vector_field.name, index_params=ct.default_flat_index)
         if index_on_par_key_field:
             collection_w.create_index(field_name=par_key_field, index_params={})
         # load
