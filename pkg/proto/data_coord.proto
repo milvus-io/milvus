@@ -172,6 +172,7 @@ message SegmentIDRequest {
   bool isImport = 5;        // deprecated
   int64 importTaskID = 6;   // deprecated
   SegmentLevel level = 7; // deprecated
+  int64 storage_version = 8;
 }
 
 message AllocSegmentRequest {
@@ -179,6 +180,7 @@ message AllocSegmentRequest {
   int64 partition_id = 2;
   int64 segment_id = 3; // segment id must be allocate from rootcoord idalloc service.
   string vchannel = 4;
+  int64 storage_version = 5;
 }
 
 message AllocSegmentResponse {
