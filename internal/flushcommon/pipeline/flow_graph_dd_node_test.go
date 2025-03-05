@@ -262,8 +262,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 					},
 				}
 				tsMessages := []msgstream.TsMsg{dropPartMsg}
-				pos := &msgpb.MsgPosition{Timestamp: 0}
-				var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, []*msgpb.MsgPosition{pos}, []*msgpb.MsgPosition{pos})
+				var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
 
 				rt := ddn.Operate([]Msg{msgStreamMsg})
 
@@ -325,7 +324,8 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 					},
 				}
 				tsMessages := []msgstream.TsMsg{dMsg}
-				var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
+				pos := &msgpb.MsgPosition{Timestamp: 0}
+				var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, []*msgpb.MsgPosition{pos}, []*msgpb.MsgPosition{pos})
 
 				// Test
 				rt := ddn.Operate([]Msg{msgStreamMsg})
