@@ -130,26 +130,6 @@ func (m *Manager) StoreIndexFilesAndStatistic(
 	}
 }
 
-func (m *Manager) storeIndexFilesAndStatisticV2(
-	ClusterID string,
-	buildID typeutil.UniqueID,
-	fileKeys []string,
-	serializedSize uint64,
-	currentIndexVersion int32,
-	indexStoreVersion int64,
-) {
-	key := Key{ClusterID: ClusterID, TaskID: buildID}
-	m.stateLock.Lock()
-	defer m.stateLock.Unlock()
-	if info, ok := m.indexTasks[key]; ok {
-		info.FileKeys = common.CloneStringList(fileKeys)
-		info.SerializedSize = serializedSize
-		info.CurrentIndexVersion = currentIndexVersion
-		info.IndexStoreVersion = indexStoreVersion
-		return
-	}
-}
-
 func (m *Manager) DeleteIndexTaskInfos(ctx context.Context, keys []Key) []*IndexTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
@@ -218,14 +198,6 @@ func (m *Manager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.Unique
 			zap.String("state", state.String()), zap.String("fail reason", failReason))
 		task.State = state
 		task.FailReason = failReason
-	}
-}
-
-func (m *Manager) foreachAnalyzeTaskInfo(fn func(clusterID string, taskID typeutil.UniqueID, info *AnalyzeTaskInfo)) {
-	m.stateLock.Lock()
-	defer m.stateLock.Unlock()
-	for key, info := range m.analyzeTasks {
-		fn(key.ClusterID, key.TaskID, info)
 	}
 }
 

@@ -4957,8 +4957,7 @@ if this parameter <= 0, will set it as 10`,
 	p.DeltalogFormat.Init(base.mgr)
 
 	p.BuildParallel = ParamItem{
-		Key:          "dataNode.scheduler.buildParallel",
-		FallbackKeys: []string{"indexNode.scheduler.buildParallel"},
+		Key:          "indexNode.scheduler.buildParallel",
 		Version:      "2.0.0",
 		DefaultValue: "1",
 		Export:       true,
@@ -4966,8 +4965,7 @@ if this parameter <= 0, will set it as 10`,
 	p.BuildParallel.Init(base.mgr)
 
 	p.EnableDisk = ParamItem{
-		Key:          "dataNode.enableDisk",
-		FallbackKeys: []string{"indexNode.enableDisk"},
+		Key:          "indexNode.enableDisk",
 		Version:      "2.2.0",
 		DefaultValue: "false",
 		PanicIfEmpty: true,
@@ -5001,8 +4999,7 @@ if this parameter <= 0, will set it as 10`,
 	p.DiskCapacityLimit.Init(base.mgr)
 
 	p.MaxDiskUsagePercentage = ParamItem{
-		Key:          "dataNode.maxDiskUsagePercentage",
-		FallbackKeys: []string{"indexNode.maxDiskUsagePercentage"},
+		Key:          "indexNode.maxDiskUsagePercentage",
 		Version:      "2.2.0",
 		DefaultValue: "95",
 		PanicIfEmpty: true,

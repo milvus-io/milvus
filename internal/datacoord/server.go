@@ -139,7 +139,6 @@ type Server struct {
 	session   sessionutil.SessionInterface
 	icSession *sessionutil.Session
 	dnEventCh <-chan *sessionutil.SessionEvent
-	inEventCh <-chan *sessionutil.SessionEvent
 	// qcEventCh <-chan *sessionutil.SessionEvent
 	qnEventCh <-chan *sessionutil.SessionEvent
 
@@ -580,27 +579,21 @@ func (s *Server) initServiceDiscovery() error {
 	// TODO implement rewatch logic
 	s.dnEventCh = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, nil)
 
-	inSessions, inRevision, err := s.session.GetSessions(typeutil.IndexNodeRole)
-	if err != nil {
-		log.Warn("DataCoord get QueryCoord session failed", zap.Error(err))
-		return err
-	}
 	if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
 		if err = s.indexNodeManager.AddNode(Params.DataCoordCfg.IndexNodeID.GetAsInt64(), Params.DataCoordCfg.IndexNodeAddress.GetValue()); err != nil {
-			log.Error("add indexNode fail", zap.Int64("ServerID", Params.DataCoordCfg.IndexNodeID.GetAsInt64()),
+			log.Error("add dataNode fail", zap.Int64("ServerID", Params.DataCoordCfg.IndexNodeID.GetAsInt64()),
 				zap.String("address", Params.DataCoordCfg.IndexNodeAddress.GetValue()), zap.Error(err))
 			return err
 		}
-		log.Info("add indexNode success", zap.String("IndexNode address", Params.DataCoordCfg.IndexNodeAddress.GetValue()),
+		log.Info("add dataNode success", zap.String("DataNode address", Params.DataCoordCfg.IndexNodeAddress.GetValue()),
 			zap.Int64("nodeID", Params.DataCoordCfg.IndexNodeID.GetAsInt64()))
 	} else {
-		for _, session := range inSessions {
+		for _, session := range sessions {
 			if err := s.indexNodeManager.AddNode(session.ServerID, session.Address); err != nil {
 				return err
 			}
 		}
 	}
-	s.inEventCh = s.session.WatchServices(typeutil.IndexNodeRole, inRevision+1, nil)
 
 	s.indexEngineVersionManager = newIndexEngineVersionManager()
 	qnSessions, qnRevision, err := s.session.GetSessions(typeutil.QueryNodeRole)
@@ -855,19 +848,6 @@ func (s *Server) watchService(ctx context.Context) {
 				return
 			}
 			if err := s.handleSessionEvent(ctx, typeutil.DataNodeRole, event); err != nil {
-				go func() {
-					if err := s.Stop(); err != nil {
-						log.Warn("DataCoord server stop error", zap.Error(err))
-					}
-				}()
-				return
-			}
-		case event, ok := <-s.inEventCh:
-			if !ok {
-				s.stopServiceWatch()
-				return
-			}
-			if err := s.handleSessionEvent(ctx, typeutil.IndexNodeRole, event); err != nil {
 				go func() {
 					if err := s.Stop(); err != nil {
 						log.Warn("DataCoord server stop error", zap.Error(err))
