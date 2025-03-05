@@ -500,6 +500,12 @@ indexCoord:
   segment:
     minSegmentNumRowsToEnableIndex: 1024 # It's a threshold. When the segment num rows is less than this value, the segment will not be indexed
 
+indexNode:
+  scheduler:
+    buildParallel: 1
+  enableDisk: true # enable build disk vector index
+  maxDiskUsagePercentage: 95
+
 dataCoord:
   channel:
     watchTimeoutInterval: 300 # Timeout on watching channels (in seconds). Datanode tickler update watch progress will reset timeout timer.
@@ -626,12 +632,6 @@ dataCoord:
     serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the dataCoord can receive, unit: byte
     clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on dataCoord can send, unit: byte
     clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on dataCoord can receive, unit: byte
-
-indexNode:
-  scheduler:
-    buildParallel: 1
-  enableDisk: true # enable build disk vector index
-  maxDiskUsagePercentage: 95
 
 dataNode:
   dataSync:

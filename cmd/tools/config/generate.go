@@ -278,6 +278,9 @@ func WriteYaml(w io.Writer) {
 			name: "indexCoord",
 		},
 		{
+			name: "indexNode",
+		},
+		{
 			name: "dataCoord",
 		},
 		{
