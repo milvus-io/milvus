@@ -627,6 +627,12 @@ dataCoord:
     clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on dataCoord can send, unit: byte
     clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on dataCoord can receive, unit: byte
 
+indexNode:
+  scheduler:
+    buildParallel: 1
+  enableDisk: true # enable build disk vector index
+  maxDiskUsagePercentage: 95
+
 dataNode:
   dataSync:
     flowGraph:
@@ -682,10 +688,6 @@ dataNode:
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   storage:
     deltalog: json # deltalog format, options: [json, parquet]
-  scheduler:
-    buildParallel: 1
-  enableDisk: true # enable build disk vector index
-  maxDiskUsagePercentage: 95
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode
   grpc:
