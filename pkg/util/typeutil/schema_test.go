@@ -1149,6 +1149,26 @@ func TestAppendFieldData(t *testing.T) {
 	assert.Equal(t, ArrayArray, result[9].GetScalars().GetArrayData().Data)
 	assert.Equal(t, SparseFloatVector, result[10].GetVectors().GetSparseFloatVector())
 	assert.Equal(t, Int8Vector, result[11].GetVectors().Data.(*schemapb.VectorField_Int8Vector).Int8Vector)
+	{
+		fieldDataArray2[9] = &schemapb.FieldData{
+			Type:      schemapb.DataType_Array,
+			FieldName: ArrayFieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							Data:        []*schemapb.ScalarField{nil},
+							ElementType: schemapb.DataType_Int32,
+						},
+					},
+				},
+			},
+			FieldId: ArrayFieldID,
+		}
+		appendSize, err := AppendFieldData(result, fieldDataArray2, 0)
+		assert.Error(t, err)
+		assert.Equal(t, appendSize, int64(0))
+	}
 }
 
 func TestDeleteFieldData(t *testing.T) {

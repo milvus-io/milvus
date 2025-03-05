@@ -92,7 +92,10 @@ func genInsertMsgsByPartition(ctx context.Context,
 			requestSize = 0
 		}
 
-		typeutil.AppendFieldData(msg.FieldsData, insertMsg.GetFieldsData(), int64(offset))
+		_, appendErr := typeutil.AppendFieldData(msg.FieldsData, insertMsg.GetFieldsData(), int64(offset))
+		if appendErr != nil {
+			return nil, appendErr
+		}
 		msg.HashValues = append(msg.HashValues, insertMsg.HashValues[offset])
 		msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
 		msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])

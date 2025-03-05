@@ -73,7 +73,8 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 
 			// remove duplicates
 			if _, ok := idSet[id]; !ok {
-				retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
+				appendSize, _ := typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
+				retSize += appendSize
 				typeutil.AppendPKs(ret.Ids, id)
 				ret.Scores = append(ret.Scores, score)
 				idSet[id] = struct{}{}
@@ -174,7 +175,8 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 					// exceed the limit for each group, filter this entity
 					filteredCount++
 				} else {
-					retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
+					appendSize, _ := typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
+					retSize += appendSize
 					typeutil.AppendPKs(ret.Ids, id)
 					ret.Scores = append(ret.Scores, score)
 					if err := typeutil.AppendGroupByValue(ret, groupByVal, searchResultData[sel].GetGroupByFieldValue().GetType()); err != nil {

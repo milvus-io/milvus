@@ -280,7 +280,8 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 				groupEntities := groupByValMap[groupVal]
 				for _, groupEntity := range groupEntities {
 					subResData := subSearchResultData[groupEntity.subSearchIdx]
-					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx)
+					appendSize, _ := typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx)
+					retSize += appendSize
 					typeutil.AppendPKs(ret.Results.Ids, groupEntity.id)
 					ret.Results.Scores = append(ret.Results.Scores, groupEntity.score)
 					if err := typeutil.AppendGroupByValue(ret.Results, groupVal, subResData.GetGroupByFieldValue().GetType()); err != nil {
@@ -401,7 +402,8 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				}
 				score := subSearchResultData[subSearchIdx].Scores[resultDataIdx]
 
-				retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
+				appendSize, _ := typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
+				retSize += appendSize
 				typeutil.CopyPk(ret.Results.Ids, subSearchResultData[subSearchIdx].GetIds(), int(resultDataIdx))
 				ret.Results.Scores = append(ret.Results.Scores, score)
 				cursors[subSearchIdx]++
