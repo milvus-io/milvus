@@ -244,9 +244,9 @@ class Json {
         return doc(offset, length).get<T>();
     }
 
-    std::string
+    std::string_view
     at_string(uint16_t offset, uint16_t length) const {
-        return std::string(data_.data() + offset, length);
+        return std::string_view(data_.data() + offset, length);
     }
 
     value_result<simdjson::dom::array>

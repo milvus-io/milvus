@@ -17,7 +17,6 @@
 #include "index/InvertedIndexTantivy.h"
 #include "common/jsmn.h"
 namespace milvus::index {
-// 定义枚举类型来表示字符串可能的类型
 enum class JSONType {
     UNKNOWN,
     BOOL,
@@ -106,8 +105,8 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
             if (shouldTriggerCommit() || is_strong_consistency) {
                 if (is_data_uncommitted_) {
                     Commit();
-                    Reload();
                 }
+                Reload();
                 return processArray();
             } else {
                 return processArray();
@@ -228,16 +227,12 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
 
     bool
     isFloat(const std::string& str) {
-        std::istringstream iss(str);
-        double numDouble;
-        float numFloat;
-
-        iss >> numDouble;
-        numFloat = static_cast<float>(numDouble);
-
-        return !iss.fail() && iss.eof() && numFloat == numDouble &&
-               numFloat >= std::numeric_limits<float>::lowest() &&
-               numFloat <= std::numeric_limits<float>::max();
+        try {
+            float d = std::stof(str);
+            return true;
+        } catch (...) {
+            return false;
+        }
     }
 
     bool

@@ -543,32 +543,30 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
                                                       uint16_t offset,
                                                       uint16_t size,
                                                       uint32_t value) {
-            if constexpr (std::is_same_v<GetType, int64_t>) {
-                if (type != uint8_t(milvus::index::JSONType::INT32) &&
-                    type != uint8_t(milvus::index::JSONType::INT64)) {
-                    return false;
-                }
-            } else if constexpr (std::is_same_v<GetType, std::string_view>) {
-                if (type != uint8_t(milvus::index::JSONType::STRING) &&
-                    type != uint8_t(milvus::index::JSONType::STRING_ESCAPE)) {
-                    return false;
-                }
-            } else if constexpr (std::is_same_v<GetType, double>) {
-                if (type != uint8_t(milvus::index::JSONType::FLOAT) &&
-                    type != uint8_t(milvus::index::JSONType::DOUBLE)) {
-                    return false;
-                }
-            } else if constexpr (std::is_same_v<GetType, bool>) {
-                if (type != uint8_t(milvus::index::JSONType::BOOL)) {
-                    return false;
-                }
-            }
-
             if (valid) {
                 if constexpr (std::is_same_v<GetType, int64_t>) {
-                    if (type != uint8_t(milvus::index::JSONType::INT32)) {
+                    if (type != uint8_t(milvus::index::JSONType::INT32) &&
+                        type != uint8_t(milvus::index::JSONType::INT64)) {
                         return false;
                     }
+                } else if constexpr (std::is_same_v<GetType,
+                                                    std::string_view>) {
+                    if (type != uint8_t(milvus::index::JSONType::STRING) &&
+                        type !=
+                            uint8_t(milvus::index::JSONType::STRING_ESCAPE)) {
+                        return false;
+                    }
+                } else if constexpr (std::is_same_v<GetType, double>) {
+                    if (type != uint8_t(milvus::index::JSONType::FLOAT) &&
+                        type != uint8_t(milvus::index::JSONType::DOUBLE)) {
+                        return false;
+                    }
+                } else if constexpr (std::is_same_v<GetType, bool>) {
+                    if (type != uint8_t(milvus::index::JSONType::BOOL)) {
+                        return false;
+                    }
+                }
+                if constexpr (std::is_same_v<GetType, int64_t>) {
                     return this->arg_set_->In(value);
                 } else if constexpr (std::is_same_v<GetType, double>) {
                     float restoredValue = *reinterpret_cast<float*>(&value);
@@ -598,7 +596,8 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
                     } else if (type ==
                                uint8_t(milvus::index::JSONType::DOUBLE)) {
                         if constexpr (std::is_same_v<GetType, double>) {
-                            auto val = std::stod(json.at_string(offset, size));
+                            auto val = std::stod(
+                                std::string(json.at_string(offset, size)));
                             return this->arg_set_->In(val);
                         } else {
                             return false;
@@ -606,7 +605,8 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
                     } else if (type ==
                                uint8_t(milvus::index::JSONType::INT64)) {
                         if constexpr (std::is_same_v<GetType, int64_t>) {
-                            auto val = std::stoll(json.at_string(offset, size));
+                            auto val = std::stoll(
+                                std::string(json.at_string(offset, size)));
                             return this->arg_set_->In(val);
                         } else {
                             return false;
