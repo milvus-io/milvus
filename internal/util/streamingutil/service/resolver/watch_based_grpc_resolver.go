@@ -12,11 +12,10 @@ import (
 var _ resolver.Resolver = (*watchBasedGRPCResolver)(nil)
 
 // newWatchBasedGRPCResolver creates a new watch based grpc resolver.
-func newWatchBasedGRPCResolver(cc resolver.ClientConn, logger *log.MLogger) *watchBasedGRPCResolver {
+func newWatchBasedGRPCResolver(cc resolver.ClientConn) *watchBasedGRPCResolver {
 	return &watchBasedGRPCResolver{
 		lifetime: typeutil.NewLifetime(),
 		cc:       cc,
-		logger:   logger,
 	}
 }
 
@@ -24,8 +23,8 @@ func newWatchBasedGRPCResolver(cc resolver.ClientConn, logger *log.MLogger) *wat
 type watchBasedGRPCResolver struct {
 	lifetime *typeutil.Lifetime
 
-	cc     resolver.ClientConn
-	logger *log.MLogger
+	cc resolver.ClientConn
+	log.Binder
 }
 
 // ResolveNow will be called by gRPC to try to resolve the target name
@@ -52,10 +51,10 @@ func (r *watchBasedGRPCResolver) Update(state VersionedState) error {
 
 	if err := r.cc.UpdateState(state.State); err != nil {
 		// watch based resolver could ignore the error, just log and return nil
-		r.logger.Warn("fail to update resolver state", zap.Error(err))
+		r.Logger().Warn("fail to update resolver state", zap.Any("state", state.State), zap.Error(err))
 		return nil
 	}
-	r.logger.Info("update resolver state success", zap.Any("state", state.State))
+	r.Logger().Info("update resolver state success", zap.Any("state", state.State))
 	return nil
 }
 

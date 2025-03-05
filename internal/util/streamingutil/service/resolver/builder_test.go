@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/google.golang.org/grpc/mock_resolver"
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_discoverer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -33,7 +34,7 @@ func TestNewBuilder(t *testing.T) {
 		Version: typeutil.VersionInt64(-1),
 	})
 
-	b := newBuilder("test", d)
+	b := newBuilder("test", d, log.With())
 	r := b.Resolver()
 	assert.NotNil(t, r)
 	assert.Equal(t, "test", b.Scheme())
