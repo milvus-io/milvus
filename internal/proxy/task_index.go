@@ -173,7 +173,12 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 	isVecIndex := typeutil.IsVectorType(cit.fieldSchema.DataType)
 	indexParamsMap := make(map[string]string)
 
+	keys := typeutil.NewSet[string]()
 	for _, kv := range cit.req.GetExtraParams() {
+		if keys.Contain(kv.GetKey()) {
+			return merr.WrapErrParameterInvalidMsg("duplicated index param (key=%s) (value=%s) found", kv.GetKey(), kv.GetValue())
+		}
+		keys.Insert(kv.GetKey())
 		if kv.Key == common.IndexParamsKey {
 			params, err := funcutil.JSONToMap(kv.Value)
 			if err != nil {
