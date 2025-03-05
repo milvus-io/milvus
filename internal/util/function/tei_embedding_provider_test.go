@@ -30,20 +30,19 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/function/models/ali"
 )
 
-func TestAliTextEmbeddingProvider(t *testing.T) {
-	suite.Run(t, new(AliTextEmbeddingProviderSuite))
+func TestTEITextEmbeddingProvider(t *testing.T) {
+	suite.Run(t, new(TEITextEmbeddingProviderSuite))
 }
 
-type AliTextEmbeddingProviderSuite struct {
+type TEITextEmbeddingProviderSuite struct {
 	suite.Suite
 	schema    *schemapb.CollectionSchema
 	providers []string
 }
 
-func (s *AliTextEmbeddingProviderSuite) SetupTest() {
+func (s *TEITextEmbeddingProviderSuite) SetupTest() {
 	s.schema = &schemapb.CollectionSchema{
 		Name: "test",
 		Fields: []*schemapb.FieldSchema{
@@ -57,10 +56,10 @@ func (s *AliTextEmbeddingProviderSuite) SetupTest() {
 			},
 		},
 	}
-	s.providers = []string{aliDashScopeProvider}
+	s.providers = []string{teiProvider}
 }
 
-func createAliProvider(url string, schema *schemapb.FieldSchema, providerName string) (textEmbeddingProvider, error) {
+func createTEIProvider(url string, schema *schemapb.FieldSchema, providerName string) (textEmbeddingProvider, error) {
 	functionSchema := &schemapb.FunctionSchema{
 		Name:             "test",
 		Type:             schemapb.FunctionType_Unknown,
@@ -69,26 +68,26 @@ func createAliProvider(url string, schema *schemapb.FieldSchema, providerName st
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: TextEmbeddingV3},
 			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: url},
-			{Key: dimParamKey, Value: "4"},
+			{Key: endpointParamKey, Value: url},
+			{Key: ingestionPromptParamKey, Value: "doc:"},
+			{Key: searchPromptParamKey, Value: "query:"},
 		},
 	}
 	switch providerName {
-	case aliDashScopeProvider:
-		return NewAliDashScopeEmbeddingProvider(schema, functionSchema)
+	case teiProvider:
+		return NewTEIEmbeddingProvider(schema, functionSchema)
 	default:
 		return nil, fmt.Errorf("Unknow provider")
 	}
 }
 
-func (s *AliTextEmbeddingProviderSuite) TestEmbedding() {
-	ts := CreateAliEmbeddingServer()
+func (s *TEITextEmbeddingProviderSuite) TestEmbedding() {
+	ts := CreateTEIEmbeddingServer(4)
 
 	defer ts.Close()
 	for _, provderName := range s.providers {
-		provder, err := createAliProvider(ts.URL, s.schema.Fields[2], provderName)
+		provder, err := createTEIProvider(ts.URL, s.schema.Fields[2], provderName)
 		s.NoError(err)
 		{
 			data := []string{"sentence"}
@@ -97,31 +96,18 @@ func (s *AliTextEmbeddingProviderSuite) TestEmbedding() {
 			s.NoError(err2)
 			s.Equal(1, len(ret))
 			s.Equal(4, len(ret[0]))
-			s.Equal([]float32{0.0, 1.0, 2.0, 3.0}, ret[0])
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
-			ret, _ := provder.CallEmbedding(data, SearchMode)
-			s.Equal([][]float32{{0.0, 1.0, 2.0, 3.0}, {1.0, 2.0, 3.0, 4.0}, {2.0, 3.0, 4.0, 5.0}}, ret)
+			_, err := provder.CallEmbedding(data, SearchMode)
+			s.NoError(err)
 		}
 	}
 }
 
-func (s *AliTextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
+func (s *TEITextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var res ali.EmbeddingResponse
-		res.Output.Embeddings = append(res.Output.Embeddings, ali.Embeddings{
-			Embedding: []float32{1.0, 1.0, 1.0, 1.0},
-			TextIndex: 0,
-		})
-
-		res.Output.Embeddings = append(res.Output.Embeddings, ali.Embeddings{
-			Embedding: []float32{1.0, 1.0},
-			TextIndex: 1,
-		})
-		res.Usage = ali.Usage{
-			TotalTokens: 100,
-		}
+		res := [][]float32{{0.1, 0.1, 0.1, 0.1}, {0.1, 0.1, 0.1}}
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
 		w.Write(data)
@@ -129,7 +115,7 @@ func (s *AliTextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 
 	defer ts.Close()
 	for _, providerName := range s.providers {
-		provder, err := createAliProvider(ts.URL, s.schema.Fields[2], providerName)
+		provder, err := createTEIProvider(ts.URL, s.schema.Fields[2], providerName)
 		s.NoError(err)
 
 		// embedding dim not match
@@ -139,16 +125,9 @@ func (s *AliTextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 	}
 }
 
-func (s *AliTextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
+func (s *TEITextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var res ali.EmbeddingResponse
-		res.Output.Embeddings = append(res.Output.Embeddings, ali.Embeddings{
-			Embedding: []float32{1.0, 1.0, 1.0, 1.0},
-			TextIndex: 0,
-		})
-		res.Usage = ali.Usage{
-			TotalTokens: 100,
-		}
+		res := [][]float32{{0.1, 0.1, 0.1, 0.1}}
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(res)
 		w.Write(data)
@@ -156,7 +135,7 @@ func (s *AliTextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 
 	defer ts.Close()
 	for _, provderName := range s.providers {
-		provder, err := createAliProvider(ts.URL, s.schema.Fields[2], provderName)
+		provder, err := createTEIProvider(ts.URL, s.schema.Fields[2], provderName)
 
 		s.NoError(err)
 
@@ -167,37 +146,70 @@ func (s *AliTextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 	}
 }
 
-func (s *AliTextEmbeddingProviderSuite) TestCreateAliEmbeddingClient() {
-	_, err := createAliEmbeddingClient("", "")
+func (s *TEITextEmbeddingProviderSuite) TestCreateTEIEmbeddingClient() {
+	_, err := createTEIEmbeddingClient("", "")
 	s.Error(err)
 
-	os.Setenv(dashscopeAKEnvStr, "mock_key")
-	defer os.Unsetenv(dashscopeAKEnvStr)
-	_, err = createAliEmbeddingClient("", "")
+	_, err = createTEIEmbeddingClient("", "http://mymock.com")
 	s.NoError(err)
+
+	os.Setenv(enableTeiEnvStr, "false")
+	defer os.Unsetenv(enableTeiEnvStr)
+	_, err = createTEIEmbeddingClient("", "http://mymock.com")
+	s.Error(err)
 }
 
-func (s *AliTextEmbeddingProviderSuite) TestNewAliDashScopeEmbeddingProvider() {
+func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 	functionSchema := &schemapb.FunctionSchema{
 		Name:             "test",
-		Type:             schemapb.FunctionType_TextEmbedding,
+		Type:             schemapb.FunctionType_Unknown,
 		InputFieldNames:  []string{"text"},
 		OutputFieldNames: []string{"vector"},
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: "UnkownModels"},
 			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: "mock"},
-			{Key: dimParamKey, Value: "4"},
+			{Key: endpointParamKey, Value: "http://mymock.com"},
 		},
 	}
-	_, err := NewAliDashScopeEmbeddingProvider(s.schema.Fields[2], functionSchema)
-	s.Error(err)
+	provider, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	s.NoError(err)
+	s.Equal(provider.FieldDim(), int64(4))
+	s.True(provider.MaxBatch() == 32*5)
 
-	// invalid dim
-	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: TextEmbeddingV3}
-	functionSchema.Params[3] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalid"}
-	_, err = NewAliDashScopeEmbeddingProvider(s.schema.Fields[2], functionSchema)
-	s.Error(err)
+	// Invalid truncate
+	{
+		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: truncateParamKey, Value: "Invalid"})
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		s.Error(err)
+	}
+	// Invalid truncationDirection
+	{
+		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: truncateParamKey, Value: "true"}
+		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: truncationDirectionParamKey, Value: "Invalid"})
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		s.Error(err)
+	}
+
+	// truncationDirection
+	{
+		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: truncationDirectionParamKey, Value: "Left"}
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		s.NoError(err)
+	}
+
+	// Invalid max batch
+	{
+		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: maxClientBatchSizeParamKey, Value: "Invalid"})
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		s.Error(err)
+	}
+
+	// Valid max batch
+	{
+		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: maxClientBatchSizeParamKey, Value: "128"}
+		pv, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		s.NoError(err)
+		s.True(pv.MaxBatch() == 128*5)
+	}
 }

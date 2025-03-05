@@ -45,9 +45,10 @@ type EmbeddingRequest struct {
 	Truncate string `json:"truncate,omitempty"`
 }
 
-// Currently only float type is supported
+// Currently only float32/int8 is supported
 type Embeddings struct {
 	Float [][]float32 `json:"float"`
+	Int8  [][]int8    `json:"int8"`
 }
 
 type EmbeddingResponse struct {

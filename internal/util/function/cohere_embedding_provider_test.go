@@ -30,7 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/function/models/ali"
+	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
 )
 
 func TestCohereTextEmbeddingProvider(t *testing.T) {
@@ -69,7 +69,7 @@ func createCohereProvider(url string, schema *schemapb.FieldSchema, providerName
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: embedEnglishLightV20},
+			{Key: modelNameParamKey, Value: embedEnglishLightV30},
 			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: embeddingURLParamKey, Value: url},
 		},
@@ -83,86 +83,188 @@ func createCohereProvider(url string, schema *schemapb.FieldSchema, providerName
 }
 
 func (s *CohereTextEmbeddingProviderSuite) TestEmbedding() {
-	ts := CreateCohereEmbeddingServer()
-
+	ts := CreateCohereEmbeddingServer[float32]()
 	defer ts.Close()
+
 	for _, providerName := range s.providers {
 		provider, err := createCohereProvider(ts.URL, s.schema.Fields[2], providerName)
 		s.True(provider.MaxBatch() > 0)
 		s.Equal(provider.FieldDim(), int64(4))
 		s.NoError(err)
+		s.Equal(float32Embd, provider.(*CohereEmbeddingProvider).embdType)
+		s.Equal("float", provider.(*CohereEmbeddingProvider).outputType)
 		{
 			data := []string{"sentence"}
-			ret, err2 := provider.CallEmbedding(data, InsertMode)
+			r, err2 := provider.CallEmbedding(data, InsertMode)
+			ret := r.([][]float32)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
 			s.Equal(4, len(ret[0]))
-			s.Equal([]float32{0.0, 0.1, 0.2, 0.3}, ret[0])
+			s.Equal([]float32{0.0, 1.0, 2.0, 3.0}, ret[0])
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
 			ret, _ := provider.CallEmbedding(data, SearchMode)
-			s.Equal([][]float32{{0.0, 0.1, 0.2, 0.3}, {1.0, 1.1, 1.2, 1.3}, {2.0, 2.1, 2.2, 2.3}}, ret)
+			s.Equal([][]float32{{0.0, 1.0, 2.0, 3.0}, {1.0, 2.0, 3.0, 4.0}, {2.0, 3.0, 4.0, 5.0}}, ret)
 		}
 	}
 }
 
-func (s *CohereTextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var res ali.EmbeddingResponse
-		res.Output.Embeddings = append(res.Output.Embeddings, ali.Embeddings{
-			Embedding: []float32{1.0, 1.0, 1.0, 1.0},
-			TextIndex: 0,
-		})
-
-		res.Output.Embeddings = append(res.Output.Embeddings, ali.Embeddings{
-			Embedding: []float32{1.0, 1.0},
-			TextIndex: 1,
-		})
-		res.Usage = ali.Usage{
-			TotalTokens: 100,
-		}
-		w.WriteHeader(http.StatusOK)
-		data, _ := json.Marshal(res)
-		w.Write(data)
-	}))
-
+func (s *CohereTextEmbeddingProviderSuite) TestEmbeddingInt8() {
+	ts := CreateCohereEmbeddingServer[int8]()
 	defer ts.Close()
+
+	int8VecField := &schemapb.FieldSchema{
+		FieldID: 102, Name: "vector", DataType: schemapb.DataType_Int8Vector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "4"},
+		},
+	}
+
 	for _, providerName := range s.providers {
-		provder, err := createCohereProvider(ts.URL, s.schema.Fields[2], providerName)
+		provider, err := createCohereProvider(ts.URL, int8VecField, providerName)
+		s.True(provider.MaxBatch() > 0)
+		s.Equal(provider.FieldDim(), int64(4))
+		s.NoError(err)
+		s.Equal(int8Embd, provider.(*CohereEmbeddingProvider).embdType)
+		s.Equal("int8", provider.(*CohereEmbeddingProvider).outputType)
+		{
+			data := []string{"sentence"}
+			r, err2 := provider.CallEmbedding(data, InsertMode)
+			s.NoError(err2)
+			ret := r.([][]int8)
+			s.Equal(1, len(ret))
+			s.Equal(4, len(ret[0]))
+			s.Equal([]int8{0, 1, 2, 3}, ret[0])
+		}
+		{
+			data := []string{"sentence 1", "sentence 2", "sentence 3"}
+			ret, _ := provider.CallEmbedding(data, SearchMode)
+			s.Equal([][]int8{{0, 1, 2, 3}, {1, 2, 3, 4}, {2, 3, 4, 5}}, ret)
+		}
+	}
+
+	// Invalid model name
+	{
+		functionSchema := &schemapb.FunctionSchema{
+			Name:             "test",
+			Type:             schemapb.FunctionType_TextEmbedding,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{102},
+			Params: []*commonpb.KeyValuePair{
+				{Key: modelNameParamKey, Value: embedEnglishLightV20},
+				{Key: apiKeyParamKey, Value: "mock"},
+				{Key: embeddingURLParamKey, Value: ts.URL},
+			},
+		}
+		_, err := NewCohereEmbeddingProvider(int8VecField, functionSchema)
+		s.Error(err)
+	}
+}
+
+func (s *CohereTextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
+	{
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var res cohere.EmbeddingResponse
+			res.Embeddings = cohere.Embeddings{
+				Float: [][]float32{{1.0, 1.0, 1.0, 1.0}, {1.0, 1.0}},
+			}
+
+			w.WriteHeader(http.StatusOK)
+			data, _ := json.Marshal(res)
+			w.Write(data)
+		}))
+
+		defer ts.Close()
+		for _, providerName := range s.providers {
+			provider, err := createCohereProvider(ts.URL, s.schema.Fields[2], providerName)
+			s.NoError(err)
+
+			// embedding dim not match
+			data := []string{"sentence", "sentence"}
+			_, err2 := provider.CallEmbedding(data, InsertMode)
+			s.Error(err2)
+		}
+	}
+	{
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var res cohere.EmbeddingResponse
+			res.Embeddings = cohere.Embeddings{
+				Int8: [][]int8{{1, 1, 1, 1}, {1, 1}},
+			}
+
+			w.WriteHeader(http.StatusOK)
+			data, _ := json.Marshal(res)
+			w.Write(data)
+		}))
+		defer ts.Close()
+		fieldSchema := &schemapb.FieldSchema{
+			FieldID: 102, Name: "vector", DataType: schemapb.DataType_Int8Vector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "4"},
+			},
+		}
+
+		provider, err := createCohereProvider(ts.URL, fieldSchema, cohereProvider)
 		s.NoError(err)
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence"}
-		_, err2 := provder.CallEmbedding(data, InsertMode)
+		_, err2 := provider.CallEmbedding(data, InsertMode)
 		s.Error(err2)
 	}
 }
 
 func (s *CohereTextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var res ali.EmbeddingResponse
-		res.Output.Embeddings = append(res.Output.Embeddings, ali.Embeddings{
-			Embedding: []float32{1.0, 1.0, 1.0, 1.0},
-			TextIndex: 0,
-		})
-		res.Usage = ali.Usage{
-			TotalTokens: 100,
+	{
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var res cohere.EmbeddingResponse
+			res.Embeddings = cohere.Embeddings{
+				Float: [][]float32{{1.0, 1.0, 1.0, 1.0}},
+			}
+			w.WriteHeader(http.StatusOK)
+			data, _ := json.Marshal(res)
+			w.Write(data)
+		}))
+
+		defer ts.Close()
+		for _, providerName := range s.providers {
+			provider, err := createCohereProvider(ts.URL, s.schema.Fields[2], providerName)
+
+			s.NoError(err)
+
+			// embedding dim not match
+			data := []string{"sentence", "sentence2"}
+			_, err2 := provider.CallEmbedding(data, InsertMode)
+			s.Error(err2)
 		}
-		w.WriteHeader(http.StatusOK)
-		data, _ := json.Marshal(res)
-		w.Write(data)
-	}))
+	}
 
-	defer ts.Close()
-	for _, provderName := range s.providers {
-		provder, err := createCohereProvider(ts.URL, s.schema.Fields[2], provderName)
-
+	{
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var res cohere.EmbeddingResponse
+			res.Embeddings = cohere.Embeddings{
+				Int8: [][]int8{{1, 1, 1, 1}},
+			}
+			w.WriteHeader(http.StatusOK)
+			data, _ := json.Marshal(res)
+			w.Write(data)
+		}))
+		defer ts.Close()
+		fieldSchema := &schemapb.FieldSchema{
+			FieldID: 102, Name: "vector", DataType: schemapb.DataType_Int8Vector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "4"},
+			},
+		}
+		provider, err := createCohereProvider(ts.URL, fieldSchema, cohereProvider)
 		s.NoError(err)
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence2"}
-		_, err2 := provder.CallEmbedding(data, InsertMode)
+		_, err2 := provider.CallEmbedding(data, InsertMode)
 		s.Error(err2)
 	}
 }
@@ -240,7 +342,7 @@ func (s *CohereTextEmbeddingProviderSuite) TestCreateCohereEmbeddingClient() {
 }
 
 func (s *CohereTextEmbeddingProviderSuite) TestRuntimeDimNotMatch() {
-	ts := CreateCohereEmbeddingServer()
+	ts := CreateCohereEmbeddingServer[float32]()
 	defer ts.Close()
 	s.schema = &schemapb.CollectionSchema{
 		Name: "test",
