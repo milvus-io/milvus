@@ -8,6 +8,7 @@
 #include <type_traits>
 
 #include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "tantivy-binding.h"
 #include "rust-binding.h"
 #include "rust-array.h"
@@ -260,6 +261,62 @@ struct TantivyIndexWrapper {
 
         throw fmt::format("InvertedIndex.add_data: unsupported data type: {}",
                           typeid(T).name());
+    }
+
+    void
+    add_json_data(const Json* array, uintptr_t len, int64_t offset_begin) {
+        assert(!finished_);
+        for (uintptr_t i = 0; i < len; i++) {
+            auto res = RustResultWrapper(tantivy_index_add_json(
+                writer_, array[i].data().data(), offset_begin + i));
+            AssertInfo(res.result_->success,
+                       "failed to add string: {}",
+                       res.result_->error);
+        }
+    }
+
+    void
+    add_json_by_single_segment_writer(const Json* array, uintptr_t len) {
+        assert(!finished_);
+        for (uintptr_t i = 0; i < len; i++) {
+            auto res = RustResultWrapper(
+                tantivy_index_add_json_by_single_segment_writer(
+                    writer_, array[i].data().data()));
+            AssertInfo(res.result_->success,
+                       "failed to add json: {}",
+                       res.result_->error);
+        }
+    }
+
+    void
+    add_json_array_data(const Json* array,
+                        uintptr_t len,
+                        int64_t offset_begin) {
+        assert(!finished_);
+        std::vector<const char*> views;
+        for (uintptr_t i = 0; i < len; i++) {
+            views.push_back(array[i].c_str());
+        }
+        auto res = RustResultWrapper(tantivy_index_add_array_json(
+            writer_, views.data(), len, offset_begin));
+        AssertInfo(res.result_->success,
+                   "failed to add multi json: {}",
+                   res.result_->error);
+    }
+
+    void
+    add_array_json_by_single_segment_writer(const Json* array, uintptr_t len) {
+        assert(!finished_);
+        std::vector<const char*> views;
+        for (uintptr_t i = 0; i < len; i++) {
+            views.push_back(array[i].c_str());
+        }
+        auto res = RustResultWrapper(
+            tantivy_index_add_array_json_by_single_segment_writer(
+                writer_, views.data(), len));
+        AssertInfo(res.result_->success,
+                   "failed to add multi json: {}",
+                   res.result_->error);
     }
 
     template <typename T>
@@ -800,6 +857,145 @@ struct TantivyIndexWrapper {
         AssertInfo(
             res.result_->value.tag == Value::Tag::RustArray,
             "TantivyIndexWrapper.phrase_match_query: invalid result type");
+        return RustArrayWrapper(std::move(res.result_->value.rust_array._0));
+    }
+
+    // json query
+    template <typename T>
+    RustArrayWrapper
+    json_term_query(const std::string& json_path, T term) {
+        auto array = [&]() {
+            if constexpr (std::is_same_v<T, bool>) {
+                return tantivy_json_term_query_bool(
+                    reader_, json_path.c_str(), term);
+            }
+
+            if constexpr (std::is_integral_v<T>) {
+                return tantivy_json_term_query_i64(
+                    reader_, json_path.c_str(), term);
+            }
+
+            if constexpr (std::is_floating_point_v<T>) {
+                return tantivy_json_term_query_f64(
+                    reader_, json_path.c_str(), term);
+            }
+
+            if constexpr (std::is_same_v<T, std::string>) {
+                return tantivy_json_term_query_keyword(
+                    reader_, json_path.c_str(), term.c_str());
+            }
+
+            throw fmt::format(
+                "InvertedIndex.json_term_query: unsupported data type: {}",
+                typeid(T).name());
+            return RustResult();
+        }();
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.json_term_query: {}",
+                   res.result_->error);
+        AssertInfo(res.result_->value.tag == Value::Tag::RustArray,
+                   "TantivyIndexWrapper.json_term_query: invalid result type");
+        return RustArrayWrapper(std::move(res.result_->value.rust_array._0));
+    }
+
+    RustArrayWrapper
+    json_exist_query(const std::string& json_path) {
+        auto array = tantivy_json_exist_query(reader_, json_path.c_str());
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.json_exist_query: {}",
+                   res.result_->error);
+        return RustArrayWrapper(std::move(res.result_->value.rust_array._0));
+    }
+
+    template <typename T>
+    RustArrayWrapper
+    json_range_query(const std::string& json_path,
+                     T lower_bound,
+                     T upper_bound,
+                     bool lb_unbounded,
+                     bool ub_unbounded,
+                     bool lb_inclusive,
+                     bool ub_inclusive) {
+        auto array = [&]() {
+            if constexpr (std::is_same_v<T, bool>) {
+                return tantivy_json_range_query_bool(reader_,
+                                                     json_path.c_str(),
+                                                     lower_bound,
+                                                     upper_bound,
+                                                     lb_unbounded,
+                                                     ub_unbounded,
+                                                     lb_inclusive,
+                                                     ub_inclusive);
+            }
+
+            if constexpr (std::is_integral_v<T>) {
+                return tantivy_json_range_query_i64(reader_,
+                                                    json_path.c_str(),
+                                                    lower_bound,
+                                                    upper_bound,
+                                                    lb_unbounded,
+                                                    ub_unbounded,
+                                                    lb_inclusive,
+                                                    ub_inclusive);
+            }
+
+            if constexpr (std::is_floating_point_v<T>) {
+                return tantivy_json_range_query_f64(reader_,
+                                                    json_path.c_str(),
+                                                    lower_bound,
+                                                    upper_bound,
+                                                    lb_unbounded,
+                                                    ub_unbounded,
+                                                    lb_inclusive,
+                                                    ub_inclusive);
+            }
+
+            if constexpr (std::is_same_v<T, std::string>) {
+                return tantivy_json_range_query_keyword(reader_,
+                                                        json_path.c_str(),
+                                                        lower_bound.c_str(),
+                                                        upper_bound.c_str(),
+                                                        lb_unbounded,
+                                                        ub_unbounded,
+                                                        lb_inclusive,
+                                                        ub_inclusive);
+            }
+
+            throw fmt::format(
+                "InvertedIndex.json_range_query: unsupported data type: {}",
+                typeid(T).name());
+            return RustResult();
+        }();
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.json_range_query: {}",
+                   res.result_->error);
+        AssertInfo(res.result_->value.tag == Value::Tag::RustArray,
+                   "TantivyIndexWrapper.json_range_query: invalid result type");
+        return RustArrayWrapper(std::move(res.result_->value.rust_array._0));
+    }
+
+    RustArrayWrapper
+    json_regex_query(const std::string& json_path, const std::string& pattern) {
+        auto array = tantivy_json_regex_query(
+            reader_, json_path.c_str(), pattern.c_str());
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.json_regex_query: {}",
+                   res.result_->error);
+        return RustArrayWrapper(std::move(res.result_->value.rust_array._0));
+    }
+
+    RustArrayWrapper
+    json_prefix_query(const std::string& json_path, const std::string& prefix) {
+        auto array = tantivy_json_prefix_query(
+            reader_, json_path.c_str(), prefix.c_str());
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.json_prefix_query: {}",
+                   res.result_->error);
         return RustArrayWrapper(std::move(res.result_->value.rust_array._0));
     }
 
