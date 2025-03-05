@@ -691,7 +691,7 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 }
 
 // AppendFieldData appends fields data of specified index from src to dst
-func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int64) {
+func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int64, err error) {
 	for i, fieldData := range src {
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
@@ -784,6 +784,9 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 				/* #nosec G103 */
 				appendSize += int64(unsafe.Sizeof(srcScalar.StringData.Data[idx]))
 			case *schemapb.ScalarField_ArrayData:
+				if srcScalar.ArrayData.Data[idx] == nil {
+					return 0, fmt.Errorf("cannot insert an empty array into milvus, check input data please")
+				}
 				if dstScalar.GetArrayData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_ArrayData{
 						ArrayData: &schemapb.ArrayArray{
@@ -898,7 +901,7 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 		}
 	}
 
-	return
+	return appendSize, nil
 }
 
 // DeleteFieldData delete fields data appended last time

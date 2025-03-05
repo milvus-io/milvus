@@ -295,6 +295,28 @@ func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeuti
 	return nil
 }
 
+func getDefaultArrayValue(elementType schemapb.DataType) *schemapb.ScalarField {
+	switch elementType {
+	case schemapb.DataType_Bool:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: make([]bool, 0)}}}
+	case schemapb.DataType_Int8:
+	case schemapb.DataType_Int16:
+	case schemapb.DataType_Int32:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: make([]int32, 0)}}}
+	case schemapb.DataType_Int64:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: make([]int64, 0)}}}
+	case schemapb.DataType_Float:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: make([]float32, 0)}}}
+	case schemapb.DataType_Double:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: make([]float64, 0)}}}
+	case schemapb.DataType_VarChar:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: make([]string, 0)}}}
+	case schemapb.DataType_String:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: make([]string, 0)}}}
+	}
+	return nil
+}
+
 func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
 	err := nullutil.CheckValidData(field.GetValidData(), fieldSchema, numRows)
 	if err != nil {
@@ -306,7 +328,7 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 		switch sd := field.GetScalars().GetData().(type) {
 		case *schemapb.ScalarField_BoolData:
 			if fieldSchema.GetNullable() {
-				sd.BoolData.Data, err = fillWithNullValueImpl(sd.BoolData.Data, field.GetValidData())
+				sd.BoolData.Data, err = fillWithNullValueImpl(sd.BoolData.Data, field.GetValidData(), false)
 				if err != nil {
 					return err
 				}
@@ -314,7 +336,7 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 
 		case *schemapb.ScalarField_IntData:
 			if fieldSchema.GetNullable() {
-				sd.IntData.Data, err = fillWithNullValueImpl(sd.IntData.Data, field.GetValidData())
+				sd.IntData.Data, err = fillWithNullValueImpl(sd.IntData.Data, field.GetValidData(), int32(0))
 				if err != nil {
 					return err
 				}
@@ -322,7 +344,7 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 
 		case *schemapb.ScalarField_LongData:
 			if fieldSchema.GetNullable() {
-				sd.LongData.Data, err = fillWithNullValueImpl(sd.LongData.Data, field.GetValidData())
+				sd.LongData.Data, err = fillWithNullValueImpl(sd.LongData.Data, field.GetValidData(), int64(0))
 				if err != nil {
 					return err
 				}
@@ -330,7 +352,7 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 
 		case *schemapb.ScalarField_FloatData:
 			if fieldSchema.GetNullable() {
-				sd.FloatData.Data, err = fillWithNullValueImpl(sd.FloatData.Data, field.GetValidData())
+				sd.FloatData.Data, err = fillWithNullValueImpl(sd.FloatData.Data, field.GetValidData(), float32(0.0))
 				if err != nil {
 					return err
 				}
@@ -338,7 +360,7 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 
 		case *schemapb.ScalarField_DoubleData:
 			if fieldSchema.GetNullable() {
-				sd.DoubleData.Data, err = fillWithNullValueImpl(sd.DoubleData.Data, field.GetValidData())
+				sd.DoubleData.Data, err = fillWithNullValueImpl(sd.DoubleData.Data, field.GetValidData(), 0.0)
 				if err != nil {
 					return err
 				}
@@ -346,15 +368,19 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 
 		case *schemapb.ScalarField_StringData:
 			if fieldSchema.GetNullable() {
-				sd.StringData.Data, err = fillWithNullValueImpl(sd.StringData.Data, field.GetValidData())
+				sd.StringData.Data, err = fillWithNullValueImpl(sd.StringData.Data, field.GetValidData(), "")
 				if err != nil {
 					return err
 				}
 			}
 
 		case *schemapb.ScalarField_ArrayData:
+			defaultArrVal := getDefaultArrayValue(fieldSchema.GetElementType())
+			if defaultArrVal == nil {
+				return fmt.Errorf("cannot get default for field:%s, fieldId:%d", fieldSchema.GetName(), fieldSchema.GetFieldID())
+			}
 			if fieldSchema.GetNullable() {
-				sd.ArrayData.Data, err = fillWithNullValueImpl(sd.ArrayData.Data, field.GetValidData())
+				sd.ArrayData.Data, err = fillWithNullValueImpl(sd.ArrayData.Data, field.GetValidData(), defaultArrVal)
 				if err != nil {
 					return err
 				}
@@ -362,7 +388,7 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 
 		case *schemapb.ScalarField_JsonData:
 			if fieldSchema.GetNullable() {
-				sd.JsonData.Data, err = fillWithNullValueImpl(sd.JsonData.Data, field.GetValidData())
+				sd.JsonData.Data, err = fillWithNullValueImpl(sd.JsonData.Data, field.GetValidData(), []byte{})
 				if err != nil {
 					return err
 				}
@@ -499,7 +525,7 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 	return nil
 }
 
-func fillWithNullValueImpl[T any](array []T, validData []bool) ([]T, error) {
+func fillWithNullValueImpl[T any](array []T, validData []bool, defaultNoneValue T) ([]T, error) {
 	n := getValidNumber(validData)
 	if len(array) != n {
 		return nil, merr.WrapErrParameterInvalid(n, len(array), "the length of field is wrong")
@@ -513,6 +539,8 @@ func fillWithNullValueImpl[T any](array []T, validData []bool) ([]T, error) {
 		if v {
 			res[i] = array[srcIdx]
 			srcIdx++
+		} else {
+			res[i] = defaultNoneValue
 		}
 	}
 	return res, nil

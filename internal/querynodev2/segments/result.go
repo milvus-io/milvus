@@ -330,7 +330,8 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		ts := validRetrieveResults[sel].Timestamps[cursors[sel]]
 		if _, ok := idTsMap[pk]; !ok {
 			typeutil.AppendPKs(ret.Ids, pk)
-			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
+			appendSize, _ := typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
+			retSize += appendSize
 			idTsMap[pk] = ts
 			j++
 		} else {
@@ -339,7 +340,8 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 			if ts != 0 && ts > idTsMap[pk] {
 				idTsMap[pk] = ts
 				typeutil.DeleteFieldData(ret.FieldsData)
-				retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
+				appendSize, _ := typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
+				retSize += appendSize
 			}
 		}
 
@@ -510,8 +512,8 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		// cursors = make([]int64, len(validRetrieveResults))
 		for _, selection := range selections {
 			// cannot use `cursors[sel]` directly, since some of them may be skipped.
-			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[selection.batchIndex].Result.GetFieldsData(), selection.resultIndex)
-
+			appendSize, _ := typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[selection.batchIndex].Result.GetFieldsData(), selection.resultIndex)
+			retSize += appendSize
 			// limit retrieve result to avoid oom
 			if retSize > maxOutputSize {
 				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
@@ -563,7 +565,8 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		// retrieve result is compacted, use 0,1,2...end
 		segmentResOffset := make([]int64, len(segmentResults))
 		for _, selection := range selections {
-			retSize += typeutil.AppendFieldData(ret.FieldsData, segmentResults[selection.batchIndex].GetFieldsData(), segmentResOffset[selection.batchIndex])
+			appendSize, _ := typeutil.AppendFieldData(ret.FieldsData, segmentResults[selection.batchIndex].GetFieldsData(), segmentResOffset[selection.batchIndex])
+			retSize += appendSize
 			segmentResOffset[selection.batchIndex]++
 			// limit retrieve result to avoid oom
 			if retSize > maxOutputSize {
