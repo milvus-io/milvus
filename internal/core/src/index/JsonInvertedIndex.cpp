@@ -50,7 +50,10 @@ JsonInvertedIndex<T>::build_index_for_json(
                                err == simdjson::NO_SUCH_FIELD,
                            "Failed to parse json, err: {}",
                            err);
-                this->null_offset_.push_back(i);
+                {
+                    folly::SharedMutex::WriteHolder lock(this->mutex_);
+                    this->null_offset_.push_back(i);
+                }
                 this->wrapper_->template add_array_data<T>(
                     nullptr, 0, offset++);
                 continue;
