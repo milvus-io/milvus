@@ -147,14 +147,23 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
         expected: create alias successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_unique_str('coll')
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. create alias
-        error = {ct.err_code: 1601, ct.err_msg: f"alias and collection name conflict[database=default]"
-                                                f"[alias={collection_name}]"}
+        error = {ct.err_code: 1601,
+                 ct.err_msg: f"alias and collection name conflict[database=default][alias={collection_name}]"}
         self.create_alias(client, collection_name, collection_name,
                           check_task=CheckTasks.err_res, check_items=error)
+        # create a collection with the same alias name
+        alias_name = cf.gen_unique_str('alias')
+        self.create_alias(client, collection_name, alias_name)
+        error = {ct.err_code: 1601,
+                 ct.err_msg: f"collection name [{alias_name}] conflicts with an existing alias, "
+                             f"please choose a unique name"}
+        self.create_collection(client, alias_name, default_dim,
+                               check_task=CheckTasks.err_res, check_items=error)
+        self.drop_alias(client, alias_name)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
