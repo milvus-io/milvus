@@ -241,7 +241,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     MemFileManagerPtr mem_file_manager_;
     DiskFileManagerPtr disk_file_manager_;
 
-    folly::SharedMutexWritePriority mutex_;
+    folly::SharedMutexWritePriority mutex_{};
     // all data need to be built to align the offset
     // so need to store null_offset_ in inverted index additionally
     std::vector<size_t> null_offset_{};
