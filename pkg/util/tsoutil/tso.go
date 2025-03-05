@@ -96,3 +96,16 @@ func SubByNow(ts uint64) int64 {
 	now := time.Now().UnixMilli()
 	return now - utcT
 }
+
+const (
+	minUnixMillis = 1546300800000   // 2019-01-01 00:00:00 UTC
+	maxUnixMillis = 253402300799000 // 9999-12-31 23:59:59 UTC
+)
+
+func IsValidPhysicalTs(t uint64) bool {
+	return t >= minUnixMillis && t <= maxUnixMillis
+}
+
+func IsValidHybridTs(t uint64) bool {
+	return IsValidPhysicalTs(t >> logicalBits)
+}
