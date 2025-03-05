@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <vector>
+#include <folly/SharedMutex.h>
 #include "common/RegexQuery.h"
 #include "index/Index.h"
 #include "storage/FileManager.h"
@@ -203,9 +204,10 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     MemFileManagerPtr mem_file_manager_;
     DiskFileManagerPtr disk_file_manager_;
 
+    folly::SharedMutexWritePriority mutex_{};
     // all data need to be built to align the offset
-    // so need to store null_offset in inverted index additionally
-    std::vector<size_t> null_offset{};
+    // so need to store null_offset_ in inverted index additionally
+    std::vector<size_t> null_offset_{};
 
     // `inverted_index_single_segment_` is used to control whether to build tantivy index with single segment.
     //
