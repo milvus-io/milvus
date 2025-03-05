@@ -51,34 +51,31 @@ type Usage struct {
 	TotalTokens int `json:"total_tokens"`
 }
 
-type EmbeddingData struct {
+type EmbeddingData[T int8 | float32] struct {
 	Object string `json:"object"`
 
-	Embedding []float32 `json:"embedding"`
+	Embedding []T `json:"embedding"`
 
 	Index int `json:"index"`
 }
 
-type EmbeddingResponse struct {
-	Object string `json:"object"`
-
-	Data []EmbeddingData `json:"data"`
-
-	Model string `json:"model"`
-
-	Usage Usage `json:"usage"`
+type EmbeddingResponse[T int8 | float32] struct {
+	Object string             `json:"object"`
+	Model  string             `json:"model"`
+	Usage  Usage              `json:"usage"`
+	Data   []EmbeddingData[T] `json:"data"`
 }
 
-type ByIndex struct {
-	resp *EmbeddingResponse
+type ByIndex[T int8 | float32] struct {
+	resp *EmbeddingResponse[T]
 }
 
-func (eb *ByIndex) Len() int { return len(eb.resp.Data) }
-func (eb *ByIndex) Swap(i, j int) {
+func (eb *ByIndex[T]) Len() int { return len(eb.resp.Data) }
+func (eb *ByIndex[T]) Swap(i, j int) {
 	eb.resp.Data[i], eb.resp.Data[j] = eb.resp.Data[j], eb.resp.Data[i]
 }
 
-func (eb *ByIndex) Less(i, j int) bool {
+func (eb *ByIndex[T]) Less(i, j int) bool {
 	return eb.resp.Data[i].Index < eb.resp.Data[j].Index
 }
 
@@ -111,7 +108,10 @@ func (c *VoyageAIEmbedding) Check() error {
 	return nil
 }
 
-func (c *VoyageAIEmbedding) Embedding(modelName string, texts []string, dim int, textType string, outputType string, timeoutSec int64) (*EmbeddingResponse, error) {
+func (c *VoyageAIEmbedding) Embedding(modelName string, texts []string, dim int, textType string, outputType string, timeoutSec int64) (any, error) {
+	if outputType != "float" && outputType != "int8" {
+		return nil, fmt.Errorf("Voyageai: unsupport output type: [%s], only support float and int8", outputType)
+	}
 	var r EmbeddingRequest
 	r.Model = modelName
 	r.Input = texts
@@ -142,11 +142,20 @@ func (c *VoyageAIEmbedding) Embedding(modelName string, texts []string, dim int,
 	if err != nil {
 		return nil, err
 	}
-	var res EmbeddingResponse
+	if outputType == "float" {
+		var res EmbeddingResponse[float32]
+		err = json.Unmarshal(body, &res)
+		if err != nil {
+			return nil, err
+		}
+		sort.Sort(&ByIndex[float32]{&res})
+		return &res, err
+	}
+	var res EmbeddingResponse[int8]
 	err = json.Unmarshal(body, &res)
 	if err != nil {
 		return nil, err
 	}
-	sort.Sort(&ByIndex{&res})
+	sort.Sort(&ByIndex[int8]{&res})
 	return &res, err
 }

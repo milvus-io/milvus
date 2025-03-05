@@ -150,7 +150,7 @@ func (provider *BedrockEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *BedrockEmbeddingProvider) CallEmbedding(texts []string, _ TextEmbeddingMode) ([][]float32, error) {
+func (provider *BedrockEmbeddingProvider) CallEmbedding(texts []string, _ TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	data := make([][]float32, 0, numRows)
 	for i := 0; i < numRows; i += 1 {

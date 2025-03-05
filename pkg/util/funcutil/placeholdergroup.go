@@ -40,6 +40,24 @@ func Float32VectorsToPlaceholderGroup(embs [][]float32) *commonpb.PlaceholderGro
 	return placeholderGroup
 }
 
+func Int8VectorsToPlaceholderGroup(embs [][]int8) *commonpb.PlaceholderGroup {
+	result := make([][]byte, len(embs))
+	for i, int8vector := range embs {
+		result[i] = make([]byte, len(int8vector))
+		for j, val := range int8vector {
+			result[i][j] = byte(val)
+		}
+	}
+	placeholderGroup := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{{
+			Tag:    "$0",
+			Type:   commonpb.PlaceholderType_Int8Vector,
+			Values: result,
+		}},
+	}
+	return placeholderGroup
+}
+
 func FieldDataToPlaceholderGroupBytes(fieldData *schemapb.FieldData) ([]byte, error) {
 	placeholderValue, err := fieldDataToPlaceholderValue(fieldData)
 	if err != nil {

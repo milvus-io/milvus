@@ -183,7 +183,7 @@ func (provider *VertexAIEmbeddingProvider) getTaskType(mode TextEmbeddingMode) s
 	return ""
 }
 
-func (provider *VertexAIEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) ([][]float32, error) {
+func (provider *VertexAIEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	taskType := provider.getTaskType(mode)
 	data := make([][]float32, 0, numRows)

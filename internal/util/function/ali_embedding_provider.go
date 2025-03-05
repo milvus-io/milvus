@@ -116,7 +116,7 @@ func (provider *AliEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *AliEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) ([][]float32, error) {
+func (provider *AliEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	var textType string
 	if mode == SearchMode {
