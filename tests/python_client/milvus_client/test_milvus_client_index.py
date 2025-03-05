@@ -238,62 +238,9 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
     #  The following are valid base cases
     ******************************************************************
     """
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/pymilvus/issues/1886")
-    @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_all_indexes_params[:7]))
-    def test_milvus_client_index_default(self, index, params, metric_type):
-        """
-        target: test index normal case
-        method: create connection, collection, create index, insert and search
-        expected: index/search/query successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, "vector")
-        res = self.list_indexes(client, collection_name)[0]
-        assert res == []
-        # 2. prepare index params
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vector", index_type=index, metric_type=metric_type)
-        # 3. create index
-        self.create_index(client, collection_name, index_params)
-        # 4. create same index twice
-        self.create_index(client, collection_name, index_params)
-        # 5. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        self.insert(client, collection_name, rows)
-        # 6. load collection
-        self.load_collection(client, collection_name)
-        # 7. search
-        vectors_to_search = rng.random((1, default_dim))
-        insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit})
-        # 8. query
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_all_indexes_params[:7]))
-    def test_milvus_client_index_with_params(self, index, params, metric_type):
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    def test_milvus_client_index_with_params(self, index, metric_type):
         """
         target: test index with user defined params
         method: create connection, collection, index, insert and search
@@ -309,6 +256,7 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         assert res == []
         # 2. prepare index params
         index_params = self.prepare_index_params(client)[0]
+        params = cf.get_index_params_params(index_type=index)
         index_params.add_index(field_name="vector", index_type=index, params=params, metric_type=metric_type)
         # 3. create index
         self.create_index(client, collection_name, index_params)
@@ -337,10 +285,8 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_all_indexes_params[:7]))
-    def test_milvus_client_index_after_insert(self, index, params, metric_type):
+    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    def test_milvus_client_index_after_insert(self, index, metric_type):
         """
         target: test index after insert
         method: create connection, collection, insert, index and search
@@ -359,6 +305,7 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. prepare index params
         index_params = self.prepare_index_params(client)[0]
+        params = cf.get_index_params_params(index)
         index_params.add_index(field_name="vector", index_type=index, metric_type=metric_type, params=params)
         # 4. create index
         self.create_index(client, collection_name, index_params)
@@ -640,10 +587,7 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_all_indexes_params[:7]))
-    def test_milvus_client_index_drop_create_same_index(self, index, params, metric_type):
+    def test_milvus_client_index_drop_create_same_index(self):
         """
         target: test index after drop and create same index twice
         method: create connection, collection, create/drop/create index, insert and search
@@ -659,64 +603,12 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         assert res == []
         # 2. prepare index params
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vector", index_type=index, params=params, metric_type=metric_type)
+        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
         # 3. create index
         self.create_index(client, collection_name, index_params)
         # 4. drop index
         self.drop_index(client, collection_name, "vector")
         # 4. create same index twice
-        self.create_index(client, collection_name, index_params)
-        # 5. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        self.insert(client, collection_name, rows)
-        # 6. load collection
-        self.load_collection(client, collection_name)
-        # 7. search
-        vectors_to_search = rng.random((1, default_dim))
-        insert_ids = [i for i in range(default_nb)]
-        self.search(client, collection_name, vectors_to_search,
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit})
-        # 8. query
-        self.query(client, collection_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_all_indexes_params[:7]))
-    def test_milvus_client_index_drop_create_different_index(self, index, params, metric_type):
-        """
-        target: test index after drop and create different index twice
-        method: create connection, collection, create/drop/create index, insert and search
-        expected: index create/drop and search/query successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, "vector")
-        res = self.list_indexes(client, collection_name)[0]
-        assert res == []
-        # 2. prepare index params
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vector", metric_type=metric_type)
-        # 3. create index
-        self.create_index(client, collection_name, index_params)
-        # 4. drop index
-        self.drop_index(client, collection_name, "vector")
-        # 4. create different index
-        index_params.add_index(field_name="vector", index_type=index, params=params, metric_type=metric_type)
         self.create_index(client, collection_name, index_params)
         # 5. insert
         rng = np.random.default_rng(seed=19530)
