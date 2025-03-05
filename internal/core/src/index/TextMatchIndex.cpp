@@ -147,6 +147,7 @@ TextMatchIndex::Load(const Config& config) {
             binary_set.Append(key, buf, size);
         }
         auto index_valid_data = binary_set.GetByName("index_null_offset");
+        folly::SharedMutex::WriteHolder lock(mutex_);
         null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
         memcpy(null_offset_.data(),
                index_valid_data->data.get(),
@@ -177,7 +178,10 @@ TextMatchIndex::AddText(const std::string& text,
 
 void
 TextMatchIndex::AddNull(int64_t offset) {
-    null_offset_.push_back(offset);
+    {
+        folly::SharedMutex::WriteHolder lock(mutex_);
+        null_offset_.push_back(offset);
+    }
     // still need to add null to make offset is correct
     std::string empty = "";
     wrapper_->add_multi_data(&empty, 0, offset);
@@ -192,6 +196,7 @@ TextMatchIndex::AddTexts(size_t n,
         for (int i = 0; i < n; i++) {
             auto offset = i + offset_begin;
             if (!valids[i]) {
+                folly::SharedMutex::WriteHolder lock(mutex_);
                 null_offset_.push_back(offset);
             }
         }
@@ -212,11 +217,15 @@ TextMatchIndex::BuildIndexFromFieldData(
         for (const auto& data : field_datas) {
             total += data->get_null_count();
         }
-        null_offset_.reserve(total);
+        {
+            folly::SharedMutex::WriteHolder lock(mutex_);
+            null_offset_.reserve(total);
+        }
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
+                    folly::SharedMutex::WriteHolder lock(mutex_);
                     null_offset_.push_back(i);
                 }
                 wrapper_->add_data(
