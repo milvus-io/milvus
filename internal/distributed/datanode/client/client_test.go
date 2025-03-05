@@ -18,6 +18,7 @@ package grpcdatanodeclient
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,9 +26,10 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
+	mock2 "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -90,24 +92,28 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r14, err)
 	}
 
-	client.(*Client).grpcClient = mocks.NewMockGrpcClient[DataNodeClient](t)
+	client.(*Client).grpcClient = &mock2.GRPCClientBase[DataNodeClient]{
+		GetGrpcClientErr: errors.New("dummy"),
+	}
 
 	newFunc1 := func(cc *grpc.ClientConn) DataNodeClient {
 		return DataNodeClient{
-			DataNodeClient:  mocks.NewMockDataNodeClient(t),
-			IndexNodeClient: mocks.NewMockDataNodeClient(t),
+			DataNodeClient:  &mock2.GrpcDataNodeClient{Err: nil},
+			IndexNodeClient: &mock2.GrpcDataNodeClient{Err: nil},
 		}
 	}
 	client.(*Client).grpcClient.SetNewGrpcClientFunc(newFunc1)
 
 	checkFunc(false)
 
-	client.(*Client).grpcClient = mocks.NewMockGrpcClient[DataNodeClient](t)
+	client.(*Client).grpcClient = &mock2.GRPCClientBase[DataNodeClient]{
+		GetGrpcClientErr: nil,
+	}
 
 	newFunc2 := func(cc *grpc.ClientConn) DataNodeClient {
 		return DataNodeClient{
-			DataNodeClient:  mocks.NewMockDataNodeClient(t),
-			IndexNodeClient: mocks.NewMockDataNodeClient(t),
+			DataNodeClient:  &mock2.GrpcDataNodeClient{Err: errors.New("dummy")},
+			IndexNodeClient: &mock2.GrpcDataNodeClient{Err: errors.New("dummy")},
 		}
 	}
 
@@ -115,12 +121,14 @@ func Test_NewClient(t *testing.T) {
 
 	checkFunc(false)
 
-	client.(*Client).grpcClient = mocks.NewMockGrpcClient[DataNodeClient](t)
+	client.(*Client).grpcClient = &mock2.GRPCClientBase[DataNodeClient]{
+		GetGrpcClientErr: nil,
+	}
 
 	newFunc3 := func(cc *grpc.ClientConn) DataNodeClient {
 		return DataNodeClient{
-			DataNodeClient:  mocks.NewMockDataNodeClient(t),
-			IndexNodeClient: mocks.NewMockDataNodeClient(t),
+			DataNodeClient:  &mock2.GrpcDataNodeClient{Err: nil},
+			IndexNodeClient: &mock2.GrpcDataNodeClient{Err: nil},
 		}
 	}
 	client.(*Client).grpcClient.SetNewGrpcClientFunc(newFunc3)
@@ -132,25 +140,35 @@ func Test_NewClient(t *testing.T) {
 }
 
 func TestIndexClient(t *testing.T) {
+	paramtable.Init()
 	ctx := context.Background()
 	client, err := NewClient(ctx, "localhost:1234", 1, false)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
 	mockIN := mocks.NewMockDataNodeClient(t)
+	mockDN := mocks.NewMockDataNodeClient(t)
+	mockNode := DataNodeClient{
+		DataNodeClient:  mockDN,
+		IndexNodeClient: mockIN,
+	}
 
 	mockGrpcClient := mocks.NewMockGrpcClient[DataNodeClient](t)
 	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, f func(nodeClient DataNodeClient) (interface{}, error)) (interface{}, error) {
+			return f(mockNode)
+		})
 	client.(*Client).grpcClient = mockGrpcClient
 
 	t.Run("GetComponentStates", func(t *testing.T) {
-		mockIN.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil)
+		mockDN.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := client.GetComponentStates(ctx, nil)
 		assert.NoError(t, err)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
-		mockIN.EXPECT().GetStatisticsChannel(mock.Anything, mock.Anything).Return(nil, nil)
+		mockDN.EXPECT().GetStatisticsChannel(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := client.GetStatisticsChannel(ctx, nil)
 		assert.NoError(t, err)
 	})
@@ -183,7 +201,7 @@ func TestIndexClient(t *testing.T) {
 	})
 
 	t.Run("ShowConfigurations", func(t *testing.T) {
-		mockIN.EXPECT().ShowConfigurations(mock.Anything, mock.Anything).Return(nil, nil)
+		mockDN.EXPECT().ShowConfigurations(mock.Anything, mock.Anything).Return(nil, nil)
 
 		req := &internalpb.ShowConfigurationsRequest{
 			Pattern: "",
@@ -193,7 +211,7 @@ func TestIndexClient(t *testing.T) {
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
-		mockIN.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, nil)
+		mockDN.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, nil)
 
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		assert.NoError(t, err)
