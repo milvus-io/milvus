@@ -285,8 +285,6 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
     }
 
     folly::SharedMutex::ReadHolder lock(mutex_);
-    std::cout << "Count " << count << " null_offset size "
-              << null_offset_.size() << std::endl;
     auto end =
         std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
     for (auto iter = null_offset_.begin(); iter != end; ++iter) {
