@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <folly/SharedMutex.h>
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
@@ -35,7 +36,8 @@ JsonInvertedIndex<T>::build_index_for_json(
         for (int64_t i = 0; i < n; i++) {
             auto json_column = static_cast<const Json*>(data->RawValue(i));
             if (this->schema_.nullable() && !data->is_valid(i)) {
-                this->null_offset.push_back(i);
+                folly::SharedMutex::WriteHolder lock(this->mutex_);
+                this->null_offset_.push_back(i);
                 continue;
             }
             value_result<GetType> res = json_column->at<GetType>(nested_path_);

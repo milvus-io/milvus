@@ -39,14 +39,16 @@ NewPackedWriter(struct ArrowSchema* schema,
         conf.part_size = part_upload_size;
 
         auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                .GetArrowFileSystem();
+                          .GetArrowFileSystem();
         if (!trueFs) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed, "Failed to get filesystem");
+            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
+                                          "Failed to get filesystem");
         }
 
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
 
-        auto columnGroups = *static_cast<std::vector<std::vector<int>>*>(column_groups);
+        auto columnGroups =
+            *static_cast<std::vector<std::vector<int>>*>(column_groups);
 
         auto writer = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
             trueFs, truePaths, trueSchema, conf, columnGroups, buffer_size);
@@ -70,7 +72,8 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
             arrow::ImportRecordBatch(array, schema).ValueOrDie();
         auto status = packed_writer->Write(record_batch);
         if (!status.ok()) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed, status.ToString());
+            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
+                                          status.ToString());
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -87,7 +90,8 @@ CloseWriter(CPackedWriter c_packed_writer) {
         auto status = packed_writer->Close();
         delete packed_writer;
         if (!status.ok()) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed, status.ToString());
+            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
+                                          status.ToString());
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
