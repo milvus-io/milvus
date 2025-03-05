@@ -13,7 +13,6 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <folly/SharedMutex.h>
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"

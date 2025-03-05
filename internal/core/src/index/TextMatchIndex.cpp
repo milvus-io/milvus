@@ -12,7 +12,6 @@
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <memory>
-#include <folly/SharedMutex.h>
 
 #include "index/TextMatchIndex.h"
 #include "index/InvertedIndexUtil.h"

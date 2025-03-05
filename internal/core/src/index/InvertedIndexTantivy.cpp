@@ -22,7 +22,6 @@
 #include <boost/filesystem.hpp>
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <folly/SharedMutex.h>
 #include <cstddef>
 #include <vector>
 #include "InvertedIndexTantivy.h"
