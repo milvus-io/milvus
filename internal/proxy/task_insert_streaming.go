@@ -56,10 +56,11 @@ func (it *insertTaskByStreamingService) Execute(ctx context.Context) error {
 
 	// start to repack insert data
 	var msgs []message.MutableMessage
+	schemaHelper, _ := typeutil.CreateSchemaHelper(it.schema)
 	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result)
+		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, schemaHelper)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, schemaHelper)
 	}
 	if err != nil {
 		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))
@@ -81,6 +82,7 @@ func repackInsertDataForStreamingService(
 	channelNames []string,
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
+	schemaHelper *typeutil.SchemaHelper,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 
@@ -92,7 +94,7 @@ func repackInsertDataForStreamingService(
 			return nil, err
 		}
 		// segment id is assigned at streaming node.
-		msgs, err := genInsertMsgsByPartition(ctx, 0, partitionID, partitionName, rowOffsets, channel, insertMsg)
+		msgs, err := genInsertMsgsByPartition(ctx, 0, partitionID, partitionName, rowOffsets, channel, insertMsg, schemaHelper)
 		if err != nil {
 			return nil, err
 		}
@@ -127,6 +129,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
 	partitionKeys *schemapb.FieldData,
+	schemaHelper *typeutil.SchemaHelper,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 
@@ -171,7 +174,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		}
 
 		for partitionName, rowOffsets := range partition2RowOffsets {
-			msgs, err := genInsertMsgsByPartition(ctx, 0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg)
+			msgs, err := genInsertMsgsByPartition(ctx, 0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg, schemaHelper)
 			if err != nil {
 				return nil, err
 			}

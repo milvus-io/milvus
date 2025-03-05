@@ -1134,8 +1134,8 @@ func TestAppendFieldData(t *testing.T) {
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(SparseFloatVectorFieldName, SparseFloatVectorFieldID, schemapb.DataType_SparseFloatVector, SparseFloatVector.Contents[1], SparseFloatVector.Dim))
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(Int8VectorFieldName, Int8VectorFieldID, schemapb.DataType_Int8Vector, Int8Vector[Dim:2*Dim], Dim))
 
-	AppendFieldData(result, fieldDataArray1, 0)
-	AppendFieldData(result, fieldDataArray2, 0)
+	AppendFieldData(result, fieldDataArray1, 0, nil)
+	AppendFieldData(result, fieldDataArray2, 0, nil)
 
 	assert.Equal(t, BoolArray, result[0].GetScalars().GetBoolData().Data)
 	assert.Equal(t, Int32Array, result[1].GetScalars().GetIntData().Data)
@@ -1149,6 +1149,53 @@ func TestAppendFieldData(t *testing.T) {
 	assert.Equal(t, ArrayArray, result[9].GetScalars().GetArrayData().Data)
 	assert.Equal(t, SparseFloatVector, result[10].GetVectors().GetSparseFloatVector())
 	assert.Equal(t, Int8Vector, result[11].GetVectors().Data.(*schemapb.VectorField_Int8Vector).Int8Vector)
+
+	// test check array inner elements type
+	{
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, &schemapb.FieldSchema{FieldID: BoolFieldID, Name: BoolFieldName, DataType: schemapb.DataType_Bool})
+		fields = append(fields, &schemapb.FieldSchema{FieldID: Int32FieldID, Name: Int32FieldName, DataType: schemapb.DataType_Int32})
+		fields = append(fields, &schemapb.FieldSchema{FieldID: Int64FieldID, Name: Int64FieldName, DataType: schemapb.DataType_Int64})
+		fields = append(fields, &schemapb.FieldSchema{FieldID: FloatFieldID, Name: FloatFieldName, DataType: schemapb.DataType_Float})
+		fields = append(fields, &schemapb.FieldSchema{FieldID: DoubleFieldID, Name: DoubleFieldName, DataType: schemapb.DataType_Double})
+		fields = append(fields, &schemapb.FieldSchema{FieldID: BinaryVectorFieldID, Name: BinaryVectorFieldName, DataType: schemapb.DataType_BinaryVector})
+		fields = append(fields, &schemapb.FieldSchema{FieldID: Float16VectorFieldID, Name: Float16VectorFieldName, DataType: schemapb.DataType_Float16Vector})
+		fields = append(fields, &schemapb.FieldSchema{FieldID: BFloat16VectorFieldID, Name: BFloat16VectorFieldName, DataType: schemapb.DataType_BFloat16Vector})
+		fields = append(fields, &schemapb.FieldSchema{FieldID: ArrayFieldID, Name: ArrayFieldName, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32})
+		fields = append(fields, &schemapb.FieldSchema{FieldID: SparseFloatVectorFieldID, Name: SparseFloatVectorFieldName, DataType: schemapb.DataType_SparseFloatVector})
+		collectionSchema := schemapb.CollectionSchema{
+			Name:   "test_array_element_type_schema",
+			Fields: fields,
+		}
+		schemaHelper, _ := CreateSchemaHelper(&collectionSchema)
+
+		corruptedArray := []*schemapb.ScalarField{
+			{
+				Data: nil,
+			},
+		}
+
+		corruptedFieldData := &schemapb.FieldData{
+			Type:      schemapb.DataType_Array,
+			FieldName: ArrayFieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							Data:        corruptedArray,
+							ElementType: schemapb.DataType_Int32,
+						},
+					},
+				},
+			},
+			FieldId: ArrayFieldID,
+		}
+
+		fieldDataArray2[9] = corruptedFieldData
+		appendSize, err := AppendFieldData(result, fieldDataArray2, 0, schemaHelper)
+		assert.Equal(t, appendSize, int64(0))
+		assert.Error(t, err)
+	}
 }
 
 func TestDeleteFieldData(t *testing.T) {
@@ -1239,8 +1286,8 @@ func TestDeleteFieldData(t *testing.T) {
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(SparseFloatVectorFieldName, SparseFloatVectorFieldID, schemapb.DataType_SparseFloatVector, SparseFloatVector.Contents[1], SparseFloatVector.Dim))
 	fieldDataArray2 = append(fieldDataArray2, genFieldData(Int8VectorFieldName, Int8VectorFieldID, schemapb.DataType_Int8Vector, Int8Vector[Dim:2*Dim], Dim))
 
-	AppendFieldData(result1, fieldDataArray1, 0)
-	AppendFieldData(result1, fieldDataArray2, 0)
+	AppendFieldData(result1, fieldDataArray1, 0, nil)
+	AppendFieldData(result1, fieldDataArray2, 0, nil)
 	DeleteFieldData(result1)
 	assert.Equal(t, BoolArray[0:1], result1[BoolFieldID-common.StartOfUserFieldID].GetScalars().GetBoolData().Data)
 	assert.Equal(t, Int32Array[0:1], result1[Int32FieldID-common.StartOfUserFieldID].GetScalars().GetIntData().Data)
@@ -1257,8 +1304,8 @@ func TestDeleteFieldData(t *testing.T) {
 	assert.Equal(t, tmpSparseFloatVector.Contents, result1[SparseFloatVectorFieldID-common.StartOfUserFieldID].GetVectors().GetSparseFloatVector().Contents)
 	assert.Equal(t, Int8Vector[0:Dim], result1[Int8VectorFieldID-common.StartOfUserFieldID].GetVectors().Data.(*schemapb.VectorField_Int8Vector).Int8Vector)
 
-	AppendFieldData(result2, fieldDataArray2, 0)
-	AppendFieldData(result2, fieldDataArray1, 0)
+	AppendFieldData(result2, fieldDataArray2, 0, nil)
+	AppendFieldData(result2, fieldDataArray1, 0, nil)
 	DeleteFieldData(result2)
 	assert.Equal(t, BoolArray[1:2], result2[BoolFieldID-common.StartOfUserFieldID].GetScalars().GetBoolData().Data)
 	assert.Equal(t, Int32Array[1:2], result2[Int32FieldID-common.StartOfUserFieldID].GetScalars().GetIntData().Data)

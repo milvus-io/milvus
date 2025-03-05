@@ -129,7 +129,7 @@ func TestRepackInsertData(t *testing.T) {
 		defer fakeSegAllocator.Close()
 
 		_, err = repackInsertData(ctx, []string{"test_dml_channel"}, insertMsg,
-			result, idAllocator, fakeSegAllocator)
+			result, idAllocator, fakeSegAllocator, nil)
 		assert.Error(t, err)
 	})
 
@@ -139,7 +139,7 @@ func TestRepackInsertData(t *testing.T) {
 	defer segAllocator.Close()
 
 	t.Run("repack insert data success", func(t *testing.T) {
-		_, err = repackInsertData(ctx, []string{"test_dml_channel"}, insertMsg, result, idAllocator, segAllocator)
+		_, err = repackInsertData(ctx, []string{"test_dml_channel"}, insertMsg, result, idAllocator, segAllocator, nil)
 		assert.NoError(t, err)
 	})
 }
@@ -236,7 +236,7 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 	t.Run("repack insert data success", func(t *testing.T) {
 		partitionKeys := generateFieldData(schemapb.DataType_VarChar, testVarCharField, nb)
 		_, err = repackInsertDataWithPartitionKey(ctx, []string{"test_dml_channel"}, partitionKeys,
-			insertMsg, result, idAllocator, segAllocator)
+			insertMsg, result, idAllocator, segAllocator, nil)
 		assert.NoError(t, err)
 	})
 }

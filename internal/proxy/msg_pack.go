@@ -45,6 +45,7 @@ func genInsertMsgsByPartition(ctx context.Context,
 	rowOffsets []int,
 	channelName string,
 	insertMsg *msgstream.InsertMsg,
+	schemaHelper *typeutil.SchemaHelper,
 ) ([]msgstream.TsMsg, error) {
 	threshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 
@@ -92,7 +93,10 @@ func genInsertMsgsByPartition(ctx context.Context,
 			requestSize = 0
 		}
 
-		typeutil.AppendFieldData(msg.FieldsData, insertMsg.GetFieldsData(), int64(offset))
+		_, appendErr := typeutil.AppendFieldData(msg.FieldsData, insertMsg.GetFieldsData(), int64(offset), schemaHelper)
+		if appendErr != nil {
+			return nil, appendErr
+		}
 		msg.HashValues = append(msg.HashValues, insertMsg.HashValues[offset])
 		msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
 		msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])
@@ -110,6 +114,7 @@ func repackInsertDataByPartition(ctx context.Context,
 	channelName string,
 	insertMsg *msgstream.InsertMsg,
 	segIDAssigner *segIDAssigner,
+	schemaHelper *typeutil.SchemaHelper,
 ) ([]msgstream.TsMsg, error) {
 	res := make([]msgstream.TsMsg, 0)
 
@@ -140,7 +145,7 @@ func repackInsertDataByPartition(ctx context.Context,
 	startPos := 0
 	for segmentID, count := range assignedSegmentInfos {
 		subRowOffsets := rowOffsets[startPos : startPos+int(count)]
-		msgs, err := genInsertMsgsByPartition(ctx, segmentID, partitionID, partitionName, subRowOffsets, channelName, insertMsg)
+		msgs, err := genInsertMsgsByPartition(ctx, segmentID, partitionID, partitionName, subRowOffsets, channelName, insertMsg, schemaHelper)
 		if err != nil {
 			log.Ctx(ctx).Warn("repack insert data to insert msgs failed",
 				zap.String("collectionName", insertMsg.CollectionName),
@@ -184,6 +189,7 @@ func repackInsertData(ctx context.Context,
 	result *milvuspb.MutationResult,
 	idAllocator *allocator.IDAllocator,
 	segIDAssigner *segIDAssigner,
+	schemaHelper *typeutil.SchemaHelper,
 ) (*msgstream.MsgPack, error) {
 	msgPack := &msgstream.MsgPack{
 		BeginTs: insertMsg.BeginTs(),
@@ -193,7 +199,7 @@ func repackInsertData(ctx context.Context,
 	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
 	for channel, rowOffsets := range channel2RowOffsets {
 		partitionName := insertMsg.PartitionName
-		msgs, err := repackInsertDataByPartition(ctx, partitionName, rowOffsets, channel, insertMsg, segIDAssigner)
+		msgs, err := repackInsertDataByPartition(ctx, partitionName, rowOffsets, channel, insertMsg, segIDAssigner, schemaHelper)
 		if err != nil {
 			log.Ctx(ctx).Warn("repack insert data to msg pack failed",
 				zap.String("collectionName", insertMsg.CollectionName),
@@ -224,6 +230,7 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 	result *milvuspb.MutationResult,
 	idAllocator *allocator.IDAllocator,
 	segIDAssigner *segIDAssigner,
+	schemaHelper *typeutil.SchemaHelper,
 ) (*msgstream.MsgPack, error) {
 	msgPack := &msgstream.MsgPack{
 		BeginTs: insertMsg.BeginTs(),
@@ -262,7 +269,7 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 			partitionName := partitionName
 			offsets := offsets
 			errGroup.Go(func() error {
-				msgs, err := repackInsertDataByPartition(ctx, partitionName, offsets, channel, insertMsg, segIDAssigner)
+				msgs, err := repackInsertDataByPartition(ctx, partitionName, offsets, channel, insertMsg, segIDAssigner, schemaHelper)
 				if err != nil {
 					return err
 				}
