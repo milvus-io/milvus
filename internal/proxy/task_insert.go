@@ -301,10 +301,11 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	// assign segmentID for insert data and repack data by segmentID
 	var msgPack *msgstream.MsgPack
+	schemaHelper, _ := typeutil.CreateSchemaHelper(it.schema)
 	if it.partitionKeys == nil {
-		msgPack, err = repackInsertData(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.idAllocator, it.segIDAssigner)
+		msgPack, err = repackInsertData(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.idAllocator, it.segIDAssigner, schemaHelper)
 	} else {
-		msgPack, err = repackInsertDataWithPartitionKey(it.TraceCtx(), channelNames, it.partitionKeys, it.insertMsg, it.result, it.idAllocator, it.segIDAssigner)
+		msgPack, err = repackInsertDataWithPartitionKey(it.TraceCtx(), channelNames, it.partitionKeys, it.insertMsg, it.result, it.idAllocator, it.segIDAssigner, schemaHelper)
 	}
 	if err != nil {
 		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))

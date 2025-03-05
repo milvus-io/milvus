@@ -696,8 +696,8 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 			break
 		}
-		retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
-
+		appendSize, _ := typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel], nil)
+		retSize += appendSize
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
 			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)

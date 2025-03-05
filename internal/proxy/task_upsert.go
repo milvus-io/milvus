@@ -454,9 +454,9 @@ func (it *upsertTask) insertExecute(ctx context.Context, msgPack *msgstream.MsgP
 	// assign segmentID for insert data and repack data by segmentID
 	var insertMsgPack *msgstream.MsgPack
 	if it.partitionKeys == nil {
-		insertMsgPack, err = repackInsertData(it.TraceCtx(), channelNames, it.upsertMsg.InsertMsg, it.result, it.idAllocator, it.segIDAssigner)
+		insertMsgPack, err = repackInsertData(it.TraceCtx(), channelNames, it.upsertMsg.InsertMsg, it.result, it.idAllocator, it.segIDAssigner, it.schema.schemaHelper)
 	} else {
-		insertMsgPack, err = repackInsertDataWithPartitionKey(it.TraceCtx(), channelNames, it.partitionKeys, it.upsertMsg.InsertMsg, it.result, it.idAllocator, it.segIDAssigner)
+		insertMsgPack, err = repackInsertDataWithPartitionKey(it.TraceCtx(), channelNames, it.partitionKeys, it.upsertMsg.InsertMsg, it.result, it.idAllocator, it.segIDAssigner, it.schema.schemaHelper)
 	}
 	if err != nil {
 		log.Warn("assign segmentID and repack insert data failed when insertExecute",

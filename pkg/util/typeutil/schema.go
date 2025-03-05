@@ -690,8 +690,29 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 	return result
 }
 
+func matchArrayElementType(elementType schemapb.DataType, scalarData *schemapb.ScalarField) bool {
+	switch elementType {
+	case schemapb.DataType_Bool:
+		return scalarData.GetBoolData() != nil
+	case schemapb.DataType_Int8:
+	case schemapb.DataType_Int16:
+	case schemapb.DataType_Int32:
+		return scalarData.GetIntData() != nil
+	case schemapb.DataType_Int64:
+		return scalarData.GetLongData() != nil
+	case schemapb.DataType_Float:
+		return scalarData.GetFloatData() != nil
+	case schemapb.DataType_Double:
+		return scalarData.GetDoubleData() != nil
+	case schemapb.DataType_String:
+	case schemapb.DataType_VarChar:
+		return scalarData.GetStringData() != nil
+	}
+	return false
+}
+
 // AppendFieldData appends fields data of specified index from src to dst
-func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int64) {
+func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, schemaHelper *SchemaHelper) (appendSize int64, err error) {
 	for i, fieldData := range src {
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
@@ -784,6 +805,12 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 				/* #nosec G103 */
 				appendSize += int64(unsafe.Sizeof(srcScalar.StringData.Data[idx]))
 			case *schemapb.ScalarField_ArrayData:
+				if schemaHelper != nil {
+					fieldSchema, _ := schemaHelper.GetFieldFromID(fieldData.GetFieldId())
+					if !matchArrayElementType(fieldSchema.ElementType, srcScalar.ArrayData.Data[idx]) {
+						return 0, fmt.Errorf("element type in array is not matched:%d", fieldSchema.ElementType)
+					}
+				}
 				if dstScalar.GetArrayData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_ArrayData{
 						ArrayData: &schemapb.ArrayArray{
@@ -898,7 +925,7 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 		}
 	}
 
-	return
+	return appendSize, nil
 }
 
 // DeleteFieldData delete fields data appended last time
