@@ -208,6 +208,9 @@ func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
 			return seg.GetIsSorted() && needDoJsonKeyIndex(seg, needTriggerFieldIDs)
 		}))
 		for _, segment := range segments {
+			if jm.scheduler.pendingTasks.TaskCount() > Params.DataCoordCfg.StatsTaskTriggerCount.GetAsInt() {
+				break
+			}
 			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true); err != nil {
 				log.Warn("create stats task with json key index for segment failed, wait for retry:",
 					zap.Int64("segmentID", segment.GetID()), zap.Error(err))

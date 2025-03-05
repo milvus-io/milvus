@@ -201,11 +201,7 @@ TEST_P(JsonKeyIndexTest, TestTermInFunc) {
                                              uint16_t offset,
                                              uint16_t size,
                                              uint32_t value) {
-            auto val = this->data_[row_id].template at<int64_t>(offset, size);
-            if (val.error()) {
-                return false;
-            }
-            return term_set.find(int64_t(val.value())) != term_set.end();
+            return term_set.find(int64_t(value)) != term_set.end();
         };
         auto pointer = milvus::Json::pointer(testcase.nested_path);
         auto bitset =
@@ -283,24 +279,19 @@ TEST_P(JsonKeyIndexTest, TestUnaryRangeInFunc) {
                                                       uint16_t offset,
                                                       uint16_t size,
                                                       uint32_t value) {
-                auto val =
-                    this->data_[row_id].template at<int64_t>(offset, size);
-                if (val.error()) {
-                    return false;
-                }
                 switch (op) {
                     case OpType::GreaterThan:
-                        return int64_t(val.value()) > testcase.val;
+                        return int64_t(value) > testcase.val;
                     case OpType::GreaterEqual:
-                        return int64_t(val.value()) >= testcase.val;
+                        return int64_t(value) >= testcase.val;
                     case OpType::LessThan:
-                        return int64_t(val.value()) < testcase.val;
+                        return int64_t(value) < testcase.val;
                     case OpType::LessEqual:
-                        return int64_t(val.value()) <= testcase.val;
+                        return int64_t(value) <= testcase.val;
                     case OpType::Equal:
-                        return int64_t(val.value()) == testcase.val;
+                        return int64_t(value) == testcase.val;
                     case OpType::NotEqual:
-                        return int64_t(val.value()) != testcase.val;
+                        return int64_t(value) != testcase.val;
                     default:
                         return false;
                 }
@@ -368,22 +359,43 @@ TEST_P(JsonKeyIndexTest, TestBinaryRangeInFunc) {
                                              uint16_t offset,
                                              uint16_t size,
                                              uint32_t value) {
-            auto val = this->data_[row_id].template at<int64_t>(offset, size);
-            if (val.error()) {
-                return false;
-            }
-            if (testcase.lower_inclusive && testcase.upper_inclusive) {
-                return testcase.lower <= int64_t(val.value()) &&
-                       int64_t(val.value()) <= testcase.upper;
-            } else if (testcase.lower_inclusive && !testcase.upper_inclusive) {
-                return testcase.lower <= int64_t(val.value()) &&
-                       int64_t(val.value()) < testcase.upper;
-            } else if (!testcase.lower_inclusive && testcase.upper_inclusive) {
-                return testcase.lower < int64_t(val.value()) &&
-                       int64_t(val.value()) <= testcase.upper;
+            if (valid) {
+                if (testcase.lower_inclusive && testcase.upper_inclusive) {
+                    return testcase.lower <= int64_t(value) &&
+                           int64_t(value) <= testcase.upper;
+                } else if (testcase.lower_inclusive &&
+                           !testcase.upper_inclusive) {
+                    return testcase.lower <= int64_t(value) &&
+                           int64_t(value) < testcase.upper;
+                } else if (!testcase.lower_inclusive &&
+                           testcase.upper_inclusive) {
+                    return testcase.lower < int64_t(value) &&
+                           int64_t(value) <= testcase.upper;
+                } else {
+                    return testcase.lower < int64_t(value) &&
+                           int64_t(value) < testcase.upper;
+                }
             } else {
-                return testcase.lower < int64_t(val.value()) &&
-                       int64_t(val.value()) < testcase.upper;
+                auto val =
+                    this->data_[row_id].template at<int64_t>(offset, size);
+                if (val.error()) {
+                    return false;
+                }
+                if (testcase.lower_inclusive && testcase.upper_inclusive) {
+                    return testcase.lower <= int64_t(val.value()) &&
+                           int64_t(val.value()) <= testcase.upper;
+                } else if (testcase.lower_inclusive &&
+                           !testcase.upper_inclusive) {
+                    return testcase.lower <= int64_t(val.value()) &&
+                           int64_t(val.value()) < testcase.upper;
+                } else if (!testcase.lower_inclusive &&
+                           testcase.upper_inclusive) {
+                    return testcase.lower < int64_t(val.value()) &&
+                           int64_t(val.value()) <= testcase.upper;
+                } else {
+                    return testcase.lower < int64_t(val.value()) &&
+                           int64_t(val.value()) < testcase.upper;
+                }
             }
         };
         auto pointer = milvus::Json::pointer(testcase.nested_path);
@@ -541,11 +553,7 @@ TEST(GrowingJsonKeyIndexTest, GrowingIndex) {
                                          uint16_t offset,
                                          uint16_t size,
                                          uint32_t value) {
-        auto val = jsons[row_id].template at<int64_t>(offset, size);
-        if (val.error()) {
-            return false;
-        }
-        if (val.value() == checkVal) {
+        if (value == checkVal) {
             return true;
         }
         return false;

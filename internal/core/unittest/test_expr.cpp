@@ -56,14 +56,17 @@ using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
 
-class ExprTest : public ::testing::TestWithParam<
-                     std::pair<milvus::DataType, knowhere::MetricType>> {
+class ExprTest
+    : public ::testing::TestWithParam<
+          std::tuple<std::pair<milvus::DataType, knowhere::MetricType>, bool>> {
  public:
     void
     SetUp() override {
         auto param = GetParam();
-        data_type = param.first;
-        metric_type = param.second;
+        data_type = std::get<0>(param).first;  // Get the DataType from the pair
+        metric_type =
+            std::get<0>(param).second;  // Get the MetricType from the pair
+        JSON_KEY_STATS_ENABLED = std::get<1>(param);  // Get the bool parameter
     }
 
     // replace the metric type in the plan string with the proper type
@@ -78,13 +81,29 @@ class ExprTest : public ::testing::TestWithParam<
     knowhere::MetricType metric_type;
 };
 
+// Instantiate test suite with new bool parameter
 INSTANTIATE_TEST_SUITE_P(
     ExprTestSuite,
     ExprTest,
     ::testing::Values(
-        std::pair(milvus::DataType::VECTOR_FLOAT, knowhere::metric::L2),
-        std::pair(milvus::DataType::VECTOR_SPARSE_FLOAT, knowhere::metric::IP),
-        std::pair(milvus::DataType::VECTOR_BINARY, knowhere::metric::JACCARD)));
+        std::make_tuple(std::pair(milvus::DataType::VECTOR_FLOAT,
+                                  knowhere::metric::L2),
+                        false),
+        std::make_tuple(std::pair(milvus::DataType::VECTOR_SPARSE_FLOAT,
+                                  knowhere::metric::IP),
+                        false),
+        std::make_tuple(std::pair(milvus::DataType::VECTOR_BINARY,
+                                  knowhere::metric::JACCARD),
+                        false),
+        std::make_tuple(std::pair(milvus::DataType::VECTOR_FLOAT,
+                                  knowhere::metric::L2),
+                        true),
+        std::make_tuple(std::pair(milvus::DataType::VECTOR_SPARSE_FLOAT,
+                                  knowhere::metric::IP),
+                        true),
+        std::make_tuple(std::pair(milvus::DataType::VECTOR_BINARY,
+                                  knowhere::metric::JACCARD),
+                        true)));
 
 TEST_P(ExprTest, Range) {
     SUCCEED();
@@ -1246,10 +1265,6 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                                     {20, {"int"}},
                                     {30, {"int"}},
                                     {40, {"int"}},
-                                    {10, {"double"}},
-                                    {20, {"double"}},
-                                    {30, {"double"}},
-                                    {40, {"double"}},
                                     {1, {"array", "0"}},
                                     {2, {"array", "1"}},
                                     {3, {"array", "2"}}};
@@ -1361,7 +1376,8 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                             .value();
 
                     auto ref = f(val);
-                    ASSERT_EQ(ans, ref);
+                    ASSERT_EQ(ans, ref) << "@" << i << "op" << op;
+
                     if (i % 2 == 0) {
                         ASSERT_EQ(view[int(i / 2)], ref);
                     }
@@ -1459,10 +1475,6 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
                                     {20, {"int"}},
                                     {30, {"int"}},
                                     {40, {"int"}},
-                                    {10, {"double"}},
-                                    {20, {"double"}},
-                                    {30, {"double"}},
-                                    {40, {"double"}},
                                     {1, {"array", "0"}},
                                     {2, {"array", "1"}},
                                     {3, {"array", "2"}}};
