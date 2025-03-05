@@ -128,30 +128,36 @@ func (c *Client) DropRole(ctx context.Context, opt DropRoleOption, callOpts ...g
 }
 
 func (c *Client) DescribeRole(ctx context.Context, option DescribeRoleOption, callOptions ...grpc.CallOption) (*entity.Role, error) {
-	req := option.Request()
-
 	var role *entity.Role
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
-		resp, err := milvusService.SelectGrant(ctx, req, callOptions...)
-		if err := merr.CheckRPCCall(resp, err); err != nil {
+		roleResp, err := milvusService.SelectRole(ctx, option.SelectRoleRequest(), callOptions...)
+		if err := merr.CheckRPCCall(roleResp, err); err != nil {
 			return err
 		}
-		if len(resp.GetEntities()) == 0 {
+
+		if len(roleResp.GetResults()) == 0 {
 			return errors.New("role not found")
 		}
 
 		role = &entity.Role{
-			RoleName: req.GetEntity().GetRole().GetName(),
-			Privileges: lo.Map(resp.GetEntities(), func(g *milvuspb.GrantEntity, _ int) entity.GrantItem {
-				return entity.GrantItem{
-					Object:     g.Object.GetName(),
-					ObjectName: g.GetObjectName(),
-					RoleName:   g.GetRole().GetName(),
-					Grantor:    g.GetGrantor().GetUser().GetName(),
-					Privilege:  g.GetGrantor().GetPrivilege().GetName(),
-				}
-			}),
+			RoleName: roleResp.GetResults()[0].GetRole().GetName(),
 		}
+
+		resp, err := milvusService.SelectGrant(ctx, option.Request(), callOptions...)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+
+		role.Privileges = lo.Map(resp.GetEntities(), func(g *milvuspb.GrantEntity, _ int) entity.GrantItem {
+			return entity.GrantItem{
+				Object:     g.GetObject().GetName(),
+				ObjectName: g.GetObjectName(),
+				RoleName:   g.GetRole().GetName(),
+				Grantor:    g.GetGrantor().GetUser().GetName(),
+				Privilege:  g.GetGrantor().GetPrivilege().GetName(),
+			}
+		})
+
 		return nil
 	})
 	return role, err

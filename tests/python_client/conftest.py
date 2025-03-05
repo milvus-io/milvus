@@ -235,11 +235,6 @@ def initialize_env(request):
     param_info.prepare_param_info(host, port, handler, replica_num, user, password, secure, uri, token)
 
 
-@pytest.fixture(params=cf.gen_simple_index())
-def get_index_param(request):
-    yield request.param
-
-
 # TODO: construct invalid index params for all index types
 @pytest.fixture(params=[{"metric_type": "L3", "index_type": "IVF_FLAT"},
                         {"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": -1}}])

@@ -361,7 +361,7 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 
 	// The privilege info is a little more. And to get this info, the query operation of involving multiple table queries is required.
 	resp, err := rootCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
-	if err != nil {
+	if err = merr.CheckRPCCall(resp, err); err != nil {
 		log.Error("fail to init meta cache", zap.Error(err))
 		return err
 	}

@@ -20,7 +20,6 @@ package function
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -182,7 +181,6 @@ func (s *FunctionExecutorSuite) TestErrorEmbedding() {
 	defer ts.Close()
 	schema := s.creataSchema(ts.URL)
 	exec, err := NewFunctionExecutor(schema)
-	fmt.Println(err)
 	s.NoError(err)
 	msg := s.createMsg([]string{"sentence", "sentence"})
 	err = exec.ProcessInsert(msg)

@@ -35,8 +35,12 @@ JsonInvertedIndex<T>::build_index_for_json(
         for (int64_t i = 0; i < n; i++) {
             auto json_column = static_cast<const Json*>(data->RawValue(i));
             if (this->schema_.nullable() && !data->is_valid(i)) {
-                folly::SharedMutex::WriteHolder lock(this->mutex_);
-                this->null_offset_.push_back(i);
+                {
+                    folly::SharedMutex::WriteHolder lock(this->mutex_);
+                    this->null_offset_.push_back(i);
+                }
+                this->wrapper_->template add_array_data<T>(
+                    nullptr, 0, offset++);
                 continue;
             }
             value_result<GetType> res = json_column->at<GetType>(nested_path_);
@@ -46,7 +50,9 @@ JsonInvertedIndex<T>::build_index_for_json(
                                err == simdjson::NO_SUCH_FIELD,
                            "Failed to parse json, err: {}",
                            err);
-                offset++;
+                this->null_offset_.push_back(i);
+                this->wrapper_->template add_array_data<T>(
+                    nullptr, 0, offset++);
                 continue;
             }
             if constexpr (std::is_same_v<GetType, std::string_view>) {

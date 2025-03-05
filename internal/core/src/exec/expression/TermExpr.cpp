@@ -237,7 +237,11 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(OffsetVector* input) {
     if (expr_->is_in_field_) {
         return ExecTermJsonVariableInField<ValueType>(input);
     } else {
-        return ExecTermJsonFieldInVariable<ValueType>(input);
+        if (is_index_mode_) {
+            return ExecVisitorImplForIndex<ValueType>(input);
+        } else {
+            return ExecTermJsonFieldInVariable<ValueType>(input);
+        }
     }
 }
 
