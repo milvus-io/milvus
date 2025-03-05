@@ -21,8 +21,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type CommonSuite struct {

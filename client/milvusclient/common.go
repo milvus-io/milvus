@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
