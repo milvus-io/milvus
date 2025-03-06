@@ -150,3 +150,60 @@ func NewDropIndexOption(collectionName string, indexName string) *dropIndexOptio
 		indexName:      indexName,
 	}
 }
+
+type AlterIndexPropertiesOption interface {
+	Request() *milvuspb.AlterIndexRequest
+}
+
+type alterIndexPropertiesOption struct {
+	collectionName string
+	indexName      string
+	properties     map[string]string
+}
+
+func (opt *alterIndexPropertiesOption) Request() *milvuspb.AlterIndexRequest {
+	return &milvuspb.AlterIndexRequest{
+		CollectionName: opt.collectionName,
+		IndexName:      opt.indexName,
+		ExtraParams:    entity.MapKvPairs(opt.properties),
+	}
+}
+
+func (opt *alterIndexPropertiesOption) WithProperty(key string, value any) *alterIndexPropertiesOption {
+	opt.properties[key] = fmt.Sprintf("%v", value)
+	return opt
+}
+
+func NewAlterIndexPropertiesOption(collectionName string, indexName string) *alterIndexPropertiesOption {
+	return &alterIndexPropertiesOption{
+		collectionName: collectionName,
+		indexName:      indexName,
+		properties:     make(map[string]string),
+	}
+}
+
+type DropIndexPropertiesOption interface {
+	Request() *milvuspb.AlterIndexRequest
+}
+
+type dropIndexPropertiesOption struct {
+	collectionName string
+	indexName      string
+	keys           []string
+}
+
+func (opt *dropIndexPropertiesOption) Request() *milvuspb.AlterIndexRequest {
+	return &milvuspb.AlterIndexRequest{
+		CollectionName: opt.collectionName,
+		IndexName:      opt.indexName,
+		DeleteKeys:     opt.keys,
+	}
+}
+
+func NewDropIndexPropertiesOption(collectionName string, indexName string, keys ...string) *dropIndexPropertiesOption {
+	return &dropIndexPropertiesOption{
+		collectionName: collectionName,
+		indexName:      indexName,
+		keys:           keys,
+	}
+}
