@@ -270,7 +270,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(0), tmpIndexID)
 
-		_, err = m.CreateIndex(context.TODO(), req, indexID)
+		_, err = m.CreateIndex(context.TODO(), req, indexID, false)
 		assert.NoError(t, err)
 
 		tmpIndexID, err = m.CanCreateIndex(req, false)
@@ -472,7 +472,7 @@ func TestMeta_CreateIndex(t *testing.T) {
 		).Return(nil)
 
 		m := newSegmentIndexMeta(sc)
-		_, err := m.CreateIndex(context.TODO(), req, 3)
+		_, err := m.CreateIndex(context.TODO(), req, 3, false)
 		assert.NoError(t, err)
 	})
 
@@ -484,7 +484,7 @@ func TestMeta_CreateIndex(t *testing.T) {
 		).Return(errors.New("fail"))
 
 		m := newSegmentIndexMeta(ec)
-		_, err := m.CreateIndex(context.TODO(), req, 4)
+		_, err := m.CreateIndex(context.TODO(), req, 4, false)
 		assert.Error(t, err)
 	})
 }
