@@ -272,13 +272,7 @@ func (bsw *BinlogStreamWriter) GetRecordWriter() (RecordWriter, error) {
 		return bsw.rw, nil
 	}
 
-	fid := bsw.fieldSchema.FieldID
-	dim, _ := typeutil.GetDim(bsw.fieldSchema)
-	rw, err := newSingleFieldRecordWriter(fid, arrow.Field{
-		Name:     strconv.Itoa(int(fid)),
-		Type:     serdeMap[bsw.fieldSchema.DataType].arrowType(int(dim)),
-		Nullable: true, // No nullable check here.
-	}, &bsw.buf, WithRecordWriterProps(getFieldWriterProps(bsw.fieldSchema)))
+	rw, err := newSingleFieldRecordWriter(bsw.fieldSchema, &bsw.buf, WithRecordWriterProps(getFieldWriterProps(bsw.fieldSchema)))
 	if err != nil {
 		return nil, err
 	}
@@ -426,12 +420,7 @@ func (dsw *DeltalogStreamWriter) GetRecordWriter() (RecordWriter, error) {
 	if dsw.rw != nil {
 		return dsw.rw, nil
 	}
-	dim, _ := typeutil.GetDim(dsw.fieldSchema)
-	rw, err := newSingleFieldRecordWriter(dsw.fieldSchema.FieldID, arrow.Field{
-		Name:     dsw.fieldSchema.Name,
-		Type:     serdeMap[dsw.fieldSchema.DataType].arrowType(int(dim)),
-		Nullable: false,
-	}, &dsw.buf, WithRecordWriterProps(getFieldWriterProps(dsw.fieldSchema)))
+	rw, err := newSingleFieldRecordWriter(dsw.fieldSchema, &dsw.buf, WithRecordWriterProps(getFieldWriterProps(dsw.fieldSchema)))
 	if err != nil {
 		return nil, err
 	}
