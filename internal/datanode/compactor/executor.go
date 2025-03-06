@@ -202,7 +202,7 @@ func (e *executor) executeTask(task Compactor) {
 	var entityCount int64
 	var deleteCount int64
 	lo.ForEach(result.Segments, func(seg *datapb.CompactionSegment, _ int) {
-		entityCount += getDataCount(seg.GetInsertLogs())
+		entityCount += seg.GetNumOfRows()
 		deleteCount += getDataCount(seg.GetDeltalogs())
 	})
 	metrics.DataNodeWriteDataCount.WithLabelValues(

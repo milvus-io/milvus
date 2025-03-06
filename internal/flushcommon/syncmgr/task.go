@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/samber/lo"
 )
 
 type SyncTask struct {
@@ -155,7 +154,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	metrics.DataNodeWriteDataCount.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
 		t.dataSource, metrics.InsertLabel, fmt.Sprint(t.collectionID)).
-		Add(float64(getDataCount(lo.Values(t.insertBinlogs)...)))
+		Add(float64(t.batchRows))
 	metrics.DataNodeWriteDataCount.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
 		t.dataSource, metrics.DeleteLabel, fmt.Sprint(t.collectionID)).
