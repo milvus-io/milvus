@@ -52,3 +52,17 @@ type ResourceGroupConfig struct {
 	TransferTo   []*ResourceGroupTransfer
 	NodeFilter   ResourceGroupNodeFilter
 }
+
+type ReplicaInfo struct {
+	ReplicaID         int64
+	Shards            []*Shard
+	Nodes             []int64
+	ResourceGroupName string
+	NumOutboundNode   map[string]int32
+}
+
+type Shard struct {
+	ChannelName string
+	ShardNodes  []int64
+	ShardLeader int64
+}

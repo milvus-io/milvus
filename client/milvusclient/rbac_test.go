@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -102,7 +103,7 @@ func (s *UserSuite) TestCreateUser() {
 		password := s.randString(12)
 		s.mock.EXPECT().CreateCredential(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ccr *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
 			s.Equal(userName, ccr.GetUsername())
-			s.Equal(password, ccr.GetPassword())
+			s.Equal(crypto.Base64Encode(password), ccr.GetPassword())
 			return merr.Success(), nil
 		}).Once()
 
@@ -121,8 +122,8 @@ func (s *UserSuite) TestUpdatePassword() {
 		newPassword := s.randString(12)
 		s.mock.EXPECT().UpdateCredential(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ucr *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
 			s.Equal(userName, ucr.GetUsername())
-			s.Equal(oldPassword, ucr.GetOldPassword())
-			s.Equal(newPassword, ucr.GetNewPassword())
+			s.Equal(crypto.Base64Encode(oldPassword), ucr.GetOldPassword())
+			s.Equal(crypto.Base64Encode(newPassword), ucr.GetNewPassword())
 			return merr.Success(), nil
 		}).Once()
 
@@ -298,6 +299,16 @@ func (s *RoleSuite) TestDescribeRole() {
 
 	s.Run("success", func() {
 		roleName := fmt.Sprintf("role_%s", s.randString(5))
+		s.mock.EXPECT().SelectRole(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+			s.Equal(roleName, r.GetRole().GetName())
+			return &milvuspb.SelectRoleResponse{
+				Results: []*milvuspb.RoleResult{
+					{
+						Role: &milvuspb.RoleEntity{Name: roleName},
+					},
+				},
+			}, nil
+		}).Once()
 		s.mock.EXPECT().SelectGrant(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
 			s.Equal(roleName, r.GetEntity().GetRole().GetName())
 			return &milvuspb.SelectGrantResponse{
@@ -328,7 +339,7 @@ func (s *RoleSuite) TestDescribeRole() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		s.mock.EXPECT().SelectRole(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
 		_, err := s.client.DescribeRole(ctx, NewDescribeRoleOption("role"))
 		s.Error(err)
@@ -570,6 +581,58 @@ func (s *PrivilegeGroupSuite) TestOperatePrivilegeGroup() {
 		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
 		err := s.client.OperatePrivilegeGroup(ctx, NewOperatePrivilegeGroupOption(groupName, privileges, operateType))
+		s.Error(err)
+	})
+}
+
+func (s *PrivilegeGroupSuite) TestAddPrivilegesToGroup() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	groupName := fmt.Sprintf("test_pg_%s", s.randString(6))
+	privileges := []string{"Insert", "Query"}
+
+	s.Run("success", func() {
+		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
+			s.Equal(groupName, r.GetGroupName())
+			s.Equal(milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup, r.GetType())
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.AddPrivilegesToGroup(ctx, NewAddPrivilegesToGroupOption(groupName, privileges...))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.AddPrivilegesToGroup(ctx, NewAddPrivilegesToGroupOption(groupName, privileges...))
+		s.Error(err)
+	})
+}
+
+func (s *PrivilegeGroupSuite) TestRemovePrivilegesFromGroup() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	groupName := fmt.Sprintf("test_pg_%s", s.randString(6))
+	privileges := []string{"Insert", "Query"}
+
+	s.Run("success", func() {
+		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
+			s.Equal(groupName, r.GetGroupName())
+			s.Equal(milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup, r.GetType())
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.RemovePrivilegesFromGroup(ctx, NewRemovePrivilegesFromGroupOption(groupName, privileges...))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.RemovePrivilegesFromGroup(ctx, NewRemovePrivilegesFromGroupOption(groupName, privileges...))
 		s.Error(err)
 	})
 }

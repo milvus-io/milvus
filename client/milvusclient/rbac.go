@@ -128,30 +128,36 @@ func (c *Client) DropRole(ctx context.Context, opt DropRoleOption, callOpts ...g
 }
 
 func (c *Client) DescribeRole(ctx context.Context, option DescribeRoleOption, callOptions ...grpc.CallOption) (*entity.Role, error) {
-	req := option.Request()
-
 	var role *entity.Role
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
-		resp, err := milvusService.SelectGrant(ctx, req, callOptions...)
-		if err := merr.CheckRPCCall(resp, err); err != nil {
+		roleResp, err := milvusService.SelectRole(ctx, option.SelectRoleRequest(), callOptions...)
+		if err := merr.CheckRPCCall(roleResp, err); err != nil {
 			return err
 		}
-		if len(resp.GetEntities()) == 0 {
+
+		if len(roleResp.GetResults()) == 0 {
 			return errors.New("role not found")
 		}
 
 		role = &entity.Role{
-			RoleName: req.GetEntity().GetRole().GetName(),
-			Privileges: lo.Map(resp.GetEntities(), func(g *milvuspb.GrantEntity, _ int) entity.GrantItem {
-				return entity.GrantItem{
-					Object:     g.Object.GetName(),
-					ObjectName: g.GetObjectName(),
-					RoleName:   g.GetRole().GetName(),
-					Grantor:    g.GetGrantor().GetUser().GetName(),
-					Privilege:  g.GetGrantor().GetPrivilege().GetName(),
-				}
-			}),
+			RoleName: roleResp.GetResults()[0].GetRole().GetName(),
 		}
+
+		resp, err := milvusService.SelectGrant(ctx, option.Request(), callOptions...)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+
+		role.Privileges = lo.Map(resp.GetEntities(), func(g *milvuspb.GrantEntity, _ int) entity.GrantItem {
+			return entity.GrantItem{
+				Object:     g.GetObject().GetName(),
+				ObjectName: g.GetObjectName(),
+				RoleName:   g.GetRole().GetName(),
+				Grantor:    g.GetGrantor().GetUser().GetName(),
+				Privilege:  g.GetGrantor().GetPrivilege().GetName(),
+			}
+		})
+
 		return nil
 	})
 	return role, err
@@ -171,74 +177,6 @@ func (c *Client) RevokePrivilege(ctx context.Context, option RevokePrivilegeOpti
 
 	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.OperatePrivilege(ctx, req, callOptions...)
-		return merr.CheckRPCCall(resp, err)
-	})
-}
-
-func (c *Client) GrantV2(ctx context.Context, option GrantV2Option, callOptions ...grpc.CallOption) error {
-	req := option.Request()
-
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
-		resp, err := milvusService.OperatePrivilegeV2(ctx, req, callOptions...)
-		return merr.CheckRPCCall(resp, err)
-	})
-}
-
-func (c *Client) RevokeV2(ctx context.Context, option RevokeV2Option, callOptions ...grpc.CallOption) error {
-	req := option.Request()
-
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
-		resp, err := milvusService.OperatePrivilegeV2(ctx, req, callOptions...)
-		return merr.CheckRPCCall(resp, err)
-	})
-}
-
-func (c *Client) CreatePrivilegeGroup(ctx context.Context, option CreatePrivilegeGroupOption, callOptions ...grpc.CallOption) error {
-	req := option.Request()
-
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
-		resp, err := milvusService.CreatePrivilegeGroup(ctx, req, callOptions...)
-		return merr.CheckRPCCall(resp, err)
-	})
-}
-
-func (c *Client) DropPrivilegeGroup(ctx context.Context, option DropPrivilegeGroupOption, callOptions ...grpc.CallOption) error {
-	req := option.Request()
-
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
-		resp, err := milvusService.DropPrivilegeGroup(ctx, req, callOptions...)
-		return merr.CheckRPCCall(resp, err)
-	})
-}
-
-func (c *Client) ListPrivilegeGroups(ctx context.Context, option ListPrivilegeGroupsOption, callOptions ...grpc.CallOption) ([]*entity.PrivilegeGroup, error) {
-	req := option.Request()
-
-	var privilegeGroups []*entity.PrivilegeGroup
-	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
-		r, err := milvusService.ListPrivilegeGroups(ctx, req, callOptions...)
-		if err != nil {
-			return err
-		}
-		for _, pg := range r.PrivilegeGroups {
-			privileges := lo.Map(pg.Privileges, func(p *milvuspb.PrivilegeEntity, _ int) string {
-				return p.Name
-			})
-			privilegeGroups = append(privilegeGroups, &entity.PrivilegeGroup{
-				GroupName:  pg.GroupName,
-				Privileges: privileges,
-			})
-		}
-		return nil
-	})
-	return privilegeGroups, err
-}
-
-func (c *Client) OperatePrivilegeGroup(ctx context.Context, option OperatePrivilegeGroupOption, callOptions ...grpc.CallOption) error {
-	req := option.Request()
-
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
-		resp, err := milvusService.OperatePrivilegeGroup(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
 }
