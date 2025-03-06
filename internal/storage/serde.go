@@ -677,12 +677,14 @@ var _ RecordWriter = (*CompositeRecordWriter)(nil)
 
 type CompositeRecordWriter struct {
 	writers map[FieldID]RecordWriter
-
-	writtenUncompressed uint64
 }
 
 func (crw *CompositeRecordWriter) GetWrittenUncompressed() uint64 {
-	return crw.writtenUncompressed
+	s := uint64(0)
+	for _, w := range crw.writers {
+		s += w.GetWrittenUncompressed()
+	}
+	return s
 }
 
 func (crw *CompositeRecordWriter) Write(r Record) error {
@@ -690,12 +692,6 @@ func (crw *CompositeRecordWriter) Write(r Record) error {
 		return fmt.Errorf("schema length mismatch %d, expected %d", len(r.Schema()), len(crw.writers))
 	}
 
-	var bytes uint64
-	for fid := range r.Schema() {
-		arr := r.Column(fid)
-		bytes += uint64(calculateArraySize(arr))
-	}
-	crw.writtenUncompressed += bytes
 	for fieldId, w := range crw.writers {
 		sr := newSelectiveRecord(r, fieldId)
 		if err := w.Write(sr); err != nil {
