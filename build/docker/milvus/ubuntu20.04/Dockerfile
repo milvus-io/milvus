@@ -23,7 +23,8 @@ RUN apt-get update && \
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
     chmod +x /tini
 
-COPY --chown=root:root --chmod=774 ./bin/ /milvus/bin/
+RUN mkdir -p /milvus/bin
+COPY --chown=root:root --chmod=774 ./bin/milvus /milvus/bin/milvus
 
 COPY --chown=root:root --chmod=774 ./configs/ /milvus/configs/
 
