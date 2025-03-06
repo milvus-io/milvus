@@ -2,6 +2,8 @@ cluster:
   enabled: true
 streaming:
   enabled: true
+streamingNode:
+  replicas: 2
 common:
   security:
     authorizationEnabled: false

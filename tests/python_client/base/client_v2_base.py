@@ -394,6 +394,7 @@ class TestMilvusClientV2Base(Base):
                                        old_name=old_name,
                                        new_name=new_name,
                                        **kwargs).run()
+        self.tear_down_collection_names.append(new_name)
         return res, check_result
 
     @trace()
