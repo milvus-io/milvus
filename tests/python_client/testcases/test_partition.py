@@ -371,8 +371,8 @@ class TestPartitionParams(TestcaseBase):
 
         # load with 2 replicas
         error = {ct.err_code: 65535,
-                 ct.err_msg: "failed to spawn replica for collection: resource group node not enough"
-                             "[rg=__default_resource_group]"}
+                 ct.err_msg: "when load 3 replica count: service resource insufficient"
+                             "[currentStreamingNode=2][expectedStreamingNode=3]"}
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
