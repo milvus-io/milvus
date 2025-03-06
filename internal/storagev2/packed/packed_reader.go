@@ -45,6 +45,7 @@ func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64)
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
+	defer cdata.ReleaseCArrowSchema(&cas)
 
 	cBufferSize := C.int64_t(bufferSize)
 
@@ -71,6 +72,10 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 	// Convert ArrowArray to Go RecordBatch using cdata
 	goCArr := (*cdata.CArrowArray)(unsafe.Pointer(cArr))
 	goCSchema := (*cdata.CArrowSchema)(unsafe.Pointer(cSchema))
+	defer func() {
+		cdata.ReleaseCArrowArray(goCArr)
+		cdata.ReleaseCArrowSchema(goCSchema)
+	}()
 	recordBatch, err := cdata.ImportCRecordBatch(goCArr, goCSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert ArrowArray to Record: %w", err)

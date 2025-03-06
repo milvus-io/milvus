@@ -8,6 +8,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
@@ -19,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
@@ -226,11 +228,13 @@ func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*
 	if err != nil {
 		return nil, err
 	}
+
 	resp, err := dc.AllocSegment(ctx, &datapb.AllocSegmentRequest{
-		CollectionId: pendingSegment.GetCollectionID(),
-		PartitionId:  pendingSegment.GetPartitionID(),
-		SegmentId:    pendingSegment.GetSegmentID(),
-		Vchannel:     pendingSegment.GetVChannel(),
+		CollectionId:   pendingSegment.GetCollectionID(),
+		PartitionId:    pendingSegment.GetPartitionID(),
+		SegmentId:      pendingSegment.GetSegmentID(),
+		Vchannel:       pendingSegment.GetVChannel(),
+		StorageVersion: pendingSegment.GetStorageVersion(),
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, errors.Wrap(err, "failed to alloc growing segment at datacoord")
@@ -244,8 +248,9 @@ func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*
 				// We only execute one segment creation operation at a time.
 				// But in future, we need to modify the segment creation operation to support batch creation.
 				// Because the partition-key based collection may create huge amount of segments at the same time.
-				PartitionId: pendingSegment.GetPartitionID(),
-				SegmentId:   pendingSegment.GetSegmentID(),
+				PartitionId:    pendingSegment.GetPartitionID(),
+				SegmentId:      pendingSegment.GetSegmentID(),
+				StorageVersion: pendingSegment.GetStorageVersion(),
 			}},
 		}).BuildMutable()
 	if err != nil {
@@ -300,7 +305,11 @@ func (m *partitionSegmentManager) createNewPendingSegment(ctx context.Context) (
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to allocate segment id")
 	}
-	meta := newSegmentAllocManager(m.pchannel, m.collectionID, m.paritionID, int64(segmentID), m.vchannel, m.metrics)
+	storageVersion := storage.StorageV1
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+		storageVersion = storage.StorageV2
+	}
+	meta := newSegmentAllocManager(m.pchannel, m.collectionID, m.paritionID, int64(segmentID), m.vchannel, m.metrics, storageVersion)
 	tx := meta.BeginModification()
 	tx.IntoPending()
 	if err := tx.Commit(ctx); err != nil {

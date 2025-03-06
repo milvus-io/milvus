@@ -37,7 +37,7 @@ func send(req *http.Request) ([]byte, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf(string(body))
+		return nil, fmt.Errorf("Call %s faild, errs:[%s, %s]", req.URL, resp.Status, body)
 	}
 	return body, nil
 }

@@ -2805,7 +2805,8 @@ class TestLoadCollection(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         error = {ct.err_code: 999,
-                 ct.err_msg: "failed to spawn replica for collection: resource group node not enough"}
+                 ct.err_msg: "call query coordinator LoadCollection: when load 3 replica count: service resource "
+                             "insufficient[currentStreamingNode=2][expectedStreamingNode=3]"}
         collection_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.ClusterOnly)
@@ -2835,20 +2836,17 @@ class TestLoadCollection(TestcaseBase):
         assert loading_progress == {'loading_progress': '100%'}
 
         # verify load different replicas thrown an exception
-        error = {ct.err_code: 1100, ct.err_msg: "call query coordinator LoadCollection: when load "
-                                                "2 replica count: service resource insufficient"
-                                                "[currentStreamingNode=1][expectedStreamingNode=2]"}
-        collection_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.load(replica_number=2)
         one_replica, _ = collection_w.get_replicas()
-        assert len(one_replica.groups) == 1
+        assert len(one_replica.groups) == 2
 
         collection_w.release()
-        collection_w.load(replica_number=1)
+        collection_w.load(replica_number=2)
         # replicas is not yet reflected in loading progress
         loading_progress, _ = self.utility_wrap.loading_progress(collection_w.name)
         assert loading_progress == {'loading_progress': '100%'}
         two_replicas, _ = collection_w.get_replicas()
-        assert len(two_replicas.groups) == 1
+        assert len(two_replicas.groups) == 2
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': [{'int64': 0}]})
 
@@ -2856,7 +2854,7 @@ class TestLoadCollection(TestcaseBase):
         seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
         num_entities = 0
         for seg in seg_info:
-            assert len(seg.nodeIds) == 1
+            assert len(seg.nodeIds) == 2
             num_entities += seg.num_rows
         assert num_entities == ct.default_nb
 
@@ -2864,7 +2862,7 @@ class TestLoadCollection(TestcaseBase):
     def test_load_replica_multi(self):
         """
         target: test load with multiple replicas
-        method: 1.create collection with one shards
+        method: 1.create collection with one shard
                 2.insert multiple segments
                 3.load with multiple replicas
                 4.query and search
@@ -2873,7 +2871,7 @@ class TestLoadCollection(TestcaseBase):
         # create, insert
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=1)
         tmp_nb = 1000
-        replica_number = 1  # only 1 streaming node
+        replica_number = 2
         for i in range(replica_number):
             df = cf.gen_default_dataframe_data(nb=tmp_nb, start=i * tmp_nb)
             insert_res, _ = collection_w.insert(df)
@@ -2912,9 +2910,9 @@ class TestLoadCollection(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb * 2
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
-        collection_w.load([partition_w.name], replica_number=1)  # only 1 StreamingNode
+        collection_w.load([partition_w.name], replica_number=2)
         for seg in self.utility_wrap.get_query_segment_info(collection_w.name)[0]:
-            assert len(seg.nodeIds) == 1
+            assert len(seg.nodeIds) == 2
         # default tag query 0 empty
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", partition_names=[ct.default_tag],
                            check_tasks=CheckTasks.check_query_empty)
@@ -3256,14 +3254,6 @@ class TestLoadPartition(TestcaseBase):
       The following cases are used to test `load_collection` function
     ******************************************************************
     """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        return request.param
-
     @pytest.fixture(
         scope="function",
         params=gen_binary_index()

@@ -22,13 +22,17 @@ extern "C" {
 
 typedef void* CColumnGroups;
 
-CColumnGroups NewCColumnGroups();
+CColumnGroups
+NewCColumnGroups();
 
-void AddCColumnGroup(CColumnGroups cgs, int* group, int group_size);
+void
+AddCColumnGroup(CColumnGroups cgs, int* group, int group_size);
 
-int CColumnGroupsSize(CColumnGroups cgs);
+int
+CColumnGroupsSize(CColumnGroups cgs);
 
-void FreeCColumnGroups(CColumnGroups cgs);
+void
+FreeCColumnGroups(CColumnGroups cgs);
 
 #ifdef __cplusplus
 }

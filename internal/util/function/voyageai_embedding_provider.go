@@ -34,6 +34,8 @@ type VoyageAIEmbeddingProvider struct {
 	client        *voyageai.VoyageAIEmbedding
 	modelName     string
 	embedDimParam int64
+	embdType      embeddingType
+	outputType    string
 
 	maxBatch   int
 	timeoutSec int64
@@ -99,11 +101,31 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 		return nil, err
 	}
 
+	embdType := getEmbdType(fieldSchema.DataType)
+	if embdType == unsupportEmbd {
+		return nil, fmt.Errorf("Unsupport output type: %s", fieldSchema.DataType)
+	}
+
+	outputType := func() string {
+		if embdType == float32Embd {
+			return "float"
+		}
+		return "int8"
+	}()
+
+	if outputType == "int8" {
+		if modelName != voyage3Large && modelName != voyageCode3 {
+			return nil, fmt.Errorf("VoyageAI text embedding model: [%s] doesn't supports int8 output_dtype, only [%s, %s] support it.", modelName, voyage3, voyageCode3)
+		}
+	}
+
 	provider := VoyageAIEmbeddingProvider{
 		client:        c,
 		fieldDim:      fieldDim,
 		modelName:     modelName,
 		embedDimParam: dim,
+		embdType:      embdType,
+		outputType:    outputType,
 		maxBatch:      128,
 		timeoutSec:    30,
 	}
@@ -118,7 +140,7 @@ func (provider *VoyageAIEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *VoyageAIEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) ([][]float32, error) {
+func (provider *VoyageAIEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	var textType string
 	if mode == InsertMode {
@@ -127,26 +149,46 @@ func (provider *VoyageAIEmbeddingProvider) CallEmbedding(texts []string, mode Te
 		textType = "query"
 	}
 
-	data := make([][]float32, 0, numRows)
+	embRet := newEmbdResult(numRows, provider.embdType)
 	for i := 0; i < numRows; i += provider.maxBatch {
 		end := i + provider.maxBatch
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, "float", provider.timeoutSec)
+		r, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.timeoutSec)
 		if err != nil {
 			return nil, err
 		}
-		if end-i != len(resp.Data) {
-			return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
-		}
-		for _, item := range resp.Data {
-			if len(item.Embedding) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
-					provider.fieldDim, len(item.Embedding))
+		if provider.embdType == float32Embd {
+			resp := r.(*voyageai.EmbeddingResponse[float32])
+			if end-i != len(resp.Data) {
+				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
 			}
-			data = append(data, item.Embedding)
+
+			for _, item := range resp.Data {
+				if len(item.Embedding) != int(provider.fieldDim) {
+					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+						provider.fieldDim, len(item.Embedding))
+				}
+				embRet.append(item.Embedding)
+			}
+		} else {
+			resp := r.(*voyageai.EmbeddingResponse[int8])
+			if end-i != len(resp.Data) {
+				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
+			}
+
+			for _, item := range resp.Data {
+				if len(item.Embedding) != int(provider.fieldDim) {
+					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+						provider.fieldDim, len(item.Embedding))
+				}
+				embRet.append(item.Embedding)
+			}
 		}
 	}
-	return data, nil
+	if embRet.eType == float32Embd {
+		return embRet.floatEmbds, nil
+	}
+	return embRet.int8Embds, nil
 }

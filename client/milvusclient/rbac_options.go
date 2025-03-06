@@ -17,6 +17,8 @@
 package milvusclient
 
 import (
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 )
@@ -234,11 +236,20 @@ func NewDropRoleOption(roleName string) *dropDropRoleOption {
 }
 
 type DescribeRoleOption interface {
+	SelectRoleRequest() *milvuspb.SelectRoleRequest
 	Request() *milvuspb.SelectGrantRequest
 }
 
 type describeRoleOption struct {
 	roleName string
+}
+
+func (opt *describeRoleOption) SelectRoleRequest() *milvuspb.SelectRoleRequest {
+	return &milvuspb.SelectRoleRequest{
+		Role: &milvuspb.RoleEntity{
+			Name: opt.roleName,
+		},
+	}
 }
 
 func (opt *describeRoleOption) Request() *milvuspb.SelectGrantRequest {
@@ -329,19 +340,21 @@ func NewRevokePrivilegeOption(roleName, objectType, privilegeName, objectName st
 	}
 }
 
-// GrantV2Option is the interface builds OperatePrivilegeV2Request
-type GrantV2Option interface {
+type GrantV2Option GrantPrivilegeV2Option
+
+// GrantPrivilegeV2Option is the interface builds OperatePrivilegeV2Request
+type GrantPrivilegeV2Option interface {
 	Request() *milvuspb.OperatePrivilegeV2Request
 }
 
-type grantV2Option struct {
+type grantPrivilegeV2Option struct {
 	roleName       string
 	privilegeName  string
 	dbName         string
 	collectionName string
 }
 
-func (opt *grantV2Option) Request() *milvuspb.OperatePrivilegeV2Request {
+func (opt *grantPrivilegeV2Option) Request() *milvuspb.OperatePrivilegeV2Request {
 	return &milvuspb.OperatePrivilegeV2Request{
 		Role: &milvuspb.RoleEntity{Name: opt.roleName},
 		Grantor: &milvuspb.GrantorEntity{
@@ -353,8 +366,13 @@ func (opt *grantV2Option) Request() *milvuspb.OperatePrivilegeV2Request {
 	}
 }
 
-func NewGrantV2Option(roleName, privilegeName, dbName, collectionName string) *grantV2Option {
-	return &grantV2Option{
+// Deprecated, use `NewGrantPrivilegeV2Option` instead
+func NewGrantV2Option(roleName, privilegeName, dbName, collectionName string) *grantPrivilegeV2Option {
+	return NewGrantPrivilegeV2Option(roleName, privilegeName, dbName, collectionName)
+}
+
+func NewGrantPrivilegeV2Option(roleName, privilegeName, dbName, collectionName string) *grantPrivilegeV2Option {
+	return &grantPrivilegeV2Option{
 		roleName:       roleName,
 		privilegeName:  privilegeName,
 		dbName:         dbName,
@@ -362,19 +380,21 @@ func NewGrantV2Option(roleName, privilegeName, dbName, collectionName string) *g
 	}
 }
 
-// RevokeV2Option is the interface builds OperatePrivilegeV2Request
-type RevokeV2Option interface {
+type RevokeV2Option RevokePrivilegeV2Option
+
+// RevokePrivilegeV2Option is the interface builds OperatePrivilegeV2Request
+type RevokePrivilegeV2Option interface {
 	Request() *milvuspb.OperatePrivilegeV2Request
 }
 
-type revokeV2Option struct {
+type revokePrivilegeV2Option struct {
 	roleName       string
 	privilegeName  string
 	dbName         string
 	collectionName string
 }
 
-func (opt *revokeV2Option) Request() *milvuspb.OperatePrivilegeV2Request {
+func (opt *revokePrivilegeV2Option) Request() *milvuspb.OperatePrivilegeV2Request {
 	return &milvuspb.OperatePrivilegeV2Request{
 		Role: &milvuspb.RoleEntity{Name: opt.roleName},
 		Grantor: &milvuspb.GrantorEntity{
@@ -386,8 +406,8 @@ func (opt *revokeV2Option) Request() *milvuspb.OperatePrivilegeV2Request {
 	}
 }
 
-func NewRevokeV2Option(roleName, privilegeName, dbName, collectionName string) *revokeV2Option {
-	return &revokeV2Option{
+func NewRevokeV2Option(roleName, privilegeName, dbName, collectionName string) *revokePrivilegeV2Option {
+	return &revokePrivilegeV2Option{
 		roleName:       roleName,
 		privilegeName:  privilegeName,
 		dbName:         dbName,
@@ -471,10 +491,67 @@ func (opt *operatePrivilegeGroupOption) Request() *milvuspb.OperatePrivilegeGrou
 	}
 }
 
+// Deprecated, use AddPrivilegeToGroupOption/ RemovePrivilegeFromGroupOption instead
 func NewOperatePrivilegeGroupOption(groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) *operatePrivilegeGroupOption {
 	return &operatePrivilegeGroupOption{
 		groupName:   groupName,
 		privileges:  privileges,
 		operateType: operateType,
+	}
+}
+
+type AddPrivilegeToGroupOption interface {
+	Request() *milvuspb.OperatePrivilegeGroupRequest
+}
+
+type addPrivilegeToGroupOption struct {
+	privileges []string
+	groupName  string
+}
+
+func (opt *addPrivilegeToGroupOption) Request() *milvuspb.OperatePrivilegeGroupRequest {
+	return &milvuspb.OperatePrivilegeGroupRequest{
+		GroupName: opt.groupName,
+		Privileges: lo.Map(opt.privileges, func(privilege string, _ int) *milvuspb.PrivilegeEntity {
+			return &milvuspb.PrivilegeEntity{
+				Name: privilege,
+			}
+		}),
+		Type: milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,
+	}
+}
+
+func NewAddPrivilegesToGroupOption(groupName string, privileges ...string) *addPrivilegeToGroupOption {
+	return &addPrivilegeToGroupOption{
+		groupName:  groupName,
+		privileges: privileges,
+	}
+}
+
+type RemovePrivilegeFromGroupOption interface {
+	Request() *milvuspb.OperatePrivilegeGroupRequest
+}
+
+type removePrivilegeFromGroupOption struct {
+	privileges []string
+	groupName  string
+}
+
+func (opt *removePrivilegeFromGroupOption) Request() *milvuspb.OperatePrivilegeGroupRequest {
+	return &milvuspb.OperatePrivilegeGroupRequest{
+		GroupName: opt.groupName,
+		Privileges: lo.Map(opt.privileges, func(privilege string, _ int) *milvuspb.PrivilegeEntity {
+			return &milvuspb.PrivilegeEntity{
+				Name: privilege,
+			}
+		}),
+		Type: milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup,
+	}
+}
+
+func NewRemovePrivilegesFromGroupOption(groupName string, privileges ...string) *removePrivilegeFromGroupOption {
+	return &removePrivilegeFromGroupOption{
+		groupName:  groupName,
+		privileges: privileges,
 	}
 }

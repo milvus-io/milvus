@@ -21,6 +21,8 @@ package function
 import (
 	"fmt"
 	"strconv"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 type TextEmbeddingMode int
@@ -30,12 +32,21 @@ const (
 	SearchMode
 )
 
+type embeddingType int
+
+const (
+	unsupportEmbd embeddingType = iota
+	float32Embd
+	int8Embd
+)
+
 // common params
 const (
 	modelNameParamKey    string = "model_name"
 	dimParamKey          string = "dim"
 	embeddingURLParamKey string = "url"
 	apiKeyParamKey       string = "api_key"
+	truncateParamKey     string = "truncate"
 )
 
 // ali text embedding
@@ -112,8 +123,6 @@ const (
 	embedEnglishLightV20      string = "embed-english-light-v2.0"
 	embedMultilingualV20      string = "embed-multilingual-v2.0"
 
-	truncateParamKey string = "truncate"
-
 	cohereAIAKEnvStr string = "MILVUSAI_COHERE_API_KEY"
 )
 
@@ -129,6 +138,18 @@ const (
 	siliconflowAKEnvStr string = "MILVUSAI_SILICONFLOW_API_KEY"
 )
 
+// TEI
+
+const (
+	ingestionPromptParamKey     string = "ingestion_prompt"
+	searchPromptParamKey        string = "search_prompt"
+	maxClientBatchSizeParamKey  string = "max_client_batch_size"
+	truncationDirectionParamKey string = "truncation_direction"
+	endpointParamKey            string = "endpoint"
+
+	enableTeiEnvStr string = "MILVUSAI_ENABLE_TEI"
+)
+
 func parseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int64, error) {
 	dim, err := strconv.ParseInt(dimStr, 10, 64)
 	if err != nil {
@@ -139,4 +160,45 @@ func parseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int
 		return 0, fmt.Errorf("Function output field:[%s]'s dimension [%d] does not match the dimension [%d] provided in Function params.", fieldName, fieldDim, dim)
 	}
 	return dim, nil
+}
+
+func getEmbdType(dtype schemapb.DataType) embeddingType {
+	switch dtype {
+	case schemapb.DataType_FloatVector:
+		return float32Embd
+	case schemapb.DataType_Int8Vector:
+		return int8Embd
+	default:
+		return unsupportEmbd
+	}
+}
+
+type EmbdResult struct {
+	floatEmbds [][]float32
+	int8Embds  [][]int8
+	eType      embeddingType
+}
+
+func newEmbdResult(size int, eType embeddingType) *EmbdResult {
+	embR := EmbdResult{}
+	embR.eType = eType
+	if eType == float32Embd {
+		embR.floatEmbds = make([][]float32, 0, size)
+	} else {
+		embR.int8Embds = make([][]int8, 0, size)
+	}
+	return &embR
+}
+
+func (embR *EmbdResult) append(newEmbd any) {
+	switch newEmbd := newEmbd.(type) {
+	case [][]float32:
+		embR.floatEmbds = append(embR.floatEmbds, newEmbd...)
+	case []float32:
+		embR.floatEmbds = append(embR.floatEmbds, newEmbd)
+	case [][]int8:
+		embR.int8Embds = append(embR.int8Embds, newEmbd...)
+	case []int8:
+		embR.int8Embds = append(embR.int8Embds, newEmbd)
+	}
 }
