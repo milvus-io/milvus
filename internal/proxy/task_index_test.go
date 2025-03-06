@@ -1090,6 +1090,52 @@ func Test_parseIndexParams(t *testing.T) {
 		err := cit.parseIndexParams(context.TODO())
 		// Out of range in json: param 'M' (3000) should be in range [2, 2048]
 		assert.Error(t, err)
+
+		cit = &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{{
+					Key:   common.JSONCastTypeKey,
+					Value: "1",
+				}},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldJSON",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_JSON,
+			},
+		}
+		err = cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		jsonPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, cit.newIndexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, jsonPath, "FieldJSON")
+
+		cit = &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{{
+					Key:   common.JSONCastTypeKey,
+					Value: "1",
+				}},
+				IndexName: "",
+				FieldName: "DynamicField",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldJSON",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_JSON,
+				IsDynamic:    true,
+			},
+		}
+		err = cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		jsonPath, err = funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, cit.newIndexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, jsonPath, "DynamicField")
 	})
 
 	t.Run("check_duplicated_extraparam", func(t *testing.T) {

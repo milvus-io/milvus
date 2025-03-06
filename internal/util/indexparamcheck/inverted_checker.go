@@ -21,9 +21,6 @@ func (c *INVERTEDChecker) CheckTrain(dataType schemapb.DataType, params map[stri
 		if _, exist := params[common.JSONCastTypeKey]; !exist {
 			return merr.WrapErrParameterMissing(common.JSONCastTypeKey, "json index must specify cast type")
 		}
-		if _, exist := params[common.JSONPathKey]; !exist {
-			return merr.WrapErrParameterMissing(common.JSONPathKey, "json index must specify json path")
-		}
 	}
 	return c.scalarIndexChecker.CheckTrain(dataType, params)
 }
