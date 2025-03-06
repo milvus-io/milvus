@@ -58,8 +58,8 @@ var (
 			segmentLevelLabelName,
 		})
 
-	DataNodeWriteBinlogSize = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
+	DataNodeWriteBinlogSize = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataNodeRole,
 			Name:      "write_data_size",
