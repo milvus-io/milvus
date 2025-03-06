@@ -2,6 +2,7 @@ package writebuffer
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -16,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
@@ -199,6 +201,22 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 			delete(wb.l0Segments, partition)
 		}
 	}
+
+	return nil
+}
+
+// bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
+func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition) error {
+	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos, storage.StorageV1)
+	segBuf := wb.getOrCreateBuffer(inData.segmentID)
+
+	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)
+	wb.metaCache.UpdateSegments(metacache.SegmentActions(
+		metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
+		metacache.SetStartPositionIfNil(startPos),
+	), metacache.WithSegmentIDs(inData.segmentID))
+
+	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(float64(totalMemSize))
 
 	return nil
 }

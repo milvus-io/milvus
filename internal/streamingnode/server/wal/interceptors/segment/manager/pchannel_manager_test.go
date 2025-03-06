@@ -299,6 +299,7 @@ func initializeTestState(t *testing.T) {
 	paramtable.Get().DataCoordCfg.SegmentSealProportion.SwapTempValue("1.0")
 	paramtable.Get().DataCoordCfg.SegmentSealProportionJitter.SwapTempValue("0.0")
 	paramtable.Get().DataCoordCfg.SegmentMaxSize.SwapTempValue("1")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableStorageV2.Key, "true")
 
 	streamingNodeCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	dataCoordClient := mocks.NewMockDataCoordClient(t)

@@ -86,10 +86,6 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 			// Skip bulk insert segments.
 			continue
 		}
-		if s.GetIsInvisible() {
-			// skip invisible segments
-			continue
-		}
 
 		if s.GetState() == commonpb.SegmentState_Dropped {
 			droppedIDs.Insert(s.GetID())

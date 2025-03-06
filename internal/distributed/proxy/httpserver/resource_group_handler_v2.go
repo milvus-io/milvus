@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func toKVPair(data map[string]string) []*commonpb.KeyValuePair {
@@ -86,16 +85,12 @@ func (h *HandlersV2) createResourceGroup(ctx context.Context, c *gin.Context, an
 		ResourceGroup: httpReq.GetName(),
 		Config:        toPbResourceGroupConfig(httpReq.GetConfig()),
 	}
-	log.Info("f1")
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateResourceGroup", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateResourceGroup(reqCtx, req.(*milvuspb.CreateResourceGroupRequest))
 	})
-	log.Info("f2")
 	if err == nil {
-		log.Info("f3")
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
-	log.Info("f4")
 	return resp, err
 }
 

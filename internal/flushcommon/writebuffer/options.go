@@ -21,6 +21,7 @@ type writeBufferOption struct {
 	metaWriter           syncmgr.MetaWriter
 	errorHandler         func(error)
 	taskObserverCallback TaskObserverCallback
+	storageVersion       int64
 }
 
 func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {

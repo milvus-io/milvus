@@ -102,7 +102,7 @@ func (provider *SiliconflowEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *SiliconflowEmbeddingProvider) CallEmbedding(texts []string, _ TextEmbeddingMode) ([][]float32, error) {
+func (provider *SiliconflowEmbeddingProvider) CallEmbedding(texts []string, _ TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	data := make([][]float32, 0, numRows)
 	for i := 0; i < numRows; i += provider.maxBatch {

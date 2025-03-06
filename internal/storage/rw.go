@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -46,10 +47,10 @@ type rwOptions struct {
 
 type RwOption func(*rwOptions)
 
-func defaultRwOptions() *rwOptions {
+func DefaultRwOptions() *rwOptions {
 	return &rwOptions{
-		bufferSize:          32 * 1024 * 1024,
-		multiPartUploadSize: 10 * 1024 * 1024,
+		bufferSize:          packed.DefaultWriteBufferSize,
+		multiPartUploadSize: packed.DefaultMultiPartUploadSize,
 	}
 }
 
@@ -90,7 +91,7 @@ func WithColumnGroups(columnGroups []storagecommon.ColumnGroup) RwOption {
 }
 
 func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, schema *schemapb.CollectionSchema, option ...RwOption) (RecordReader, error) {
-	rwOptions := defaultRwOptions()
+	rwOptions := DefaultRwOptions()
 	for _, opt := range option {
 		opt(rwOptions)
 	}
@@ -140,7 +141,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	schema *schemapb.CollectionSchema, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64,
 	option ...RwOption,
 ) (BinlogRecordWriter, error) {
-	rwOptions := defaultRwOptions()
+	rwOptions := DefaultRwOptions()
 	for _, opt := range option {
 		opt(rwOptions)
 	}

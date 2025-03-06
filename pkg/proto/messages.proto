@@ -92,6 +92,7 @@ message CreateSegmentMessageBody {
 message CreateSegmentInfo {
     int64 partition_id  = 1;
     int64 segment_id    = 2;
+    int64 storage_version = 3;
 }
 
 // BeginTxnMessageBody is the body of begin transaction message.

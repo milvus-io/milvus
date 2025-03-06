@@ -8,12 +8,14 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/kafka"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // Server is the streamingnode server.
@@ -39,6 +41,12 @@ func (s *Server) Init(ctx context.Context) (err error) {
 	// init all service.
 	s.initService(ctx)
 	log.Info("streamingnode server initialized")
+
+	// init storage v2 file system.
+	err = initcore.InitStorageV2FileSystem(paramtable.Get())
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -66,16 +66,18 @@ func newSegmentAllocManager(
 	segmentID int64,
 	vchannel string,
 	metrics *metricsutil.SegmentAssignMetrics,
+	storageVersion int64,
 ) *segmentAllocManager {
 	return &segmentAllocManager{
 		pchannel: pchannel,
 		inner: &streamingpb.SegmentAssignmentMeta{
-			CollectionId: collectionID,
-			PartitionId:  partitionID,
-			SegmentId:    segmentID,
-			Vchannel:     vchannel,
-			State:        streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_UNKNOWN,
-			Stat:         nil,
+			CollectionId:   collectionID,
+			PartitionId:    partitionID,
+			SegmentId:      segmentID,
+			Vchannel:       vchannel,
+			State:          streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_UNKNOWN,
+			Stat:           nil,
+			StorageVersion: storageVersion,
 		},
 		immutableStat: nil, // immutable stat can be seen after sealed.
 		ackSem:        atomic.NewInt32(0),
@@ -134,6 +136,10 @@ func (s *segmentAllocManager) GetPartitionID() int64 {
 // GetSegmentID returns the segment id of the segment assignment meta.
 func (s *segmentAllocManager) GetSegmentID() int64 {
 	return s.inner.GetSegmentId()
+}
+
+func (s *segmentAllocManager) GetStorageVersion() int64 {
+	return s.inner.GetStorageVersion()
 }
 
 // GetVChannel returns the vchannel of the segment assignment meta.

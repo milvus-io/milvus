@@ -33,7 +33,7 @@ type NullableScalarSuite struct {
 func (s *NullableScalarSuite) TestBasic() {
 	s.Run("nullable_bool", func() {
 		name := fmt.Sprintf("field_%d", rand.Intn(1000))
-		data := []bool{true, false}
+		data := []bool{false}
 		validData := []bool{true, false}
 		column, err := NewNullableColumnBool(name, data, validData)
 		s.NoError(err)
@@ -63,7 +63,7 @@ func (s *NullableScalarSuite) TestBasic() {
 
 	s.Run("nullable_int8", func() {
 		name := fmt.Sprintf("field_%d", rand.Intn(1000))
-		data := []int8{1, 2, 3}
+		data := []int8{1, 3}
 		validData := []bool{true, false, true}
 		column, err := NewNullableColumnInt8(name, data, validData)
 		s.NoError(err)
@@ -93,7 +93,7 @@ func (s *NullableScalarSuite) TestBasic() {
 
 	s.Run("nullable_int16", func() {
 		name := fmt.Sprintf("field_%d", rand.Intn(1000))
-		data := []int16{1, 2, 3}
+		data := []int16{1, 3}
 		validData := []bool{true, false, true}
 		column, err := NewNullableColumnInt16(name, data, validData)
 		s.NoError(err)
@@ -123,7 +123,7 @@ func (s *NullableScalarSuite) TestBasic() {
 
 	s.Run("nullable_int32", func() {
 		name := fmt.Sprintf("field_%d", rand.Intn(1000))
-		data := []int32{1, 2, 3}
+		data := []int32{1, 3}
 		validData := []bool{true, false, true}
 		column, err := NewNullableColumnInt32(name, data, validData)
 		s.NoError(err)
@@ -153,7 +153,7 @@ func (s *NullableScalarSuite) TestBasic() {
 
 	s.Run("nullable_int64", func() {
 		name := fmt.Sprintf("field_%d", rand.Intn(1000))
-		data := []int64{1, 2, 3}
+		data := []int64{1, 3}
 		validData := []bool{true, false, true}
 		column, err := NewNullableColumnInt64(name, data, validData)
 		s.NoError(err)
@@ -183,7 +183,7 @@ func (s *NullableScalarSuite) TestBasic() {
 
 	s.Run("nullable_float", func() {
 		name := fmt.Sprintf("field_%d", rand.Intn(1000))
-		data := []float32{0.1, 0.2, 0.3}
+		data := []float32{0.1, 0.3}
 		validData := []bool{true, false, true}
 		column, err := NewNullableColumnFloat(name, data, validData)
 		s.NoError(err)
@@ -213,7 +213,7 @@ func (s *NullableScalarSuite) TestBasic() {
 
 	s.Run("nullable_double", func() {
 		name := fmt.Sprintf("field_%d", rand.Intn(1000))
-		data := []float64{0.1, 0.2, 0.3}
+		data := []float64{0.1, 0.3}
 		validData := []bool{true, false, true}
 		column, err := NewNullableColumnDouble(name, data, validData)
 		s.NoError(err)

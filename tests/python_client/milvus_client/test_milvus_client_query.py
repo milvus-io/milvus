@@ -225,6 +225,72 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                                 "primary_field": default_primary_key_field_name[:limit]})
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("sample_rate", [0.7, 0.5, 0.01])
+    def test_milvus_client_query_random_sample(self, sample_rate):
+        """
+        target: test query random sample
+        method: create connection, collection, insert and query
+        expected: query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        # 2. insert
+        vectors = cf.gen_vectors(default_nb, default_dim)
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_float_field_name: i * 1.0,
+                default_string_field_name: cf.generate_random_sentence("English")
+            } for i in range(default_nb)
+        ]
+        self.insert(client, collection_name, rows)
+        expr = f"{default_string_field_name} like '%red%'"
+
+        # 3. query without sample rate
+        all_res = self.query(client, collection_name, filter=expr)[0]
+        exp_num = max(1, int(len(all_res) * sample_rate))
+
+        # 4. query using sample rate
+        expr = expr + f" && random_sample({sample_rate})"
+        sample_res = self.query(client, collection_name, filter=expr)[0]
+        log.info(exp_num)
+        assert len(sample_res) == exp_num
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("sample_rate", [1, 0, -9])
+    def test_milvus_client_query_invalid_sample_rate(self, sample_rate):
+        """
+        target: test query random sample
+        method: create connection, collection, insert and query
+        expected: query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        # 2. insert
+        vectors = cf.gen_vectors(1, default_dim)
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: vectors[i],
+                default_float_field_name: i * 1.0,
+                default_string_field_name: cf.generate_random_sentence("English")
+            } for i in range(1)
+        ]
+        self.insert(client, collection_name, rows)
+        expr = f"{default_string_field_name} like '%red%' && random_sample({sample_rate})"
+
+        # 3. query
+        error = {ct.err_code: 999,
+                 ct.err_msg: "the sample factor should be between 0 and 1 and not too close to 0 or 1"}
+        self.query(client, collection_name, filter=expr,
+                   check_task=CheckTasks.err_res, check_items=error)
+
 
 class TestMilvusClientGetInvalid(TestMilvusClientV2Base):
     """ Test case of search interface """

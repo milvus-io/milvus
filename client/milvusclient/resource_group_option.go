@@ -191,3 +191,21 @@ func NewTransferReplicaOption(collectionName, sourceGroup, targetGroup string, r
 		replicaNum:     replicaNum,
 	}
 }
+
+type DescribeReplicaOption interface {
+	Request() *milvuspb.GetReplicasRequest
+}
+
+type describeReplicaOption struct {
+	collectionName string
+}
+
+func (opt *describeReplicaOption) Request() *milvuspb.GetReplicasRequest {
+	return &milvuspb.GetReplicasRequest{
+		CollectionName: opt.collectionName,
+	}
+}
+
+func NewDescribeReplicaOption(collectionName string) *describeReplicaOption {
+	return &describeReplicaOption{collectionName: collectionName}
+}

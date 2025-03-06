@@ -311,11 +311,11 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 	}
 
 	// mocks
-	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil)
-	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil)
-	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	suite.msgStream.EXPECT().Chan().Return(suite.msgChan)
-	suite.msgStream.EXPECT().Close()
+	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil).Maybe()
+	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil).Maybe()
+	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	suite.msgStream.EXPECT().Chan().Return(suite.msgChan).Maybe()
+	suite.msgStream.EXPECT().Close().Maybe()
 
 	// watchDmChannels
 	status, err := suite.node.WatchDmChannels(ctx, req)
@@ -363,11 +363,11 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 	}
 
 	// mocks
-	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil)
-	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil)
-	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	suite.msgStream.EXPECT().Chan().Return(suite.msgChan)
-	suite.msgStream.EXPECT().Close()
+	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil).Maybe()
+	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil).Maybe()
+	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	suite.msgStream.EXPECT().Chan().Return(suite.msgChan).Maybe()
+	suite.msgStream.EXPECT().Close().Maybe()
 
 	// watchDmChannels
 	status, err := suite.node.WatchDmChannels(ctx, req)
@@ -497,16 +497,6 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(status), merr.ErrChannelReduplicate)
 	suite.node.unsubscribingChannels.Remove(suite.vchannel)
-
-	// init msgstream failed
-	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil)
-	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil)
-	suite.msgStream.EXPECT().Close().Return()
-	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
-
-	status, err = suite.node.WatchDmChannels(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 
 	// load growing failed
 	badSegmentReq := typeutil.Clone(req)

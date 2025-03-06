@@ -26,7 +26,7 @@ type BufferManager interface {
 	// Register adds a WriteBuffer with provided schema & options.
 	Register(channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error
 	// CreateNewGrowingSegment notifies writeBuffer to create a new growing segment.
-	CreateNewGrowingSegment(ctx context.Context, channel string, partition int64, segmentID int64) error
+	CreateNewGrowingSegment(ctx context.Context, channel string, partition int64, segmentID int64, storageVersion int64) error
 	// SealSegments notifies writeBuffer corresponding to provided channel to seal segments.
 	// which will cause segment start flush procedure.
 	SealSegments(ctx context.Context, channel string, segmentIDs []int64) error
@@ -176,7 +176,7 @@ func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, 
 }
 
 // CreateNewGrowingSegment notifies writeBuffer to create a new growing segment.
-func (m *bufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, partitionID int64, segmentID int64) error {
+func (m *bufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, partitionID int64, segmentID int64, storageVersion int64) error {
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
 		log.Ctx(ctx).Warn("write buffer not found when create new growing segment",
@@ -185,7 +185,7 @@ func (m *bufferManager) CreateNewGrowingSegment(ctx context.Context, channel str
 			zap.Int64("segmentID", segmentID))
 		return merr.WrapErrChannelNotFound(channel)
 	}
-	buf.CreateNewGrowingSegment(partitionID, segmentID, nil)
+	buf.CreateNewGrowingSegment(partitionID, segmentID, nil, storageVersion)
 	return nil
 }
 

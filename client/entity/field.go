@@ -220,6 +220,7 @@ func (f *Field) ProtoMessage() *schemapb.FieldSchema {
 		IsPartitionKey:  f.IsPartitionKey,
 		IsClusteringKey: f.IsClusteringKey,
 		ElementType:     schemapb.DataType(f.ElementType),
+		Nullable:        f.Nullable,
 	}
 }
 

@@ -761,17 +761,17 @@ def gen_index():
     return index_params
 
 
-def gen_simple_index():
-    index_params = []
-    for i in range(len(all_index_types)):
-        if all_index_types[i] in binary_support():
-            continue
-        if all_index_types[i] in gpu_support():
-            continue
-        dic = {"index_type": all_index_types[i], "metric_type": "L2"}
-        dic.update({"params": default_index_params[i]})
-        index_params.append(dic)
-    return index_params
+# def gen_simple_index():
+#     index_params = []
+#     for i in range(len(all_index_types)):
+#         if all_index_types[i] in binary_support():
+#             continue
+#         if all_index_types[i] in gpu_support():
+#             continue
+#         dic = {"index_type": all_index_types[i], "metric_type": "L2"}
+#         dic.update({"params": default_index_params[i]})
+#         index_params.append(dic)
+#     return index_params
 
 
 def gen_binary_index():

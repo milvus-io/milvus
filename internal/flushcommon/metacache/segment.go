@@ -38,6 +38,7 @@ type SegmentInfo struct {
 	bm25stats        *SegmentBM25Stats
 	level            datapb.SegmentLevel
 	syncingTasks     int32
+	storageVersion   int64
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -95,6 +96,10 @@ func (s *SegmentInfo) SyncingRows() int64 {
 	return s.syncingRows
 }
 
+func (s *SegmentInfo) GetStorageVersion() int64 {
+	return s.storageVersion
+}
+
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
 		segmentID:        s.segmentID,
@@ -129,5 +134,6 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 		level:            level,
 		bfs:              bfs,
 		bm25stats:        bm25Stats,
+		storageVersion:   info.GetStorageVersion(),
 	}
 }

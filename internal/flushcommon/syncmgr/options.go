@@ -66,3 +66,13 @@ func (t *SyncTask) WithFailureCallback(callback func(error)) *SyncTask {
 	t.failureCallback = callback
 	return t
 }
+
+func (t *SyncTask) WithSyncBufferSize(size int64) *SyncTask {
+	t.syncBufferSize = size
+	return t
+}
+
+func (t *SyncTask) WithMultiPartUploadSize(size int64) *SyncTask {
+	t.multiPartUploadSize = size
+	return t
+}

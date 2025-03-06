@@ -28,6 +28,7 @@ import (
 
 func TestPackedSerde(t *testing.T) {
 	t.Run("test binlog packed serde v2", func(t *testing.T) {
+		t.Skip("storage v2 cgo not ready yet")
 		initcore.InitLocalArrowFileSystem("/tmp")
 		size := 10
 

@@ -49,6 +49,9 @@ func (c *genericColumnBase[T]) Type() entity.FieldType {
 }
 
 func (c *genericColumnBase[T]) Len() int {
+	if c.validData != nil {
+		return len(c.validData)
+	}
 	return len(c.values)
 }
 
@@ -166,9 +169,9 @@ func (c *genericColumnBase[T]) AppendNull() error {
 	if !c.nullable {
 		return errors.New("append null to not nullable column")
 	}
-	var v T
+	// var v T
 	c.validData = append(c.validData, true)
-	c.values = append(c.values, v)
+	// c.values = append(c.values, v)
 	return nil
 }
 
