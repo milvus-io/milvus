@@ -26,7 +26,8 @@ RUN dnf -y install dnf-plugins-core && \
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
     chmod +x /tini
 
-COPY ./bin/ /milvus/bin/
+RUN mkdir -p /milvus/bin
+COPY ./bin/milvus /milvus/bin/milvus
 
 COPY ./configs/ /milvus/configs/
 
