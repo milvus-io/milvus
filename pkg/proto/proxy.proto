@@ -29,6 +29,8 @@ service Proxy {
   rpc ListImports(internal.ListImportsRequest) returns(internal.ListImportsResponse){}
   
   rpc InvalidateShardLeaderCache(InvalidateShardLeaderCacheRequest) returns (common.Status) {}
+
+  rpc GetSegmentsInfo(internal.GetSegmentsInfoRequest) returns (internal.GetSegmentsInfoResponse) {}
 }
 
 message InvalidateCollMetaCacheRequest {
