@@ -83,16 +83,17 @@ func (s *BedrockTextEmbeddingProviderSuite) TestEmbedding() {
 		s.NoError(err)
 		{
 			data := []string{"sentence"}
-			ret, err2 := provder.CallEmbedding(data, InsertMode)
+			r, err2 := provder.CallEmbedding(data, InsertMode)
+			ret := r.([][]float32)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
 			s.Equal(4, len(ret[0]))
-			s.Equal([]float32{0.0, 0.1, 0.2, 0.3}, ret[0])
+			s.Equal([]float32{0.0, 1.0, 2.0, 3.0}, ret[0])
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
 			ret, _ := provder.CallEmbedding(data, SearchMode)
-			s.Equal([][]float32{{0.0, 0.1, 0.2, 0.3}, {0.0, 0.1, 0.2, 0.3}, {0.0, 0.1, 0.2, 0.3}}, ret)
+			s.Equal([][]float32{{0.0, 1.0, 2.0, 3.0}, {0.0, 1.0, 2.0, 3.0}, {0.0, 1.0, 2.0, 3.0}}, ret)
 		}
 	}
 }

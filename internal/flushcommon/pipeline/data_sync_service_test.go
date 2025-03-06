@@ -337,7 +337,7 @@ func (s *DataSyncServiceSuite) SetupTest() {
 	s.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(s.ms, nil)
 	s.ms.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	s.ms.EXPECT().Chan().Return(s.msChan)
-	s.ms.EXPECT().Close().Return()
+	s.ms.EXPECT().Close().Return().Maybe()
 	s.ms.EXPECT().GetUnmarshalDispatcher().Return(nil)
 
 	s.pipelineParams = &util2.PipelineParams{

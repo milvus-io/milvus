@@ -33,6 +33,9 @@ type Collection struct {
 	ConsistencyLevel ConsistencyLevel
 	ShardNum         int32
 	Properties       map[string]string
+
+	// collection update timestamp, usually used for internal change detection
+	UpdateTimestamp uint64
 }
 
 // Partition represent partition meta in Milvus

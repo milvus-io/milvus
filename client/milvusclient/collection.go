@@ -95,6 +95,7 @@ func (c *Client) DescribeCollection(ctx context.Context, option DescribeCollecti
 			ConsistencyLevel: entity.ConsistencyLevel(resp.ConsistencyLevel),
 			ShardNum:         resp.GetShardsNum(),
 			Properties:       entity.KvPairsMap(resp.GetProperties()),
+			UpdateTimestamp:  resp.GetUpdateTimestamp(),
 		}
 		collection.Name = collection.Schema.CollectionName
 		return nil
