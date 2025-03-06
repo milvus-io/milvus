@@ -665,3 +665,21 @@ func (req *TransferReplicaReq) GetCollectionName() string {
 func (req *TransferReplicaReq) GetReplicaNum() int64 {
 	return req.ReplicaNum
 }
+
+type GetSegmentsInfoReq struct {
+	DbName       string  `json:"dbName"`
+	CollectionID int64   `json:"collectionID"`
+	SegmentIDs   []int64 `json:"segmentIDs"`
+}
+
+func (req *GetSegmentsInfoReq) GetDbName() string {
+	return req.DbName
+}
+
+func (req *GetSegmentsInfoReq) GetCollectionID() int64 {
+	return req.CollectionID
+}
+
+func (req *GetSegmentsInfoReq) GetSegmentIDs() []int64 {
+	return req.SegmentIDs
+}
