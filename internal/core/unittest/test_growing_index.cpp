@@ -24,11 +24,11 @@ using namespace milvus;
 using namespace milvus::segcore;
 namespace pb = milvus::proto;
 
-using Param =
-    std::tuple<DataType,
-               /*index type*/ std::string,
-               knowhere::MetricType,
-               /*dense vector index type*/ std::optional<std::string>>;
+using Param = std::tuple<DataType,
+                         /*index type*/ std::string,
+                         knowhere::MetricType,
+                         /*dense vector index type*/ std::optional<std::string>,
+                         /*refine type*/ std::optional<std::string>>;
 
 class GrowingIndexTest : public ::testing::TestWithParam<Param> {
     void
@@ -38,6 +38,7 @@ class GrowingIndexTest : public ::testing::TestWithParam<Param> {
         index_type = std::get<1>(param);
         metric_type = std::get<2>(param);
         dense_vec_intermin_index_type = std::get<3>(param);
+        dense_refine_type = std::get<4>(param);
         if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
             is_sparse = true;
             if (metric_type == knowhere::metric::IP) {
@@ -68,6 +69,7 @@ class GrowingIndexTest : public ::testing::TestWithParam<Param> {
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
     bool intermin_index_with_raw_data;
     bool is_sparse = false;
+    std::optional<std::string> dense_refine_type = "DATA_VIEW";
 };
 
 INSTANTIATE_TEST_SUITE_P(
@@ -80,7 +82,8 @@ INSTANTIATE_TEST_SUITE_P(
                           knowhere::metric::IP,
                           knowhere::metric::L2),
         ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
-                          knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR)));
+                          knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR),
+        ::testing::Values("DATA_VIEW", "BFLOAT16", "FLOAT16", "UINT8")));
 
 INSTANTIATE_TEST_SUITE_P(
     SparseIndexTypeParameters,
@@ -95,6 +98,7 @@ INSTANTIATE_TEST_SUITE_P(
         ::testing::Values(
             knowhere::metric::
                 IP),  // when metric == IP, growing segment will keep data in intermin index
+        ::testing::Values(std::nullopt),
         ::testing::Values(std::nullopt)));
 
 INSTANTIATE_TEST_SUITE_P(
@@ -106,7 +110,8 @@ INSTANTIATE_TEST_SUITE_P(
                           knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC),
         ::testing::Values(knowhere::metric::COSINE),
         ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
-                          knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR)));
+                          knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR),
+        ::testing::Values("DATA_VIEW", "BFLOAT16", "FLOAT16", "UINT8")));
 
 TEST_P(GrowingIndexTest, Correctness) {
     auto schema = std::make_shared<Schema>();
@@ -134,6 +139,10 @@ TEST_P(GrowingIndexTest, Correctness) {
             config.set_sub_dim(4);
             config.set_nprobe(int(0.4 * nlist));
             config.set_refine_ratio(4.0);
+            if (dense_refine_type.has_value()) {
+                config.set_refine_quant_type(dense_refine_type.value());
+                config.set_refine_with_quant_flag(false);
+            }
         }
     }
     std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};

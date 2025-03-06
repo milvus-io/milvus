@@ -54,7 +54,7 @@ class VecIndexConfig {
     GetMetricType() noexcept;
 
     knowhere::Json
-    GetBuildBaseParams();
+    GetBuildBaseParams(DataType data_type);
 
     SearchInfo
     GetSearchConf(const SearchInfo& searchInfo);

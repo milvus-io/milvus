@@ -411,6 +411,8 @@ queryNode:
       nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
       subDim: 4 # interim index sub dim, recommend to (subDim % vector dim == 0)
       refineRatio: 4.5 # interim index parameters, should set to be >= 1.0
+      refineQuantType: NONE # Data representation of SCANN_DVR index, options: 'NONE', 'FLOAT16', 'BFLOAT16' and 'UINT8'
+      refineWithQuant: true # whether to use refineQuantType to refine for fatser but loss a little precision
       denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num

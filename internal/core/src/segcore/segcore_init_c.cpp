@@ -69,6 +69,28 @@ SegcoreSetDenseVectorInterminIndexType(const char* value) {
     }
 }
 
+extern "C" CStatus
+SegcoreSetDenseVectorInterminIndexRefineQuantType(const char* value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    try {
+        config.set_refine_quant_type(std::string(value));
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+extern "C" void
+SegcoreSetDenseVectorInterminIndexRefineWithQuantFlag(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_refine_with_quant_flag(value);
+}
+
 extern "C" void
 SegcoreSetSubDim(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
