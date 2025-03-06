@@ -1099,6 +1099,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "1",
 				}},
 				IndexName: "",
+				FieldName: "FieldJSON",
 			},
 			fieldSchema: &schemapb.FieldSchema{
 				FieldID:      101,
