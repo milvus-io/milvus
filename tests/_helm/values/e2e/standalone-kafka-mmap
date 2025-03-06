@@ -102,7 +102,7 @@ extraConfigFiles:
   user.yaml: |+
     indexCoord:
       gc:
-         interval: 1
+        interval: 1
       scheduler:
         interval: 100
     indexNode:
