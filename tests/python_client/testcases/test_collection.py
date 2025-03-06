@@ -3130,15 +3130,22 @@ class TestDescribeCollection(TestcaseBase):
         description = \
             {'collection_name': c_name, 'auto_id': False, 'num_shards': ct.default_shards_num, 'description': '',
              'fields': [
-                 {'field_id': 100, 'name': 'int64', 'description': '', 'type': 5, 'params': {}, 'is_primary': True},
-                 {'field_id': 101, 'name': 'float', 'description': '', 'type': 10, 'params': {}},
-                 {'field_id': 102, 'name': 'varchar', 'description': '', 'type': 21, 'params': {'max_length': 65535}},
-                 {'field_id': 103, 'name': 'json_field', 'description': '', 'type': 23, 'params': {}},
-                 {'field_id': 104, 'name': 'float_vector', 'description': '', 'type': 101, 'params': {'dim': 128}}
+                 {'field_id': 100, 'name': 'int64', 'description': '', 'type': DataType.INT64, 'params': {},
+                  'is_primary': True},
+                 {'field_id': 101, 'name': 'float', 'description': '', 'type': DataType.FLOAT, 'params': {}},
+                 {'field_id': 102, 'name': 'varchar', 'description': '', 'type': DataType.VARCHAR,
+                  'params': {'max_length': 65535}},
+                 {'field_id': 103, 'name': 'json_field', 'description': '', 'type': DataType.JSON, 'params': {}},
+                 {'field_id': 104, 'name': 'float_vector', 'description': '', 'type': DataType.FLOAT_VECTOR,
+                  'params': {'dim': 128}}
              ],
-             'aliases': [], 'consistency_level': 0, 'properties': {}, 'num_partitions': 1, 'enable_dynamic_field': False}
+             'aliases': [], 'consistency_level': 0, 'properties': {},
+             'num_partitions': 1, 'enable_dynamic_field': False}
         res = collection_w.describe()[0]
+        log.info(res)
+        assert isinstance(res['collection_id'], int) and isinstance(res['created_timestamp'], int)
         del res['collection_id']
+        del res['created_timestamp']
         log.info(res)
         assert description == res
 
