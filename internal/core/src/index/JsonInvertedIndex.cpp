@@ -36,7 +36,7 @@ JsonInvertedIndex<T>::build_index_for_json(
             auto json_column = static_cast<const Json*>(data->RawValue(i));
             if (this->schema_.nullable() && !data->is_valid(i)) {
                 this->null_offset.push_back(i);
-                this->wrapper_->template add_array_data<T>(
+                this->wrapper_->template add_multi_data<T>(
                     nullptr, 0, offset++);
                 continue;
             }
@@ -48,7 +48,7 @@ JsonInvertedIndex<T>::build_index_for_json(
                            "Failed to parse json, err: {}",
                            err);
                 this->null_offset.push_back(i);
-                this->wrapper_->template add_array_data<T>(
+                this->wrapper_->template add_multi_data<T>(
                     nullptr, 0, offset++);
                 continue;
             }
