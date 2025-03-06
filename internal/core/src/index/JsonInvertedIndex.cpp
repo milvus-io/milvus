@@ -35,7 +35,7 @@ JsonInvertedIndex<T>::build_index_for_json(
         for (int64_t i = 0; i < n; i++) {
             auto json_column = static_cast<const Json*>(data->RawValue(i));
             if (this->schema_.nullable() && !data->is_valid(i)) {
-                this->null_offset.push_back(i);
+                this->null_offset_.push_back(i);
                 this->wrapper_->template add_multi_data<T>(
                     nullptr, 0, offset++);
                 continue;
@@ -47,7 +47,7 @@ JsonInvertedIndex<T>::build_index_for_json(
                                err == simdjson::NO_SUCH_FIELD,
                            "Failed to parse json, err: {}",
                            err);
-                this->null_offset.push_back(i);
+                this->null_offset_.push_back(i);
                 this->wrapper_->template add_multi_data<T>(
                     nullptr, 0, offset++);
                 continue;
