@@ -585,6 +585,58 @@ func (s *PrivilegeGroupSuite) TestOperatePrivilegeGroup() {
 	})
 }
 
+func (s *PrivilegeGroupSuite) TestAddPrivilegesToGroup() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	groupName := fmt.Sprintf("test_pg_%s", s.randString(6))
+	privileges := []string{"Insert", "Query"}
+
+	s.Run("success", func() {
+		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
+			s.Equal(groupName, r.GetGroupName())
+			s.Equal(milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup, r.GetType())
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.AddPrivilegesToGroup(ctx, NewAddPrivilegesToGroupOption(groupName, privileges...))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.AddPrivilegesToGroup(ctx, NewAddPrivilegesToGroupOption(groupName, privileges...))
+		s.Error(err)
+	})
+}
+
+func (s *PrivilegeGroupSuite) TestRemovePrivilegesFromGroup() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	groupName := fmt.Sprintf("test_pg_%s", s.randString(6))
+	privileges := []string{"Insert", "Query"}
+
+	s.Run("success", func() {
+		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
+			s.Equal(groupName, r.GetGroupName())
+			s.Equal(milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup, r.GetType())
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.RemovePrivilegesFromGroup(ctx, NewRemovePrivilegesFromGroupOption(groupName, privileges...))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.RemovePrivilegesFromGroup(ctx, NewRemovePrivilegesFromGroupOption(groupName, privileges...))
+		s.Error(err)
+	})
+}
+
 func TestPrivilegeGroup(t *testing.T) {
 	suite.Run(t, new(PrivilegeGroupSuite))
 }
