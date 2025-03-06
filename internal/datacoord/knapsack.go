@@ -33,14 +33,14 @@ type Knapsack[T Sizable] struct {
 	candidates []T
 }
 
-func newKnapsack[T Sizable](name string, candidates []T) Knapsack[T] {
+func newKnapsack[T Sizable](name string, candidates []T) *Knapsack[T] {
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].getSegmentSize() != candidates[j].getSegmentSize() {
 			return candidates[i].getSegmentSize() > candidates[j].getSegmentSize()
 		}
 		return candidates[i].GetID() < candidates[j].GetID()
 	})
-	return Knapsack[T]{
+	return &Knapsack[T]{
 		name:       name,
 		candidates: candidates,
 	}
@@ -61,13 +61,7 @@ func (c *Knapsack[T]) tryPack(size, maxLeftSize, minSegs, maxSegs int64) (bitset
 	}
 
 	nSelections := selection.Count()
-	var minUSegs uint
-	if minSegs < 0 {
-		minUSegs = 0
-	} else {
-		minUSegs = uint(minSegs)
-	}
-	if left > maxLeftSize || nSelections < uint(minUSegs) {
+	if left > maxLeftSize || int64(nSelections) < minSegs {
 		selection.ClearAll()
 		left = size
 	}
@@ -103,7 +97,7 @@ func (c *Knapsack[T]) pack(size, maxLeftSize, minSegs, maxSegs int64) ([]T, int6
 	return segs, left
 }
 
-func (c *Knapsack[T]) packWith(size, maxLeftSize, minSegs, maxSegs int64, other Knapsack[T]) ([]T, int64) {
+func (c *Knapsack[T]) packWith(size, maxLeftSize, minSegs, maxSegs int64, other *Knapsack[T]) ([]T, int64) {
 	selection, left := c.tryPack(size, math.MaxInt64, 0, maxSegs)
 	if selection.Count() == 0 {
 		return nil, size
@@ -114,7 +108,7 @@ func (c *Knapsack[T]) packWith(size, maxLeftSize, minSegs, maxSegs int64, other 
 
 	if otherSelection.Count() == 0 {
 		// If the original selection already satisfied the requirements, return immediately
-		if left < maxLeftSize && selection.Count() >= uint(minSegs) {
+		if left < maxLeftSize && int64(selection.Count()) >= minSegs {
 			return c.commit(selection), left
 		}
 		return nil, size
@@ -124,6 +118,6 @@ func (c *Knapsack[T]) packWith(size, maxLeftSize, minSegs, maxSegs int64, other 
 	return append(segs, otherSegs...), left
 }
 
-func newSegmentPacker(name string, candidates []*SegmentInfo) Knapsack[*SegmentInfo] {
-	return newKnapsack[*SegmentInfo](name, candidates)
+func newSegmentPacker(name string, candidates []*SegmentInfo) *Knapsack[*SegmentInfo] {
+	return newKnapsack(name, candidates)
 }
