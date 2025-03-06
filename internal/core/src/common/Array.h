@@ -134,7 +134,9 @@ class Array {
             if (element_type_ == DataType::INT8 ||
                 element_type_ == DataType::INT16) {
                 length_ = size / sizeof(int32_t);
-            } else {
+            } else if (element_type_ == DataType::NONE) {
+                length_ = 0;
+            } else{
                 length_ = size / GetDataTypeSize(element_type_);
             }
         }
@@ -459,7 +461,9 @@ class ArrayView {
             if (element_type_ == DataType::INT8 ||
                 element_type_ == DataType::INT16) {
                 length_ = size / sizeof(int32_t);
-            } else {
+            } else if(element_type_ == DataType::NONE) {
+                length_ = 0;
+            } else{
                 length_ = size / GetDataTypeSize(element_type_);
             }
         }
