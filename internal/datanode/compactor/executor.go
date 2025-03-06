@@ -179,23 +179,52 @@ func (e *executor) executeTask(task Compactor) {
 	e.completed.Insert(result.GetPlanID(), result)
 	e.completedCompactor.Insert(result.GetPlanID(), task)
 
-	getLogSize := func(binlogs []*datapb.FieldBinlog) int64 {
-		size := int64(0)
+	getDataCount := func(binlogs []*datapb.FieldBinlog) int64 {
+		count := int64(0)
 		for _, binlog := range binlogs {
 			for _, fbinlog := range binlog.GetBinlogs() {
-				size += fbinlog.GetLogSize()
+				count += fbinlog.GetEntriesNum()
 			}
 		}
-		return size
+		return count
 	}
 
-	totalSize := lo.SumBy(result.Segments, func(seg *datapb.CompactionSegment) int64 {
-		return getLogSize(seg.GetInsertLogs()) +
-			getLogSize(seg.GetField2StatslogPaths()) +
-			getLogSize(seg.GetBm25Logs()) +
-			getLogSize(seg.GetDeltalogs())
+	// getLogSize := func(binlogs []*datapb.FieldBinlog) int64 {
+	//     size := int64(0)
+	//     for _, binlog := range binlogs {
+	//         for _, fbinlog := range binlog.GetBinlogs() {
+	//             size += fbinlog.GetLogSize()
+	//         }
+	//     }
+	//     return size
+	// }
+
+	var entityCount int64
+	var deleteCount int64
+	lo.ForEach(result.Segments, func(seg *datapb.CompactionSegment, _ int) {
+		entityCount += getDataCount(seg.GetInsertLogs())
+		deleteCount += getDataCount(seg.GetDeltalogs())
 	})
-	metrics.DataNodeWriteBinlogSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.CompactionDataSourceLabel, fmt.Sprint(task.GetCollection())).Add(float64(totalSize))
+	metrics.DataNodeWriteDataCount.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		metrics.CompactionDataSourceLabel,
+		metrics.InsertLabel,
+		fmt.Sprint(task.GetCollection())).Add(float64(entityCount))
+	metrics.DataNodeWriteDataCount.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		metrics.CompactionDataSourceLabel,
+		metrics.DeleteLabel,
+		fmt.Sprint(task.GetCollection())).Add(float64(deleteCount))
+	// totalSize := lo.SumBy(result.Segments, func(seg *datapb.CompactionSegment) int64 {
+	//     return getLogSize(seg.GetInsertLogs()) +
+	//         getLogSize(seg.GetField2StatslogPaths()) +
+	//         getLogSize(seg.GetBm25Logs()) +
+	//         getLogSize(seg.GetDeltalogs())
+	// })
+	// metrics.DataNodeWriteDataCount.WithLabelValues(
+	//     fmt.Sprint(paramtable.GetNodeID()),
+	//     metrics.CompactionDataSourceLabel,
+	//     fmt.Sprint(task.GetCollection())).Add(float64())
 
 	log.Info("end to execute compaction")
 }
