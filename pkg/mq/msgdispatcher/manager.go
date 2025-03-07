@@ -16,6 +16,7 @@
 
 package msgdispatcher
 
+import "C"
 import (
 	"context"
 	"fmt"
@@ -40,8 +41,6 @@ import (
 type DispatcherManager interface {
 	Add(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error)
 	Remove(vchannel string)
-	NumTarget() int
-	NumConsumer() int
 	Run()
 	Close()
 }
@@ -55,7 +54,9 @@ type dispatcherManager struct {
 
 	registeredTargets *typeutil.ConcurrentMap[string, *target]
 
-	mu                sync.RWMutex
+	numConsumer     atomic.Int64
+	numActiveTarget atomic.Int64
+
 	mainDispatcher    *Dispatcher
 	deputyDispatchers map[int64]*Dispatcher // ID -> *Dispatcher
 
@@ -99,22 +100,6 @@ func (c *dispatcherManager) Remove(vchannel string) {
 	t.close()
 }
 
-func (c *dispatcherManager) NumTarget() int {
-	return c.registeredTargets.Len()
-}
-
-func (c *dispatcherManager) NumConsumer() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	numConsumer := 0
-	if c.mainDispatcher != nil {
-		numConsumer++
-	}
-	numConsumer += len(c.deputyDispatchers)
-	return numConsumer
-}
-
 func (c *dispatcherManager) Close() {
 	c.closeOnce.Do(func() {
 		c.closeChan <- struct{}{}
@@ -139,14 +124,30 @@ func (c *dispatcherManager) Run() {
 			c.tryRemoveUnregisteredTargets()
 			c.tryBuildDispatcher()
 			c.tryMerge()
+			c.updateNumInfo()
 		}
 	}
+}
+
+func (c *dispatcherManager) updateNumInfo() {
+	numConsumer := 0
+	numActiveTarget := 0
+	if c.mainDispatcher != nil {
+		numConsumer++
+		numActiveTarget += c.mainDispatcher.TargetNum()
+	}
+	numConsumer += len(c.deputyDispatchers)
+	c.numConsumer.Store(int64(numConsumer))
+
+	for _, d := range c.deputyDispatchers {
+		numActiveTarget += d.TargetNum()
+	}
+	c.numActiveTarget.Store(int64(numActiveTarget))
 }
 
 func (c *dispatcherManager) tryRemoveUnregisteredTargets() {
 	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
 	unregisteredTargets := make([]*target, 0)
-	c.mu.RLock()
 	for _, dispatcher := range c.deputyDispatchers {
 		for _, t := range dispatcher.GetTargets() {
 			if !c.registeredTargets.Contain(t.vchannel) {
@@ -161,10 +162,6 @@ func (c *dispatcherManager) tryRemoveUnregisteredTargets() {
 			}
 		}
 	}
-	c.mu.RUnlock()
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	for _, dispatcher := range c.deputyDispatchers {
 		for _, t := range unregisteredTargets {
 			if dispatcher.HasTarget(t.vchannel) {
@@ -206,7 +203,6 @@ func (c *dispatcherManager) tryBuildDispatcher() {
 	// get lack targets to perform subscription
 	lackTargets := make([]*target, 0, len(allTargets))
 
-	c.mu.RLock()
 OUTER:
 	for _, t := range allTargets {
 		if c.mainDispatcher != nil && c.mainDispatcher.HasTarget(t.vchannel) {
@@ -219,7 +215,6 @@ OUTER:
 		}
 		lackTargets = append(lackTargets, t)
 	}
-	c.mu.RUnlock()
 
 	if len(lackTargets) == 0 {
 		return
@@ -287,8 +282,6 @@ OUTER:
 		zap.Strings("vchannels", vchannels),
 	)
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.mainDispatcher == nil {
 		c.mainDispatcher = d
 		log.Info("add main dispatcher", zap.Int64("id", d.ID()))
@@ -299,9 +292,6 @@ OUTER:
 }
 
 func (c *dispatcherManager) tryMerge() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	start := time.Now()
 	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
 
@@ -363,9 +353,6 @@ func (c *dispatcherManager) deleteMetric(channel string) {
 }
 
 func (c *dispatcherManager) uploadMetric() {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	nodeIDStr := fmt.Sprintf("%d", c.nodeID)
 	fn := func(gauge *prometheus.GaugeVec) {
 		if c.mainDispatcher == nil {
