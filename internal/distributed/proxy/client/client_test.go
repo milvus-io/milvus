@@ -499,3 +499,24 @@ func Test_InvalidateShardLeaderCache(t *testing.T) {
 	_, err = client.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
+
+func Test_GetSegmentsInfo(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	client, err := NewClient(ctx, "test", 1)
+	assert.NoError(t, err)
+	defer client.Close()
+
+	mockProxy := mocks.NewMockProxyClient(t)
+	mockGrpcClient := mocks.NewMockGrpcClient[proxypb.ProxyClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		return f(mockProxy)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	mockProxy.EXPECT().GetSegmentsInfo(mock.Anything, mock.Anything).Return(&internalpb.GetSegmentsInfoResponse{Status: merr.Success()}, nil)
+	_, err = client.GetSegmentsInfo(ctx, &internalpb.GetSegmentsInfoRequest{})
+	assert.Nil(t, err)
+}
