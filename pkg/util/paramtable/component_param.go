@@ -3510,9 +3510,11 @@ type dataCoordConfig struct {
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 
-	EnableStatsTask       ParamItem `refreshable:"true"`
-	TaskCheckInterval     ParamItem `refreshable:"true"`
-	StatsTaskTriggerCount ParamItem `refreshable:"true"`
+	EnableStatsTask          ParamItem `refreshable:"true"`
+	TaskCheckInterval        ParamItem `refreshable:"true"`
+	StatsTaskTriggerCount    ParamItem `refreshable:"true"`
+	JSONStatsTriggerCount    ParamItem `refreshable:"true"`
+	JSONStatsTriggerInterval ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds             ParamItem `refreshable:"true"`
 	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
@@ -4408,6 +4410,26 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.StatsTaskTriggerCount.Init(base.mgr)
+
+	p.JSONStatsTriggerCount = ParamItem{
+		Key:          "dataCoord.jsonStatsTriggerCount",
+		Version:      "2.5.5",
+		Doc:          "jsonkey stats task count per trigger",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.JSONStatsTriggerCount.Init(base.mgr)
+
+	p.JSONStatsTriggerInterval = ParamItem{
+		Key:          "dataCoord.jsonStatsTriggerInterval",
+		Version:      "2.5.5",
+		Doc:          "jsonkey task interval per trigger",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.JSONStatsTriggerInterval.Init(base.mgr)
 
 	p.RequestTimeoutSeconds = ParamItem{
 		Key:          "dataCoord.requestTimeoutSeconds",
