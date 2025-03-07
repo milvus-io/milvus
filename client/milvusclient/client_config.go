@@ -13,8 +13,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/keepalive"
-
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 )
 
 const (
@@ -64,9 +62,6 @@ type ClientConfig struct {
 
 	DisableConn bool
 
-	metadataHeaders map[string]string
-
-	identifier    string // Identifier for this connection
 	ServerVersion string // ServerVersion
 	parsedAddress *url.URL
 	flags         uint64 // internal flags
@@ -117,27 +112,8 @@ func (c *ClientConfig) useDatabase(dbName string) {
 	c.DBName = dbName
 }
 
-// useDatabase change the inner db name.
-func (c *ClientConfig) setIdentifier(identifier string) {
-	c.identifier = identifier
-}
-
 func (c *ClientConfig) setServerInfo(serverInfo string) {
 	c.ServerVersion = serverInfo
-}
-
-// parseAuthentication prepares authentication headers for grpc inteceptors based on the provided username, password or API key.
-func (c *ClientConfig) parseAuthentication() {
-	c.metadataHeaders = make(map[string]string)
-	if c.Username != "" || c.Password != "" {
-		value := crypto.Base64Encode(fmt.Sprintf("%s:%s", c.Username, c.Password))
-		c.metadataHeaders[authorizationHeader] = value
-	}
-	// API overwrites username & passwd
-	if c.APIKey != "" {
-		value := crypto.Base64Encode(c.APIKey)
-		c.metadataHeaders[authorizationHeader] = value
-	}
 }
 
 func (c *ClientConfig) getRetryOnRateLimitInterceptor() grpc.UnaryClientInterceptor {
