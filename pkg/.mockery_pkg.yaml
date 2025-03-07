@@ -47,3 +47,7 @@ packages:
       Cipher:
       Encryptor:
       Decryptor:
+  github.com/milvus-io/milvus/pkg/v2/proto/viewpb:
+    interfaces:
+      QueryViewSyncServiceClient:
+      QueryViewSyncService_SyncClient:
