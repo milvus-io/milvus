@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -35,6 +34,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type statsTaskSuite struct {
@@ -55,6 +56,19 @@ func (s *statsTaskSuite) SetupSuite() {
 	s.segID = 1179
 	s.targetID = 1180
 
+	tasks := typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
+	tasks.Insert(s.taskID, &indexpb.StatsTask{
+		CollectionID:  1,
+		PartitionID:   2,
+		SegmentID:     s.segID,
+		InsertChannel: "ch1",
+		TaskID:        s.taskID,
+		SubJobType:    indexpb.StatsSubJob_Sort,
+		Version:       0,
+		NodeID:        0,
+		State:         indexpb.JobState_JobStateInit,
+		FailReason:    "",
+	})
 	s.mt = &meta{
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
@@ -109,23 +123,10 @@ func (s *statsTaskSuite) SetupSuite() {
 		},
 
 		statsTaskMeta: &statsTaskMeta{
-			RWMutex: sync.RWMutex{},
+			keyLock: lock.NewKeyLock[UniqueID](),
 			ctx:     context.Background(),
 			catalog: nil,
-			tasks: map[int64]*indexpb.StatsTask{
-				s.taskID: {
-					CollectionID:  1,
-					PartitionID:   2,
-					SegmentID:     s.segID,
-					InsertChannel: "ch1",
-					TaskID:        s.taskID,
-					SubJobType:    indexpb.StatsSubJob_Sort,
-					Version:       0,
-					NodeID:        0,
-					State:         indexpb.JobState_JobStateInit,
-					FailReason:    "",
-				},
-			},
+			tasks:   tasks,
 		},
 	}
 }
@@ -595,7 +596,9 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 			s.NoError(st.SetJobInfo(s.mt))
 			s.NotNil(s.mt.GetHealthySegment(context.TODO(), s.targetID))
-			s.Equal(indexpb.JobState_JobStateFinished, s.mt.statsTaskMeta.tasks[s.taskID].GetState())
+			t, ok := s.mt.statsTaskMeta.tasks.Get(s.taskID)
+			s.True(ok)
+			s.Equal(indexpb.JobState_JobStateFinished, t.GetState())
 			s.Equal(datapb.SegmentLevel_L2, s.mt.GetHealthySegment(context.TODO(), s.targetID).GetLevel())
 		})
 	})
