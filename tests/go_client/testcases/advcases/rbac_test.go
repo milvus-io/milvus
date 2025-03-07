@@ -63,7 +63,7 @@ func setupTest(t *testing.T, ctx context.Context, mc *base.MilvusClient) {
 
 func TestRbacDefault(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: common.RootUser, Password: common.RootPwd})
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	setupTest(t, ctx, mc)
 
@@ -106,7 +106,7 @@ func TestRbacDefault(t *testing.T) {
 		Object:     CollectionObjectType,
 		ObjectName: AllObjectName,
 		RoleName:   roleName,
-		Grantor:    common.RootUser,
+		Grantor:    hp.GetUser(),
 		Privilege:  "CreateIndex",
 		DbName:     common.DefaultDb,
 	}
@@ -136,7 +136,7 @@ func TestRbacDefault(t *testing.T) {
 
 func TestRbacDefaultV2(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: common.RootUser, Password: common.RootPwd})
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	setupTest(t, ctx, mc)
 
@@ -177,7 +177,7 @@ func TestRbacDefaultV2(t *testing.T) {
 		Object:     GlobalObjectType,
 		ObjectName: AllObjectName,
 		RoleName:   roleName,
-		Grantor:    common.RootUser,
+		Grantor:    hp.GetUser(),
 		Privilege:  "CollectionAdmin",
 		DbName:     common.DefaultDb,
 	}
@@ -209,7 +209,7 @@ func TestRbacDefaultV2(t *testing.T) {
 func TestCreateInvalidUser(t *testing.T) {
 	// root user & username must contain only numbers, letters and underscores
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	setupTest(t, ctx, mc)
 
 	invalidUserNames := common.GenInvalidNames()
@@ -243,7 +243,7 @@ func TestCreateInvalidUser(t *testing.T) {
 
 func TestCreateUserLimit(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	setupTest(t, ctx, mc)
 
 	// Limit to 100 users, including root
@@ -263,7 +263,7 @@ func TestCreateUserLimit(t *testing.T) {
 
 func TestUpdatePassword(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	setupTest(t, ctx, mc)
 
 	userName := common.GenRandomString("user", 6)
@@ -296,7 +296,7 @@ func TestUpdatePassword(t *testing.T) {
 
 func TestUpdatePasswordInvalid(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	setupTest(t, ctx, mc)
 
 	userName := common.GenRandomString("user", 6)
@@ -325,7 +325,7 @@ func TestUpdatePasswordInvalid(t *testing.T) {
 
 func TestDropUser(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	setupTest(t, ctx, mc)
 
 	userName := common.GenRandomString("user", 6)
@@ -355,7 +355,7 @@ func TestDropUser(t *testing.T) {
 
 func TestCreateRoleLimit(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	setupTest(t, ctx, mc)
 
 	// Limit to 10 roles, including admin & public
@@ -374,7 +374,7 @@ func TestCreateRoleLimit(t *testing.T) {
 
 func TestCreateInvalidRole(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	setupTest(t, ctx, mc)
 
 	invalidNames := common.GenInvalidNames()
@@ -406,7 +406,7 @@ func TestCreateInvalidRole(t *testing.T) {
 
 func TestDropRoleBindUser(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	setupTest(t, ctx, mc)
 
 	userName := common.GenRandomString("user", 6)
@@ -433,7 +433,7 @@ func TestDropRoleBindUser(t *testing.T) {
 
 func TestDropRoleBindPrivilege(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	setupTest(t, ctx, mc)
 
 	roleName := common.GenRandomString("role", 6)
@@ -456,7 +456,7 @@ func TestDropRoleBindPrivilege(t *testing.T) {
 
 func TestDescribeRole(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	resetRbac(t, ctx, mc)
 
 	// describe role that no grants
@@ -483,7 +483,7 @@ func TestDescribeRole(t *testing.T) {
 				Object:     GlobalObjectType,
 				ObjectName: AllObjectName,
 				RoleName:   roleName,
-				Grantor:    common.RootUser,
+				Grantor:    hp.GetUser(),
 				Privilege:  "ClusterAdmin",
 				DbName:     AllObjectName,
 			},
@@ -491,7 +491,7 @@ func TestDescribeRole(t *testing.T) {
 				Object:     GlobalObjectType,
 				ObjectName: AllObjectName,
 				RoleName:   roleName,
-				Grantor:    common.RootUser,
+				Grantor:    hp.GetUser(),
 				Privilege:  "DatabaseAdmin",
 				DbName:     common.DefaultDb,
 			},
@@ -508,7 +508,7 @@ func TestDescribeRole(t *testing.T) {
 func TestGrantV2PrivilegeConnectedDb(t *testing.T) {
 	t.Skip("https://github.com/milvus-io/milvus/issues/40340")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	resetRbac(t, ctx, mc)
 
 	// create a user
@@ -523,7 +523,7 @@ func TestGrantV2PrivilegeConnectedDb(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	// init client with new db
-	mcDb := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: common.RootUser, Password: common.RootPwd, DBName: dbName})
+	mcDb := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword(), DBName: dbName})
 
 	// create a role
 	roleName := common.GenRandomString("role", 6)
@@ -543,7 +543,7 @@ func TestGrantV2PrivilegeConnectedDb(t *testing.T) {
 				Object:     GlobalObjectType,
 				ObjectName: AllObjectName,
 				RoleName:   roleName,
-				Grantor:    common.RootUser,
+				Grantor:    hp.GetUser(),
 				Privilege:  "CollectionAdmin",
 				DbName:     dbName,
 			},
@@ -554,7 +554,7 @@ func TestGrantV2PrivilegeConnectedDb(t *testing.T) {
 // grant v2 use connected db as default db
 func TestGrantV2PrivilegeSpecifyDb(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	resetRbac(t, ctx, mc)
 
 	// create a user
@@ -590,7 +590,7 @@ func TestGrantV2PrivilegeSpecifyDb(t *testing.T) {
 				Object:     GlobalObjectType,
 				ObjectName: AllObjectName,
 				RoleName:   roleName,
-				Grantor:    common.RootUser,
+				Grantor:    hp.GetUser(),
 				Privilege:  "CollectionAdmin",
 				DbName:     dbName,
 			},
@@ -601,7 +601,7 @@ func TestGrantV2PrivilegeSpecifyDb(t *testing.T) {
 // grant use connected db as default db
 func TestGrantPrivilegeConnectedDb(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	resetRbac(t, ctx, mc)
 
 	// create a user
@@ -616,7 +616,7 @@ func TestGrantPrivilegeConnectedDb(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	// init client with new db
-	mcDb := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: common.RootUser, Password: common.RootPwd, DBName: dbName})
+	mcDb := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword(), DBName: dbName})
 
 	// create a role
 	roleName := common.GenRandomString("role", 6)
@@ -636,7 +636,7 @@ func TestGrantPrivilegeConnectedDb(t *testing.T) {
 				Object:     CollectionObjectType,
 				ObjectName: AllObjectName,
 				RoleName:   roleName,
-				Grantor:    common.RootUser,
+				Grantor:    hp.GetUser(),
 				Privilege:  "Insert",
 				DbName:     dbName,
 			},
@@ -647,7 +647,7 @@ func TestGrantPrivilegeConnectedDb(t *testing.T) {
 // grant v2 use connected db as default db
 func TestGrantPrivilegeSpecifyDb(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	resetRbac(t, ctx, mc)
 
 	// create a user
@@ -683,7 +683,7 @@ func TestGrantPrivilegeSpecifyDb(t *testing.T) {
 				Object:     CollectionObjectType,
 				ObjectName: AllObjectName,
 				RoleName:   roleName,
-				Grantor:    common.RootUser,
+				Grantor:    hp.GetUser(),
 				Privilege:  "Insert",
 				DbName:     dbName,
 			},
@@ -693,7 +693,7 @@ func TestGrantPrivilegeSpecifyDb(t *testing.T) {
 
 func TestGrantPrivilegeInvalid(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	// resetRbac(t, ctx, mc)
 
 	// create a role
@@ -732,7 +732,7 @@ func TestGrantPrivilegeInvalid(t *testing.T) {
 
 func TestRevokePrivilegeInvalid(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	mc := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), Username: hp.GetUser(), Password: hp.GetPassword()})
 	resetRbac(t, ctx, mc)
 
 	roleName := common.GenRandomString("role", 6)

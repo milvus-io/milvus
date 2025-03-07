@@ -16,6 +16,8 @@ import (
 
 var (
 	addr                = flag.String("addr", "localhost:19530", "server host and port")
+	user                = flag.String("user", "root", "user")
+	password            = flag.String("password", "Milvus", "password")
 	logLevel            = flag.String("log.level", "info", "log level for test")
 	defaultClientConfig *client.ClientConfig
 )
@@ -30,6 +32,14 @@ func GetDefaultClientConfig() *client.ClientConfig {
 
 func GetAddr() string {
 	return *addr
+}
+
+func GetUser() string {
+	return *user
+}
+
+func GetPassword() string {
+	return *password
 }
 
 func parseLogConfig() {
@@ -55,7 +65,7 @@ func setup() {
 	log.Info("Parser Milvus address", zap.String("address", *addr))
 
 	// set default milvus client config
-	setDefaultClientConfig(&client.ClientConfig{Address: *addr, Username: common.RootUser, Password: common.RootPwd})
+	setDefaultClientConfig(&client.ClientConfig{Address: *addr})
 }
 
 // Teardown teardown
@@ -63,7 +73,7 @@ func teardown() {
 	log.Info("Start to tear down all.....")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*common.DefaultTimeout)
 	defer cancel()
-	mc, err := base.NewMilvusClient(ctx, defaultClientConfig)
+	mc, err := base.NewMilvusClient(ctx, &client.ClientConfig{Address: GetAddr(), Username: GetUser(), Password: GetPassword()})
 	if err != nil {
 		log.Error("teardown failed to connect milvus with error", zap.Error(err))
 	}
