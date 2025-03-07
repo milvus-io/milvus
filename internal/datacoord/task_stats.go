@@ -176,6 +176,20 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		return false
 	}
 
+	if segment.GetNumOfRows() == 0 {
+		st.setResult(&workerpb.StatsResult{
+			TaskID:       st.taskID,
+			State:        indexpb.JobState_JobStateFinished,
+			FailReason:   "segment num row is zero",
+			CollectionID: st.req.GetCollectionID(),
+			PartitionID:  st.req.GetPartitionID(),
+			SegmentID:    st.targetSegmentID,
+			Channel:      st.req.GetInsertChannel(),
+			NumRows:      0,
+		})
+		return false
+	}
+
 	if segment.GetIsSorted() && st.subJobType == indexpb.StatsSubJob_Sort {
 		log.Info("stats task is marked as sorted, skip stats")
 		st.SetState(indexpb.JobState_JobStateNone, "segment is marked as sorted")
