@@ -133,8 +133,13 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
 
         index++;
     } else if (current.type == JSMN_ARRAY) {
-        AddInvertedRecord(
-            path, 0, 0, offset, current.start, current.end - current.start, 0);
+        AddInvertedRecord(path,
+                          0,
+                          static_cast<uint8_t>(JSONType::UNKNOWN),
+                          offset,
+                          current.start,
+                          current.end - current.start,
+                          0);
         // skip array parse
         int count = current.size;
         int j = 1;
