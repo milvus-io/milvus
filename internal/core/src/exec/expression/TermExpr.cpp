@@ -550,7 +550,9 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
             if (valid) {
                 if constexpr (std::is_same_v<GetType, int64_t>) {
                     if (type != uint8_t(milvus::index::JSONType::INT32) &&
-                        type != uint8_t(milvus::index::JSONType::INT64)) {
+                        type != uint8_t(milvus::index::JSONType::INT64) &&
+                        type != uint8_t(milvus::index::JSONType::FLOAT) &&
+                        type != uint8_t(milvus::index::JSONType::DOUBLE)) {
                         return false;
                     }
                 } else if constexpr (std::is_same_v<GetType,
@@ -561,7 +563,9 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
                         return false;
                     }
                 } else if constexpr (std::is_same_v<GetType, double>) {
-                    if (type != uint8_t(milvus::index::JSONType::FLOAT) &&
+                    if (type != uint8_t(milvus::index::JSONType::INT32) &&
+                        type != uint8_t(milvus::index::JSONType::INT64) &&
+                        type != uint8_t(milvus::index::JSONType::FLOAT) &&
                         type != uint8_t(milvus::index::JSONType::DOUBLE)) {
                         return false;
                     }
@@ -593,7 +597,7 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
                         if constexpr (std::is_same_v<GetType,
                                                      std::string_view>) {
                             auto val = json.at_string(offset, size);
-                            return this->arg_set_->In(val);
+                            return this->arg_set_->In(ValueType(val));
                         } else {
                             return false;
                         }
@@ -602,7 +606,7 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
                         if constexpr (std::is_same_v<GetType, double>) {
                             auto val = std::stod(
                                 std::string(json.at_string(offset, size)));
-                            return this->arg_set_->In(val);
+                            return this->arg_set_->In(ValueType(val));
                         } else {
                             return false;
                         }
@@ -611,7 +615,7 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
                         if constexpr (std::is_same_v<GetType, int64_t>) {
                             auto val = std::stoll(
                                 std::string(json.at_string(offset, size)));
-                            return this->arg_set_->In(val);
+                            return this->arg_set_->In(ValueType(val));
                         } else {
                             return false;
                         }

@@ -512,14 +512,21 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
 #define BinaryRangeJSONTypeCompareWithValue(cmp)                   \
     do {                                                           \
         if constexpr (std::is_same_v<GetType, int64_t>) {          \
-            if (type != uint8_t(milvus::index::JSONType::INT32)) { \
-                return false;                                      \
+            if (type == uint8_t(milvus::index::JSONType::FLOAT)) { \
+                float val = *reinterpret_cast<float*>(&value);     \
+                return (cmp);                                      \
+            } else {                                               \
+                int64_t val = value;                               \
+                return (cmp);                                      \
             }                                                      \
-            int64_t val = value;                                   \
-            return (cmp);                                          \
         } else if constexpr (std::is_same_v<GetType, double>) {    \
-            float val = *reinterpret_cast<float*>(&value);         \
-            return (cmp);                                          \
+            if (type == uint8_t(milvus::index::JSONType::FLOAT)) { \
+                float val = *reinterpret_cast<float*>(&value);     \
+                return (cmp);                                      \
+            } else {                                               \
+                int64_t val = value;                               \
+                return (cmp);                                      \
+            }                                                      \
         } else if constexpr (std::is_same_v<GetType, bool>) {      \
             bool val = *reinterpret_cast<bool*>(&value);           \
             return (cmp);                                          \
@@ -554,7 +561,9 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
             if (valid) {
                 if constexpr (std::is_same_v<GetType, int64_t>) {
                     if (type != uint8_t(milvus::index::JSONType::INT32) &&
-                        type != uint8_t(milvus::index::JSONType::INT64)) {
+                        type != uint8_t(milvus::index::JSONType::INT64) &&
+                        type != uint8_t(milvus::index::JSONType::FLOAT) &&
+                        type != uint8_t(milvus::index::JSONType::DOUBLE)) {
                         return false;
                     }
                 } else if constexpr (std::is_same_v<GetType,
@@ -565,7 +574,9 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
                         return false;
                     }
                 } else if constexpr (std::is_same_v<GetType, double>) {
-                    if (type != uint8_t(milvus::index::JSONType::FLOAT) &&
+                    if (type != uint8_t(milvus::index::JSONType::INT32) &&
+                        type != uint8_t(milvus::index::JSONType::INT64) &&
+                        type != uint8_t(milvus::index::JSONType::FLOAT) &&
                         type != uint8_t(milvus::index::JSONType::DOUBLE)) {
                         return false;
                     }
