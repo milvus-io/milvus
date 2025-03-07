@@ -62,7 +62,7 @@ func TestWriteAheadBufferWithOnlyTrivialTimeTick(t *testing.T) {
 
 	nextTimeTick := uint64(100)
 	for {
-		nextTimeTick += uint64(rand.Int31n(1000))
+		nextTimeTick += uint64(rand.Int31n(1000) + 1)
 		wb.Append(nil, createTimeTickMessage(nextTimeTick))
 		if nextTimeTick > expectedLastTimeTick {
 			break
