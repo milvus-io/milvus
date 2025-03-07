@@ -505,7 +505,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                         for (int i = 0; i < n; i++) {
                             if (!data->is_valid(i)) {
                                 folly::SharedMutex::WriteHolder lock(mutex_);
-                                null_offset_.push_back(i);
+                                null_offset_.push_back(offset);
                             }
                             wrapper_->add_multi_data<T>(
                                 static_cast<const T*>(data->RawValue(i)),
@@ -567,7 +567,7 @@ InvertedIndexTantivy<T>::build_index_for_array(
         for (int64_t i = 0; i < n; i++) {
             if (schema_.nullable() && !data->is_valid(i)) {
                 folly::SharedMutex::WriteHolder lock(mutex_);
-                null_offset_.push_back(i);
+                null_offset_.push_back(offset);
             }
             auto length = data->is_valid(i) ? array_column[i].length() : 0;
             if (!inverted_index_single_segment_) {
@@ -594,7 +594,7 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
         for (int64_t i = 0; i < n; i++) {
             if (schema_.nullable() && !data->is_valid(i)) {
                 folly::SharedMutex::WriteHolder lock(mutex_);
-                null_offset_.push_back(i);
+                null_offset_.push_back(offset);
             } else {
                 Assert(IsStringDataType(array_column[i].get_element_type()));
                 Assert(IsStringDataType(
