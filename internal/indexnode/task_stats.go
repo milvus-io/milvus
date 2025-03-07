@@ -138,13 +138,16 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 	}
 
 	st.insertLogs = make([][]string, 0)
-	binlogNum := len(st.req.GetInsertLogs()[0].GetBinlogs())
-	for idx := 0; idx < binlogNum; idx++ {
-		var batchPaths []string
-		for _, f := range st.req.GetInsertLogs() {
-			batchPaths = append(batchPaths, f.GetBinlogs()[idx].GetLogPath())
+	// just protect
+	if len(st.req.GetInsertLogs()) > 0 {
+		binlogNum := len(st.req.GetInsertLogs()[0].GetBinlogs())
+		for idx := 0; idx < binlogNum; idx++ {
+			var batchPaths []string
+			for _, f := range st.req.GetInsertLogs() {
+				batchPaths = append(batchPaths, f.GetBinlogs()[idx].GetLogPath())
+			}
+			st.insertLogs = append(st.insertLogs, batchPaths)
 		}
-		st.insertLogs = append(st.insertLogs, batchPaths)
 	}
 
 	for _, d := range st.req.GetDeltaLogs() {
