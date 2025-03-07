@@ -27,24 +27,26 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 )
 
 func TestAzureObjectStorage(t *testing.T) {
 	ctx := context.Background()
 	bucketName := Params.MinioCfg.BucketName.GetValue()
-	config := config{
-		bucketName:    bucketName,
-		createBucket:  true,
-		useIAM:        false,
-		cloudProvider: "azure",
+	config := objectstorage.Config{
+		BucketName:    bucketName,
+		CreateBucket:  true,
+		UseIAM:        false,
+		CloudProvider: "azure",
 	}
 
 	t.Run("test initialize", func(t *testing.T) {
 		var err error
-		config.bucketName = ""
+		config.BucketName = ""
 		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Error(t, err)
-		config.bucketName = bucketName
+		config.BucketName = bucketName
 		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
 	})
@@ -52,7 +54,7 @@ func TestAzureObjectStorage(t *testing.T) {
 	t.Run("test load", func(t *testing.T) {
 		testCM, err := newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
-		defer testCM.DeleteContainer(ctx, config.bucketName, &azblob.DeleteContainerOptions{})
+		defer testCM.DeleteContainer(ctx, config.BucketName, &azblob.DeleteContainerOptions{})
 
 		prepareTests := []struct {
 			key   string
@@ -66,7 +68,7 @@ func TestAzureObjectStorage(t *testing.T) {
 		}
 
 		for _, test := range prepareTests {
-			err := testCM.PutObject(ctx, config.bucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
+			err := testCM.PutObject(ctx, config.BucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
 			require.NoError(t, err)
 		}
 
@@ -89,19 +91,19 @@ func TestAzureObjectStorage(t *testing.T) {
 		for _, test := range loadTests {
 			t.Run(test.description, func(t *testing.T) {
 				if test.isvalid {
-					got, err := testCM.GetObject(ctx, config.bucketName, test.loadKey, 0, 1024)
+					got, err := testCM.GetObject(ctx, config.BucketName, test.loadKey, 0, 1024)
 					assert.NoError(t, err)
 					contentData, err := io.ReadAll(got)
 					assert.NoError(t, err)
 					assert.Equal(t, len(contentData), len(test.expectedValue))
 					assert.Equal(t, test.expectedValue, contentData)
-					statSize, err := testCM.StatObject(ctx, config.bucketName, test.loadKey)
+					statSize, err := testCM.StatObject(ctx, config.BucketName, test.loadKey)
 					assert.NoError(t, err)
 					assert.Equal(t, statSize, int64(len(contentData)))
-					_, err = testCM.GetObject(ctx, config.bucketName, test.loadKey, 1, 1023)
+					_, err = testCM.GetObject(ctx, config.BucketName, test.loadKey, 1, 1023)
 					assert.NoError(t, err)
 				} else {
-					got, err := testCM.GetObject(ctx, config.bucketName, test.loadKey, 0, 1024)
+					got, err := testCM.GetObject(ctx, config.BucketName, test.loadKey, 0, 1024)
 					assert.NoError(t, err)
 					assert.NotEmpty(t, got)
 					_, err = io.ReadAll(got)
@@ -124,11 +126,11 @@ func TestAzureObjectStorage(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.bucketName, test.prefix, false)
+				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.BucketName, test.prefix, false)
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				for _, key := range gotk {
-					err := testCM.RemoveObject(ctx, config.bucketName, key)
+					err := testCM.RemoveObject(ctx, config.BucketName, key)
 					assert.NoError(t, err)
 				}
 			})
@@ -138,7 +140,7 @@ func TestAzureObjectStorage(t *testing.T) {
 	t.Run("test list", func(t *testing.T) {
 		testCM, err := newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
-		defer testCM.DeleteContainer(ctx, config.bucketName, &azblob.DeleteContainerOptions{})
+		defer testCM.DeleteContainer(ctx, config.BucketName, &azblob.DeleteContainerOptions{})
 
 		prepareTests := []struct {
 			valid bool
@@ -156,10 +158,10 @@ func TestAzureObjectStorage(t *testing.T) {
 		}
 
 		for _, test := range prepareTests {
-			err := testCM.PutObject(ctx, config.bucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
+			err := testCM.PutObject(ctx, config.BucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
 			require.Nil(t, err)
 			if !test.valid {
-				err := testCM.RemoveObject(ctx, config.bucketName, test.key)
+				err := testCM.RemoveObject(ctx, config.BucketName, test.key)
 				require.Nil(t, err)
 			}
 		}
@@ -177,7 +179,7 @@ func TestAzureObjectStorage(t *testing.T) {
 
 		for _, test := range insertWithPrefixTests {
 			t.Run(fmt.Sprintf("prefix: %s, recursive: %t", test.prefix, test.recursive), func(t *testing.T) {
-				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.bucketName, test.prefix, test.recursive)
+				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.BucketName, test.prefix, test.recursive)
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				for _, key := range gotk {
@@ -189,7 +191,7 @@ func TestAzureObjectStorage(t *testing.T) {
 
 	t.Run("test useIAM", func(t *testing.T) {
 		var err error
-		config.useIAM = true
+		config.UseIAM = true
 		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Error(t, err)
 		os.Setenv("AZURE_CLIENT_ID", "00000000-0000-0000-0000-00000000000")
@@ -197,16 +199,16 @@ func TestAzureObjectStorage(t *testing.T) {
 		os.Setenv("AZURE_FEDERATED_TOKEN_FILE", "/var/run/secrets/tokens/azure-identity-token")
 		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Error(t, err)
-		config.useIAM = false
+		config.UseIAM = false
 	})
 
 	t.Run("test key secret", func(t *testing.T) {
 		var err error
 		connectionString := os.Getenv("AZURE_STORAGE_CONNECTION_STRING")
 		os.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
-		config.accessKeyID = "devstoreaccount1"
-		config.secretAccessKeyID = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
-		config.address = "core.windows.net"
+		config.AccessKeyID = "devstoreaccount1"
+		config.SecretAccessKeyID = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+		config.Address = "core.windows.net"
 		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Error(t, err)
 		os.Setenv("AZURE_STORAGE_CONNECTION_STRING", connectionString)
@@ -216,11 +218,11 @@ func TestAzureObjectStorage(t *testing.T) {
 func TestReadFile(t *testing.T) {
 	ctx := context.Background()
 	bucketName := Params.MinioCfg.BucketName.GetValue()
-	c := &config{
-		bucketName:    bucketName,
-		createBucket:  true,
-		useIAM:        false,
-		cloudProvider: "azure",
+	c := &objectstorage.Config{
+		BucketName:    bucketName,
+		CreateBucket:  true,
+		UseIAM:        false,
+		CloudProvider: "azure",
 	}
 	rcm, err := NewRemoteChunkManager(ctx, c)
 

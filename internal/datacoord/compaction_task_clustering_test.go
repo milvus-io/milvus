@@ -60,7 +60,7 @@ type ClusteringCompactionTaskSuite struct {
 
 func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	ctx := context.Background()
-	cm := storage.NewLocalChunkManager(storage.RootPath(""))
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(""))
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
