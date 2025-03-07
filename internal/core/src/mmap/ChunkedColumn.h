@@ -57,7 +57,7 @@ class ChunkedColumnBase : public ColumnBase {
         nullable_ = field_meta.is_nullable();
     }
 
-    virtual ~ChunkedColumnBase() {};
+    virtual ~ChunkedColumnBase(){};
 
     virtual void
     AppendBatch(const FieldDataPtr data) override {
