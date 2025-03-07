@@ -189,16 +189,6 @@ func (e *executor) executeTask(task Compactor) {
 		return count
 	}
 
-	// getLogSize := func(binlogs []*datapb.FieldBinlog) int64 {
-	//     size := int64(0)
-	//     for _, binlog := range binlogs {
-	//         for _, fbinlog := range binlog.GetBinlogs() {
-	//             size += fbinlog.GetLogSize()
-	//         }
-	//     }
-	//     return size
-	// }
-
 	var entityCount int64
 	var deleteCount int64
 	lo.ForEach(result.Segments, func(seg *datapb.CompactionSegment, _ int) {
@@ -215,17 +205,6 @@ func (e *executor) executeTask(task Compactor) {
 		metrics.CompactionDataSourceLabel,
 		metrics.DeleteLabel,
 		fmt.Sprint(task.GetCollection())).Add(float64(deleteCount))
-	// totalSize := lo.SumBy(result.Segments, func(seg *datapb.CompactionSegment) int64 {
-	//     return getLogSize(seg.GetInsertLogs()) +
-	//         getLogSize(seg.GetField2StatslogPaths()) +
-	//         getLogSize(seg.GetBm25Logs()) +
-	//         getLogSize(seg.GetDeltalogs())
-	// })
-	// metrics.DataNodeWriteDataCount.WithLabelValues(
-	//     fmt.Sprint(paramtable.GetNodeID()),
-	//     metrics.CompactionDataSourceLabel,
-	//     fmt.Sprint(task.GetCollection())).Add(float64())
-
 	log.Info("end to execute compaction")
 }
 

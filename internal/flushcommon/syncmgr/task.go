@@ -150,16 +150,8 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		}
 		return count
 	}
-	// metrics.DataNodeWriteBinlogSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, fmt.Sprint(t.collectionID)).Add(float64(t.flushedSize))
-	metrics.DataNodeWriteDataCount.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
-		t.dataSource, metrics.InsertLabel, fmt.Sprint(t.collectionID)).
-		Add(float64(t.batchRows))
-	metrics.DataNodeWriteDataCount.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
-		t.dataSource, metrics.DeleteLabel, fmt.Sprint(t.collectionID)).
-		Add(float64(getDataCount(t.deltaBinlog)))
-
+	metrics.DataNodeWriteDataCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, metrics.InsertLabel, fmt.Sprint(t.collectionID)).Add(float64(t.batchRows))
+	metrics.DataNodeWriteDataCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, metrics.DeleteLabel, fmt.Sprint(t.collectionID)).Add(float64(getDataCount(t.deltaBinlog)))
 	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, t.level.String()).Add(float64(t.flushedSize))
 
 	metrics.DataNodeFlushedRows.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource).Add(float64(t.batchRows))
