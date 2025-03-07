@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
@@ -67,7 +68,7 @@ func (suite *HandlersSuite) SetupTest() {
 
 	// mock factory
 	suite.factory = dependency.NewMockFactory(suite.T())
-	suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus_test"))
+	suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", objectstorage.RootPath("/tmp/milvus_test"))
 
 	// new node
 	suite.node = NewQueryNode(context.Background(), suite.factory)

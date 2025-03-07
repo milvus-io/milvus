@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -25,21 +26,21 @@ func NewChunkMgrFactory() *chunkMgrFactory {
 
 func (m *chunkMgrFactory) NewChunkManager(ctx context.Context, config *indexpb.StorageConfig) (storage.ChunkManager, error) {
 	chunkManagerFactory := storage.NewChunkManagerFactory(config.GetStorageType(),
-		storage.RootPath(config.GetRootPath()),
-		storage.Address(config.GetAddress()),
-		storage.AccessKeyID(config.GetAccessKeyID()),
-		storage.SecretAccessKeyID(config.GetSecretAccessKey()),
-		storage.UseSSL(config.GetUseSSL()),
-		storage.SslCACert(config.GetSslCACert()),
-		storage.BucketName(config.GetBucketName()),
-		storage.UseIAM(config.GetUseIAM()),
-		storage.CloudProvider(config.GetCloudProvider()),
-		storage.IAMEndpoint(config.GetIAMEndpoint()),
-		storage.UseVirtualHost(config.GetUseVirtualHost()),
-		storage.RequestTimeout(config.GetRequestTimeoutMs()),
-		storage.Region(config.GetRegion()),
-		storage.CreateBucket(true),
-		storage.GcpCredentialJSON(config.GetGcpCredentialJSON()),
+		objectstorage.RootPath(config.GetRootPath()),
+		objectstorage.Address(config.GetAddress()),
+		objectstorage.AccessKeyID(config.GetAccessKeyID()),
+		objectstorage.SecretAccessKeyID(config.GetSecretAccessKey()),
+		objectstorage.UseSSL(config.GetUseSSL()),
+		objectstorage.SslCACert(config.GetSslCACert()),
+		objectstorage.BucketName(config.GetBucketName()),
+		objectstorage.UseIAM(config.GetUseIAM()),
+		objectstorage.CloudProvider(config.GetCloudProvider()),
+		objectstorage.IAMEndpoint(config.GetIAMEndpoint()),
+		objectstorage.UseVirtualHost(config.GetUseVirtualHost()),
+		objectstorage.RequestTimeout(config.GetRequestTimeoutMs()),
+		objectstorage.Region(config.GetRegion()),
+		objectstorage.CreateBucket(true),
+		objectstorage.GcpCredentialJSON(config.GetGcpCredentialJSON()),
 	)
 	return chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 }
