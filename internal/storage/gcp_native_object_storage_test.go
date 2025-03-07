@@ -25,27 +25,29 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 )
 
 func TestGcpNativeObjectStorage(t *testing.T) {
 	ctx := context.Background()
 	bucketName := "test-bucket"
-	config := config{
-		address:              "storage.gcs.127.0.0.1.nip.io:4443",
-		bucketName:           bucketName,
-		createBucket:         true,
-		useIAM:               false,
-		cloudProvider:        "gcpnative",
-		useSSL:               false,
-		gcpNativeWithoutAuth: true,
+	config := objectstorage.Config{
+		Address:              "storage.gcs.127.0.0.1.nip.io:4443",
+		BucketName:           bucketName,
+		CreateBucket:         true,
+		UseIAM:               false,
+		CloudProvider:        "gcpnative",
+		UseSSL:               false,
+		GcpNativeWithoutAuth: true,
 	}
 
 	t.Run("test initialize", func(t *testing.T) {
 		var err error
-		config.bucketName = ""
+		config.BucketName = ""
 		_, err = newGcpNativeObjectStorageWithConfig(ctx, &config)
 		assert.Error(t, err)
-		config.bucketName = bucketName
+		config.BucketName = bucketName
 		_, err = newGcpNativeObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
 	})
@@ -53,7 +55,7 @@ func TestGcpNativeObjectStorage(t *testing.T) {
 	t.Run("test load", func(t *testing.T) {
 		testCM, err := newGcpNativeObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
-		defer testCM.DeleteBucket(ctx, config.bucketName)
+		defer testCM.DeleteBucket(ctx, config.BucketName)
 
 		prepareTests := []struct {
 			key   string
@@ -67,7 +69,7 @@ func TestGcpNativeObjectStorage(t *testing.T) {
 		}
 
 		for _, test := range prepareTests {
-			err := testCM.PutObject(ctx, config.bucketName, test.key, bytes.NewReader(test.value),
+			err := testCM.PutObject(ctx, config.BucketName, test.key, bytes.NewReader(test.value),
 				int64(len(test.value)))
 			require.NoError(t, err)
 		}
@@ -91,19 +93,19 @@ func TestGcpNativeObjectStorage(t *testing.T) {
 		for _, test := range loadTests {
 			t.Run(test.description, func(t *testing.T) {
 				if test.isvalid {
-					got, err := testCM.GetObject(ctx, config.bucketName, test.loadKey, 0, 1024)
+					got, err := testCM.GetObject(ctx, config.BucketName, test.loadKey, 0, 1024)
 					assert.NoError(t, err)
 					contentData, err := io.ReadAll(got)
 					assert.NoError(t, err)
 					assert.Equal(t, len(contentData), len(test.expectedValue))
 					assert.Equal(t, test.expectedValue, contentData)
-					statSize, err := testCM.StatObject(ctx, config.bucketName, test.loadKey)
+					statSize, err := testCM.StatObject(ctx, config.BucketName, test.loadKey)
 					assert.NoError(t, err)
 					assert.Equal(t, statSize, int64(len(contentData)))
-					_, err = testCM.GetObject(ctx, config.bucketName, test.loadKey, 1, 1023)
+					_, err = testCM.GetObject(ctx, config.BucketName, test.loadKey, 1, 1023)
 					assert.NoError(t, err)
 				} else {
-					got, err := testCM.GetObject(ctx, config.bucketName, test.loadKey, 0, 1024)
+					got, err := testCM.GetObject(ctx, config.BucketName, test.loadKey, 0, 1024)
 					assert.Error(t, err)
 					assert.Empty(t, got)
 				}
@@ -124,12 +126,12 @@ func TestGcpNativeObjectStorage(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.bucketName,
+				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.BucketName,
 					test.prefix, false)
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				for _, key := range gotk {
-					err := testCM.RemoveObject(ctx, config.bucketName, key)
+					err := testCM.RemoveObject(ctx, config.BucketName, key)
 					assert.NoError(t, err)
 				}
 			})
@@ -139,7 +141,7 @@ func TestGcpNativeObjectStorage(t *testing.T) {
 	t.Run("test list", func(t *testing.T) {
 		testCM, err := newGcpNativeObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
-		defer testCM.DeleteBucket(ctx, config.bucketName)
+		defer testCM.DeleteBucket(ctx, config.BucketName)
 
 		prepareTests := []struct {
 			valid bool
@@ -155,11 +157,11 @@ func TestGcpNativeObjectStorage(t *testing.T) {
 		}
 
 		for _, test := range prepareTests {
-			err := testCM.PutObject(ctx, config.bucketName, test.key, bytes.NewReader(test.value),
+			err := testCM.PutObject(ctx, config.BucketName, test.key, bytes.NewReader(test.value),
 				int64(len(test.value)))
 			require.Nil(t, err)
 			if !test.valid {
-				err := testCM.RemoveObject(ctx, config.bucketName, test.key)
+				err := testCM.RemoveObject(ctx, config.BucketName, test.key)
 				require.Nil(t, err)
 			}
 		}
@@ -177,7 +179,7 @@ func TestGcpNativeObjectStorage(t *testing.T) {
 
 		for _, test := range insertWithPrefixTests {
 			t.Run(fmt.Sprintf("prefix: %s, recursive: %t", test.prefix, test.recursive), func(t *testing.T) {
-				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.bucketName,
+				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.BucketName,
 					test.prefix, test.recursive)
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
@@ -192,14 +194,14 @@ func TestGcpNativeObjectStorage(t *testing.T) {
 func TestGcpNativeReadFile(t *testing.T) {
 	ctx := context.Background()
 	bucketName := "test-bucket"
-	c := &config{
-		address:              "storage.gcs.127.0.0.1.nip.io:4443",
-		bucketName:           bucketName,
-		createBucket:         true,
-		useIAM:               false,
-		cloudProvider:        "gcpnative",
-		useSSL:               false,
-		gcpNativeWithoutAuth: true,
+	c := &objectstorage.Config{
+		Address:              "storage.gcs.127.0.0.1.nip.io:4443",
+		BucketName:           bucketName,
+		CreateBucket:         true,
+		UseIAM:               false,
+		CloudProvider:        "gcpnative",
+		UseSSL:               false,
+		GcpNativeWithoutAuth: true,
 	}
 	rcm, err := NewRemoteChunkManager(ctx, c)
 
