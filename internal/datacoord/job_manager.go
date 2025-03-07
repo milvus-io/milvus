@@ -73,6 +73,9 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 
 	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
+	tickerJsonKeyStats := time.NewTicker(Params.DataCoordCfg.JSONStatsTriggerInterval.GetAsDuration(time.Minute))
+	defer tickerJsonKeyStats.Stop()
+
 	for {
 		select {
 		case <-jm.ctx.Done():
@@ -82,6 +85,8 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 			jm.triggerSortStatsTask()
 			jm.triggerTextStatsTask()
 			jm.triggerBM25StatsTask()
+
+		case <-tickerJsonKeyStats.C:
 			jm.triggerJsonKeyIndexStatsTask()
 
 		case segID := <-getStatsTaskChSingleton():
@@ -207,8 +212,9 @@ func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
 		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
 			return seg.GetIsSorted() && needDoJsonKeyIndex(seg, needTriggerFieldIDs)
 		}))
+		taskCount := 0
 		for _, segment := range segments {
-			if jm.scheduler.pendingTasks.TaskCount() > Params.DataCoordCfg.StatsTaskTriggerCount.GetAsInt() {
+			if taskCount >= Params.DataCoordCfg.JSONStatsTriggerCount.GetAsInt() {
 				break
 			}
 			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true); err != nil {
@@ -216,6 +222,7 @@ func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
 					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 				continue
 			}
+			taskCount++
 		}
 	}
 }
