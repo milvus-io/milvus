@@ -566,12 +566,13 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
-            Assert(IsStringDataType(array_column[i].get_element_type()));
-            Assert(IsStringDataType(
-                static_cast<DataType>(schema_.element_type())));
             if (schema_.nullable() && !data->is_valid(i)) {
                 folly::SharedMutex::WriteHolder lock(mutex_);
                 null_offset_.push_back(offset);
+            } else {
+                Assert(IsStringDataType(array_column[i].get_element_type()));
+                Assert(IsStringDataType(
+                    static_cast<DataType>(schema_.element_type())));
             }
             std::vector<std::string> output;
             for (int64_t j = 0; j < array_column[i].length(); j++) {
