@@ -20,9 +20,14 @@ var errStopTimeout = errors.New("stop timeout")
 
 // exitWhenStopTimeout stops a component with timeout and exit progress when timeout.
 func exitWhenStopTimeout(stop func() error, timeout time.Duration) error {
-	err := dumpPprof(func() error { return stopWithTimeout(stop, timeout) })
+	err := stopWithTimeout(stop, timeout)
 	if errors.Is(err, errStopTimeout) {
-		log.Info("stop progress timeout, force exit")
+		start := time.Now()
+		dumpPprof()
+		log.Info("stop progress timeout, force exit",
+			zap.String("component", paramtable.GetRole()),
+			zap.Duration("cost", time.Since(start)),
+			zap.Error(err))
 		os.Exit(1)
 	}
 	return err
@@ -34,7 +39,8 @@ func stopWithTimeout(stop func() error, timeout time.Duration) error {
 	defer cancel()
 
 	future := conc.Go(func() (struct{}, error) {
-		return struct{}{}, dumpPprof(stop)
+		time.Sleep(10 * time.Second)
+		return struct{}{}, stop()
 	})
 	select {
 	case <-future.Inner():
@@ -51,14 +57,25 @@ type profileType struct {
 	dump     func(*os.File) error // Function to dump the profile data
 }
 
-// dumpPprof wraps the execution of a function with pprof profiling
-// It collects various performance profiles only if the execution fails
-func dumpPprof(exec func() error) error {
+// dumpPprof collects various performance profiles
+func dumpPprof() {
 	// Get pprof directory from configuration
 	pprofDir := paramtable.Get().ServiceParam.ProfileCfg.PprofPath.GetValue()
+
+	// Clean existing directory if not empty
+	if pprofDir != "" {
+		if err := os.RemoveAll(pprofDir); err != nil {
+			log.Error("failed to clean pprof directory",
+				zap.String("path", pprofDir),
+				zap.Error(err))
+		}
+	}
+
+	// Recreate directory with proper permissions
 	if err := os.MkdirAll(pprofDir, 0o755); err != nil {
-		log.Error("failed to create pprof directory", zap.Error(err))
-		return exec()
+		log.Error("failed to create pprof directory",
+			zap.String("path", pprofDir),
+			zap.Error(err))
 	}
 
 	// Generate base file path with timestamp
@@ -72,16 +89,6 @@ func dumpPprof(exec func() error) error {
 
 	// Define all profile types to be collected
 	profiles := []profileType{
-		{
-			name:     "cpu",
-			filename: baseFilePath + "_cpu.prof",
-			dump: func(f *os.File) error {
-				// Ensure no other CPU profiling is active before starting a new one.
-				// This prevents the "cpu profiling already in use" error.
-				pprof.StopCPUProfile()
-				return pprof.StartCPUProfile(f)
-			},
-		},
 		{
 			name:     "goroutine",
 			filename: baseFilePath + "_goroutine.prof",
@@ -124,7 +131,6 @@ func dumpPprof(exec func() error) error {
 				f.Close()
 				os.Remove(filename)
 			}
-			return exec()
 		}
 		files[p.filename] = f
 	}
@@ -135,33 +141,11 @@ func dumpPprof(exec func() error) error {
 		}
 	}()
 
-	// Start CPU profiling
-	cpuProfile := profiles[0]
-	if err := cpuProfile.dump(files[cpuProfile.filename]); err != nil {
-		log.Error("could not start CPU profiling", zap.Error(err))
-		return exec()
-	}
-	defer pprof.StopCPUProfile()
-
-	// Execute the target function
-	execErr := exec()
-
-	// Only save profiles and collect additional data if execution fails
-	if execErr != nil {
-		// Start from index 1 to skip CPU profile (already running)
-		for _, p := range profiles[1:] {
-			if err := p.dump(files[p.filename]); err != nil {
-				log.Error("could not write profile",
-					zap.String("profile", p.name),
-					zap.Error(err))
-			}
-		}
-	} else {
-		// Remove all files if execution succeeds
-		for _, p := range profiles {
-			os.Remove(p.filename)
+	for _, p := range profiles {
+		if err := p.dump(files[p.filename]); err != nil {
+			log.Error("could not write profile",
+				zap.String("profile", p.name),
+				zap.Error(err))
 		}
 	}
-
-	return execErr
 }
