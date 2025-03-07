@@ -176,7 +176,7 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
             arrays.push_back(std::move(arr));
             if (is_string) {
                 // element offsets size
-                size += sizeof(uint64_t) * arr.length();
+                size += sizeof(uint32_t) * arr.length();
             }
         }
         row_nums_ += array->length();
@@ -205,18 +205,20 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
 
     int offsets_num = row_nums_ + 1;
     int len_num = row_nums_;
-    int offset_start_pos =
+    uint64_t offset_start_pos =
         target_->tell() + sizeof(uint64_t) * (offsets_num + len_num);
-    std::vector<uint64_t> offsets;
-    std::vector<uint64_t> lens;
-    for (auto& arr : arrays) {
-        offsets.push_back(offset_start_pos);
-        lens.push_back(arr.length());
-        offset_start_pos +=
-            is_string ? sizeof(uint64_t) * arr.get_offsets().size() : 0;
+    std::vector<uint64_t> offsets(offsets_num);
+    std::vector<uint64_t> lens(len_num);
+    for (auto i = 0; i < arrays.size(); i++) {
+        auto& arr = arrays[i];
+        offsets[i] = offset_start_pos;
+        lens[i] = arr.length();
+        offset_start_pos += is_string ? sizeof(uint32_t) * lens[i] : 0;
         offset_start_pos += arr.byte_size();
     }
-    offsets.push_back(offset_start_pos);
+    if (offsets_num > 0) {
+        offsets[offsets_num - 1] = offset_start_pos;
+    }
 
     for (int i = 0; i < offsets.size(); i++) {
         if (i == offsets.size() - 1) {
@@ -229,8 +231,8 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
 
     for (auto& arr : arrays) {
         if (is_string) {
-            target_->write(arr.get_offsets().data(),
-                           arr.get_offsets().size() * sizeof(uint64_t));
+            target_->write(arr.get_offsets_data(),
+                           arr.length() * sizeof(uint32_t));
         }
         target_->write(arr.data(), arr.byte_size());
     }
