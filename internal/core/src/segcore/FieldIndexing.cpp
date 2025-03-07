@@ -117,7 +117,7 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
         "vec_base can't cast to ConcurrentVector type");
     auto num_chunk = vec_base->num_chunk();
     AssertInfo(ack_end <= num_chunk, "ack_end is bigger than num_chunk");
-    auto conf = get_build_params();
+    auto conf = get_build_params(field_meta_.get_data_type());
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
         const auto& chunk_data = vec_base->get_chunk_data(chunk_id);
@@ -176,7 +176,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
                                               int64_t new_data_dim,
                                               const VectorBase* field_raw_data,
                                               const void* data_source) {
-    auto conf = get_build_params();
+    auto conf = get_build_params(field_meta_.get_data_type());
     auto source = dynamic_cast<const ConcurrentVector<SparseFloatVector>*>(
         field_raw_data);
     AssertInfo(source,
@@ -236,7 +236,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                "Data type of vector field is not in (VECTOR_FLOAT, "
                "VECTOR_FLOAT16,VECTOR_BFLOAT16)");
     auto dim = field_meta_.get_dim();
-    auto conf = get_build_params();
+    auto conf = get_build_params(field_meta_.get_data_type());
     auto size_per_chunk = field_raw_data->get_size_per_chunk();
     //append vector [vector_id_beg, vector_id_end] into index
     //build index [vector_id_beg, build_threshold) when index not exist
@@ -339,8 +339,8 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
 }
 
 knowhere::Json
-VectorFieldIndexing::get_build_params() const {
-    auto config = config_->GetBuildBaseParams();
+VectorFieldIndexing::get_build_params(DataType data_type) const {
+    auto config = config_->GetBuildBaseParams(data_type);
     if (!IsSparseFloatVectorDataType(field_meta_.get_data_type())) {
         config[knowhere::meta::DIM] = std::to_string(field_meta_.get_dim());
     }

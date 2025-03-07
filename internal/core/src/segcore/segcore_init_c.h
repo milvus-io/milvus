@@ -46,6 +46,12 @@ SegcoreSetRefineRatio(const float);
 void
 SegcoreInterminDenseIndexType(const char*);
 
+CStatus
+SegcoreSetDenseVectorInterminIndexRefineType(const char*);
+
+void
+SegcoreSetDenseVectorInterminIndexLosslessRefineFlag(const bool);
+
 // return value must be freed by the caller
 char*
 SegcoreSetSimdType(const char*);
