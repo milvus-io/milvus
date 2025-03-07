@@ -53,13 +53,11 @@ class ChunkedColumnBase : public ColumnBase {
  public:
     ChunkedColumnBase() = default;
     // memory mode ctor
-    ChunkedColumnBase(const FieldMeta& field_meta) {
-        if (field_meta.is_nullable()) {
-            nullable_ = true;
-        }
+    explicit ChunkedColumnBase(const FieldMeta& field_meta) {
+        nullable_ = field_meta.is_nullable();
     }
 
-    virtual ~ChunkedColumnBase(){};
+    virtual ~ChunkedColumnBase() {};
 
     virtual void
     AppendBatch(const FieldDataPtr data) override {
@@ -246,7 +244,9 @@ class ChunkedColumn : public ChunkedColumnBase {
         : ChunkedColumnBase(field_meta) {
     }
 
-    explicit ChunkedColumn(const std::vector<std::shared_ptr<Chunk>>& chunks) {
+    explicit ChunkedColumn(const FieldMeta& field_meta,
+                           const std::vector<std::shared_ptr<Chunk>>& chunks)
+        : ChunkedColumnBase(field_meta) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }
@@ -270,7 +270,9 @@ class ChunkedSparseFloatColumn : public ChunkedColumnBase {
     }
 
     explicit ChunkedSparseFloatColumn(
-        const std::vector<std::shared_ptr<Chunk>>& chunks) {
+        const FieldMeta& field_meta,
+        const std::vector<std::shared_ptr<Chunk>>& chunks)
+        : ChunkedColumnBase(field_meta) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }
@@ -315,7 +317,9 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     }
 
     explicit ChunkedVariableColumn(
-        const std::vector<std::shared_ptr<Chunk>>& chunks) {
+        const FieldMeta& field_meta,
+        const std::vector<std::shared_ptr<Chunk>>& chunks)
+        : ChunkedColumnBase(field_meta) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }
@@ -393,7 +397,9 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
     }
 
     explicit ChunkedArrayColumn(
-        const std::vector<std::shared_ptr<Chunk>>& chunks) {
+        const FieldMeta& field_meta,
+        const std::vector<std::shared_ptr<Chunk>>& chunks)
+        : ChunkedColumnBase(field_meta) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }
