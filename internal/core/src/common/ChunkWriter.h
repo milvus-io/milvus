@@ -22,7 +22,6 @@
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 namespace milvus {
-
 class ChunkWriterBase {
  public:
     explicit ChunkWriterBase(bool nullable) : nullable_(nullable) {
@@ -87,8 +86,11 @@ class ChunkWriter final : public ChunkWriterBase {
             row_nums += batch->num_rows();
             auto data = batch->column(0);
             auto array = std::dynamic_pointer_cast<ArrowType>(data);
-            auto null_bitmap_n = (data->length() + 7) / 8;
-            size += null_bitmap_n + array->length() * dim_ * sizeof(T);
+            if (nullable_) {
+                auto null_bitmap_n = (data->length() + 7) / 8;
+                size += null_bitmap_n;
+            }
+            size += array->length() * dim_ * sizeof(T);
         }
 
         row_nums_ = row_nums;
@@ -97,17 +99,21 @@ class ChunkWriter final : public ChunkWriterBase {
         } else {
             target_ = std::make_shared<MemChunkTarget>(size);
         }
-
-        // chunk layout: nullbitmap, data1, data2, ..., datan
-        for (auto& batch : batch_vec) {
-            auto data = batch->column(0);
-            auto null_bitmap = data->null_bitmap_data();
-            auto null_bitmap_n = (data->length() + 7) / 8;
-            if (null_bitmap) {
-                target_->write(null_bitmap, null_bitmap_n);
-            } else {
-                std::vector<uint8_t> null_bitmap(null_bitmap_n, 0xff);
-                target_->write(null_bitmap.data(), null_bitmap_n);
+        // Chunk layout:
+        // 1. Null bitmap (if nullable_=true): Indicates which values are null
+        // 2. Data values: Contiguous storage of data elements in the order:
+        //    data1, data2, ..., dataN where each data element has size dim_*sizeof(T)
+        if (nullable_) {
+            for (auto& batch : batch_vec) {
+                auto data = batch->column(0);
+                auto null_bitmap = data->null_bitmap_data();
+                auto null_bitmap_n = (data->length() + 7) / 8;
+                if (null_bitmap) {
+                    target_->write(null_bitmap, null_bitmap_n);
+                } else {
+                    std::vector<uint8_t> null_bitmap(null_bitmap_n, 0xff);
+                    target_->write(null_bitmap.data(), null_bitmap_n);
+                }
             }
         }
 
