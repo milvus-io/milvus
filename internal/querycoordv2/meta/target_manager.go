@@ -72,6 +72,7 @@ type TargetManagerInterface interface {
 	GetTargetJSON(ctx context.Context, scope TargetScope, collectionID int64) string
 	GetPartitions(ctx context.Context, collectionID int64, scope TargetScope) ([]int64, error)
 	IsCurrentTargetReady(ctx context.Context, collectionID int64) bool
+	GetCollectionRowCount(ctx context.Context, collectionID int64, scope TargetScope) int64
 }
 
 type TargetManager struct {
@@ -608,4 +609,12 @@ func (mgr *TargetManager) IsCurrentTargetReady(ctx context.Context, collectionID
 	}
 
 	return target.Ready()
+}
+
+func (mgr *TargetManager) GetCollectionRowCount(ctx context.Context, collectionID int64, scope TargetScope) int64 {
+	target := mgr.getCollectionTarget(scope, collectionID)
+	if len(target) == 0 {
+		return 0
+	}
+	return target[0].GetRowCount()
 }
