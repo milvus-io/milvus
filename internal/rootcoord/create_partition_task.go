@@ -46,7 +46,7 @@ func (t *createPartitionTask) Prepare(ctx context.Context) error {
 		return err
 	}
 	t.collMeta = collMeta
-	return checkGeneralCapacity(ctx, 0, 1, 0, t.core)
+	return checkPartitionNumber(ctx, 1, t.core)
 }
 
 func (t *createPartitionTask) Execute(ctx context.Context) error {
