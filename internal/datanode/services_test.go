@@ -109,7 +109,7 @@ func (s *DataNodeServicesSuite) SetupTest() {
 	err = s.node.Start()
 	s.Require().NoError(err)
 
-	s.node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/milvus_test/datanode"))
+	s.node.chunkManager = storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/milvus_test/datanode"))
 	paramtable.SetNodeID(1)
 }
 

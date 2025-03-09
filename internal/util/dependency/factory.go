@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -42,7 +43,7 @@ func NewDefaultFactory(standAlone bool) *DefaultFactory {
 		standAlone:       standAlone,
 		msgStreamFactory: msgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactory("local",
-			storage.RootPath("/tmp/milvus")),
+			objectstorage.RootPath("/tmp/milvus")),
 	}
 }
 

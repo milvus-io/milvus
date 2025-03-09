@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -1364,16 +1365,16 @@ func Min(a, b int64) int64 {
 
 func NewTestChunkManagerFactory(params *paramtable.ComponentParam, rootPath string) *ChunkManagerFactory {
 	return NewChunkManagerFactory("minio",
-		RootPath(rootPath),
-		Address(params.MinioCfg.Address.GetValue()),
-		AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
-		SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
-		UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
-		BucketName(params.MinioCfg.BucketName.GetValue()),
-		UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
-		CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
-		IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
-		CreateBucket(true))
+		objectstorage.RootPath(rootPath),
+		objectstorage.Address(params.MinioCfg.Address.GetValue()),
+		objectstorage.AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
+		objectstorage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
+		objectstorage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
+		objectstorage.BucketName(params.MinioCfg.BucketName.GetValue()),
+		objectstorage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
+		objectstorage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
+		objectstorage.IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
+		objectstorage.CreateBucket(true))
 }
 
 func GetFilesSize(ctx context.Context, paths []string, cm ChunkManager) (int64, error) {

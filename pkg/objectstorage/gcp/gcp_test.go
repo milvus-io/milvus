@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/oauth2"

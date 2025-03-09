@@ -27,7 +27,7 @@ type BinlogIOSuite struct {
 
 func (s *BinlogIOSuite) SetupTest() {
 	paramtable.Init()
-	s.cm = storage.NewLocalChunkManager(storage.RootPath(binlogIOTestDir))
+	s.cm = storage.NewLocalChunkManager(objectstorage.RootPath(binlogIOTestDir))
 
 	s.b = NewBinlogIO(s.cm)
 }

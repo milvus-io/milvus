@@ -127,7 +127,7 @@ func TestDataNode(t *testing.T) {
 
 	defer node.Stop()
 
-	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/milvus_test/datanode"))
+	node.chunkManager = storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/milvus_test/datanode"))
 	paramtable.SetNodeID(1)
 
 	defer cancel()
