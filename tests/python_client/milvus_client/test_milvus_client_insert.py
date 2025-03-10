@@ -793,6 +793,39 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
         self.upsert(client, collection_name, data=rows, partition_name=partition_name,
                     check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_milvus_client_insert_array_element_null(self, nullable):
+        """
+        target: test search with null expression on each key of json
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(nullable_field_name, DataType.ARRAY, element_type=DataType.INT64, max_capacity=12,
+                         max_length=64, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        vectors = cf.gen_vectors(default_nb, dim)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: vectors[i],
+                 nullable_field_name: [None, 2, 3]} for i in range(default_nb)]
+        error = {ct.err_code: 1,
+                 ct.err_msg: "The Input data type is inconsistent with defined schema, {nullable_field} field "
+                             "should be a array, but got a {<class 'list'>} instead."}
+        self.insert(client, collection_name, rows,
+                    check_task=CheckTasks.err_res,
+                    check_items=error)
+
 
 class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
     """ Test case of search interface """

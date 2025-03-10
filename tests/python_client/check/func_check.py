@@ -123,6 +123,9 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.check_insert_result:
             # check `insert` interface response
             result = self.check_insert_response(check_items=self.check_items)
+        elif self.check_task == CheckTasks.check_describe_index_property:
+            # describe collection interface(high level api) response check
+            result = self.check_describe_index_property(self.response, self.func_name, self.check_items)
 
         # Add check_items here if something new need verify
 
@@ -730,5 +733,36 @@ class ResponseChecker:
         # check insert count
         error_message = "[CheckFunc] Insert count does not meet expectations, response:{0} != expected:{1}"
         assert self.response.insert_count == real, error_message.format(self.response.insert_count, real)
+
+        return True
+
+    @staticmethod
+    def check_describe_index_property(res, func_name, check_items):
+        """
+        According to the check_items to check collection properties of res, which return from func_name
+        :param res: actual response of init collection
+        :type res: Collection
+
+        :param func_name: init collection API
+        :type func_name: str
+
+        :param check_items: which items expected to be checked, including name, schema, num_entities, primary
+        :type check_items: dict, {check_key: expected_value}
+        """
+        exp_func_name = "describe_index"
+        if func_name != exp_func_name:
+            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+        if len(check_items) == 0:
+            raise Exception("No expect values found in the check task")
+        if check_items.get("json_cast_type", None) is not None:
+            assert res["json_cast_type"] == check_items.get("json_cast_type")
+        if check_items.get("index_type", None) is not None:
+            assert res["index_type"] == check_items.get("index_type")
+        if check_items.get("json_path", None) is not None:
+            assert res["json_path"] == check_items.get("json_path")
+        if check_items.get("field_name", None) is not None:
+            assert res["field_name"] == check_items.get("field_name")
+        if check_items.get("index_name", None) is not None:
+            assert res["index_name"] == check_items.get("index_name")
 
         return True
