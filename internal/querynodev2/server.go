@@ -233,6 +233,9 @@ func (node *QueryNode) InitSegcore() error {
 	cExprBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.GetAsInt64())
 	C.InitDefaultExprEvalBatchSize(cExprBatchSize)
 
+	cOptimizeExprEnabled := C.bool(paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool())
+	C.InitDefaultOptimizeExprEnable(cOptimizeExprEnabled)
+
 	cJSONIndexMemoryBudgetInTantivy := C.int64_t(paramtable.Get().QueryNodeCfg.JSONIndexMemoryBudgetInTantivy.GetAsInt64() * 1024 * 1024)
 	C.InitDefaultJSONKeyIndexMemoryBudget(cJSONIndexMemoryBudgetInTantivy)
 
