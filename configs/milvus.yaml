@@ -557,6 +557,12 @@ dataCoord:
       # The size threshold in MB, if the total size of growing segments of each shard 
       # exceeds this threshold, the largest growing segment will be sealed.
       growingSegmentsMemSize: 4096
+      # If the total entry number of l0 logs of each shard 
+      # exceeds this threshold, the earliest growing segments will be sealed.
+      blockingL0EntryNum: 5000000
+      # The size threshold in MB, if the total entry number of l0 logs of each shard 
+      # exceeds this threshold, the earliest growing segments will be sealed.
+      blockingL0SizeInMB: 64
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
   # Switch value to control if to enable segment compaction. 
