@@ -897,6 +897,8 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			zap.Int("# of dropped segments", len(channelInfo.GetDroppedSegmentIds())),
 			zap.Int("# of indexed segments", len(channelInfo.GetIndexedSegmentIds())),
 			zap.Int("# of l0 segments", len(channelInfo.GetLevelZeroSegmentIds())),
+			zap.Time("# of check point", tsoutil.PhysicalTime(channelInfo.GetSeekPosition().GetTimestamp())),
+			zap.Time("# of delete check point", tsoutil.PhysicalTime(channelInfo.GetDeleteCheckpoint().GetTimestamp())),
 		)
 		flushedIDs.Insert(channelInfo.GetFlushedSegmentIds()...)
 	}

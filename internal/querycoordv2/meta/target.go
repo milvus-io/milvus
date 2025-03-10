@@ -111,6 +111,7 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 				UnflushedSegmentIds: t.GetGrowingSegmentIDs(),
 				FlushedSegmentIds:   lo.Keys(segments),
 				DroppedSegmentIds:   t.GetDroppedSegmentIDs(),
+				DeleteCheckpoint:    t.GetDeleteCheckpoint(),
 			},
 		}
 	}
@@ -173,6 +174,7 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 			GrowingSegmentIDs: channel.GetUnflushedSegmentIds(),
 			DroppedSegmentIDs: channel.GetDroppedSegmentIds(),
 			PartitionTargets:  lo.Values(partitionTargets),
+			DeleteCheckpoint:  channel.GetDeleteCheckpoint(),
 		}
 	}
 

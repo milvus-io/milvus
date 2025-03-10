@@ -533,7 +533,7 @@ func (sd *shardDelegator) LoadL0(ctx context.Context, infos []*querypb.SegmentLo
 	}
 
 	segmentIDs = lo.Map(loaded, func(segment segments.Segment, _ int) int64 { return segment.ID() })
-	log.Info("load growing segments done", zap.Int64s("segmentIDs", segmentIDs))
+	log.Info("load l0 segments done", zap.Int64s("segmentIDs", segmentIDs))
 
 	sd.deleteBuffer.RegisterL0(loaded...)
 	// register l0 segment
@@ -623,6 +623,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	for _, info := range infos {
 		log := log.With(
 			zap.Int64("segmentID", info.GetSegmentID()),
+			zap.Time("startPosition", tsoutil.PhysicalTime(info.GetStartPosition().GetTimestamp())),
 		)
 		candidate := idCandidates[info.GetSegmentID()]
 		// after L0 segment feature
@@ -651,8 +652,11 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		// }
 		// list buffered delete
 		deleteRecords := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
+		tsHitDeleteRows := int64(0)
+		start := time.Now()
 		for _, entry := range deleteRecords {
 			for _, record := range entry.Data {
+				tsHitDeleteRows += int64(len(record.DeleteData.Pks))
 				if record.PartitionID != common.AllPartitionsID && candidate.Partition() != record.PartitionID {
 					continue
 				}
@@ -676,7 +680,11 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		}
 		// if delete count not empty, apply
 		if deleteData.RowCount > 0 {
-			log.Info("forward delete to worker...", zap.Int64("deleteRowNum", deleteData.RowCount))
+			log.Info("forward delete to worker...",
+				zap.Int64("tsHitDeleteRowNum", tsHitDeleteRows),
+				zap.Int64("bfHitDeleteRowNum", deleteData.RowCount),
+				zap.Int64("bfCost", time.Since(start).Milliseconds()),
+			)
 			err := worker.Delete(ctx, &querypb.DeleteRequest{
 				Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(targetNodeID)),
 				CollectionId: info.GetCollectionID(),
@@ -993,8 +1001,21 @@ func (sd *shardDelegator) SyncTargetVersion(
 	}
 	sd.distribution.SyncTargetVersion(newVersion, partitions, growingInTarget, sealedInTarget, redundantGrowingIDs)
 	start := time.Now()
+	sizeBeforeClean, _ := sd.deleteBuffer.Size()
 	sd.deleteBuffer.UnRegister(deleteSeekPos.GetTimestamp())
-	log.Info("clean delete buffer cost", zap.Duration("cost", time.Since(start)))
+	sizeAfterClean, _ := sd.deleteBuffer.Size()
+
+	if sizeAfterClean < sizeBeforeClean {
+		log.Info("clean delete buffer",
+			zap.String("channel", sd.vchannelName),
+			zap.Time("deleteSeekPos", tsoutil.PhysicalTime(deleteSeekPos.GetTimestamp())),
+			zap.Time("channelCP", tsoutil.PhysicalTime(checkpoint.GetTimestamp())),
+			zap.Int64("sizeBeforeClean", sizeBeforeClean),
+			zap.Int64("sizeAfterClean", sizeAfterClean),
+			zap.Duration("cost", time.Since(start)),
+		)
+	}
+
 	sd.RefreshLevel0DeletionStats()
 }
 
