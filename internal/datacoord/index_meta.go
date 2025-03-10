@@ -240,7 +240,7 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
 }
 
-func checkJsonParams(index *model.Index, req *indexpb.CreateIndexRequest) bool {
+func checkIdenticalJson(index *model.Index, req *indexpb.CreateIndexRequest) bool {
 	// Skip error handling since json path existence is guaranteed in CreateIndex
 	jsonPath1, _ := getIndexParam(index.IndexParams, common.JSONPathKey)
 	jsonPath2, _ := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
@@ -355,7 +355,7 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 		}
 		if req.IndexName == index.IndexName {
 			if req.FieldID == index.FieldID && checkParams(index, req) &&
-				/*only check json params when it is json index*/ (!isJson || checkJsonParams(index, req)) {
+				/*only check json params when it is json index*/ (!isJson || checkIdenticalJson(index, req)) {
 				return index.IndexID, nil
 			}
 			errMsg := "at most one distinct index is allowed per field"

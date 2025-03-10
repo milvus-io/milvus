@@ -270,7 +270,7 @@ struct TantivyIndexWrapper {
             auto res = RustResultWrapper(tantivy_index_add_json(
                 writer_, array[i].data().data(), offset_begin + i));
             AssertInfo(res.result_->success,
-                       "failed to add string: {}",
+                       "failed to add json: {}",
                        res.result_->error);
         }
     }
