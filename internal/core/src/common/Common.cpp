@@ -32,6 +32,7 @@ int64_t EXEC_EVAL_EXPR_BATCH_SIZE = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
 int64_t JSON_INDEX_MEMORY_BUDGET = DEFAULT_JSON_INDEX_MEMORY_BUDGET;
 int64_t JSON_INDEX_COMMIT_INTERVAL = DEFAULT_JSON_INDEX_COMMIT_INTERVAL;
 bool JSON_INDEX_ENABLED = DEFAULT_JSON_INDEX_ENABLED;
+bool SCALAR_INDEX_HAS_RAW_DATA = DEFAULT_SCALAR_INDEX_HAS_RAW_DATA;
 
 void
 SetIndexSliceSize(const int64_t size) {
@@ -91,4 +92,10 @@ SetDefaultJSONKeyIndexEnable(bool val) {
     LOG_INFO("set default json key index enable: {}", JSON_INDEX_ENABLED);
 }
 
+void
+SetDefaultScalarIndexHasRawData(bool val) {
+    SCALAR_INDEX_HAS_RAW_DATA = val;
+    LOG_INFO("set default scalar index has raw data: {}",
+             SCALAR_INDEX_HAS_RAW_DATA);
+}
 }  // namespace milvus
