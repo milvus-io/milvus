@@ -106,6 +106,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         self.drop_database(client, db_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="pymilvus issue 2683")
     @pytest.mark.parametrize("properties", ["hhh", []])
     def test_milvus_client_create_database_with_invalid_properties(self, properties):
         """
@@ -120,7 +121,7 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         db_name = cf.gen_unique_str(db_prefix)
         error = {ct.err_code: 1, ct.err_msg: f"Unexpected error, message=<unsupported operand type(s) for +: 'float' and '{type(properties).__name__}'>"}
         self.create_database(client, db_name, properties,
-                               check_task=CheckTasks.err_res, check_items=error)
+                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("properties", [{"database.rep.number": 3}])
