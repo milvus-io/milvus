@@ -922,7 +922,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	var validDataMap map[string][]bool
-	err, httpReq.Data, validDataMap = checkAndSetData(string(body.([]byte)), collSchema)
+	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Error(err), zap.String("body", string(body.([]byte))))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -996,7 +996,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	var validDataMap map[string][]bool
-	err, httpReq.Data, validDataMap = checkAndSetData(string(body.([]byte)), collSchema)
+	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
