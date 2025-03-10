@@ -204,9 +204,10 @@ func defaultSegmentSealPolicy() []SegmentSealPolicy {
 	}
 }
 
-func defaultChannelSealPolicy() []channelSealPolicy {
+func defaultChannelSealPolicy(meta *meta) []channelSealPolicy {
 	return []channelSealPolicy{
 		sealByTotalGrowingSegmentsSize(),
+		sealByBlockingL0(meta),
 	}
 }
 
@@ -226,7 +227,7 @@ func newSegmentManager(meta *meta, allocator allocator.Allocator, opts ...allocO
 		estimatePolicy:      defaultCalUpperLimitPolicy(),
 		allocPolicy:         defaultAllocatePolicy(),
 		segmentSealPolicies: defaultSegmentSealPolicy(),
-		channelSealPolicies: defaultChannelSealPolicy(),
+		channelSealPolicies: defaultChannelSealPolicy(meta),
 		flushPolicy:         defaultFlushPolicy(),
 	}
 	for _, opt := range opts {
