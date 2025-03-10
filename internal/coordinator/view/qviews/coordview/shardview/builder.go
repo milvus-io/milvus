@@ -33,10 +33,3 @@ func (qb *QueryViewAtCoordBuilder) Build() *queryView {
 	qb.inner = nil
 	return newPreparingQueryView(c)
 }
-
-func newPreparingQueryView(*viewpb.QueryViewOfShard) *queryView {
-	return &queryView{}
-}
-
-// TODO: Implement at next PR
-type queryView struct{}
