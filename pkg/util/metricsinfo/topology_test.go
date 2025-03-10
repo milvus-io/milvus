@@ -147,8 +147,6 @@ func TestDataClusterTopology_Codec(t *testing.T) {
 					ID:   3,
 				},
 			},
-		},
-		ConnectedIndexNodes: []IndexNodeInfos{
 			{
 				BaseComponentInfos: BaseComponentInfos{
 					Name: ConstructComponentName(typeutil.IndexNodeRole, 4),
@@ -172,12 +170,8 @@ func TestDataClusterTopology_Codec(t *testing.T) {
 	assert.Equal(t, nil, err)
 	assert.Equal(t, topology1.Self, topology2.Self)
 	assert.Equal(t, len(topology1.ConnectedDataNodes), len(topology2.ConnectedDataNodes))
-	assert.Equal(t, len(topology1.ConnectedIndexNodes), len(topology2.ConnectedIndexNodes))
 	for i := range topology1.ConnectedDataNodes {
 		assert.Equal(t, topology1.ConnectedDataNodes[i], topology2.ConnectedDataNodes[i])
-	}
-	for i := range topology1.ConnectedIndexNodes {
-		assert.Equal(t, topology1.ConnectedIndexNodes[i], topology2.ConnectedIndexNodes[i])
 	}
 }
 
@@ -203,8 +197,6 @@ func TestDataCoordTopology_Codec(t *testing.T) {
 						ID:   3,
 					},
 				},
-			},
-			ConnectedIndexNodes: []IndexNodeInfos{
 				{
 					BaseComponentInfos: BaseComponentInfos{
 						Name: ConstructComponentName(typeutil.IndexNodeRole, 4),
@@ -237,12 +229,8 @@ func TestDataCoordTopology_Codec(t *testing.T) {
 	assert.Equal(t, nil, err)
 	assert.Equal(t, topology1.Cluster.Self, topology2.Cluster.Self)
 	assert.Equal(t, len(topology1.Cluster.ConnectedDataNodes), len(topology2.Cluster.ConnectedDataNodes))
-	assert.Equal(t, len(topology1.Cluster.ConnectedIndexNodes), len(topology2.Cluster.ConnectedIndexNodes))
 	for i := range topology1.Cluster.ConnectedDataNodes {
 		assert.Equal(t, topology1.Cluster.ConnectedDataNodes[i], topology2.Cluster.ConnectedDataNodes[i])
-	}
-	for i := range topology1.Cluster.ConnectedIndexNodes {
-		assert.Equal(t, topology1.Cluster.ConnectedIndexNodes[i], topology2.Cluster.ConnectedIndexNodes[i])
 	}
 	assert.Equal(t, topology1.Connections.Name, topology2.Connections.Name)
 	assert.Equal(t, len(topology1.Connections.ConnectedComponents), len(topology1.Connections.ConnectedComponents))

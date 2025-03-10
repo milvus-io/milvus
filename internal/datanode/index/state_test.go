@@ -14,28 +14,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package index
 
-type TaskState int32
+import (
+	"testing"
 
-const (
-	TaskStateNormal  TaskState = 0
-	TaskStateAbandon TaskState = 1
-	TaskStateRetry   TaskState = 2
-	TaskStateFailed  TaskState = 3
+	"github.com/stretchr/testify/assert"
 )
 
-var TaskStateNames = map[TaskState]string{
-	0: "Normal",
-	1: "Abandon",
-	2: "Retry",
-	3: "Failed",
-}
-
-func (x TaskState) String() string {
-	ret, ok := TaskStateNames[x]
-	if !ok {
-		return "None"
-	}
-	return ret
+func TestTaskState_String(t *testing.T) {
+	assert.Equal(t, TaskStateNormal.String(), "Normal")
+	assert.Equal(t, TaskStateAbandon.String(), "Abandon")
+	assert.Equal(t, TaskStateRetry.String(), "Retry")
+	assert.Equal(t, TaskStateFailed.String(), "Failed")
+	assert.Equal(t, TaskState(100).String(), "None")
 }

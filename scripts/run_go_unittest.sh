@@ -132,11 +132,6 @@ go test -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/datanode/..."
 
 }
 
-function test_indexnode()
-{
-go test -race -cover -tags dynamic,test "${MILVUS_DIR}/indexnode/..." -failfast -count=1 -ldflags="-r ${RPATH}"
-}
-
 function test_rootcoord()
 {
 go test -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/rootcoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
@@ -181,7 +176,6 @@ function test_all()
 test_proxy
 test_querynode
 test_datanode
-test_indexnode
 test_rootcoord
 test_querycoord
 test_datacoord
@@ -208,9 +202,6 @@ case "${TEST_TAG}" in
         ;;
     datanode)
 	test_datanode
-        ;;
-    indexnode)
-	test_indexnode
         ;;
     rootcoord)
 	test_rootcoord

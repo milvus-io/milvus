@@ -9,8 +9,6 @@ package workerpb
 import (
 	context "context"
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -22,32 +20,23 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	IndexNode_GetComponentStates_FullMethodName   = "/milvus.proto.index.IndexNode/GetComponentStates"
-	IndexNode_GetStatisticsChannel_FullMethodName = "/milvus.proto.index.IndexNode/GetStatisticsChannel"
-	IndexNode_CreateJob_FullMethodName            = "/milvus.proto.index.IndexNode/CreateJob"
-	IndexNode_QueryJobs_FullMethodName            = "/milvus.proto.index.IndexNode/QueryJobs"
-	IndexNode_DropJobs_FullMethodName             = "/milvus.proto.index.IndexNode/DropJobs"
-	IndexNode_GetJobStats_FullMethodName          = "/milvus.proto.index.IndexNode/GetJobStats"
-	IndexNode_ShowConfigurations_FullMethodName   = "/milvus.proto.index.IndexNode/ShowConfigurations"
-	IndexNode_GetMetrics_FullMethodName           = "/milvus.proto.index.IndexNode/GetMetrics"
-	IndexNode_CreateJobV2_FullMethodName          = "/milvus.proto.index.IndexNode/CreateJobV2"
-	IndexNode_QueryJobsV2_FullMethodName          = "/milvus.proto.index.IndexNode/QueryJobsV2"
-	IndexNode_DropJobsV2_FullMethodName           = "/milvus.proto.index.IndexNode/DropJobsV2"
+	IndexNode_CreateJob_FullMethodName   = "/milvus.proto.index.IndexNode/CreateJob"
+	IndexNode_QueryJobs_FullMethodName   = "/milvus.proto.index.IndexNode/QueryJobs"
+	IndexNode_DropJobs_FullMethodName    = "/milvus.proto.index.IndexNode/DropJobs"
+	IndexNode_GetJobStats_FullMethodName = "/milvus.proto.index.IndexNode/GetJobStats"
+	IndexNode_CreateJobV2_FullMethodName = "/milvus.proto.index.IndexNode/CreateJobV2"
+	IndexNode_QueryJobsV2_FullMethodName = "/milvus.proto.index.IndexNode/QueryJobsV2"
+	IndexNode_DropJobsV2_FullMethodName  = "/milvus.proto.index.IndexNode/DropJobsV2"
 )
 
 // IndexNodeClient is the client API for IndexNode service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type IndexNodeClient interface {
-	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
-	GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	CreateJob(ctx context.Context, in *CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	QueryJobs(ctx context.Context, in *QueryJobsRequest, opts ...grpc.CallOption) (*QueryJobsResponse, error)
 	DropJobs(ctx context.Context, in *DropJobsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GetJobStats(ctx context.Context, in *GetJobStatsRequest, opts ...grpc.CallOption) (*GetJobStatsResponse, error)
-	ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error)
-	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
-	GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error)
 	CreateJobV2(ctx context.Context, in *CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error)
 	QueryJobsV2(ctx context.Context, in *QueryJobsV2Request, opts ...grpc.CallOption) (*QueryJobsV2Response, error)
 	DropJobsV2(ctx context.Context, in *DropJobsV2Request, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -59,24 +48,6 @@ type indexNodeClient struct {
 
 func NewIndexNodeClient(cc grpc.ClientConnInterface) IndexNodeClient {
 	return &indexNodeClient{cc}
-}
-
-func (c *indexNodeClient) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
-	out := new(milvuspb.ComponentStates)
-	err := c.cc.Invoke(ctx, IndexNode_GetComponentStates_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *indexNodeClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	out := new(milvuspb.StringResponse)
-	err := c.cc.Invoke(ctx, IndexNode_GetStatisticsChannel_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *indexNodeClient) CreateJob(ctx context.Context, in *CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -115,24 +86,6 @@ func (c *indexNodeClient) GetJobStats(ctx context.Context, in *GetJobStatsReques
 	return out, nil
 }
 
-func (c *indexNodeClient) ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
-	out := new(internalpb.ShowConfigurationsResponse)
-	err := c.cc.Invoke(ctx, IndexNode_ShowConfigurations_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *indexNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	out := new(milvuspb.GetMetricsResponse)
-	err := c.cc.Invoke(ctx, IndexNode_GetMetrics_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *indexNodeClient) CreateJobV2(ctx context.Context, in *CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, IndexNode_CreateJobV2_FullMethodName, in, out, opts...)
@@ -164,15 +117,10 @@ func (c *indexNodeClient) DropJobsV2(ctx context.Context, in *DropJobsV2Request,
 // All implementations should embed UnimplementedIndexNodeServer
 // for forward compatibility
 type IndexNodeServer interface {
-	GetComponentStates(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)
-	GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)
 	CreateJob(context.Context, *CreateJobRequest) (*commonpb.Status, error)
 	QueryJobs(context.Context, *QueryJobsRequest) (*QueryJobsResponse, error)
 	DropJobs(context.Context, *DropJobsRequest) (*commonpb.Status, error)
 	GetJobStats(context.Context, *GetJobStatsRequest) (*GetJobStatsResponse, error)
-	ShowConfigurations(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
-	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
-	GetMetrics(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	CreateJobV2(context.Context, *CreateJobV2Request) (*commonpb.Status, error)
 	QueryJobsV2(context.Context, *QueryJobsV2Request) (*QueryJobsV2Response, error)
 	DropJobsV2(context.Context, *DropJobsV2Request) (*commonpb.Status, error)
@@ -182,12 +130,6 @@ type IndexNodeServer interface {
 type UnimplementedIndexNodeServer struct {
 }
 
-func (UnimplementedIndexNodeServer) GetComponentStates(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetComponentStates not implemented")
-}
-func (UnimplementedIndexNodeServer) GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetStatisticsChannel not implemented")
-}
 func (UnimplementedIndexNodeServer) CreateJob(context.Context, *CreateJobRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateJob not implemented")
 }
@@ -199,12 +141,6 @@ func (UnimplementedIndexNodeServer) DropJobs(context.Context, *DropJobsRequest) 
 }
 func (UnimplementedIndexNodeServer) GetJobStats(context.Context, *GetJobStatsRequest) (*GetJobStatsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetJobStats not implemented")
-}
-func (UnimplementedIndexNodeServer) ShowConfigurations(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ShowConfigurations not implemented")
-}
-func (UnimplementedIndexNodeServer) GetMetrics(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetMetrics not implemented")
 }
 func (UnimplementedIndexNodeServer) CreateJobV2(context.Context, *CreateJobV2Request) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateJobV2 not implemented")
@@ -225,42 +161,6 @@ type UnsafeIndexNodeServer interface {
 
 func RegisterIndexNodeServer(s grpc.ServiceRegistrar, srv IndexNodeServer) {
 	s.RegisterService(&IndexNode_ServiceDesc, srv)
-}
-
-func _IndexNode_GetComponentStates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(milvuspb.GetComponentStatesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(IndexNodeServer).GetComponentStates(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: IndexNode_GetComponentStates_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexNodeServer).GetComponentStates(ctx, req.(*milvuspb.GetComponentStatesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _IndexNode_GetStatisticsChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.GetStatisticsChannelRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(IndexNodeServer).GetStatisticsChannel(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: IndexNode_GetStatisticsChannel_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexNodeServer).GetStatisticsChannel(ctx, req.(*internalpb.GetStatisticsChannelRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _IndexNode_CreateJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -335,42 +235,6 @@ func _IndexNode_GetJobStats_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _IndexNode_ShowConfigurations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.ShowConfigurationsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(IndexNodeServer).ShowConfigurations(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: IndexNode_ShowConfigurations_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexNodeServer).ShowConfigurations(ctx, req.(*internalpb.ShowConfigurationsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _IndexNode_GetMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(milvuspb.GetMetricsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(IndexNodeServer).GetMetrics(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: IndexNode_GetMetrics_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexNodeServer).GetMetrics(ctx, req.(*milvuspb.GetMetricsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _IndexNode_CreateJobV2_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateJobV2Request)
 	if err := dec(in); err != nil {
@@ -433,14 +297,6 @@ var IndexNode_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*IndexNodeServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "GetComponentStates",
-			Handler:    _IndexNode_GetComponentStates_Handler,
-		},
-		{
-			MethodName: "GetStatisticsChannel",
-			Handler:    _IndexNode_GetStatisticsChannel_Handler,
-		},
-		{
 			MethodName: "CreateJob",
 			Handler:    _IndexNode_CreateJob_Handler,
 		},
@@ -455,14 +311,6 @@ var IndexNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetJobStats",
 			Handler:    _IndexNode_GetJobStats_Handler,
-		},
-		{
-			MethodName: "ShowConfigurations",
-			Handler:    _IndexNode_ShowConfigurations_Handler,
-		},
-		{
-			MethodName: "GetMetrics",
-			Handler:    _IndexNode_GetMetrics_Handler,
 		},
 		{
 			MethodName: "CreateJobV2",

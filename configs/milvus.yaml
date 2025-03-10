@@ -503,15 +503,8 @@ indexCoord:
 indexNode:
   scheduler:
     buildParallel: 1
-  enableDisk: true # enable index node build disk vector index
+  enableDisk: true # enable build disk vector index
   maxDiskUsagePercentage: 95
-  ip:  # TCP/IP address of indexNode. If not specified, use the first unicastable address
-  port: 21121 # TCP port of indexNode
-  grpc:
-    serverMaxSendSize: 536870912 # The maximum size of each RPC request that the indexNode can send, unit: byte
-    serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the indexNode can receive, unit: byte
-    clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on indexNode can send, unit: byte
-    clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on indexNode can receive, unit: byte
 
 dataCoord:
   channel:

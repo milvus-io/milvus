@@ -84,15 +84,6 @@ class MilvusSys:
         return data_nodes
 
     @property
-    def index_nodes(self):
-        """get all index nodes in Milvus deployment"""
-        index_nodes = []
-        for node in self.nodes:
-            if 'indexnode' == node.get('infos').get('type'):
-                index_nodes.append(node)
-        return index_nodes
-
-    @property
     def proxy_nodes(self):
         """get all proxy nodes in Milvus deployment"""
         proxy_nodes = []
