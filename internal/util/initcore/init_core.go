@@ -217,6 +217,17 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	denseVecIndexType := C.CString(params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue())
 	defer C.free(unsafe.Pointer(denseVecIndexType))
 	status := C.SegcoreSetDenseVectorInterminIndexType(denseVecIndexType)
+	stat_err := HandleCStatus(&status, "InitInterminIndexConfig failed")
+	if stat_err != nil {
+		return stat_err
+	}
+
+	lossnessRefineFlag := C.bool(params.QueryNodeCfg.InterimIndexLossLessRefine.GetAsBool())
+	C.SegcoreSetDenseVectorInterminIndexLosslessRefineFlag(lossnessRefineFlag)
+
+	denseVecIndexRefineType := C.CString(params.QueryNodeCfg.InterimIndexRefineType.GetValue())
+	defer C.free(unsafe.Pointer(denseVecIndexRefineType))
+	status = C.SegcoreSetDenseVectorInterminIndexType(denseVecIndexType)
 	return HandleCStatus(&status, "InitInterminIndexConfig failed")
 }
 
