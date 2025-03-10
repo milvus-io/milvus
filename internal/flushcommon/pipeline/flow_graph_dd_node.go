@@ -222,7 +222,12 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				continue
 			}
 
-			log.Debug("DDNode receive delete messages", zap.String("channel", ddn.vChannelName), zap.Int64("numRows", dmsg.NumRows))
+			log.Debug("DDNode receive delete messages",
+				zap.String("channel", ddn.vChannelName),
+				zap.Int64("numRows", dmsg.NumRows),
+				zap.Uint64("startPosTs", msMsg.StartPositions()[0].GetTimestamp()),
+				zap.Uint64("endPosTs", msMsg.EndPositions()[0].GetTimestamp()),
+			)
 			util.GetRateCollector().Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
