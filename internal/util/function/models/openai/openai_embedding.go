@@ -17,7 +17,6 @@
 package openai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -148,18 +147,10 @@ func (c *openAIBase) embedding(url string, headers map[string]string, modelName 
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
+	body, err := utils.RetrySend(ctx, data, http.MethodPost, url, headers, 3, 1)
 	if err != nil {
 		return nil, err
 	}
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-	body, err := utils.RetrySend(req, 3)
-	if err != nil {
-		return nil, err
-	}
-
 	var res EmbeddingResponse
 	err = json.Unmarshal(body, &res)
 	if err != nil {

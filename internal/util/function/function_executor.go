@@ -19,7 +19,9 @@
 package function
 
 import (
+	"context"
 	"fmt"
+	"strconv"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -27,18 +29,26 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
 type Runner interface {
 	GetSchema() *schemapb.FunctionSchema
 	GetOutputFields() []*schemapb.FieldSchema
+	GetCollectionName() string
+	GetFunctionTypeName() string
+	GetFunctionName() string
+	GetFunctionProvider() string
+	Check() error
 
 	MaxBatch() int
-	ProcessInsert(inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error)
-	ProcessSearch(placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error)
+	ProcessInsert(ctx context.Context, inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error)
+	ProcessSearch(ctx context.Context, placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error)
 	ProcessBulkInsert(inputs []storage.FieldData) (map[storage.FieldID]storage.FieldData, error)
 }
 
@@ -64,8 +74,17 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 // Since bm25 and embedding are implemented in different ways, the bm25 function is not verified here.
 func ValidateFunctions(schema *schemapb.CollectionSchema) error {
 	for _, fSchema := range schema.Functions {
-		if _, err := createFunction(schema, fSchema); err != nil {
+		f, err := createFunction(schema, fSchema)
+		if err != nil {
 			return err
+		}
+
+		// ignore bm25 function
+		if f == nil {
+			continue
+		}
+		if err := f.Check(); err != nil {
+			return fmt.Errorf("Check function [%s:%s] failed, the err is: %v", fSchema.Name, fSchema.GetType().String(), err)
 		}
 	}
 	return nil
@@ -87,7 +106,7 @@ func NewFunctionExecutor(schema *schemapb.CollectionSchema) (*FunctionExecutor, 
 	return executor, nil
 }
 
-func (executor *FunctionExecutor) processSingleFunction(runner Runner, msg *msgstream.InsertMsg) ([]*schemapb.FieldData, error) {
+func (executor *FunctionExecutor) processSingleFunction(ctx context.Context, runner Runner, msg *msgstream.InsertMsg) ([]*schemapb.FieldData, error) {
 	inputs := make([]*schemapb.FieldData, 0, len(runner.GetSchema().GetInputFieldNames()))
 	for _, name := range runner.GetSchema().GetInputFieldNames() {
 		for _, field := range msg.FieldsData {
@@ -100,14 +119,18 @@ func (executor *FunctionExecutor) processSingleFunction(runner Runner, msg *msgs
 		return nil, fmt.Errorf("Input field not found")
 	}
 
-	outputs, err := runner.ProcessInsert(inputs)
+	tr := timerecord.NewTimeRecorder("function ProcessInsert")
+	outputs, err := runner.ProcessInsert(ctx, inputs)
 	if err != nil {
 		return nil, err
 	}
+
+	metrics.ProxyFunctionlatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), runner.GetCollectionName(), runner.GetFunctionTypeName(), runner.GetFunctionProvider(), runner.GetFunctionName()).Observe(float64(tr.RecordSpan().Milliseconds()))
+	tr.CtxElapse(ctx, "function ProcessInsert done")
 	return outputs, nil
 }
 
-func (executor *FunctionExecutor) ProcessInsert(msg *msgstream.InsertMsg) error {
+func (executor *FunctionExecutor) ProcessInsert(ctx context.Context, msg *msgstream.InsertMsg) error {
 	numRows := msg.NumRows
 	for _, runner := range executor.runners {
 		if numRows > uint64(runner.MaxBatch()) {
@@ -122,7 +145,7 @@ func (executor *FunctionExecutor) ProcessInsert(msg *msgstream.InsertMsg) error 
 		wg.Add(1)
 		go func(runner Runner) {
 			defer wg.Done()
-			data, err := executor.processSingleFunction(runner, msg)
+			data, err := executor.processSingleFunction(ctx, runner, msg)
 			if err != nil {
 				errChan <- err
 				return
@@ -149,7 +172,7 @@ func (executor *FunctionExecutor) ProcessInsert(msg *msgstream.InsertMsg) error 
 	return nil
 }
 
-func (executor *FunctionExecutor) processSingleSearch(runner Runner, placeholderGroup []byte) ([]byte, error) {
+func (executor *FunctionExecutor) processSingleSearch(ctx context.Context, runner Runner, placeholderGroup []byte) ([]byte, error) {
 	pb := &commonpb.PlaceholderGroup{}
 	proto.Unmarshal(placeholderGroup, pb)
 	if len(pb.Placeholders) != 1 {
@@ -158,14 +181,18 @@ func (executor *FunctionExecutor) processSingleSearch(runner Runner, placeholder
 	if pb.Placeholders[0].Type != commonpb.PlaceholderType_VarChar {
 		return placeholderGroup, nil
 	}
-	res, err := runner.ProcessSearch(pb)
+
+	tr := timerecord.NewTimeRecorder("function ProcessSearch")
+	res, err := runner.ProcessSearch(ctx, pb)
 	if err != nil {
 		return nil, err
 	}
+	metrics.ProxyFunctionlatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), runner.GetCollectionName(), runner.GetFunctionTypeName(), runner.GetFunctionProvider(), runner.GetFunctionName()).Observe(float64(tr.RecordSpan().Milliseconds()))
+	tr.CtxElapse(ctx, "function ProcessSearch done")
 	return proto.Marshal(res)
 }
 
-func (executor *FunctionExecutor) prcessSearch(req *internalpb.SearchRequest) error {
+func (executor *FunctionExecutor) prcessSearch(ctx context.Context, req *internalpb.SearchRequest) error {
 	runner, exist := executor.runners[req.FieldId]
 	if !exist {
 		return fmt.Errorf("Can not found function in field %d", req.FieldId)
@@ -173,7 +200,7 @@ func (executor *FunctionExecutor) prcessSearch(req *internalpb.SearchRequest) er
 	if req.Nq > int64(runner.MaxBatch()) {
 		return fmt.Errorf("Nq [%d] > function [%s]'s max batch [%d]", req.Nq, runner.GetSchema().Name, runner.MaxBatch())
 	}
-	if newHolder, err := executor.processSingleSearch(runner, req.GetPlaceholderGroup()); err != nil {
+	if newHolder, err := executor.processSingleSearch(ctx, runner, req.GetPlaceholderGroup()); err != nil {
 		return err
 	} else {
 		req.PlaceholderGroup = newHolder
@@ -181,7 +208,7 @@ func (executor *FunctionExecutor) prcessSearch(req *internalpb.SearchRequest) er
 	return nil
 }
 
-func (executor *FunctionExecutor) prcessAdvanceSearch(req *internalpb.SearchRequest) error {
+func (executor *FunctionExecutor) prcessAdvanceSearch(ctx context.Context, req *internalpb.SearchRequest) error {
 	outputs := make(chan map[int64][]byte, len(req.GetSubReqs()))
 	errChan := make(chan error, len(req.GetSubReqs()))
 	var wg sync.WaitGroup
@@ -193,7 +220,7 @@ func (executor *FunctionExecutor) prcessAdvanceSearch(req *internalpb.SearchRequ
 			wg.Add(1)
 			go func(runner Runner, idx int64, placeholderGroup []byte) {
 				defer wg.Done()
-				if newHolder, err := executor.processSingleSearch(runner, placeholderGroup); err != nil {
+				if newHolder, err := executor.processSingleSearch(ctx, runner, placeholderGroup); err != nil {
 					errChan <- err
 				} else {
 					outputs <- map[int64][]byte{idx: newHolder}
@@ -216,11 +243,11 @@ func (executor *FunctionExecutor) prcessAdvanceSearch(req *internalpb.SearchRequ
 	return nil
 }
 
-func (executor *FunctionExecutor) ProcessSearch(req *internalpb.SearchRequest) error {
+func (executor *FunctionExecutor) ProcessSearch(ctx context.Context, req *internalpb.SearchRequest) error {
 	if !req.IsAdvanced {
-		return executor.prcessSearch(req)
+		return executor.prcessSearch(ctx, req)
 	}
-	return executor.prcessAdvanceSearch(req)
+	return executor.prcessAdvanceSearch(ctx, req)
 }
 
 func (executor *FunctionExecutor) processSingleBulkInsert(runner Runner, data *storage.InsertData) (map[storage.FieldID]storage.FieldData, error) {

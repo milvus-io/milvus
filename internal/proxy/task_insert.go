@@ -163,13 +163,17 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 
 	// Calculate embedding fields
 	if function.HasNonBM25Functions(schema.CollectionSchema.Functions, []int64{}) {
+		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-call-function-udf")
+		defer sp.End()
 		exec, err := function.NewFunctionExecutor(schema.CollectionSchema)
 		if err != nil {
 			return err
 		}
-		if err := exec.ProcessInsert(it.insertMsg); err != nil {
+		sp.AddEvent("Create-function-udf")
+		if err := exec.ProcessInsert(ctx, it.insertMsg); err != nil {
 			return err
 		}
+		sp.AddEvent("Call-function-udf")
 	}
 	rowNums := uint32(it.insertMsg.NRows())
 	// set insertTask.rowIDs

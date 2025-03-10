@@ -19,8 +19,9 @@
 package function
 
 import (
+	"context"
 	"fmt"
-	"strings"
+	"reflect"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -44,22 +45,18 @@ const (
 	teiProvider          string = "tei"
 )
 
+func TextEmbeddingOutputsCheck(fields []*schemapb.FieldSchema) error {
+	if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_FloatVector && fields[0].DataType != schemapb.DataType_Int8Vector) {
+		return fmt.Errorf("TextEmbedding function output field must be a FloatVector or Int8Vector field")
+	}
+	return nil
+}
+
 // Text embedding for retrieval task
 type textEmbeddingProvider interface {
 	MaxBatch() int
 	CallEmbedding(texts []string, mode TextEmbeddingMode) (any, error)
 	FieldDim() int64
-}
-
-func getProvider(functionSchema *schemapb.FunctionSchema) (string, error) {
-	for _, param := range functionSchema.Params {
-		switch strings.ToLower(param.Key) {
-		case Provider:
-			return strings.ToLower(param.Value), nil
-		default:
-		}
-	}
-	return "", fmt.Errorf("The text embedding service provider parameter:[%s] was not found", Provider)
 }
 
 type TextEmbeddingFunction struct {
@@ -82,20 +79,13 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 		return nil, err
 	}
 
-	if base.outputFields[0].DataType != schemapb.DataType_FloatVector && base.outputFields[0].DataType != schemapb.DataType_Int8Vector {
-		return nil, fmt.Errorf("Text embedding function's output field not match, needs [%s, %s], got [%s]",
-			schemapb.DataType_name[int32(schemapb.DataType_FloatVector)],
-			schemapb.DataType_name[int32(schemapb.DataType_Int8Vector)],
-			schemapb.DataType_name[int32(base.outputFields[0].DataType)])
-	}
-
-	provider, err := getProvider(functionSchema)
-	if err != nil {
+	if err := TextEmbeddingOutputsCheck(base.outputFields); err != nil {
 		return nil, err
 	}
+
 	var embP textEmbeddingProvider
 	var newProviderErr error
-	switch provider {
+	switch base.provider {
 	case openAIProvider:
 		embP, newProviderErr = NewOpenAIEmbeddingProvider(base.outputFields[0], functionSchema)
 	case azureOpenAIProvider:
@@ -115,7 +105,7 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 	case teiProvider:
 		embP, newProviderErr = NewTEIEmbeddingProvider(base.outputFields[0], functionSchema)
 	default:
-		return nil, fmt.Errorf("Unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s]", provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider)
+		return nil, fmt.Errorf("Unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider)
 	}
 
 	if newProviderErr != nil {
@@ -127,8 +117,44 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 	}, nil
 }
 
+func (runner *TextEmbeddingFunction) Check() error {
+	embds, err := runner.embProvider.CallEmbedding([]string{"check"}, InsertMode)
+	if err != nil {
+		return err
+	}
+	dim := 0
+	switch embds := embds.(type) {
+	case [][]float32:
+		dim = len(embds[0])
+	case [][]int8:
+		dim = len(embds[0])
+	default:
+		return fmt.Errorf("Unsupport embedding type: %s", reflect.TypeOf(embds).String())
+	}
+	if dim != int(runner.embProvider.FieldDim()) {
+		return fmt.Errorf("The dim set in the schema is inconsistent with the dim of the model, dim in schema is %d, dim of model is %d", runner.embProvider.FieldDim(), dim)
+	}
+	return nil
+}
+
 func (runner *TextEmbeddingFunction) MaxBatch() int {
 	return runner.embProvider.MaxBatch()
+}
+
+func (runner *TextEmbeddingFunction) GetCollectionName() string {
+	return runner.collectionName
+}
+
+func (runner *TextEmbeddingFunction) GetFunctionProvider() string {
+	return runner.provider
+}
+
+func (runner *TextEmbeddingFunction) GetFunctionTypeName() string {
+	return runner.functionTypeName
+}
+
+func (runner *TextEmbeddingFunction) GetFunctionName() string {
+	return runner.functionName
 }
 
 func (runner *TextEmbeddingFunction) packToFieldData(embds any) ([]*schemapb.FieldData, error) {
@@ -174,7 +200,7 @@ func (runner *TextEmbeddingFunction) packToFieldData(embds any) ([]*schemapb.Fie
 	return []*schemapb.FieldData{&outputField}, nil
 }
 
-func (runner *TextEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
+func (runner *TextEmbeddingFunction) ProcessInsert(ctx context.Context, inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
 	if len(inputs) != 1 {
 		return nil, fmt.Errorf("Text embedding function only receives one input field, but got [%d]", len(inputs))
 	}
@@ -199,7 +225,7 @@ func (runner *TextEmbeddingFunction) ProcessInsert(inputs []*schemapb.FieldData)
 	return runner.packToFieldData(embds)
 }
 
-func (runner *TextEmbeddingFunction) ProcessSearch(placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error) {
+func (runner *TextEmbeddingFunction) ProcessSearch(ctx context.Context, placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error) {
 	texts := funcutil.GetVarCharFromPlaceholder(placeholderGroup.Placeholders[0]) // Already checked externally
 	numRows := len(texts)
 	if numRows > runner.MaxBatch() {

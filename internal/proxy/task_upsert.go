@@ -148,6 +148,8 @@ func (it *upsertTask) OnEnqueue() error {
 }
 
 func (it *upsertTask) insertPreExecute(ctx context.Context) error {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-insertPreExecute")
+	defer sp.End()
 	collectionName := it.upsertMsg.InsertMsg.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
 		log.Ctx(ctx).Error("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
@@ -156,13 +158,17 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 
 	// Calculate embedding fields
 	if function.HasNonBM25Functions(it.schema.CollectionSchema.Functions, []int64{}) {
+		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Proxy-Upsert-insertPreExecute-call-function-udf")
+		defer sp.End()
 		exec, err := function.NewFunctionExecutor(it.schema.CollectionSchema)
 		if err != nil {
 			return err
 		}
-		if err := exec.ProcessInsert(it.upsertMsg.InsertMsg); err != nil {
+		sp.AddEvent("Create-function-udf")
+		if err := exec.ProcessInsert(ctx, it.upsertMsg.InsertMsg); err != nil {
 			return err
 		}
+		sp.AddEvent("Call-function-udf")
 	}
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
 	// set upsertTask.insertRequest.rowIDs

@@ -81,7 +81,8 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 	if err != nil {
 		return nil, err
 	}
-	var apiKey, url, modelName, user string
+	apiKey, url := parseAKAndURL(functionSchema.Params)
+	var modelName, user string
 	var dim int64
 
 	for _, param := range functionSchema.Params {
@@ -95,21 +96,12 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 			}
 		case userParamKey:
 			user = param.Value
-		case apiKeyParamKey:
-			apiKey = param.Value
-		case embeddingURLParamKey:
-			url = param.Value
 		default:
 		}
 	}
 
 	var c openai.OpenAIEmbeddingInterface
 	if !isAzure {
-		if modelName != TextEmbeddingAda002 && modelName != TextEmbedding3Small && modelName != TextEmbedding3Large {
-			return nil, fmt.Errorf("Unsupported model: %s, only support [%s, %s, %s]",
-				modelName, TextEmbeddingAda002, TextEmbedding3Small, TextEmbedding3Large)
-		}
-
 		c, err = createOpenAIEmbeddingClient(apiKey, url)
 		if err != nil {
 			return nil, err

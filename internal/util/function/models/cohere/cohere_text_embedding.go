@@ -17,7 +17,6 @@
 package cohere
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -100,15 +99,12 @@ func (c *CohereEmbedding) Embedding(modelName string, texts []string, inputType 
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		"accept":        "application/json",
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("bearer %s", c.apiKey),
 	}
-
-	req.Header.Set("accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("bearer %s", c.apiKey))
-	body, err := utils.RetrySend(req, 3)
+	body, err := utils.RetrySend(ctx, data, http.MethodPost, c.url, headers, 3, 1)
 	if err != nil {
 		return nil, err
 	}

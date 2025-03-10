@@ -17,7 +17,6 @@
 package voyageai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -108,7 +107,7 @@ func (c *VoyageAIEmbedding) Check() error {
 	return nil
 }
 
-func (c *VoyageAIEmbedding) Embedding(modelName string, texts []string, dim int, textType string, outputType string, timeoutSec int64) (any, error) {
+func (c *VoyageAIEmbedding) Embedding(modelName string, texts []string, dim int, textType string, outputType string, truncation bool, timeoutSec int64) (any, error) {
 	if outputType != "float" && outputType != "int8" {
 		return nil, fmt.Errorf("Voyageai: unsupport output type: [%s], only support float and int8", outputType)
 	}
@@ -117,9 +116,11 @@ func (c *VoyageAIEmbedding) Embedding(modelName string, texts []string, dim int,
 	r.Input = texts
 	r.InputType = textType
 	r.OutputDtype = outputType
+	r.Truncation = truncation
 	if dim != 0 {
 		r.OutputDimension = int64(dim)
 	}
+
 	data, err := json.Marshal(r)
 	if err != nil {
 		return nil, err
@@ -131,14 +132,11 @@ func (c *VoyageAIEmbedding) Embedding(modelName string, texts []string, dim int,
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("Bearer %s", c.apiKey),
 	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
-	body, err := utils.RetrySend(req, 3)
+	body, err := utils.RetrySend(ctx, data, http.MethodPost, c.url, headers, 3, 1)
 	if err != nil {
 		return nil, err
 	}

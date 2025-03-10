@@ -17,7 +17,6 @@
 package ali
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -135,14 +134,11 @@ func (c *AliDashScopeEmbedding) Embedding(modelName string, texts []string, dim 
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("Bearer %s", c.apiKey),
 	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
-	body, err := utils.RetrySend(req, 3)
+	body, err := utils.RetrySend(ctx, data, http.MethodPost, c.url, headers, 3, 1)
 	if err != nil {
 		return nil, err
 	}

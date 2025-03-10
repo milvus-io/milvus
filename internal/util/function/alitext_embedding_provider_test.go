@@ -69,9 +69,9 @@ func createAliProvider(url string, schema *schemapb.FieldSchema, providerName st
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: TextEmbeddingV3},
-			{Key: apiKeyParamKey, Value: "mock"},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: embeddingURLParamKey, Value: url},
+			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: dimParamKey, Value: "4"},
 		},
 	}
@@ -85,8 +85,8 @@ func createAliProvider(url string, schema *schemapb.FieldSchema, providerName st
 
 func (s *AliTextEmbeddingProviderSuite) TestEmbedding() {
 	ts := CreateAliEmbeddingServer()
-
 	defer ts.Close()
+
 	for _, provderName := range s.providers {
 		provder, err := createAliProvider(ts.URL, s.schema.Fields[2], provderName)
 		s.NoError(err)
@@ -186,18 +186,13 @@ func (s *AliTextEmbeddingProviderSuite) TestNewAliDashScopeEmbeddingProvider() {
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: "UnkownModels"},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: "mock"},
 			{Key: dimParamKey, Value: "4"},
 		},
 	}
-	_, err := NewAliDashScopeEmbeddingProvider(s.schema.Fields[2], functionSchema)
-	s.Error(err)
-
 	// invalid dim
-	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: TextEmbeddingV3}
-	functionSchema.Params[3] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalid"}
-	_, err = NewAliDashScopeEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	functionSchema.Params[2] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalid"}
+	_, err := NewAliDashScopeEmbeddingProvider(s.schema.Fields[2], functionSchema)
 	s.Error(err)
 }

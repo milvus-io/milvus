@@ -60,23 +60,15 @@ func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, function
 	if err != nil {
 		return nil, err
 	}
-	var apiKey, url, modelName string
+	apiKey, url := parseAKAndURL(functionSchema.Params)
+	var modelName string
 
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
 		case modelNameParamKey:
 			modelName = param.Value
-		case apiKeyParamKey:
-			apiKey = param.Value
-		case embeddingURLParamKey:
-			url = param.Value
 		default:
 		}
-	}
-
-	if modelName != bAAIBgeLargeZhV15 && modelName != bAAIBgeLargeEhV15 && modelName != neteaseYoudaoBceEmbeddingBasev1 && modelName != bAAIBgeM3 && modelName != proBAAIBgeM3 {
-		return nil, fmt.Errorf("Unsupported model: %s, only support [%s, %s, %s, %s, %s]",
-			modelName, bAAIBgeLargeZhV15, bAAIBgeLargeEhV15, neteaseYoudaoBceEmbeddingBasev1, bAAIBgeM3, proBAAIBgeM3)
 	}
 
 	c, err := createSiliconflowEmbeddingClient(apiKey, url)

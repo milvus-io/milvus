@@ -21,6 +21,7 @@ package function
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -34,6 +35,7 @@ type VoyageAIEmbeddingProvider struct {
 	client        *voyageai.VoyageAIEmbedding
 	modelName     string
 	embedDimParam int64
+	truncate      bool
 	embdType      embeddingType
 	outputType    string
 
@@ -62,8 +64,10 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 	if err != nil {
 		return nil, err
 	}
-	var apiKey, url, modelName string
+	apiKey, url := parseAKAndURL(functionSchema.Params)
+	var modelName string
 	dim := int64(0)
+	truncate := false
 
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
@@ -75,27 +79,14 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 			if err != nil {
 				return nil, err
 			}
-		case apiKeyParamKey:
-			apiKey = param.Value
-		case embeddingURLParamKey:
-			url = param.Value
+		case truncationParamKey:
+			if truncate, err = strconv.ParseBool(param.Value); err != nil {
+				return nil, fmt.Errorf("[%s param's value: %s] is invalid, only supports: [true/false]", truncationParamKey, param.Value)
+			}
 		default:
 		}
 	}
 
-	if modelName != voyage3Large && modelName != voyage3 && modelName != voyage3Lite && modelName != voyageCode3 && modelName != voyageFinance2 && modelName != voyageLaw2 && modelName != voyageCode2 {
-		return nil, fmt.Errorf("Unsupported model: %s, only support [%s, %s, %s, %s, %s, %s, %s]",
-			modelName, voyage3Large, voyage3, voyage3Lite, voyageCode3, voyageFinance2, voyageLaw2, voyageCode2)
-	}
-
-	if dim != 0 {
-		if modelName != voyage3Large && modelName != voyageCode3 {
-			return nil, fmt.Errorf("VoyageAI text embedding model: [%s] doesn't supports dim parameter, only [%s, %s] support it.", modelName, voyage3, voyageCode3)
-		}
-		if dim != 1024 && dim != 256 && dim != 512 && dim != 2048 {
-			return nil, fmt.Errorf("VoyageAI text embedding model's dim only supports 2048, 1024 (default), 512, and 256.")
-		}
-	}
 	c, err := createVoyageAIEmbeddingClient(apiKey, url)
 	if err != nil {
 		return nil, err
@@ -113,16 +104,11 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 		return "int8"
 	}()
 
-	if outputType == "int8" {
-		if modelName != voyage3Large && modelName != voyageCode3 {
-			return nil, fmt.Errorf("VoyageAI text embedding model: [%s] doesn't supports int8 output_dtype, only [%s, %s] support it.", modelName, voyage3, voyageCode3)
-		}
-	}
-
 	provider := VoyageAIEmbeddingProvider{
 		client:        c,
 		fieldDim:      fieldDim,
 		modelName:     modelName,
+		truncate:      truncate,
 		embedDimParam: dim,
 		embdType:      embdType,
 		outputType:    outputType,
@@ -155,7 +141,7 @@ func (provider *VoyageAIEmbeddingProvider) CallEmbedding(texts []string, mode Te
 		if end > numRows {
 			end = numRows
 		}
-		r, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.timeoutSec)
+		r, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.truncate, provider.timeoutSec)
 		if err != nil {
 			return nil, err
 		}

@@ -17,7 +17,6 @@
 package tei
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -46,10 +45,10 @@ func NewTEIEmbeddingClient(apiKey string, endpoint string) (*TEIEmbedding, error
 		return nil, err
 	}
 	if base.Scheme != "http" && base.Scheme != "https" {
-		return nil, fmt.Errorf("%s is not a valid http/https link", endpoint)
+		return nil, fmt.Errorf("endpoint: [%s] is not a valid http/https link", endpoint)
 	}
 	if base.Host == "" {
-		return nil, fmt.Errorf("%s is not a valid http/https link", endpoint)
+		return nil, fmt.Errorf("endpoint: [%s] is not a valid http/https link", endpoint)
 	}
 
 	base.Path = "/embed"
@@ -88,17 +87,13 @@ func (c *TEIEmbedding) Embedding(texts []string, truncate bool, truncationDirect
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		"Content-Type": "application/json",
 	}
-
-	req.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+		headers["Authorization"] = fmt.Sprintf("Bearer %s", c.apiKey)
 	}
-
-	body, err := utils.RetrySend(req, 3)
+	body, err := utils.RetrySend(ctx, data, http.MethodPost, c.url, headers, 3, 1)
 	if err != nil {
 		return nil, err
 	}

@@ -20,8 +20,11 @@ package function
 
 import (
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
@@ -51,20 +54,12 @@ const (
 
 // ali text embedding
 const (
-	TextEmbeddingV1 string = "text-embedding-v1"
-	TextEmbeddingV2 string = "text-embedding-v2"
-	TextEmbeddingV3 string = "text-embedding-v3"
-
 	dashscopeAKEnvStr string = "MILVUSAI_DASHSCOPE_API_KEY"
 )
 
 // openai/azure text embedding
 
 const (
-	TextEmbeddingAda002 string = "text-embedding-ada-002"
-	TextEmbedding3Small string = "text-embedding-3-small"
-	TextEmbedding3Large string = "text-embedding-3-large"
-
 	openaiAKEnvStr string = "MILVUSAI_OPENAI_API_KEY"
 
 	azureOpenaiAKEnvStr     string = "MILVUSAI_AZURE_OPENAI_API_KEY"
@@ -76,11 +71,10 @@ const (
 // bedrock emebdding
 
 const (
-	BedRockTitanTextEmbeddingsV2 string = "amazon.titan-embed-text-v2:0"
-	awsAKIdParamKey              string = "aws_access_key_id"
-	awsSAKParamKey               string = "aws_secret_access_key"
-	regionParamKey               string = "regin"
-	normalizeParamKey            string = "normalize"
+	awsAKIdParamKey   string = "aws_access_key_id"
+	awsSAKParamKey    string = "aws_secret_access_key"
+	regionParamKey    string = "regin"
+	normalizeParamKey string = "normalize"
 
 	bedrockAccessKeyId string = "MILVUSAI_BEDROCK_ACCESS_KEY_ID"
 	bedrockSAKEnvStr   string = "MILVUSAI_BEDROCK_SECRET_ACCESS_KEY"
@@ -93,48 +87,24 @@ const (
 	projectIDParamKey string = "projectid"
 	taskTypeParamKey  string = "task"
 
-	textEmbedding005             string = "text-embedding-005"
-	textMultilingualEmbedding002 string = "text-multilingual-embedding-002"
-
 	vertexServiceAccountJSONEnv string = "MILVUSAI_GOOGLE_APPLICATION_CREDENTIALS"
 )
 
 // voyageAI
 const (
-	voyage3Large   string = "voyage-3-large"
-	voyage3        string = "voyage-3"
-	voyage3Lite    string = "voyage-3-lite"
-	voyageCode3    string = "voyage-code-3"
-	voyageFinance2 string = "voyage-finance-2"
-	voyageLaw2     string = "voyage-law-2"
-	voyageCode2    string = "voyage-code-2"
-
-	voyageAIAKEnvStr string = "MILVUSAI_VOYAGEAI_API_KEY"
+	truncationParamKey string = "truncation"
+	voyageAIAKEnvStr   string = "MILVUSAI_VOYAGEAI_API_KEY"
 )
 
 // cohere
 
 const (
-	embedEnglishV30           string = "embed-english-v3.0"
-	embedMultilingualV30      string = "embed-multilingual-v3.0"
-	embedEnglishLightV30      string = "embed-english-light-v3.0"
-	embedMultilingualLightV30 string = "embed-multilingual-light-v3.0"
-	embedEnglishV20           string = "embed-english-v2.0"
-	embedEnglishLightV20      string = "embed-english-light-v2.0"
-	embedMultilingualV20      string = "embed-multilingual-v2.0"
-
 	cohereAIAKEnvStr string = "MILVUSAI_COHERE_API_KEY"
 )
 
 // siliconflow
 
 const (
-	bAAIBgeLargeZhV15               string = "BAAI/bge-large-zh-v1.5"
-	bAAIBgeLargeEhV15               string = "BAAI/bge-large-eh-v1.5"
-	neteaseYoudaoBceEmbeddingBasev1 string = "netease-youdao/bce-embedding-base_v1"
-	bAAIBgeM3                       string = "BAAI/bge-m3"
-	proBAAIBgeM3                    string = "Pro/BAAI/bge-m3 "
-
 	siliconflowAKEnvStr string = "MILVUSAI_SILICONFLOW_API_KEY"
 )
 
@@ -149,6 +119,23 @@ const (
 
 	enableTeiEnvStr string = "MILVUSAI_ENABLE_TEI"
 )
+
+const enableConfigAKAndURL string = "ENABLE_CONFIG_AK_AND_URL"
+
+func parseAKAndURL(params []*commonpb.KeyValuePair) (string, string) {
+	var apiKey, url string
+	if strings.ToLower(os.Getenv(enableConfigAKAndURL)) != "false" {
+		for _, param := range params {
+			switch strings.ToLower(param.Key) {
+			case apiKeyParamKey:
+				apiKey = param.Value
+			case embeddingURLParamKey:
+				url = param.Value
+			}
+		}
+	}
+	return apiKey, url
+}
 
 func parseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int64, error) {
 	dim, err := strconv.ParseInt(dimStr, 10, 64)
