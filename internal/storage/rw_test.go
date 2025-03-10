@@ -138,11 +138,9 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	defer reader.Close()
 
 	for i := 1; i <= rows; i++ {
-		err = reader.Next()
+		value, err := reader.NextValue()
 		s.NoError(err)
-
-		value := reader.Value()
-		rec, err := ValueSerializer([]*Value{value}, s.schema.Fields)
+		rec, err := ValueSerializer([]*Value{*value}, s.schema.Fields)
 		s.NoError(err)
 		err = w.Write(rec)
 		s.NoError(err)
@@ -174,6 +172,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	}
 	r, err := NewBinlogRecordReader(s.ctx, binlogs, s.schema, rOption...)
 	s.NoError(err)
+	defer r.Close()
 	for i := 0; i < rows/readBatchSize+1; i++ {
 		rec, err := r.Next()
 		s.NoError(err)
@@ -304,11 +303,10 @@ func (s *PackedBinlogRecordSuite) TestAllocIDExhausedError() {
 	defer reader.Close()
 
 	for i := 0; i < size; i++ {
-		err = reader.Next()
+		value, err := reader.NextValue()
 		s.NoError(err)
 
-		value := reader.Value()
-		rec, err := ValueSerializer([]*Value{value}, s.schema.Fields)
+		rec, err := ValueSerializer([]*Value{*value}, s.schema.Fields)
 		s.NoError(err)
 		err = w.Write(rec)
 		s.Error(err)

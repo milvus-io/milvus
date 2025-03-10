@@ -86,9 +86,13 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 }
 
 func (pr *PackedReader) Close() error {
+	if pr.cPackedReader == nil {
+		return nil
+	}
 	status := C.CloseReader(pr.cPackedReader)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return err
 	}
+	pr.cPackedReader = nil
 	return nil
 }

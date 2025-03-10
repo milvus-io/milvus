@@ -44,9 +44,8 @@ NewPackedReader(char** paths,
         for (int i = 0; i < trueSchema->num_fields(); i++) {
             needed_columns.emplace(i);
         }
-        auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
+        *c_packed_reader = new milvus_storage::PackedRecordBatchReader(
             trueFs, truePaths, trueSchema, needed_columns, buffer_size);
-        *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -92,13 +91,13 @@ ReadNext(CPackedReader c_packed_reader,
 
 CStatus
 CloseReader(CPackedReader c_packed_reader) {
-    try {
-        auto packed_reader =
-            static_cast<milvus_storage::PackedRecordBatchReader*>(
-                c_packed_reader);
-        delete packed_reader;
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
+    auto packed_reader =
+        static_cast<milvus_storage::PackedRecordBatchReader*>(c_packed_reader);
+    auto status = packed_reader->Close();
+    if (!status.ok()) {
+        return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
+                                      status.ToString());
     }
+    delete packed_reader;
+    return milvus::SuccessCStatus();
 }
