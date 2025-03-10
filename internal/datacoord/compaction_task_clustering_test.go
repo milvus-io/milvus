@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -60,7 +61,7 @@ type ClusteringCompactionTaskSuite struct {
 
 func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	ctx := context.Background()
-	cm := storage.NewLocalChunkManager(storage.RootPath(""))
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(""))
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)

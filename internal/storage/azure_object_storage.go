@@ -19,71 +19,24 @@ package storage
 import (
 	"context"
 	"io"
-	"os"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
 
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 type AzureObjectStorage struct {
 	*service.Client
 }
 
-func newAzureObjectStorageWithConfig(ctx context.Context, c *config) (*AzureObjectStorage, error) {
-	var client *service.Client
-	var err error
-	if c.useIAM {
-		cred, credErr := azidentity.NewWorkloadIdentityCredential(&azidentity.WorkloadIdentityCredentialOptions{
-			ClientID:      os.Getenv("AZURE_CLIENT_ID"),
-			TenantID:      os.Getenv("AZURE_TENANT_ID"),
-			TokenFilePath: os.Getenv("AZURE_FEDERATED_TOKEN_FILE"),
-		})
-		if credErr != nil {
-			return nil, credErr
-		}
-		client, err = service.NewClient("https://"+c.accessKeyID+".blob."+c.address+"/", cred, &service.ClientOptions{})
-	} else {
-		connectionString := os.Getenv("AZURE_STORAGE_CONNECTION_STRING")
-		if connectionString == "" {
-			connectionString = "DefaultEndpointsProtocol=https;AccountName=" + c.accessKeyID +
-				";AccountKey=" + c.secretAccessKeyID + ";EndpointSuffix=" + c.address
-		}
-		client, err = service.NewClientFromConnectionString(connectionString, &service.ClientOptions{})
-	}
-	if err != nil {
-		return nil, err
-	}
-	if c.bucketName == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("invalid empty bucket name")
-	}
-	// check valid in first query
-	checkBucketFn := func() error {
-		_, err := client.NewContainerClient(c.bucketName).GetProperties(ctx, &container.GetPropertiesOptions{})
-		if err != nil {
-			switch err := err.(type) {
-			case *azcore.ResponseError:
-				if c.createBucket && err.ErrorCode == string(bloberror.ContainerNotFound) {
-					_, createErr := client.NewContainerClient(c.bucketName).Create(ctx, &azblob.CreateContainerOptions{})
-					if createErr != nil {
-						return createErr
-					}
-					return nil
-				}
-			}
-		}
-		return err
-	}
-	err = retry.Do(ctx, checkBucketFn, retry.Attempts(CheckBucketRetryAttempts))
+func newAzureObjectStorageWithConfig(ctx context.Context, c *objectstorage.Config) (*AzureObjectStorage, error) {
+	client, err := objectstorage.NewAzureObjectStorageClient(ctx, c)
 	if err != nil {
 		return nil, err
 	}

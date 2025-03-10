@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -39,27 +40,27 @@ func newAzureChunkManager(ctx context.Context, bucketName string, rootPath strin
 
 func newRemoteChunkManager(ctx context.Context, cloudProvider string, bucketName string, rootPath string) (ChunkManager, error) {
 	factory := NewChunkManagerFactory("remote",
-		RootPath(rootPath),
-		Address(Params.MinioCfg.Address.GetValue()),
-		AccessKeyID(Params.MinioCfg.AccessKeyID.GetValue()),
-		SecretAccessKeyID(Params.MinioCfg.SecretAccessKey.GetValue()),
-		UseSSL(Params.MinioCfg.UseSSL.GetAsBool()),
-		SslCACert(Params.MinioCfg.SslCACert.GetValue()),
-		BucketName(bucketName),
-		UseIAM(Params.MinioCfg.UseIAM.GetAsBool()),
-		CloudProvider(cloudProvider),
-		IAMEndpoint(Params.MinioCfg.IAMEndpoint.GetValue()),
-		CreateBucket(true))
+		objectstorage.RootPath(rootPath),
+		objectstorage.Address(Params.MinioCfg.Address.GetValue()),
+		objectstorage.AccessKeyID(Params.MinioCfg.AccessKeyID.GetValue()),
+		objectstorage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey.GetValue()),
+		objectstorage.UseSSL(Params.MinioCfg.UseSSL.GetAsBool()),
+		objectstorage.SslCACert(Params.MinioCfg.SslCACert.GetValue()),
+		objectstorage.BucketName(bucketName),
+		objectstorage.UseIAM(Params.MinioCfg.UseIAM.GetAsBool()),
+		objectstorage.CloudProvider(cloudProvider),
+		objectstorage.IAMEndpoint(Params.MinioCfg.IAMEndpoint.GetValue()),
+		objectstorage.CreateBucket(true))
 	return factory.NewPersistentStorageChunkManager(ctx)
 }
 
 func TestInitRemoteChunkManager(t *testing.T) {
 	ctx := context.Background()
-	client, err := NewRemoteChunkManager(ctx, &config{
-		bucketName:    Params.MinioCfg.BucketName.GetValue(),
-		createBucket:  true,
-		useIAM:        false,
-		cloudProvider: "azure",
+	client, err := NewRemoteChunkManager(ctx, &objectstorage.Config{
+		BucketName:    Params.MinioCfg.BucketName.GetValue(),
+		CreateBucket:  true,
+		UseIAM:        false,
+		CloudProvider: "azure",
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, client)

@@ -174,7 +174,7 @@ func (s *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType
 	assert.NoError(s.T(), err)
 
 	ctx := context.Background()
-	f := storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus_test/test_parquet_reader/"))
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath("/tmp/milvus_test/test_parquet_reader/"))
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(s.T(), err)
 	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
@@ -276,7 +276,7 @@ func (s *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 	assert.NoError(s.T(), err)
 
 	ctx := context.Background()
-	f := storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus_test/test_parquet_reader/"))
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath("/tmp/milvus_test/test_parquet_reader/"))
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(s.T(), err)
 	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
@@ -329,7 +329,7 @@ func (s *ReaderSuite) runWithDefaultValue(dataType schemapb.DataType, elemType s
 	assert.NoError(s.T(), err)
 
 	ctx := context.Background()
-	f := storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus_test/test_parquet_reader/"))
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath("/tmp/milvus_test/test_parquet_reader/"))
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(s.T(), err)
 	schema.Fields[2].Nullable = nullable

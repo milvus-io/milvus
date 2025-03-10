@@ -167,7 +167,7 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 			"add un-flushed and flushed segments",
 		},
 	}
-	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(dataSyncServiceTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	wbManager := writebuffer.NewMockBufferManager(t)
@@ -238,7 +238,7 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 func TestGetChannelWithTickler(t *testing.T) {
 	channelName := "by-dev-rootcoord-dml-0"
 	info := GetWatchInfoByOpID(100, channelName, datapb.ChannelWatchState_ToWatch)
-	chunkManager := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(dataSyncServiceTestDir))
 	defer chunkManager.RemoveWithPrefix(context.Background(), chunkManager.RootPath())
 
 	meta := NewMetaFactory().GetCollectionMeta(1, "test_collection", schemapb.DataType_Int64)
