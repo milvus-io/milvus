@@ -12878,6 +12878,7 @@ class TestSparseSearch(TestcaseBase):
         collection_w = self.init_collection_wrap(c_name, schema=schema)
         data = cf.gen_default_list_sparse_data(nb=4000)
         collection_w.insert(data)
+        collection_w.flush()
         params = {"index_type": index, "metric_type": "IP", "params": {"drop_ratio_build": drop_ratio_build}}
         collection_w.create_index(ct.default_sparse_vec_field_name, params, index_name=index)
         collection_w.load()
