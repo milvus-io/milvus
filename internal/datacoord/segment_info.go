@@ -50,7 +50,6 @@ type segmentInfoIndexes struct {
 // SegmentInfo wraps datapb.SegmentInfo and patches some extra info on it
 type SegmentInfo struct {
 	*datapb.SegmentInfo
-	currRows      int64
 	allocations   []*Allocation
 	lastFlushTime time.Time
 	isCompacting  bool
@@ -70,7 +69,6 @@ type SegmentInfo struct {
 func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 	s := &SegmentInfo{
 		SegmentInfo: info,
-		currRows:    info.GetNumOfRows(),
 	}
 	// setup growing fields
 	if s.GetState() == commonpb.SegmentState_Growing {
@@ -258,12 +256,12 @@ func (s *SegmentsInfo) AddAllocation(segmentID UniqueID, allocation *Allocation)
 	}
 }
 
-// SetCurrentRows sets rows count for segment
+// UpdateLastWrittenTime updates segment last writtent time to now.
 // if the segment is not found, do nothing
 // uses `ShadowClone` since internal SegmentInfo is not changed
-func (s *SegmentsInfo) SetCurrentRows(segmentID UniqueID, rows int64) {
+func (s *SegmentsInfo) SetLastWrittenTime(segmentID UniqueID) {
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.ShadowClone(SetCurrentRows(rows))
+		s.segments[segmentID] = segment.ShadowClone(SetLastWrittenTime())
 	}
 }
 
@@ -326,7 +324,6 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
 	cloned := &SegmentInfo{
 		SegmentInfo:   info,
-		currRows:      s.currRows,
 		allocations:   s.allocations,
 		lastFlushTime: s.lastFlushTime,
 		isCompacting:  s.isCompacting,
@@ -343,7 +340,6 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	cloned := &SegmentInfo{
 		SegmentInfo:     s.SegmentInfo,
-		currRows:        s.currRows,
 		allocations:     s.allocations,
 		lastFlushTime:   s.lastFlushTime,
 		isCompacting:    s.isCompacting,
@@ -457,10 +453,9 @@ func AddAllocation(allocation *Allocation) SegmentInfoOption {
 	}
 }
 
-// SetCurrentRows is the option to set current row count for segment info
-func SetCurrentRows(rows int64) SegmentInfoOption {
+// SetLastWrittenTime is the option to set last writtent time for segment info
+func SetLastWrittenTime() SegmentInfoOption {
 	return func(segment *SegmentInfo) {
-		segment.currRows = rows
 		segment.lastWrittenTime = time.Now()
 	}
 }
