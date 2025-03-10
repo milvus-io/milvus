@@ -221,8 +221,25 @@ func checkFieldSchema(schema *schemapb.CollectionSchema) error {
 				panic("default value unsupport data type")
 			}
 		}
+		if err := checkDupKvPairs(fieldSchema.GetTypeParams(), "type"); err != nil {
+			return err
+		}
+		if err := checkDupKvPairs(fieldSchema.GetIndexParams(), "index"); err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+func checkDupKvPairs(params []*commonpb.KeyValuePair, paramType string) error {
+	set := typeutil.NewSet[string]()
+	for _, kv := range params {
+		if set.Contain(kv.GetKey()) {
+			return merr.WrapErrParameterInvalidMsg("duplicated %s param key \"%s\"", paramType, kv.GetKey())
+		}
+		set.Insert(kv.GetKey())
+	}
 	return nil
 }
 
