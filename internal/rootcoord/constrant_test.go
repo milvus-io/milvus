@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func TestCheckGeneralCapacity(t *testing.T) {
+func TestCheckPartitionNumber(t *testing.T) {
 	ctx := context.Background()
 
 	catalog := mocks.NewRootCoordCatalog(t)
@@ -45,17 +46,15 @@ func TestCheckGeneralCapacity(t *testing.T) {
 	meta, err := NewMetaTable(ctx, catalog, allocator)
 	assert.NoError(t, err)
 	core := newTestCore(withMeta(meta))
-	assert.Equal(t, 0, meta.GetGeneralCount(ctx))
+	assert.Equal(t, 0, meta.GetTotalPartitionNumber(ctx))
 
-	Params.Save(Params.RootCoordCfg.MaxGeneralCapacity.Key, "512")
+	Params.Save(Params.QuotaConfig.MaxPartitionNum.Key, "1")
 	defer Params.Reset(Params.RootCoordCfg.MaxGeneralCapacity.Key)
 
-	assert.Equal(t, 0, meta.GetGeneralCount(ctx))
-	err = checkGeneralCapacity(ctx, 1, 2, 256, core)
+	assert.Equal(t, 0, meta.GetTotalPartitionNumber(ctx))
+	err = checkPartitionNumber(ctx, 1, core)
 	assert.NoError(t, err)
-	assert.Equal(t, 0, meta.GetGeneralCount(ctx))
-	err = checkGeneralCapacity(ctx, 2, 4, 256, core)
-	assert.Error(t, err)
+	assert.Equal(t, 0, meta.GetTotalPartitionNumber(ctx))
 
 	catalog.EXPECT().CreateCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	err = meta.CreateDatabase(ctx, &model.Database{}, typeutil.MaxTimestamp)
@@ -63,7 +62,7 @@ func TestCheckGeneralCapacity(t *testing.T) {
 	err = meta.AddCollection(ctx, &model.Collection{
 		CollectionID: 1,
 		State:        pb.CollectionState_CollectionCreating,
-		ShardsNum:    256,
+		ShardsNum:    1,
 		Partitions: []*model.Partition{
 			{PartitionID: 100, State: pb.PartitionState_PartitionCreated},
 			{PartitionID: 200, State: pb.PartitionState_PartitionCreated},
@@ -71,22 +70,23 @@ func TestCheckGeneralCapacity(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	assert.Equal(t, 0, meta.GetGeneralCount(ctx))
-	err = checkGeneralCapacity(ctx, 1, 2, 256, core)
+	assert.Equal(t, 0, meta.GetTotalPartitionNumber(ctx))
+	err = checkPartitionNumber(ctx, 1, core)
 	assert.NoError(t, err)
 
 	catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	err = meta.ChangeCollectionState(ctx, 1, pb.CollectionState_CollectionCreated, typeutil.MaxTimestamp)
 	assert.NoError(t, err)
 
-	assert.Equal(t, 512, meta.GetGeneralCount(ctx))
-	err = checkGeneralCapacity(ctx, 1, 1, 1, core)
+	assert.Equal(t, 2, meta.GetTotalPartitionNumber(ctx))
+	err = checkPartitionNumber(ctx, 1, core)
+	fmt.Println(err)
 	assert.Error(t, err)
 
 	err = meta.ChangeCollectionState(ctx, 1, pb.CollectionState_CollectionDropping, typeutil.MaxTimestamp)
 	assert.NoError(t, err)
 
-	assert.Equal(t, 0, meta.GetGeneralCount(ctx))
-	err = checkGeneralCapacity(ctx, 1, 2, 256, core)
+	assert.Equal(t, 0, meta.GetTotalPartitionNumber(ctx))
+	err = checkPartitionNumber(ctx, 1, core)
 	assert.NoError(t, err)
 }
