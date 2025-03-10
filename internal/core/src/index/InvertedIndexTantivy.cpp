@@ -221,6 +221,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
     } else if (auto it = find_file(INDEX_NULL_OFFSET_FILE_NAME);
                it != inverted_index_files.end()) {
         // null offset file is not sliced
+        null_offset_files.push_back(*it);
         auto index_datas = mem_file_manager_->LoadIndexToMemory({*it});
         null_offset_data = index_datas.at(INDEX_NULL_OFFSET_FILE_NAME);
     }
