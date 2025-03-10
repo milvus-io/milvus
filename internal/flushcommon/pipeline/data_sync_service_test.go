@@ -320,7 +320,6 @@ func (s *DataSyncServiceSuite) SetupTest() {
 	s.chunkManager = mocks.NewChunkManager(s.T())
 
 	s.broker = broker.NewMockBroker(s.T())
-	s.broker.EXPECT().UpdateSegmentStatistics(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	s.allocator = allocator.NewMockAllocator(s.T())
 	s.wbManager = writebuffer.NewMockBufferManager(s.T())

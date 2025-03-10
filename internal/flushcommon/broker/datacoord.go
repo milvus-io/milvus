@@ -156,18 +156,6 @@ func (dc *dataCoordBroker) DropVirtualChannel(ctx context.Context, req *datapb.D
 	return resp, nil
 }
 
-func (dc *dataCoordBroker) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) error {
-	log := log.Ctx(ctx)
-
-	resp, err := dc.client.UpdateSegmentStatistics(ctx, req)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to UpdateSegmentStatistics", zap.Error(err))
-		return err
-	}
-
-	return nil
-}
-
 func (dc *dataCoordBroker) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	resp, err := dc.client.ImportV2(ctx, in)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
