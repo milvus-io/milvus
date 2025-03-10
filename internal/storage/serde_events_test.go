@@ -284,13 +284,13 @@ func TestSize(t *testing.T) {
 					},
 				},
 			}
-			err := writer.Write(value)
+			err := writer.WriteValue(value)
 			assert.NoError(t, err)
 		}
 
 		err = writer.Close()
 		assert.NoError(t, err)
-		memSize := writer.WrittenMemorySize()
+		memSize := writer.GetWrittenUncompressed()
 		assert.Greater(t, memSize, uint64(8*4*size)) // written memory size should greater than data size
 		t.Log("writtern memory size", memSize)
 	})
@@ -322,13 +322,13 @@ func TestSize(t *testing.T) {
 					},
 				},
 			}
-			err := writer.Write(value)
+			err := writer.WriteValue(value)
 			assert.NoError(t, err)
 		}
 
 		err = writer.Close()
 		assert.NoError(t, err)
-		memSize := writer.WrittenMemorySize()
+		memSize := writer.GetWrittenUncompressed()
 		assert.Greater(t, memSize, uint64(8*4*size)) // written memory size should greater than data size
 		t.Log("writtern memory size", memSize)
 	})
