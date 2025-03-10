@@ -164,7 +164,7 @@ func parseAKAndURL(params []*commonpb.KeyValuePair, confParams map[string]string
 
 	// from env, url doesn't support configuration in in env
 	if apiKey == "" {
-		url = os.Getenv(apiKeyEnv)
+		apiKey = os.Getenv(apiKeyEnv)
 	}
 	return apiKey, url
 }
