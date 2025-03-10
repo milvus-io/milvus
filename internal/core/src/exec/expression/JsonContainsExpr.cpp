@@ -367,30 +367,37 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [this, segment, &field_id](uint32_t row_id,
+        auto filter_func = [this, segment, &field_id](bool valid,
+                                                      uint8_t type,
+                                                      uint32_t row_id,
                                                       uint16_t offset,
-                                                      uint16_t size) {
-            auto json_pair = segment->GetJsonData(field_id, row_id);
-            if (!json_pair.second) {
+                                                      uint16_t size,
+                                                      uint32_t value) {
+            if (valid) {
                 return false;
-            }
-            auto json =
-                milvus::Json(json_pair.first.data(), json_pair.first.size());
-            auto array = json.array_at(offset, size);
+            } else {
+                auto json_pair = segment->GetJsonData(field_id, row_id);
+                if (!json_pair.second) {
+                    return false;
+                }
+                auto json = milvus::Json(json_pair.first.data(),
+                                         json_pair.first.size());
+                auto array = json.array_at(offset, size);
 
-            if (array.error()) {
+                if (array.error()) {
+                    return false;
+                }
+                for (auto&& it : array) {
+                    auto val = it.template get<GetType>();
+                    if (val.error()) {
+                        continue;
+                    }
+                    if (this->arg_set_->In(val.value())) {
+                        return true;
+                    }
+                }
                 return false;
             }
-            for (auto&& it : array) {
-                auto val = it.template get<GetType>();
-                if (val.error()) {
-                    continue;
-                }
-                if (this->arg_set_->In(val.value())) {
-                    return true;
-                }
-            }
-            return false;
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
@@ -535,31 +542,38 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &field_id](uint32_t row_id,
+        auto filter_func = [segment, &elements, &field_id](bool valid,
+                                                           uint8_t type,
+                                                           uint32_t row_id,
                                                            uint16_t offset,
-                                                           uint16_t size) {
-            auto json_pair = segment->GetJsonData(field_id, row_id);
-            if (!json_pair.second) {
+                                                           uint16_t size,
+                                                           uint32_t value) {
+            if (valid) {
                 return false;
-            }
-            auto json =
-                milvus::Json(json_pair.first.data(), json_pair.first.size());
-            auto array = json.array_at(offset, size);
-            if (array.error()) {
-                return false;
-            }
-            for (auto&& it : array) {
-                auto val = it.get_array();
-                if (val.error()) {
-                    continue;
+            } else {
+                auto json_pair = segment->GetJsonData(field_id, row_id);
+                if (!json_pair.second) {
+                    return false;
                 }
-                for (auto const& element : elements) {
-                    if (CompareTwoJsonArray(val, element)) {
-                        return true;
+                auto json = milvus::Json(json_pair.first.data(),
+                                         json_pair.first.size());
+                auto array = json.array_at(offset, size);
+                if (array.error()) {
+                    return false;
+                }
+                for (auto&& it : array) {
+                    auto val = it.get_array();
+                    if (val.error()) {
+                        continue;
+                    }
+                    for (auto const& element : elements) {
+                        if (CompareTwoJsonArray(val, element)) {
+                            return true;
+                        }
                     }
                 }
+                return false;
             }
-            return false;
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
@@ -790,31 +804,38 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &field_id](uint32_t row_id,
+        auto filter_func = [segment, &elements, &field_id](bool valid,
+                                                           uint8_t type,
+                                                           uint32_t row_id,
                                                            uint16_t offset,
-                                                           uint16_t size) {
-            auto json_pair = segment->GetJsonData(field_id, row_id);
-            if (!json_pair.second) {
+                                                           uint16_t size,
+                                                           uint32_t value) {
+            if (valid) {
                 return false;
-            }
-            auto json =
-                milvus::Json(json_pair.first.data(), json_pair.first.size());
-            auto array = json.array_at(offset, size);
-            if (array.error()) {
-                return false;
-            }
-            std::set<GetType> tmp_elements(elements);
-            for (auto&& it : array) {
-                auto val = it.template get<GetType>();
-                if (val.error()) {
-                    continue;
+            } else {
+                auto json_pair = segment->GetJsonData(field_id, row_id);
+                if (!json_pair.second) {
+                    return false;
                 }
-                tmp_elements.erase(val.value());
-                if (tmp_elements.size() == 0) {
-                    return true;
+                auto json = milvus::Json(json_pair.first.data(),
+                                         json_pair.first.size());
+                auto array = json.array_at(offset, size);
+                if (array.error()) {
+                    return false;
                 }
+                std::set<GetType> tmp_elements(elements);
+                for (auto&& it : array) {
+                    auto val = it.template get<GetType>();
+                    if (val.error()) {
+                        continue;
+                    }
+                    tmp_elements.erase(val.value());
+                    if (tmp_elements.size() == 0) {
+                        return true;
+                    }
+                }
+                return tmp_elements.empty();
             }
-            return tmp_elements.empty();
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
@@ -1023,89 +1044,98 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
         auto filter_func = [segment, &elements, &elements_index, &field_id](
+                               bool valid,
+                               uint8_t type,
                                uint32_t row_id,
                                uint16_t offset,
-                               uint16_t size) {
-            auto json_pair = segment->GetJsonData(field_id, row_id);
-            if (!json_pair.second) {
+                               uint16_t size,
+                               uint32_t value) {
+            if (valid) {
                 return false;
-            }
-            auto json =
-                milvus::Json(json_pair.first.data(), json_pair.first.size());
-            std::set<int> tmp_elements_index(elements_index);
-            auto array = json.array_at(offset, size);
-            if (array.error()) {
-                return false;
-            }
-            for (auto&& it : array) {
-                int i = -1;
-                for (auto& element : elements) {
-                    i++;
-                    switch (element.val_case()) {
-                        case proto::plan::GenericValue::kBoolVal: {
-                            auto val = it.template get<bool>();
-                            if (val.error()) {
-                                continue;
+            } else {
+                auto json_pair = segment->GetJsonData(field_id, row_id);
+                if (!json_pair.second) {
+                    return false;
+                }
+                auto json = milvus::Json(json_pair.first.data(),
+                                         json_pair.first.size());
+                std::set<int> tmp_elements_index(elements_index);
+                auto array = json.array_at(offset, size);
+                if (array.error()) {
+                    return false;
+                }
+                for (auto&& it : array) {
+                    int i = -1;
+                    for (auto& element : elements) {
+                        i++;
+                        switch (element.val_case()) {
+                            case proto::plan::GenericValue::kBoolVal: {
+                                auto val = it.template get<bool>();
+                                if (val.error()) {
+                                    continue;
+                                }
+                                if (val.value() == element.bool_val()) {
+                                    tmp_elements_index.erase(i);
+                                }
+                                break;
                             }
-                            if (val.value() == element.bool_val()) {
-                                tmp_elements_index.erase(i);
+                            case proto::plan::GenericValue::kInt64Val: {
+                                auto val = it.template get<int64_t>();
+                                if (val.error()) {
+                                    continue;
+                                }
+                                if (val.value() == element.int64_val()) {
+                                    tmp_elements_index.erase(i);
+                                }
+                                break;
                             }
-                            break;
+                            case proto::plan::GenericValue::kFloatVal: {
+                                auto val = it.template get<double>();
+                                if (val.error()) {
+                                    continue;
+                                }
+                                if (val.value() == element.float_val()) {
+                                    tmp_elements_index.erase(i);
+                                }
+                                break;
+                            }
+                            case proto::plan::GenericValue::kStringVal: {
+                                auto val = it.template get<std::string_view>();
+                                if (val.error()) {
+                                    continue;
+                                }
+                                if (val.value() == element.string_val()) {
+                                    tmp_elements_index.erase(i);
+                                }
+                                break;
+                            }
+                            case proto::plan::GenericValue::kArrayVal: {
+                                auto val = it.get_array();
+                                if (val.error()) {
+                                    continue;
+                                }
+                                if (CompareTwoJsonArray(val,
+                                                        element.array_val())) {
+                                    tmp_elements_index.erase(i);
+                                }
+                                break;
+                            }
+                            default:
+                                PanicInfo(
+                                    DataTypeInvalid,
+                                    fmt::format("unsupported data type {}",
+                                                element.val_case()));
                         }
-                        case proto::plan::GenericValue::kInt64Val: {
-                            auto val = it.template get<int64_t>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.int64_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
+                        if (tmp_elements_index.size() == 0) {
+                            return true;
                         }
-                        case proto::plan::GenericValue::kFloatVal: {
-                            auto val = it.template get<double>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.float_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kStringVal: {
-                            auto val = it.template get<std::string_view>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.string_val()) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kArrayVal: {
-                            auto val = it.get_array();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (CompareTwoJsonArray(val, element.array_val())) {
-                                tmp_elements_index.erase(i);
-                            }
-                            break;
-                        }
-                        default:
-                            PanicInfo(DataTypeInvalid,
-                                      fmt::format("unsupported data type {}",
-                                                  element.val_case()));
                     }
                     if (tmp_elements_index.size() == 0) {
                         return true;
                     }
                 }
-                if (tmp_elements_index.size() == 0) {
-                    return true;
-                }
+                return tmp_elements_index.size() == 0;
             }
-            return tmp_elements_index.size() == 0;
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
@@ -1255,35 +1285,42 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &field_id](uint32_t row_id,
+        auto filter_func = [segment, &elements, &field_id](bool valid,
+                                                           uint8_t type,
+                                                           uint32_t row_id,
                                                            uint16_t offset,
-                                                           uint16_t size) {
-            auto json_pair = segment->GetJsonData(field_id, row_id);
-            if (!json_pair.second) {
+                                                           uint16_t size,
+                                                           uint32_t value) {
+            if (valid) {
                 return false;
-            }
-            auto json =
-                milvus::Json(json_pair.first.data(), json_pair.first.size());
-            auto array = json.array_at(offset, size);
-            if (array.error()) {
-                return false;
-            }
-            std::set<int> exist_elements_index;
-            for (auto&& it : array) {
-                auto json_array = it.get_array();
-                if (json_array.error()) {
-                    continue;
+            } else {
+                auto json_pair = segment->GetJsonData(field_id, row_id);
+                if (!json_pair.second) {
+                    return false;
                 }
-                for (int index = 0; index < elements.size(); ++index) {
-                    if (CompareTwoJsonArray(json_array, elements[index])) {
-                        exist_elements_index.insert(index);
+                auto json = milvus::Json(json_pair.first.data(),
+                                         json_pair.first.size());
+                auto array = json.array_at(offset, size);
+                if (array.error()) {
+                    return false;
+                }
+                std::set<int> exist_elements_index;
+                for (auto&& it : array) {
+                    auto json_array = it.get_array();
+                    if (json_array.error()) {
+                        continue;
+                    }
+                    for (int index = 0; index < elements.size(); ++index) {
+                        if (CompareTwoJsonArray(json_array, elements[index])) {
+                            exist_elements_index.insert(index);
+                        }
+                    }
+                    if (exist_elements_index.size() == elements.size()) {
+                        return true;
                     }
                 }
-                if (exist_elements_index.size() == elements.size()) {
-                    return true;
-                }
+                return exist_elements_index.size() == elements.size();
             }
-            return exist_elements_index.size() == elements.size();
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
@@ -1474,81 +1511,90 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &field_id](uint32_t row_id,
+        auto filter_func = [segment, &elements, &field_id](bool valid,
+                                                           uint8_t type,
+                                                           uint32_t row_id,
                                                            uint16_t offset,
-                                                           uint16_t size) {
-            auto json_pair = segment->GetJsonData(field_id, row_id);
-            if (!json_pair.second) {
+                                                           uint16_t size,
+                                                           uint32_t value) {
+            if (valid) {
                 return false;
-            }
-            auto json =
-                milvus::Json(json_pair.first.data(), json_pair.first.size());
-            auto array = json.array_at(offset, size);
-            if (array.error()) {
-                return false;
-            }
-            // Note: array can only be iterated once
-            for (auto&& it : array) {
-                for (auto const& element : elements) {
-                    switch (element.val_case()) {
-                        case proto::plan::GenericValue::kBoolVal: {
-                            auto val = it.template get<bool>();
-                            if (val.error()) {
-                                continue;
+            } else {
+                auto json_pair = segment->GetJsonData(field_id, row_id);
+                if (!json_pair.second) {
+                    return false;
+                }
+                auto json = milvus::Json(json_pair.first.data(),
+                                         json_pair.first.size());
+                auto array = json.array_at(offset, size);
+                if (array.error()) {
+                    return false;
+                }
+                // Note: array can only be iterated once
+                for (auto&& it : array) {
+                    for (auto const& element : elements) {
+                        switch (element.val_case()) {
+                            case proto::plan::GenericValue::kBoolVal: {
+                                auto val = it.template get<bool>();
+                                if (val.error()) {
+                                    continue;
+                                }
+                                if (val.value() == element.bool_val()) {
+                                    return true;
+                                }
+                                break;
                             }
-                            if (val.value() == element.bool_val()) {
-                                return true;
+                            case proto::plan::GenericValue::kInt64Val: {
+                                auto val = it.template get<int64_t>();
+                                if (val.error()) {
+                                    continue;
+                                }
+                                if (val.value() == element.int64_val()) {
+                                    return true;
+                                }
+                                break;
                             }
-                            break;
+                            case proto::plan::GenericValue::kFloatVal: {
+                                auto val = it.template get<double>();
+                                if (val.error()) {
+                                    continue;
+                                }
+                                if (val.value() == element.float_val()) {
+                                    return true;
+                                }
+                                break;
+                            }
+                            case proto::plan::GenericValue::kStringVal: {
+                                auto val = it.template get<std::string_view>();
+                                if (val.error()) {
+                                    continue;
+                                }
+                                if (val.value() == element.string_val()) {
+                                    return true;
+                                }
+                                break;
+                            }
+                            case proto::plan::GenericValue::kArrayVal: {
+                                auto val = it.get_array();
+                                if (val.error()) {
+                                    continue;
+                                }
+                                if (CompareTwoJsonArray(val,
+                                                        element.array_val())) {
+                                    return true;
+                                }
+                                break;
+                            }
+                            default:
+                                PanicInfo(
+                                    DataTypeInvalid,
+                                    fmt::format("unsupported data type {}",
+                                                element.val_case()));
                         }
-                        case proto::plan::GenericValue::kInt64Val: {
-                            auto val = it.template get<int64_t>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.int64_val()) {
-                                return true;
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kFloatVal: {
-                            auto val = it.template get<double>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.float_val()) {
-                                return true;
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kStringVal: {
-                            auto val = it.template get<std::string_view>();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (val.value() == element.string_val()) {
-                                return true;
-                            }
-                            break;
-                        }
-                        case proto::plan::GenericValue::kArrayVal: {
-                            auto val = it.get_array();
-                            if (val.error()) {
-                                continue;
-                            }
-                            if (CompareTwoJsonArray(val, element.array_val())) {
-                                return true;
-                            }
-                            break;
-                        }
-                        default:
-                            PanicInfo(DataTypeInvalid,
-                                      fmt::format("unsupported data type {}",
-                                                  element.val_case()));
                     }
                 }
+                return false;
             }
-            return false;
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;

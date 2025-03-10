@@ -198,15 +198,6 @@ func (i *IndexNode) initSegcore() {
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
-
-	cJSONIndexMemoryBudgetInTantivy := C.int64_t(paramtable.Get().QueryNodeCfg.JSONIndexMemoryBudgetInTantivy.GetAsInt64() * 1024 * 1024)
-	C.InitDefaultJSONKeyIndexMemoryBudget(cJSONIndexMemoryBudgetInTantivy)
-
-	cJSONIndexCommitInterval := C.int64_t(paramtable.Get().QueryNodeCfg.JSONIndexCommitInterval.GetAsInt64())
-	C.InitDefaultJSONKeyIndexCommitInterval(cJSONIndexCommitInterval)
-
-	cJSONIndexEnabled := C.bool(Params.CommonCfg.EnabledJSONKeyStats.GetAsBool())
-	C.InitDefaultJSONKeyIndexEnable(cJSONIndexEnabled)
 }
 
 func (i *IndexNode) CloseSegcore() {
