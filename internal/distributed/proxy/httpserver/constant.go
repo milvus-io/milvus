@@ -37,6 +37,7 @@ const (
 	PrivilegeGroupCategory  = "/privilege_groups/"
 	CollectionFieldCategory = "/collections/fields/"
 	ResourceGroupCategory   = "/resource_groups/"
+	SegmentCategory         = "/segments/"
 
 	ListAction           = "list"
 	HasAction            = "has"
