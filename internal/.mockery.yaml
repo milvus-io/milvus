@@ -90,9 +90,20 @@ packages:
   github.com/milvus-io/milvus/internal/util/searchutil/optimizers:
     interfaces:
       QueryHook:
-#  github.com/milvus-io/milvus/internal/flushcommon/util:
-#    interfaces:
-#      MsgHandler:
+  github.com/milvus-io/milvus/internal/coordinator/view/qviews:
+    interfaces:
+      QueryViewAtWorkNode:
+  github.com/milvus-io/milvus/internal/coordinator/view/qviews/syncer:
+    interfaces:
+      CoordSyncer:
+      QueryViewAtWorkNodeWithAck:
+  github.com/milvus-io/milvus/internal/coordinator/view/qviews/syncer/client:
+    interfaces:
+      QueryViewServiceClient:
+      QueryViewServiceSyncer:
+  github.com/milvus-io/milvus/internal/coordinator/view/qviews/recovery:
+    interfaces:
+      RecoveryStorage:
   google.golang.org/grpc/resolver:
     interfaces:
       ClientConn:
