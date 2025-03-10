@@ -17,7 +17,7 @@ import (
 )
 
 func TestRecoveryStore(t *testing.T) {
-	events.InitNopEventsNotifier()
+	events.InitRecordAllEventsNotifier()
 
 	sv := map[string]string{}
 	useErr := false
