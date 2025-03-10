@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type taskScheduler struct {
@@ -60,6 +61,8 @@ type taskScheduler struct {
 	handler                   Handler
 	allocator                 allocator.Allocator
 	compactionHandler         compactionPlanContext
+
+	slotsMutex sync.RWMutex
 
 	taskStats *expirable.LRU[UniqueID, Task]
 }
@@ -394,34 +397,42 @@ func (s *taskScheduler) run() {
 		return
 	}
 
-	// 1. pick an indexNode client
-	nodeSlots := s.nodeManager.QuerySlots()
-	log.Ctx(s.ctx).Info("task scheduler", zap.Int("task num", pendingTaskNum), zap.Any("nodeSlots", nodeSlots))
+	workerSlots := s.nodeManager.QuerySlots()
+	log.Ctx(s.ctx).Info("task scheduler", zap.Int("task num", pendingTaskNum), zap.Any("workerSlots", workerSlots))
 	var wg sync.WaitGroup
+	stopCh := make(chan struct{}, 1)
 	sem := make(chan struct{}, 100)
 	for {
-		nodeID := pickNode(nodeSlots)
-		if nodeID == -1 {
-			log.Ctx(s.ctx).Debug("pick node failed")
-			break
-		}
-
-		task := s.pendingTasks.Pop()
-		if task == nil {
-			break
+		select {
+		case <-stopCh:
+			goto END
+		default:
 		}
 
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(task Task, nodeID int64) {
+		go func() {
 			defer wg.Done()
-			defer func() {
-				<-sem
-			}()
+			defer func() { <-sem }()
+
+			task := s.pendingTasks.Pop()
+			if task == nil {
+				select {
+				case stopCh <- struct{}{}:
+				default:
+				}
+				return
+			}
 
 			s.taskLock.Lock(task.GetTaskID())
-			s.process(task, nodeID)
+			keep := s.process(task, workerSlots)
 			s.taskLock.Unlock(task.GetTaskID())
+			if !keep {
+				select {
+				case stopCh <- struct{}{}:
+				default:
+				}
+			}
 
 			switch task.GetState() {
 			case indexpb.JobState_JobStateNone:
@@ -435,12 +446,13 @@ func (s *taskScheduler) run() {
 				s.runningTasks[task.GetTaskID()] = task
 				s.runningQueueLock.Unlock()
 			}
-		}(task, nodeID)
+		}()
 	}
+END:
 	wg.Wait()
 }
 
-func (s *taskScheduler) process(task Task, nodeID int64) bool {
+func (s *taskScheduler) process(task Task, workerSlots map[typeutil.UniqueID]*session.WorkerSlots) bool {
 	if !task.CheckTaskHealthy(s.meta) {
 		task.SetState(indexpb.JobState_JobStateNone, "task not healthy")
 		return true
@@ -452,7 +464,7 @@ func (s *taskScheduler) process(task Task, nodeID int64) bool {
 	case indexpb.JobState_JobStateNone:
 		return s.processNone(task)
 	case indexpb.JobState_JobStateInit:
-		return s.processInit(task, nodeID)
+		return s.processInit(task, workerSlots)
 	default:
 		log.Ctx(s.ctx).Error("invalid task state in pending queue", zap.Int64("taskID", task.GetTaskID()), zap.String("state", task.GetState().String()))
 	}
@@ -541,14 +553,16 @@ func (s *taskScheduler) collectTaskMetrics() {
 	}
 }
 
-func (s *taskScheduler) processInit(task Task, nodeID int64) bool {
+func (s *taskScheduler) processInit(task Task, workerSlots map[typeutil.UniqueID]*session.WorkerSlots) bool {
 	// 0. pre check task
 	// Determine whether the task can be performed or if it is truly necessary.
 	// for example: flat index doesn't need to actually build. checkPass is false.
-	checkPass := task.PreCheck(s.ctx, s)
+	checkPass, taskSLot := task.PreCheck(s.ctx, s)
 	if !checkPass {
 		return true
 	}
+
+	nodeID := s.pickNode(workerSlots, taskSLot)
 
 	client, exist := s.nodeManager.GetClientByID(nodeID)
 	if !exist || client == nil {
@@ -660,11 +674,17 @@ func (s *taskScheduler) processInProgress(task Task) bool {
 	return false
 }
 
-func pickNode(nodeSlots map[int64]int64) int64 {
-	for w, slots := range nodeSlots {
-		if slots >= 1 {
-			nodeSlots[w] = slots - 1
-			return w
+func (s *taskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, taskSlot int64) int64 {
+	s.slotsMutex.Lock()
+	defer s.slotsMutex.Unlock()
+
+	for nodeID, ws := range workerSlots {
+		if ws.AvailableSlots >= taskSlot {
+			ws.AvailableSlots -= taskSlot
+			return nodeID
+		} else if ws.TotalSlots == ws.AvailableSlots {
+			ws.AvailableSlots = 0
+			return nodeID
 		}
 	}
 	return -1
