@@ -77,7 +77,7 @@ func createAliProvider(url string, schema *schemapb.FieldSchema, providerName st
 	}
 	switch providerName {
 	case aliDashScopeProvider:
-		return NewAliDashScopeEmbeddingProvider(schema, functionSchema)
+		return NewAliDashScopeEmbeddingProvider(schema, functionSchema, map[string]string{})
 	default:
 		return nil, fmt.Errorf("Unknow provider")
 	}
@@ -193,6 +193,6 @@ func (s *AliTextEmbeddingProviderSuite) TestNewAliDashScopeEmbeddingProvider() {
 	}
 	// invalid dim
 	functionSchema.Params[2] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalid"}
-	_, err := NewAliDashScopeEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	_, err := NewAliDashScopeEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 	s.Error(err)
 }
