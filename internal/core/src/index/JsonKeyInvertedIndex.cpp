@@ -22,21 +22,33 @@ constexpr const char* TMP_JSON_INVERTED_LOG_PREFIX =
 
 void
 JsonKeyInvertedIndex::AddInvertedRecord(const std::vector<std::string>& paths,
+                                        uint8_t valid,
+                                        uint8_t type,
                                         uint32_t row_id,
                                         uint16_t offset,
-                                        uint16_t length) {
+                                        uint16_t length,
+                                        uint32_t value) {
     std::string key = "";
     if (!paths.empty()) {
         key = std::string("/") + Join(paths, "/");
     }
     LOG_DEBUG(
-        "insert inverted key: {}, row_id: {}, offset: "
-        "{}, length:{}",
+        "insert inverted key: {}, valid: {}, type: {}, row_id: {}, offset: "
+        "{}, length:{}, value:{}",
         key,
+        valid,
+        type,
         row_id,
         offset,
-        length);
-    int64_t combine_id = EncodeOffset(row_id, offset, length);
+        length,
+        value);
+    int64_t combine_id = 0;
+    if (valid) {
+        combine_id = EncodeValue(valid, type, row_id, value);
+    } else {
+        combine_id = EncodeOffset(valid, type, row_id, offset, length);
+    }
+
     wrapper_->add_multi_data<std::string>(&key, 1, combine_id);
 }
 
@@ -50,8 +62,13 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
     Assert(current.type != JSMN_UNDEFINED);
     if (current.type == JSMN_OBJECT) {
         if (!path.empty()) {
-            AddInvertedRecord(
-                path, offset, current.start, current.end - current.start);
+            AddInvertedRecord(path,
+                              0,
+                              0,
+                              offset,
+                              current.start,
+                              current.end - current.start,
+                              0);
         }
         int j = 1;
         for (int i = 0; i < current.size; i++) {
@@ -67,12 +84,62 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
         }
         index = j;
     } else if (current.type == JSMN_PRIMITIVE) {
-        AddInvertedRecord(
-            path, offset, current.start, current.end - current.start);
+        std::string value(json + current.start, current.end - current.start);
+        auto type = getType(value);
+
+        if (type == JSONType::INT32) {
+            AddInvertedRecord(path,
+                              1,
+                              static_cast<uint8_t>(JSONType::INT32),
+                              offset,
+                              current.start,
+                              current.end - current.start,
+                              stoi(value));
+        } else if (type == JSONType::INT64) {
+            AddInvertedRecord(path,
+                              0,
+                              static_cast<uint8_t>(JSONType::INT64),
+                              offset,
+                              current.start,
+                              current.end - current.start,
+                              0);
+        } else if (type == JSONType::FLOAT) {
+            auto fvalue = stof(value);
+            uint32_t valueBits = *reinterpret_cast<uint32_t*>(&fvalue);
+            AddInvertedRecord(path,
+                              1,
+                              static_cast<uint8_t>(JSONType::FLOAT),
+                              offset,
+                              current.start,
+                              current.end - current.start,
+                              valueBits);
+        } else if (type == JSONType::DOUBLE) {
+            AddInvertedRecord(path,
+                              0,
+                              static_cast<uint8_t>(JSONType::DOUBLE),
+                              offset,
+                              current.start,
+                              current.end - current.start,
+                              0);
+        } else if (type == JSONType::BOOL) {
+            AddInvertedRecord(path,
+                              1,
+                              static_cast<uint8_t>(JSONType::BOOL),
+                              offset,
+                              current.start,
+                              current.end - current.start,
+                              value == "true" ? 1 : 0);
+        }
+
         index++;
     } else if (current.type == JSMN_ARRAY) {
-        AddInvertedRecord(
-            path, offset, current.start, current.end - current.start);
+        AddInvertedRecord(path,
+                          0,
+                          static_cast<uint8_t>(JSONType::UNKNOWN),
+                          offset,
+                          current.start,
+                          current.end - current.start,
+                          0);
         // skip array parse
         int count = current.size;
         int j = 1;
@@ -86,8 +153,24 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
         index = j;
     } else if (current.type == JSMN_STRING) {
         Assert(current.size == 0);
-        AddInvertedRecord(
-            path, offset, current.start - 1, current.end - current.start + 2);
+        std::string value(json + current.start, current.end - current.start);
+        if (has_escape_sequence(value)) {
+            AddInvertedRecord(path,
+                              0,
+                              static_cast<uint8_t>(JSONType::STRING_ESCAPE),
+                              offset,
+                              current.start - 1,
+                              current.end - current.start + 2,
+                              0);
+        } else {
+            AddInvertedRecord(path,
+                              0,
+                              static_cast<uint8_t>(JSONType::STRING),
+                              offset,
+                              current.start,
+                              current.end - current.start,
+                              0);
+        }
         index++;
     }
 }
@@ -136,9 +219,13 @@ JsonKeyInvertedIndex::AddJson(const char* json, int64_t offset) {
 }
 
 JsonKeyInvertedIndex::JsonKeyInvertedIndex(
-    const storage::FileManagerContext& ctx, bool is_load)
+    const storage::FileManagerContext& ctx,
+    bool is_load,
+    int64_t json_stats_tantivy_memory_budget)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
+    LOG_INFO("JsonKeyInvertedIndex json_stats_tantivy_memory_budget:{}",
+             json_stats_tantivy_memory_budget);
     schema_ = ctx.fieldDataMeta.field_schema;
     field_id_ = ctx.fieldDataMeta.field_id;
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
@@ -150,19 +237,18 @@ JsonKeyInvertedIndex::JsonKeyInvertedIndex(
     } else {
         auto prefix = disk_file_manager_->GetJsonKeyIndexIdentifier();
         path_ = std::string(TMP_JSON_INVERTED_LOG_PREFIX) + prefix;
-
         boost::filesystem::create_directories(path_);
         std::string field_name =
             std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
         d_type_ = TantivyDataType::Keyword;
-        wrapper_ =
-            std::make_shared<TantivyIndexWrapper>(field_name.c_str(),
-                                                  d_type_,
-                                                  path_.c_str(),
-                                                  false,
-                                                  false,
-                                                  1,
-                                                  JSON_INDEX_MEMORY_BUDGET);
+        wrapper_ = std::make_shared<TantivyIndexWrapper>(
+            field_name.c_str(),
+            d_type_,
+            path_.c_str(),
+            false,
+            false,
+            1,
+            json_stats_tantivy_memory_budget);
     }
 }
 
@@ -240,7 +326,6 @@ JsonKeyInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load json key index");
-
     for (auto& index_file : index_files.value()) {
         boost::filesystem::path p(index_file);
         if (!p.has_parent_path()) {
@@ -249,7 +334,6 @@ JsonKeyInvertedIndex::Load(milvus::tracer::TraceContext ctx,
             index_file = remote_prefix + "/" + index_file;
         }
     }
-
     disk_file_manager_->CacheJsonKeyIndexToDisk(index_files.value());
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
