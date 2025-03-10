@@ -1158,6 +1158,6 @@ func (s *Server) DescribeDatabase(ctx context.Context, req *milvuspb.DescribeDat
 	return s.proxy.DescribeDatabase(ctx, req)
 }
 
-func (s *Server) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequset) (*milvuspb.RunAnalyzerResponse, error) {
+func (s *Server) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	return s.proxy.RunAnalyzer(ctx, req)
 }

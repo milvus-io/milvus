@@ -6832,7 +6832,7 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	return result, nil
 }
 
-func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequset) (*milvuspb.RunAnalyzerResponse, error) {
+func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	// TODO: use collection analyzer when collection name and field name not none
 	tokenizer, err := ctokenizer.NewTokenizer(req.GetAnalyzerParams())
 	if err != nil {
@@ -6846,13 +6846,23 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 	for i, text := range req.GetPlaceholder() {
 		stream := tokenizer.NewTokenStream(string(text))
 		defer stream.Destroy()
-		tokens := []string{}
-		for stream.Advance() {
-			token := stream.Token()
-			tokens = append(tokens, token)
-		}
+
 		results[i] = &milvuspb.AnalyzerResult{
-			Tokens: tokens,
+			Tokens: make([]*milvuspb.AnalyzerToken, 0),
+		}
+
+		for stream.Advance() {
+			var token *milvuspb.AnalyzerToken
+			if req.GetWithDetail() {
+				token = stream.DetailedToken()
+			} else {
+				token = &milvuspb.AnalyzerToken{Token: stream.Token()}
+			}
+
+			if req.GetWithHash() {
+				token.Hash = typeutil.HashString2LessUint32(token.GetToken())
+			}
+			results[i].Tokens = append(results[i].Tokens, token)
 		}
 	}
 
