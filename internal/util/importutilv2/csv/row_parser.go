@@ -72,8 +72,7 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 
 	// check if csv header provides the primary key while it should be auto-generated
 	if pkField.GetAutoID() && lo.Contains(header, pkField.GetName()) {
-		return nil, merr.WrapErrImportFailed(
-			fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", pkField.GetName()))
+		return nil, fmt.Errorf("the primary key '%s' is auto-generated, no need to provide", pkField.GetName())
 	}
 
 	// check whether csv header contains all fields in schema
@@ -84,7 +83,7 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 	}
 	for fieldName := range name2Field {
 		if _, ok := nameMap[fieldName]; !ok && (fieldName != dynamicField.GetName()) && (fieldName != pkField.GetName() && !pkField.GetAutoID()) {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("value of field is missed: '%s'", fieldName))
+			return nil, fmt.Errorf("value of field is missed: '%s'", fieldName)
 		}
 	}
 
@@ -100,7 +99,7 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 
 func (r *rowParser) Parse(strArr []string) (Row, error) {
 	if len(strArr) != len(r.header) {
-		return nil, merr.WrapErrImportFailed("the number of fields in the row is not equal to the header")
+		return nil, fmt.Errorf("the number of fields in the row is not equal to the header")
 	}
 
 	row := make(Row)
@@ -115,7 +114,7 @@ func (r *rowParser) Parse(strArr []string) (Row, error) {
 		} else if r.dynamicField != nil {
 			dynamicValues[r.header[index]] = value
 		} else {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field '%s' is not defined in schema", r.header[index]))
+			return nil, fmt.Errorf("the field '%s' is not defined in schema", r.header[index])
 		}
 	}
 
@@ -144,12 +143,12 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]string, row Row) 
 		var mp map[string]interface{}
 		err := json.Unmarshal([]byte(str), &mp)
 		if err != nil {
-			return merr.WrapErrImportFailed("illegal value for dynamic field, not a JSON format string")
+			return fmt.Errorf("illegal value for dynamic field, not a JSON format string")
 		}
 		// put the all dynamic fields into newDynamicValues
 		for k, v := range mp {
 			if _, ok = dynamicValues[k]; ok {
-				return merr.WrapErrImportFailed(fmt.Sprintf("duplicated key in dynamic field, key=%s", k))
+				return fmt.Errorf("duplicated key in dynamic field, key=%s", k)
 			}
 			newDynamicValues[k] = v
 		}
@@ -165,7 +164,7 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]string, row Row) 
 	// check if stasify the json format
 	dynamicBytes, err := json.Marshal(newDynamicValues)
 	if err != nil {
-		return merr.WrapErrImportFailed("illegal value for dynamic field, not a JSON object")
+		return fmt.Errorf("illegal value for dynamic field, not a JSON object")
 	}
 	row[dynamicFieldID] = dynamicBytes
 
@@ -246,7 +245,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		if err != nil {
 			return nil, err
 		}
-		if err = common.CheckVarcharLength(obj, maxLength); err != nil {
+		if err = common.CheckVarcharLength(obj, maxLength, field); err != nil {
 			return nil, err
 		}
 		return obj, nil
@@ -352,7 +351,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		if err != nil {
 			return nil, err
 		}
-		if err = common.CheckArrayCapacity(len(vec), maxCapacity); err != nil {
+		if err = common.CheckArrayCapacity(len(vec), maxCapacity, field); err != nil {
 			return nil, err
 		}
 		// elements in array not support null value
@@ -362,8 +361,8 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		}
 		return scalarFieldData, nil
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("parse csv failed, unsupport data type: %s",
-			field.GetDataType().String()))
+		return nil, fmt.Errorf("parse csv failed, unsupport data type: %s",
+			field.GetDataType().String())
 	}
 }
 
@@ -489,21 +488,21 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, eleType schemapb.DataTyp
 			},
 		}, nil
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("parse csv failed, unsupported data type: %s", eleType.String()))
+		return nil, fmt.Errorf("parse csv failed, unsupported data type: %s", eleType.String())
 	}
 }
 
 func (r *rowParser) wrapTypeError(v any, field *schemapb.FieldSchema) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected type '%s' for field '%s', got type '%T' with value '%v'",
-		field.GetDataType().String(), field.GetName(), v, v))
+	return fmt.Errorf("expected type '%s' for field '%s', got type '%T' with value '%v'",
+		field.GetDataType().String(), field.GetName(), v, v)
 }
 
 func (r *rowParser) wrapDimError(actualDim int, field *schemapb.FieldSchema) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected dim '%d' for field '%s' with type '%s', got dim '%d'",
-		r.name2Dim[field.GetName()], field.GetName(), field.GetDataType().String(), actualDim))
+	return fmt.Errorf("expected dim '%d' for field '%s' with type '%s', got dim '%d'",
+		r.name2Dim[field.GetName()], field.GetName(), field.GetDataType().String(), actualDim)
 }
 
 func (r *rowParser) wrapArrayValueTypeError(v any, eleType schemapb.DataType) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected element type '%s' in array field, got type '%T' with value '%v'",
-		eleType.String(), v, v))
+	return fmt.Errorf("expected element type '%s' in array field, got type '%T' with value '%v'",
+		eleType.String(), v, v)
 }
