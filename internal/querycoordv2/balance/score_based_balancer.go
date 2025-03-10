@@ -72,6 +72,11 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 		balanceBatchSize = paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
 	}
 
+	// filter out query node which resource exhausted
+	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
+		return !b.nodeManager.IsResourceExhausted(node)
+	})
+
 	// calculate each node's score
 	nodeItemsMap := b.convertToNodeItemsBySegment(br, collectionID, nodes)
 	if len(nodeItemsMap) == 0 {
@@ -138,7 +143,7 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 			targetNode.AddCurrentScoreDelta(scoreChanges)
 		}(s)
 
-		if len(plans) > balanceBatchSize {
+		if len(plans) >= balanceBatchSize {
 			break
 		}
 	}
@@ -165,6 +170,11 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 		})
 		balanceBatchSize = paramtable.Get().QueryCoordCfg.CollectionBalanceChannelBatchSize.GetAsInt()
 	}
+
+	// filter out query node which resource exhausted
+	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
+		return !b.nodeManager.IsResourceExhausted(node)
+	})
 
 	// calculate each node's score
 	nodeItemsMap := b.convertToNodeItemsByChannel(br, collectionID, nodes)
@@ -237,7 +247,7 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 			targetNode.AddCurrentScoreDelta(scoreChanges)
 		}(ch)
 
-		if len(plans) > balanceBatchSize {
+		if len(plans) >= balanceBatchSize {
 			break
 		}
 	}
@@ -653,7 +663,6 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 		channelDist[node] = b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
 	}
 
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
 	// find the segment from the node which has more score than the average
 	channelsToMove := make([]*meta.DmChannel, 0)
 	for node, channels := range channelDist {
@@ -668,10 +677,6 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 			channelScore := b.calculateChannelScore(ch, replica.GetCollectionID())
 			br.AddRecord(StrRecordf("pick channel %s with score %f from node %d", ch.GetChannelName(), channelScore, node))
 			channelsToMove = append(channelsToMove, ch)
-			if len(channelsToMove) >= balanceBatchSize {
-				br.AddRecord(StrRecordf("stop add channel candidate since current plan is equal to batch max(%d)", balanceBatchSize))
-				break
-			}
 
 			currentScore -= channelScore
 			if currentScore <= assignedScore {

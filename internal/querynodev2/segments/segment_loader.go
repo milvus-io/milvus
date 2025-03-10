@@ -1384,6 +1384,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	}
 
 	diskUsage := uint64(localDiskUsage) + loader.committedResource.DiskSize
+	diskCapacity := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
 
 	factor := resourceEstimateFactor{
 		memoryUsageFactor:        paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
@@ -1392,7 +1393,8 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		tempSegmentIndexFactor:   paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
 		deltaDataExpansionFactor: paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
 	}
-	maxSegmentSize := uint64(0)
+	maxSegmentMemSize := uint64(0)
+	maxSegmentDiskSize := uint64(0)
 	predictMemUsage := memUsage
 	predictDiskUsage := diskUsage
 	var predictGpuMemUsage []uint64
@@ -1419,38 +1421,36 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		predictDiskUsage += usage.DiskSize
 		predictMemUsage += usage.MemorySize
 		predictGpuMemUsage = usage.FieldGpuMemorySize
-		if usage.MemorySize > maxSegmentSize {
-			maxSegmentSize = usage.MemorySize
+		if usage.MemorySize > maxSegmentMemSize {
+			maxSegmentMemSize = usage.MemorySize
+		}
+		if usage.DiskSize > maxSegmentDiskSize {
+			maxSegmentDiskSize = usage.DiskSize
 		}
 	}
 
 	log.Info("predict memory and disk usage while loading (in MiB)",
-		zap.Float64("maxSegmentSize(MB)", toMB(maxSegmentSize)),
+		zap.Float64("maxSegmentMemSize(MB)", toMB(maxSegmentMemSize)),
 		zap.Float64("committedMemSize(MB)", toMB(loader.committedResource.MemorySize)),
-		zap.Float64("memLimit(MB)", toMB(totalMem)),
-		zap.Float64("memUsage(MB)", toMB(memUsage)),
-		zap.Float64("committedDiskSize(MB)", toMB(loader.committedResource.DiskSize)),
-		zap.Float64("diskUsage(MB)", toMB(diskUsage)),
 		zap.Float64("predictMemUsage(MB)", toMB(predictMemUsage)),
+		zap.Float64("memUsage(MB)", toMB(memUsage)),
+		zap.Float64("memLimit(MB)", toMB(totalMem)),
+		zap.Float64("maxSegmentDiskSize(MB)", toMB(maxSegmentDiskSize)),
+		zap.Float64("committedDiskSize(MB)", toMB(loader.committedResource.DiskSize)),
 		zap.Float64("predictDiskUsage(MB)", toMB(predictDiskUsage)),
+		zap.Float64("diskUsage(MB)", toMB(diskUsage)),
+		zap.Float64("diskLimit(MB)", toMB(diskCapacity)),
 		zap.Int("mmapFieldCount", mmapFieldCount),
 	)
 
 	if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
-		return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB,  memUsage = %v MB, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
-			toMB(maxSegmentSize),
-			toMB(memUsage),
-			toMB(predictMemUsage),
-			toMB(totalMem),
+		return 0, 0, merr.WrapErrSegmentRequestResourceFailed("Memory", toMB(maxSegmentMemSize), toMB(memUsage), toMB(predictMemUsage), toMB(totalMem),
 			paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
 	}
 
-	if predictDiskUsage > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
-		return 0, 0, merr.WrapErrServiceDiskLimitExceeded(float32(predictDiskUsage), float32(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()), fmt.Sprintf("load segment failed, disk space is not enough, diskUsage = %v MB, predictDiskUsage = %v MB, totalDisk = %v MB, thresholdFactor = %f",
-			toMB(diskUsage),
-			toMB(predictDiskUsage),
-			toMB(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())),
-			paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()))
+	if predictDiskUsage > uint64(float64(diskCapacity)*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
+		return 0, 0, merr.WrapErrSegmentRequestResourceFailed("Disk", toMB(maxSegmentMemSize), toMB(diskUsage), toMB(predictDiskUsage), toMB(diskCapacity),
+			paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat())
 	}
 
 	err := checkSegmentGpuMemSize(predictGpuMemUsage, float32(paramtable.Get().GpuConfig.OverloadedMemoryThresholdPercentage.GetAsFloat()))
@@ -1721,9 +1721,11 @@ func checkSegmentGpuMemSize(fieldGpuMemSizeList []uint64, OverloadedMemoryThresh
 		return err
 	}
 	var usedGpuMem []uint64
+	var totalGpuMem []int64
 	var maxGpuMemSize []uint64
 	for _, gpuInfo := range gpuInfos {
 		usedGpuMem = append(usedGpuMem, gpuInfo.TotalMemory-gpuInfo.FreeMemory)
+		totalGpuMem = append(totalGpuMem, int64(gpuInfo.TotalMemory))
 		maxGpuMemSize = append(maxGpuMemSize, uint64(float32(gpuInfo.TotalMemory)*OverloadedMemoryThresholdPercentage))
 	}
 	currentGpuMem := usedGpuMem
@@ -1738,10 +1740,7 @@ func checkSegmentGpuMemSize(fieldGpuMemSizeList []uint64, OverloadedMemoryThresh
 			}
 		}
 		if minId == -1 {
-			return fmt.Errorf("load segment failed, GPU OOM if loaded, GpuMemUsage(bytes) = %v, usedGpuMem(bytes) = %v, maxGPUMem(bytes) = %v",
-				fieldGpuMem,
-				usedGpuMem,
-				maxGpuMemSize)
+			return merr.WrapErrSegmentRequestResourceFailed("GPU", fieldGpuMemSizeList, usedGpuMem, "Unknown", totalGpuMem, float64(OverloadedMemoryThresholdPercentage))
 		}
 		currentGpuMem[minId] += minGpuMem
 	}
