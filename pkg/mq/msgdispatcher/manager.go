@@ -16,7 +16,6 @@
 
 package msgdispatcher
 
-import "C"
 import (
 	"context"
 	"fmt"
