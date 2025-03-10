@@ -661,11 +661,11 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 }
 
 func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*IndexedFieldInfo, []*datapb.FieldBinlog) {
-	fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
+	fieldID2IndexInfo := make(map[int64][]*querypb.FieldIndexInfo)
 	for _, indexInfo := range loadInfo.IndexInfos {
 		if len(indexInfo.GetIndexFilePaths()) > 0 {
 			fieldID := indexInfo.FieldID
-			fieldID2IndexInfo[fieldID] = indexInfo
+			fieldID2IndexInfo[fieldID] = append(fieldID2IndexInfo[fieldID], indexInfo)
 		}
 	}
 
@@ -676,11 +676,13 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 		fieldID := fieldBinlog.FieldID
 		// check num rows of data meta and index meta are consistent
 		if indexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
-			fieldInfo := &IndexedFieldInfo{
-				FieldBinlog: fieldBinlog,
-				IndexInfo:   indexInfo,
+			for _, index := range indexInfo {
+				fieldInfo := &IndexedFieldInfo{
+					FieldBinlog: fieldBinlog,
+					IndexInfo:   index,
+				}
+				indexedFieldInfos[index.IndexID] = fieldInfo
 			}
-			indexedFieldInfos[fieldID] = fieldInfo
 		} else {
 			fieldBinlogs = append(fieldBinlogs, fieldBinlog)
 		}
@@ -696,11 +698,11 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 	map[int64]struct{}, // unindexed text fields
 	map[int64]*datapb.JsonKeyStats, // json key stats info
 ) {
-	fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
+	fieldID2IndexInfo := make(map[int64][]*querypb.FieldIndexInfo)
 	for _, indexInfo := range loadInfo.IndexInfos {
 		if len(indexInfo.GetIndexFilePaths()) > 0 {
 			fieldID := indexInfo.FieldID
-			fieldID2IndexInfo[fieldID] = indexInfo
+			fieldID2IndexInfo[fieldID] = append(fieldID2IndexInfo[fieldID], indexInfo)
 		}
 	}
 
@@ -710,12 +712,14 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 	for _, fieldBinlog := range loadInfo.BinlogPaths {
 		fieldID := fieldBinlog.FieldID
 		// check num rows of data meta and index meta are consistent
-		if indexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
-			fieldInfo := &IndexedFieldInfo{
-				FieldBinlog: fieldBinlog,
-				IndexInfo:   indexInfo,
+		if infos, ok := fieldID2IndexInfo[fieldID]; ok {
+			for _, indexInfo := range infos {
+				fieldInfo := &IndexedFieldInfo{
+					FieldBinlog: fieldBinlog,
+					IndexInfo:   indexInfo,
+				}
+				indexedFieldInfos[indexInfo.IndexID] = fieldInfo
 			}
-			indexedFieldInfos[fieldID] = fieldInfo
 		} else {
 			fieldBinlogs = append(fieldBinlogs, fieldBinlog)
 		}
@@ -782,7 +786,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	log := log.Ctx(ctx).With(zap.Int64("segmentID", segment.ID()))
 	tr := timerecord.NewTimeRecorder("segmentLoader.loadSealedSegment")
 	log.Info("Start loading fields...",
-		zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
+		// zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
 		zap.Int64s("indexed text fields", lo.Keys(textIndexes)),
 		zap.Int64s("unindexed text fields", lo.Keys(unindexedTextFields)),
 		zap.Int64s("indexed json key fields", lo.Keys(jsonKeyStats)),
@@ -794,7 +798,8 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(loadFieldsIndexSpan.Milliseconds()))
 
 	// 2. complement raw data for the scalar fields without raw data
-	for fieldID, info := range indexedFieldInfos {
+	for _, info := range indexedFieldInfos {
+		fieldID := info.IndexInfo.FieldID
 		field, err := schemaHelper.GetFieldFromID(fieldID)
 		if err != nil {
 			return err
@@ -1044,7 +1049,8 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 		zap.Int64("rowCount", numRows),
 	)
 
-	for fieldID, fieldInfo := range indexedFieldInfos {
+	for _, fieldInfo := range indexedFieldInfos {
+		fieldID := fieldInfo.IndexInfo.FieldID
 		indexInfo := fieldInfo.IndexInfo
 		tr := timerecord.NewTimeRecorder("loadFieldIndex")
 		err := loader.loadFieldIndex(ctx, segment, indexInfo)
@@ -1305,7 +1311,7 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 func (loader *segmentLoader) patchEntryNumber(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo) error {
 	var needReset bool
 
-	segment.fieldIndexes.Range(func(fieldID int64, info *IndexedFieldInfo) bool {
+	segment.fieldIndexes.Range(func(indexID int64, info *IndexedFieldInfo) bool {
 		for _, info := range info.FieldBinlog.GetBinlogs() {
 			if info.GetEntriesNum() == 0 {
 				needReset = true
@@ -1355,7 +1361,7 @@ func (loader *segmentLoader) patchEntryNumber(ctx context.Context, segment *Loca
 	}
 
 	var err error
-	segment.fieldIndexes.Range(func(fieldID int64, info *IndexedFieldInfo) bool {
+	segment.fieldIndexes.Range(func(indexID int64, info *IndexedFieldInfo) bool {
 		if len(info.FieldBinlog.GetBinlogs()) != len(counts) {
 			err = errors.New("rowID & index binlog number not matched")
 			return false

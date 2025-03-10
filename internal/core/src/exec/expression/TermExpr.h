@@ -63,6 +63,10 @@ class PhyTermFilterExpr : public SegmentExpr {
                       name,
                       segment,
                       expr->column_.field_id_,
+                      expr->column_.nested_path_,
+                      expr->vals_.size() == 0
+                          ? DataType::NONE
+                          : FromValCase(expr->vals_[0].val_case()),
                       active_count,
                       batch_size,
                       consistency_level),

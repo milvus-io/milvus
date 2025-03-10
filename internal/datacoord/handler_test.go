@@ -45,7 +45,7 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 		CollectionID: 1,
 		FieldID:      2,
 	}
-	_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
+	_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1, false)
 	require.NoError(t, err)
 
 	segArgs := []struct {
@@ -158,7 +158,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		FieldID:      2,
 	}
 
-	_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
+	_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1, false)
 	assert.NoError(t, err)
 
 	s1 := &datapb.SegmentInfo{
@@ -336,7 +336,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CollectionID: 0,
 			FieldID:      2,
 		}
-		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
+		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1, false)
 		assert.NoError(t, err)
 		c := &datapb.SegmentInfo{
 			ID:            1,
@@ -405,7 +405,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CollectionID: 0,
 			FieldID:      2,
 		}
-		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
+		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1, false)
 		assert.NoError(t, err)
 		a := &datapb.SegmentInfo{
 			ID:            99,
@@ -490,7 +490,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CollectionID: 0,
 			FieldID:      2,
 		}
-		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
+		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1, false)
 		assert.NoError(t, err)
 		c := &datapb.SegmentInfo{
 			ID:            1,
@@ -599,7 +599,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CollectionID: 0,
 			FieldID:      2,
 		}
-		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
+		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1, false)
 		assert.NoError(t, err)
 		seg1 := &datapb.SegmentInfo{
 			ID:            1,
@@ -979,7 +979,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CollectionID: 0,
 			FieldID:      2,
 		}
-		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
+		_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1, false)
 		assert.NoError(t, err)
 		seg1 := &datapb.SegmentInfo{
 			ID:            1,
@@ -1183,7 +1183,7 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 		CollectionID: 0,
 		FieldID:      2,
 	}
-	_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1)
+	_, err := svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 1, false)
 	assert.NoError(t, err)
 	seg1 := &datapb.SegmentInfo{
 		ID:            1,

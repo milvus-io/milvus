@@ -322,6 +322,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       name,
                       segment,
                       expr->column_.field_id_,
+                      expr->column_.nested_path_,
+                      FromValCase(expr->val_.val_case()),
                       active_count,
                       batch_size,
                       consistency_level),
@@ -384,6 +386,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     template <typename T>
     bool
     CanUseIndexForArray();
+
+    bool
+    CanUseIndexForJson(DataType val_type);
 
     VectorPtr
     ExecTextMatch();

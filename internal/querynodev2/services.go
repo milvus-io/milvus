@@ -628,8 +628,15 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 			indexInfos []*querypb.FieldIndexInfo
 		)
 		for _, field := range vecFields {
-			index := segment.GetIndex(field)
-			if index != nil {
+			indexes := segment.GetIndex(field)
+			if indexes != nil {
+				if len(indexes) != 1 {
+					log.Error("only support one index for vector field", zap.Int64("fieldID", field), zap.Int("index count", len(indexes)))
+					return &querypb.GetSegmentInfoResponse{
+						Status: merr.Status(merr.WrapErrServiceInternal("only support one index for vector field")),
+					}, nil
+				}
+				index := indexes[0]
 				indexName = index.IndexInfo.GetIndexName()
 				indexID = index.IndexInfo.GetIndexID()
 				indexInfos = append(indexInfos, index.IndexInfo)
@@ -1178,7 +1185,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			IsSorted:           s.IsSorted(),
 			LastDeltaTimestamp: s.LastDeltaTimestamp(),
 			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
-				return info.IndexInfo.FieldID, info.IndexInfo
+				return info.IndexInfo.IndexID, info.IndexInfo
 			}),
 			FieldJsonIndexStats: s.GetFieldJSONIndexStats(),
 		})
