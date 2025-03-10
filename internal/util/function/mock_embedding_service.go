@@ -36,18 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models/voyageai"
 )
 
-// func mockEmbedding(texts []string, dim int) [][]float32 {
-// 	embeddings := make([][]float32, 0)
-// 	for i := 0; i < len(texts); i++ {
-// 		f := float32(i)
-// 		emb := make([]float32, 0)
-// 		for j := 0; j < dim; j++ {
-// 			emb = append(emb, f+float32(j)*0.1)
-// 		}
-// 		embeddings = append(embeddings, emb)
-// 	}
-// 	return embeddings
-// }
+const TestModel string = "TestModel"
 
 func mockEmbedding[T int8 | float32](texts []string, dim int) [][]T {
 	embeddings := make([][]T, 0)

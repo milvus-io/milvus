@@ -20,6 +20,7 @@ package function
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
@@ -27,6 +28,22 @@ import (
 type FunctionBase struct {
 	schema       *schemapb.FunctionSchema
 	outputFields []*schemapb.FieldSchema
+
+	collectionName   string
+	functionTypeName string
+	functionName     string
+	provider         string
+}
+
+func getProvider(functionSchema *schemapb.FunctionSchema) (string, error) {
+	for _, param := range functionSchema.Params {
+		switch strings.ToLower(param.Key) {
+		case Provider:
+			return strings.ToLower(param.Value), nil
+		default:
+		}
+	}
+	return "", fmt.Errorf("The text embedding service provider parameter:[%s] was not found", Provider)
 }
 
 func NewFunctionBase(coll *schemapb.CollectionSchema, fSchema *schemapb.FunctionSchema) (*FunctionBase, error) {
@@ -45,6 +62,15 @@ func NewFunctionBase(coll *schemapb.CollectionSchema, fSchema *schemapb.Function
 		return &base, fmt.Errorf("The collection [%s]'s information is wrong, function [%s]'s outputs does not match the schema",
 			coll.Name, fSchema.Name)
 	}
+
+	provider, err := getProvider(fSchema)
+	if err != nil {
+		return nil, err
+	}
+	base.collectionName = coll.Name
+	base.functionName = fSchema.Name
+	base.provider = provider
+	base.functionTypeName = fSchema.GetType().String()
 	return &base, nil
 }
 

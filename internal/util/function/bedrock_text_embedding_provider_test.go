@@ -64,7 +64,7 @@ func createBedrockProvider(schema *schemapb.FieldSchema, providerName string, di
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: BedRockTitanTextEmbeddingsV2},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: dimParamKey, Value: "4"},
 		},
@@ -143,7 +143,7 @@ func (s *BedrockTextEmbeddingProviderSuite) TestNewBedrockEmbeddingProvider() {
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: BedRockTitanTextEmbeddingsV2},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: awsAKIdParamKey, Value: "mock"},
 			{Key: awsSAKParamKey, Value: "mock"},
 			{Key: regionParamKey, Value: "mock"},
@@ -164,14 +164,8 @@ func (s *BedrockTextEmbeddingProviderSuite) TestNewBedrockEmbeddingProvider() {
 	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil)
 	s.Error(err)
 
-	// invalid model name
-	functionSchema.Params[5] = &commonpb.KeyValuePair{Key: normalizeParamKey, Value: "true"}
-	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: "UnkownModel"}
-	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil)
-	s.Error(err)
-
 	// invalid dim
-	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: BedRockTitanTextEmbeddingsV2}
+	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: TestModel}
 	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalid"}
 	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil)
 	s.Error(err)
