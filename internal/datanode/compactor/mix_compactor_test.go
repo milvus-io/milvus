@@ -454,7 +454,6 @@ func (s *MixCompactionTaskSuite) TestSplitMergeEntityExpired() {
 }
 
 func (s *MixCompactionTaskSuite) TestMergeNoExpirationLackBinlog() {
-	s.T().Skip() // Skip added field related tests for now.
 	s.initSegBuffer(1, 4)
 	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
 	tests := []struct {
