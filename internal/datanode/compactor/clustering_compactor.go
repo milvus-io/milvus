@@ -720,8 +720,9 @@ func (t *clusteringCompactionTask) flushLargestBuffers(ctx context.Context) erro
 func (t *clusteringCompactionTask) flushAll() error {
 	futures := make([]*conc.Future[any], 0)
 	for _, buffer := range t.clusterBuffers {
+		b := buffer // avoid closure mis-capture
 		future := t.flushPool.Submit(func() (any, error) {
-			err := buffer.Close()
+			err := b.Close()
 			if err != nil {
 				return nil, err
 			}

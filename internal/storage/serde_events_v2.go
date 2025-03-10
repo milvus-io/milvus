@@ -533,6 +533,10 @@ func (pw *PackedBinlogRecordWriter) Schema() *schemapb.CollectionSchema {
 	return pw.schema
 }
 
+func (pw *PackedBinlogRecordWriter) GetBufferUncompressed() uint64 {
+	return uint64(pw.multiPartUploadSize)
+}
+
 func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
 ) (*PackedBinlogRecordWriter, error) {

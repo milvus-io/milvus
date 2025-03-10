@@ -207,8 +207,6 @@ func (w *MultiSegmentWriter) FlushChunk() error {
 	return w.writer.FlushChunk()
 }
 
-// DONOT return an empty list if every insert of the segment is deleted,
-// append an empty segment instead
 func (w *MultiSegmentWriter) Close() error {
 	if w.writer != nil {
 		return w.closeWriter()

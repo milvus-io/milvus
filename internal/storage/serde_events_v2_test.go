@@ -52,27 +52,34 @@ func TestPackedSerde(t *testing.T) {
 			writer, err := NewPackedSerializeWriter(chunkPaths, generateTestSchema(), bufferSize, multiPartUploadSize, []storagecommon.ColumnGroup{group}, batchSize)
 			assert.NoError(t, err)
 
-		for i := 1; i <= size; i++ {
-			value, err := reader.NextValue()
-			assert.NoError(t, err)
+			for i := 1; i <= size; i++ {
+				value, err := reader.NextValue()
+				assert.NoError(t, err)
 
-			assertTestData(t, i, *value)
-			err = writer.WriteValue(*value)
+				assertTestData(t, i, *value)
+				err = writer.WriteValue(*value)
+				assert.NoError(t, err)
+			}
+			err = writer.Close()
+			assert.NoError(t, err)
+			err = reader.Close()
 			assert.NoError(t, err)
 		}
-		err = writer.Close()
-		assert.NoError(t, err)
+
+		for _, chunkPaths := range paths {
+			prepareChunkData(chunkPaths, size)
+		}
 
 		reader, err := NewPackedDeserializeReader(paths, schema, bufferSize)
 		assert.NoError(t, err)
 		defer reader.Close()
 
-		for i := 1; i <= size; i++ {
+		for i := 0; i < size*len(paths); i++ {
 			value, err := reader.NextValue()
 			assert.NoError(t, err)
-			assertTestData(t, i, *value)
+			assertTestData(t, i%10+1, *value)
 		}
-		err = reader.Next()
+		_, err = reader.NextValue()
 		assert.Equal(t, err, io.EOF)
 	})
 }
