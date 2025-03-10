@@ -525,15 +525,15 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	err = imeta.AddTask(context.TODO(), it1)
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 10, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
+		SegmentInfo: &datapb.SegmentInfo{ID: 10, IsImporting: true, State: commonpb.SegmentState_Flushed, NumOfRows: 50},
 	})
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 11, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
+		SegmentInfo: &datapb.SegmentInfo{ID: 11, IsImporting: true, State: commonpb.SegmentState_Flushed, NumOfRows: 50},
 	})
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 12, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
+		SegmentInfo: &datapb.SegmentInfo{ID: 12, IsImporting: true, State: commonpb.SegmentState_Flushed, NumOfRows: 50},
 	})
 	assert.NoError(t, err)
 
@@ -554,15 +554,15 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	err = imeta.AddTask(context.TODO(), it2)
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 20, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
+		SegmentInfo: &datapb.SegmentInfo{ID: 20, IsImporting: true, State: commonpb.SegmentState_Flushed, NumOfRows: 50},
 	})
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 21, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
+		SegmentInfo: &datapb.SegmentInfo{ID: 21, IsImporting: true, State: commonpb.SegmentState_Flushed, NumOfRows: 50},
 	})
 	assert.NoError(t, err)
 	err = meta.AddSegment(ctx, &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 22, IsImporting: true, State: commonpb.SegmentState_Flushed}, currRows: 50,
+		SegmentInfo: &datapb.SegmentInfo{ID: 22, IsImporting: true, State: commonpb.SegmentState_Flushed, NumOfRows: 50},
 	})
 	assert.NoError(t, err)
 
