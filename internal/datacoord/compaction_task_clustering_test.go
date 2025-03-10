@@ -665,7 +665,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 			CollectionID: 1,
 		}
 		task.updateAndSaveTaskMeta(setResultSegments([]int64{10, 11}))
-		_, err := s.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 3)
+		_, err := s.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 3, false)
 		s.NoError(err)
 
 		s.False(task.Process())
@@ -678,7 +678,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 1,
 		}
-		_, err := s.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 3)
+		_, err := s.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 3, false)
 		s.NoError(err)
 
 		s.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{

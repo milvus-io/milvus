@@ -72,6 +72,11 @@ class IndexBase {
         return index_type_;
     }
 
+    virtual enum DataType
+    JsonCastType() const {
+        return DataType::NONE;
+    }
+
  protected:
     explicit IndexBase(IndexType index_type)
         : index_type_(std::move(index_type)) {

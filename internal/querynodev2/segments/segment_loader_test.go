@@ -678,7 +678,7 @@ func (suite *SegmentLoaderSuite) TestPatchEntryNum() {
 	info := segment.GetIndex(vecFields[0])
 	suite.Require().NotNil(info)
 
-	for _, binlog := range info.FieldBinlog.GetBinlogs() {
+	for _, binlog := range info[0].FieldBinlog.GetBinlogs() {
 		suite.Greater(binlog.EntriesNum, int64(0))
 	}
 }

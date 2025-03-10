@@ -1235,7 +1235,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			CollectionID: 0,
 			FieldID:      2,
 		}
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0)
+		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
 		assert.NoError(t, err)
 
 		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
@@ -1456,7 +1456,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			CollectionID: 0,
 			FieldID:      2,
 		}
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0)
+		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
 		assert.NoError(t, err)
 		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: segment.ID,
@@ -1620,7 +1620,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			FieldID:      2,
 			IndexName:    "_default_idx_2",
 		}
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0)
+		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
 		assert.NoError(t, err)
 		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:           seg4.ID,

@@ -166,6 +166,11 @@ class FieldMeta {
     }
 
     bool
+    is_json() const {
+        return type_ == DataType::JSON;
+    }
+
+    bool
     is_string() const {
         return IsStringDataType(type_);
     }
