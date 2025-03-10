@@ -2536,7 +2536,8 @@ type queryNodeConfig struct {
 	LazyLoadMaxRetryTimes                ParamItem `refreshable:"true"`
 	LazyLoadMaxEvictPerRetry             ParamItem `refreshable:"true"`
 
-	IndexOffsetCacheEnabled ParamItem `refreshable:"true"`
+	IndexOffsetCacheEnabled      ParamItem `refreshable:"true"`
+	ScalarIndexHasRawDataEnabled ParamItem `refreshable:"true"`
 
 	// chunk cache
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
@@ -3108,6 +3109,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export: true,
 	}
 	p.IndexOffsetCacheEnabled.Init(base.mgr)
+
+	p.ScalarIndexHasRawDataEnabled = ParamItem{
+		Key:          "queryNode.scalarIndexHasRawDataEnabled",
+		Version:      "2.5.5",
+		DefaultValue: "true",
+		Doc:          "enable scalar index has raw data or not, if false means force load raw data for segment although index has raw data itself",
+		Export:       true,
+	}
+	p.ScalarIndexHasRawDataEnabled.Init(base.mgr)
 
 	p.DiskCapacityLimit = ParamItem{
 		Key:     "LOCAL_STORAGE_SIZE",

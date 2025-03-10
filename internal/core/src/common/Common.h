@@ -32,6 +32,7 @@ extern int64_t EXEC_EVAL_EXPR_BATCH_SIZE;
 extern int64_t JSON_INDEX_MEMORY_BUDGET;
 extern int64_t JSON_INDEX_COMMIT_INTERVAL;
 extern bool JSON_INDEX_ENABLED;
+extern bool SCALAR_INDEX_HAS_RAW_DATA;
 void
 SetIndexSliceSize(const int64_t size);
 
@@ -58,6 +59,9 @@ SetDefaultJSONKeyIndexCommitInterval(int64_t val);
 
 void
 SetDefaultJSONKeyIndexEnable(bool val);
+
+void
+SetDefaultScalarIndexHasRawData(bool val);
 
 struct BufferView {
     struct Element {
