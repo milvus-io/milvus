@@ -2491,7 +2491,8 @@ type queryCoordConfig struct {
 	// query node task parallelism factor
 	QueryNodeTaskParallelismFactor ParamItem `refreshable:"true"`
 
-	BalanceCheckCollectionMaxCount ParamItem `refreshable:"true"`
+	BalanceCheckCollectionMaxCount    ParamItem `refreshable:"true"`
+	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -3133,6 +3134,16 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.BalanceCheckCollectionMaxCount.Init(base.mgr)
+	p.ResourceExhaustionPenaltyDuration = ParamItem{
+		Key:          "queryCoord.resourceExhaustionPenaltyDuration",
+		Version:      "2.6.7",
+		DefaultValue: "30",
+		Doc: `Duration (in seconds) that a query node remains marked as resource exhausted after reaching resource limits.
+During this period, the node won't receive new tasks to loading resource.
+Set to 0 to disable the penalty period.`,
+		Export: true,
+	}
+	p.ResourceExhaustionPenaltyDuration.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

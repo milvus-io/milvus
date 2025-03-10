@@ -759,6 +759,20 @@ func WrapErrSegmentLoadFailed(id int64, msg ...string) error {
 	return err
 }
 
+func WrapErrSegmentRequestResourceFailed(
+	resourceType string,
+	msg ...string,
+) error {
+	err := wrapFields(ErrSegmentRequestResourceFailed,
+		value("resourceType", resourceType),
+	)
+
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 func WrapErrSegmentNotLoaded(id int64, msg ...string) error {
 	err := wrapFields(ErrSegmentNotLoaded, value("segment", id))
 	if len(msg) > 0 {
