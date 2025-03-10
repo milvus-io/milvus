@@ -36,6 +36,7 @@ const (
 	Proxy_GetImportProgress_FullMethodName             = "/milvus.proto.proxy.Proxy/GetImportProgress"
 	Proxy_ListImports_FullMethodName                   = "/milvus.proto.proxy.Proxy/ListImports"
 	Proxy_InvalidateShardLeaderCache_FullMethodName    = "/milvus.proto.proxy.Proxy/InvalidateShardLeaderCache"
+	Proxy_GetSegmentsInfo_FullMethodName               = "/milvus.proto.proxy.Proxy/GetSegmentsInfo"
 )
 
 // ProxyClient is the client API for Proxy service.
@@ -57,6 +58,7 @@ type ProxyClient interface {
 	GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest, opts ...grpc.CallOption) (*internalpb.GetImportProgressResponse, error)
 	ListImports(ctx context.Context, in *internalpb.ListImportsRequest, opts ...grpc.CallOption) (*internalpb.ListImportsResponse, error)
 	InvalidateShardLeaderCache(ctx context.Context, in *InvalidateShardLeaderCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	GetSegmentsInfo(ctx context.Context, in *internalpb.GetSegmentsInfoRequest, opts ...grpc.CallOption) (*internalpb.GetSegmentsInfoResponse, error)
 }
 
 type proxyClient struct {
@@ -193,6 +195,15 @@ func (c *proxyClient) InvalidateShardLeaderCache(ctx context.Context, in *Invali
 	return out, nil
 }
 
+func (c *proxyClient) GetSegmentsInfo(ctx context.Context, in *internalpb.GetSegmentsInfoRequest, opts ...grpc.CallOption) (*internalpb.GetSegmentsInfoResponse, error) {
+	out := new(internalpb.GetSegmentsInfoResponse)
+	err := c.cc.Invoke(ctx, Proxy_GetSegmentsInfo_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProxyServer is the server API for Proxy service.
 // All implementations should embed UnimplementedProxyServer
 // for forward compatibility
@@ -212,6 +223,7 @@ type ProxyServer interface {
 	GetImportProgress(context.Context, *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error)
 	ListImports(context.Context, *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error)
 	InvalidateShardLeaderCache(context.Context, *InvalidateShardLeaderCacheRequest) (*commonpb.Status, error)
+	GetSegmentsInfo(context.Context, *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error)
 }
 
 // UnimplementedProxyServer should be embedded to have forward compatible implementations.
@@ -259,6 +271,9 @@ func (UnimplementedProxyServer) ListImports(context.Context, *internalpb.ListImp
 }
 func (UnimplementedProxyServer) InvalidateShardLeaderCache(context.Context, *InvalidateShardLeaderCacheRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InvalidateShardLeaderCache not implemented")
+}
+func (UnimplementedProxyServer) GetSegmentsInfo(context.Context, *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSegmentsInfo not implemented")
 }
 
 // UnsafeProxyServer may be embedded to opt out of forward compatibility for this service.
@@ -524,6 +539,24 @@ func _Proxy_InvalidateShardLeaderCache_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Proxy_GetSegmentsInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.GetSegmentsInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProxyServer).GetSegmentsInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Proxy_GetSegmentsInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProxyServer).GetSegmentsInfo(ctx, req.(*internalpb.GetSegmentsInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Proxy_ServiceDesc is the grpc.ServiceDesc for Proxy service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -586,6 +619,10 @@ var Proxy_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "InvalidateShardLeaderCache",
 			Handler:    _Proxy_InvalidateShardLeaderCache_Handler,
+		},
+		{
+			MethodName: "GetSegmentsInfo",
+			Handler:    _Proxy_GetSegmentsInfo_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

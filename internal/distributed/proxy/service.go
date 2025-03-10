@@ -1157,3 +1157,7 @@ func (s *Server) InvalidateShardLeaderCache(ctx context.Context, req *proxypb.In
 func (s *Server) DescribeDatabase(ctx context.Context, req *milvuspb.DescribeDatabaseRequest) (*milvuspb.DescribeDatabaseResponse, error) {
 	return s.proxy.DescribeDatabase(ctx, req)
 }
+
+func (s *Server) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error) {
+	return s.proxy.GetSegmentsInfo(ctx, req)
+}

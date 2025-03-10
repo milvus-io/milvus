@@ -233,3 +233,9 @@ func (c *Client) InvalidateShardLeaderCache(ctx context.Context, req *proxypb.In
 		return client.InvalidateShardLeaderCache(ctx, req)
 	})
 }
+
+func (c *Client) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegmentsInfoRequest, opts ...grpc.CallOption) (*internalpb.GetSegmentsInfoResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*internalpb.GetSegmentsInfoResponse, error) {
+		return client.GetSegmentsInfo(ctx, req)
+	})
+}
