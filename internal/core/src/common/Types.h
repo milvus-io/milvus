@@ -247,6 +247,11 @@ IsFloatDataType(DataType data_type) {
 }
 
 inline bool
+IsNumericDataType(DataType data_type) {
+    return IsIntegerDataType(data_type) || IsFloatDataType(data_type);
+}
+
+inline bool
 IsStringDataType(DataType data_type) {
     switch (data_type) {
         case DataType::VARCHAR:

@@ -63,7 +63,7 @@ class Expr {
     }
 
     std::string
-    get_name() {
+    name() {
         return name_;
     }
 
@@ -87,9 +87,29 @@ class Expr {
         return true;
     }
 
+    virtual std::string
+    ToString() const {
+        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+    }
+
+    virtual bool
+    IsSource() const {
+        return false;
+    }
+
+    virtual std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const {
+        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+    }
+
+    const std::vector<std::shared_ptr<Expr>>&
+    GetInputsRef() {
+        return inputs_;
+    }
+
  protected:
     DataType type_;
-    const std::vector<std::shared_ptr<Expr>> inputs_;
+    std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
     // NOTE: unused
     std::shared_ptr<VectorFunction> vector_func_;
