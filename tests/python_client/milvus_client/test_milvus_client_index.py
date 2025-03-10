@@ -68,8 +68,7 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="vector")
         # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. the first character of a collection "
-                                                f"name must be an underscore or letter: invalid parameter"}
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={name}"}
         self.create_index(client, name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -92,8 +91,7 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="vector")
         # 3. create index
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. the length of a collection name "
-                                                f"must be less than 255 characters: invalid parameter"}
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={name}]"}
         self.create_index(client, name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -633,3 +631,790 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
                                 "with_vec": True,
                                 "primary_field": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
+
+
+class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
+    """ Test case of search interface """
+
+    @pytest.fixture(scope="function", params=["TRIE", "STL_SORT", "BITMAP"])
+    def not_supported_varchar_scalar_index(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["INVERTED"])
+    def supported_varchar_scalar_index(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[DataType.INT8, DataType.INT16, DataType.INT32,
+                                              DataType.INT64, DataType.FLOAT, DataType.DOUBLE,
+                                              DataType.BOOL, DataType.VARCHAR, DataType.JSON,
+                                              DataType.ARRAY, DataType.FLOAT_VECTOR,
+                                              DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
+                                              DataType.SPARSE_FLOAT_VECTOR,])
+    def not_supported_json_cast_type(self, request):
+        yield request.param
+
+    """
+    ******************************************************************
+    #  The following are invalid base cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_json_path_index_no_index_params(self):
+        """
+        target: test json path index with:
+                1. no all index params
+                2. no json_cast_type
+                3. no json_path
+        method: create index on invalid collection name
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # 2. prepare index params with no index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name="my_json", index_type="INVERTED")
+        # 3. create index
+        error = {ct.err_code: 1100, ct.err_msg: "json index must specify cast type: missing parameter"
+                                                "[missing_param=json_cast_type]: invalid parameter"
+                                                "[expected=valid index params][actual=invalid index params]"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+        # 4. prepare index params with no json_cast_type
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name="my_json", index_type="INVERTED", params={"json_path": "my_json['a']['b']"})
+        # 5. create index
+        error = {ct.err_code: 1100, ct.err_msg: "json index must specify cast type: missing parameter"
+                                                "[missing_param=json_cast_type]: invalid parameter"
+                                                "[expected=valid index params][actual=invalid index params]"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+        # 6. prepare index params with no json_path
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name="my_json", index_type="INVERTED", params={"json_cast_type": DataType.VARCHAR})
+        # 7. create index
+        error = {ct.err_code: 1100, ct.err_msg: "json index must specify json path: missing parameter"
+                                                "[missing_param=json_path]: invalid parameter[expected=valid index params]"
+                                                "[actual=invalid index params]"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_index_type", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    def test_milvus_client_json_path_index_invalid_index_type(self, invalid_index_type):
+        """
+        target: test json path index with invalid index type
+        method: create json path index with invalid index type
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # 2. prepare index params with invalid index type
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name="my_json", index_type=invalid_index_type, params={"json_cast_type": DataType.INT64,
+                                                                                    "json_path": "my_json['a']['b']"})
+        # 3. create index
+        error = {ct.err_code: 1100, ct.err_msg: f"invalid parameter[expected=valid index]"
+                                                f"[actual=invalid index type: {invalid_index_type}]"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_json_path_index_not_support_index_type(self, enable_dynamic_field, not_supported_varchar_scalar_index):
+        """
+        target: test json path index with not supported index type
+        method: create json path index with not supported index type
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, default_dim)
+        # 2. prepare index params with invalid json index type
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name=json_field_name, index_type=not_supported_varchar_scalar_index,
+                               params={"json_cast_type": DataType.INT64, "json_path": "my_json['a']['b']"})
+        # 3. create index
+        if not_supported_varchar_scalar_index == "TRIE":
+            supported_field_type = "varchar"
+        if not_supported_varchar_scalar_index == "STL_SORT":
+            supported_field_type = "numeric"
+        if not_supported_varchar_scalar_index == "BITMAP":
+            supported_field_type = "bool, int, string and array"
+            not_supported_varchar_scalar_index = "bitmap index"
+        error = {ct.err_code: 1100, ct.err_msg: f"{not_supported_varchar_scalar_index} are only supported on "
+                                                f"{supported_field_type} field: invalid parameter[expected=valid "
+                                                f"index params][actual=invalid index params]"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue 40420")
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("invalid_json_cast_type", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    def test_milvus_client_json_path_index_invalid_json_cast_type(self, enable_dynamic_field, invalid_json_cast_type,
+                                                                  supported_varchar_scalar_index):
+        """
+        target: test json path index with invalid json_cast_type
+        method: create json path index with invalid json_cast_type
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, default_dim)
+        # 2. prepare index params with invalid json index type
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name=json_field_name, index_name="json_index", index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": invalid_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        # 3. create index
+        error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue 40420")
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_json_path_index_not_supported_json_cast_type(self, enable_dynamic_field, not_supported_json_cast_type,
+                                                                        supported_varchar_scalar_index):
+        """
+        target: test json path index with not supported json_cast_type
+        method: create json path index with not supported json_cast_type
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, default_dim)
+        # 2. prepare index params with invalid json index type
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name=json_field_name, index_name="json_index", index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": not_supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        # 3. create index
+        error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue 40423")
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("invalid_json_path", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    def test_milvus_client_json_path_index_invalid_json_path(self, enable_dynamic_field, invalid_json_path,
+                                                             supported_varchar_scalar_index):
+        """
+        target: test json path index with invalid json_cast_type
+        method: create json path index with invalid json_cast_type
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, default_dim)
+        # 2. prepare index params with invalid json index type
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name=json_field_name, index_name="json_index",
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": DataType.INT64, "json_path": invalid_json_path})
+        # 3. create index
+        error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_json_path_index_not_exist_field_non_dynamic(self, supported_varchar_scalar_index):
+        """
+        target: test json path index with not exist field in non dynamic field scenario
+        method: create json path index with not exist field with enable_dynamic_field disabled
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": DataType.INT64, "json_path": f"{json_field_name}['a']"})
+        error = {ct.err_code: 65535, ct.err_msg: f"cannot create index on non-exist field: {json_field_name}"}
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
+                               check_task = CheckTasks.err_res, check_items = error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_different_index_same_json_path(self, enable_dynamic_field, supported_varchar_scalar_index):
+        """
+        target: test json path index with invalid json_cast_type
+        method: create json path index with invalid json_cast_type
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, default_dim)
+        # 2. prepare index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name=json_field_name, index_name="json_index",
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": DataType.INT64, "json_path": f"{json_field_name}['a']"})
+        self.create_index(client, collection_name, index_params)
+        # 4. prepare another index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=json_field_name, index_name="json_index",
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": DataType.VARCHAR, "json_path": f"{json_field_name}['a']"})
+        # 5. create index
+        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+
+
+class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
+    """ Test case of search interface """
+
+    @pytest.fixture(scope="function", params=["TRIE", "STL_SORT", "BITMAP"])
+    def not_supported_varchar_scalar_index(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["INVERTED"])
+    def supported_varchar_scalar_index(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "BOOL", "double", "varchar", "bool"])
+    def supported_json_cast_type(self, request):
+        yield request.param
+
+    """
+    ******************************************************************
+    #  The following are valid base cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_json_path_index_default(self, enable_dynamic_field, supported_json_cast_type,
+                                                   supported_varchar_scalar_index):
+        """
+        target: test json path index with not supported json_cast_type
+        method: create json path index with not supported json_cast_type
+        expected: raise exception
+        """
+        if enable_dynamic_field:
+            pytest.skip('need to fix the field name when enabling dynamic field')
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        # 2. insert with different data distribution
+        vectors = cf.gen_vectors(default_nb+50, default_dim)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in
+                range(default_nb)]
+        self.insert(client, collection_name, rows)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i), json_field_name: i} for i in
+                range(default_nb, default_nb+10)]
+        self.insert(client, collection_name, rows)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i), json_field_name: {}} for i in
+                range(default_nb+10, default_nb+20)]
+        self.insert(client, collection_name, rows)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i), json_field_name: {'a': [1, 2, 3]}} for i in
+                range(default_nb + 20, default_nb + 30)]
+        self.insert(client, collection_name, rows)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i), json_field_name: {'a': [{'b': 1}, 2, 3]}} for i in
+                range(default_nb + 20, default_nb + 30)]
+        self.insert(client, collection_name, rows)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i), json_field_name: {'a': [{'b': None}, 2, 3]}} for i in
+                range(default_nb + 30, default_nb + 40)]
+        self.insert(client, collection_name, rows)
+        # 2. prepare index params
+        index_name = "json_index"
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name=json_field_name, index_name=index_name, index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name + '1',
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name + '2',
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name + '3',
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a'][0]['b']"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name + '4',
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a'][0]"})
+        # 3. create index
+        self.create_index(client, collection_name, index_params)
+        self.describe_index(client, collection_name, index_name,
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                #"json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": f"{json_field_name}['a']['b']",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                "index_name": index_name})
+        # 4. create json index on different json path
+        self.create_index(client, collection_name, index_params)
+        # 5. create same json index twice
+        self.create_index(client, collection_name, index_params)
+        self.describe_index(client, collection_name, index_name,
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                # "json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": f"{json_field_name}['a']['b']",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                "index_name": index_name})
+        self.describe_index(client, collection_name, index_name + '1',
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                # "json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": f"{json_field_name}['a']",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                "index_name": index_name + '1'})
+        self.describe_index(client, collection_name, index_name +'2',
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                # "json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": f"{json_field_name}",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                "index_name": index_name + '2'})
+        self.describe_index(client, collection_name, index_name + '3',
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                # "json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": f"{json_field_name}['a'][0]['b']",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                "index_name": index_name + '3'})
+        self.describe_index(client, collection_name, index_name + '4',
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                # "json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": f"{json_field_name}['a'][0]",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                "index_name": index_name + '4'})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_json_path_index_default_index_name(self, enable_dynamic_field, supported_json_cast_type,
+                                                              supported_varchar_scalar_index):
+        """
+        target: test json path index with not supported json_cast_type
+        method: create json path index with not supported json_cast_type
+        expected: raise exception
+        """
+        if enable_dynamic_field:
+            pytest.skip('issue 40374')
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        # 2. insert
+        vectors = cf.gen_vectors(default_nb, default_dim)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 2. prepare index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        # 3. create index
+        index_name = json_field_name + '/a/b'
+        self.create_index(client, collection_name, index_params)
+        self.describe_index(client, collection_name, index_name,
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                #"json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": f"{json_field_name}['a']['b']",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                "index_name": index_name})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_json_path_index_on_non_json_field(self, supported_json_cast_type,
+                                                             supported_varchar_scalar_index):
+        """
+        target: test json path index with not supported json_cast_type
+        method: create json path index with not supported json_cast_type
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        # 2. insert
+        vectors = cf.gen_vectors(default_nb, default_dim)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 2. prepare index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name=default_string_field_name, index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{default_string_field_name}['a']['b']"})
+        # 3. create index
+        index_name = default_string_field_name
+        self.create_index(client, collection_name, index_params)
+        self.describe_index(client, collection_name, index_name,
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                #"json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": f"{default_string_field_name}['a']['b']",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": default_string_field_name,
+                                "index_name": index_name})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_different_json_path_index_same_field_same_index_name(self, enable_dynamic_field, supported_json_cast_type,
+                                                                                supported_varchar_scalar_index):
+        """
+        target: test different json path index with same index name at the same time
+        method: test different json path index with same index name at the same index_params object
+        expected: create index successfully using the last index params with the same index name
+        """
+        if enable_dynamic_field:
+            pytest.skip('need to fix the field name when enabling dynamic field')
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        # 2. insert
+        vectors = cf.gen_vectors(default_nb, default_dim)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 2. prepare index params
+        index_name = "json_index"
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name=json_field_name, index_name=index_name, index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}"})
+        # 3. create index
+        self.create_index(client, collection_name, index_params)
+        self.describe_index(client, collection_name, index_name,
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                #"json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": f"{json_field_name}",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                "index_name": index_name})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="issue 40442")
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_different_json_path_index_same_field_different_index_name(self, enable_dynamic_field, supported_json_cast_type,
+                                                                                     supported_varchar_scalar_index):
+        """
+        target: test different json path index with different default index name at the same time
+        method: test different json path index with different default index name at the same index_params object
+        expected: create index successfully using the last index params with the same index name
+        """
+        if enable_dynamic_field:
+            pytest.skip('need to fix the field name when enabling dynamic field')
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        # 2. insert
+        vectors = cf.gen_vectors(default_nb, default_dim)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 2. prepare index params
+        index_name = "json_index"
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name=json_field_name, index_name=index_name, index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}"})
+        # 3. create index
+        self.create_index(client, collection_name, index_params)
+        self.describe_index(client, collection_name, index_name,
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                #"json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": f"{json_field_name}",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                "index_name": index_name})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_diff_index_same_field_diff_index_name_diff_index_params(self, enable_dynamic_field,
+                                                                                   supported_json_cast_type,
+                                                                                   supported_varchar_scalar_index):
+        """
+        target: test different json path index with different default index name at the same time
+        method: test different json path index with different default index name at the same index_params object
+        expected: create index successfully using the last index params with the same index name
+        """
+        if enable_dynamic_field:
+            pytest.skip('need to fix the field name when enabling dynamic field')
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        # 2. insert
+        vectors = cf.gen_vectors(default_nb, default_dim)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 2. prepare index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        self.create_index(client, collection_name, index_params)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=json_field_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']"})
+        self.create_index(client, collection_name, index_params)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=json_field_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}"})
+        self.create_index(client, collection_name, index_params)
+        # 3. create index
+        index_name = f"{json_field_name}/a/b"
+        self.describe_index(client, collection_name, index_name,
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                #"json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": "my_json['a']['b']",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                "index_name": index_name})
+        index_name = f"{json_field_name}/a"
+        self.describe_index(client, collection_name, index_name,
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                # "json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": "my_json['a']",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                "index_name": index_name})
+        index_name = f"{json_field_name}/"
+        self.describe_index(client, collection_name, index_name,
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                # "json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": "my_json",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                #"index_name": index_name # issue 40441
+                            })
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_json_index_same_json_path_diff_field(self, enable_dynamic_field, supported_json_cast_type,
+                                                                supported_varchar_scalar_index):
+        """
+        target: test different json path index with different default index name at the same time
+        method: test different json path index with different default index name at the same index_params object
+        expected: create index successfully using the last index params with the same index name
+        """
+        if enable_dynamic_field:
+            pytest.skip('need to fix the field name when enabling dynamic field')
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON)
+            schema.add_field(json_field_name + "1", DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        # 2. insert
+        vectors = cf.gen_vectors(default_nb, default_dim)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_string_field_name: str(i), json_field_name: {'a': {'b': i}},
+                 json_field_name + "1": {'a': {'b': i}}} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 2. prepare index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
+        self.create_index(client, collection_name, index_params)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=json_field_name + "1",
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}1['a']['b']"})
+        self.create_index(client, collection_name, index_params)
+        # 3. create index
+        index_name = f"{json_field_name}/a/b"
+        self.describe_index(client, collection_name, index_name,
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                # "json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": f"{json_field_name}['a']['b']",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name,
+                                "index_name": index_name})
+        index_name = f"{json_field_name}1/a/b"
+        self.describe_index(client, collection_name, index_name,
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                # "json_cast_type": supported_json_cast_type, # issue 40426
+                                "json_path": f"{json_field_name}1['a']['b']",
+                                "index_type": supported_varchar_scalar_index,
+                                "field_name": json_field_name + "1",
+                                "index_name": index_name})

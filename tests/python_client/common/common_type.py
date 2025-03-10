@@ -13,6 +13,7 @@ default_top_k = 10
 default_nq = 2
 default_limit = 10
 default_batch_size = 1000
+min_limit = 1
 max_limit = 16384
 max_top_k = 16384
 max_partition_num = 1024
@@ -285,6 +286,7 @@ class CheckTasks:
     check_describe_collection_property = "check_describe_collection_property"
     check_insert_result = "check_insert_result"
     check_collection_fields_properties = "check_collection_fields_properties"
+    check_describe_index_property = "check_describe_index_property"
 
 
 class BulkLoadStates:

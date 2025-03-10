@@ -11360,7 +11360,6 @@ class TestCollectionHybridSearchValid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/36273")
     def test_hybrid_search_overall_limit_larger_sum_each_limit(self, nq, primary_field, metric_type):
 
         """
