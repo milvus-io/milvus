@@ -16,6 +16,7 @@
 
 #include "UnaryExpr.h"
 #include <optional>
+#include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Types.h"
 #include "common/type_c.h"
@@ -208,10 +209,6 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         break;
                     case proto::plan::GenericValue::ValCase::kStringVal:
                         result = ExecRangeVisitorImplForIndex<std::string>();
-                        break;
-                    case proto::plan::GenericValue::ValCase::kArrayVal:
-                        result =
-                            ExecRangeVisitorImplForIndex<proto::plan::Array>();
                         break;
                     default:
                         PanicInfo(
@@ -1133,6 +1130,11 @@ PhyUnaryRangeFilterExpr::CanUseIndex() {
 
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
+    if (val_type != DataType::BOOL && val_type != DataType::INT64 &&
+        val_type != DataType::DOUBLE && val_type != DataType::STRING) {
+        return false;
+    }
+
     use_index_ =
         segment_->HasIndex(field_id_,
                            milvus::Json::pointer(expr_->column_.nested_path_),
