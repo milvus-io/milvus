@@ -66,6 +66,26 @@ func (s *NodeManagerSuite) TestNodeOperation() {
 	s.False(s.nodeManager.IsStoppingNode(2))
 }
 
+func (s *NodeManagerSuite) TestResourceExhaustion() {
+	nodeID := int64(1)
+	s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{NodeID: nodeID}))
+
+	s.Run("mark_exhausted", func() {
+		s.nodeManager.MarkResourceExhaustion(nodeID, 10*time.Minute)
+		s.True(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("auto_clear_after_expiry", func() {
+		s.nodeManager.MarkResourceExhaustion(nodeID, 1*time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("invalid_node", func() {
+		s.False(s.nodeManager.IsResourceExhausted(999))
+	})
+}
+
 func (s *NodeManagerSuite) TestNodeInfo() {
 	node := NewNodeInfo(ImmutableNodeInfo{
 		NodeID:   1,

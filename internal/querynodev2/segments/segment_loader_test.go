@@ -955,6 +955,100 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 	})
 }
 
+func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithDiskLimit() {
+	ctx := context.Background()
+
+	// Save original value and restore after test
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key, "1") // 1MB
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key)
+
+	// Set disk usage threshold
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.Key, "0.8") // 80% threshold
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.Key)
+
+	// set mmap, trigger dist cost
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+
+	// Create a test segment that would exceed the disk limit
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		NumOfRows:    1000,
+		BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "test_path",
+						LogSize:    1024 * 1024 * 1024 * 2, // 2GB
+						MemorySize: 1024 * 1024 * 1024 * 4,
+					},
+				},
+			},
+			{
+				FieldID: 105,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "test_path",
+						LogSize:    1024 * 1024 * 1024 * 2, // 2GB
+						MemorySize: 1024 * 1024 * 1024 * 4,
+					},
+				},
+			},
+		},
+	}
+
+	// Mock collection manager to return a valid collection
+	collection, err := NewCollection(suite.collectionID, suite.schema, nil, nil)
+	suite.NoError(err)
+	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection)
+
+	memUsage := uint64(100 * 1024 * 1024)  // 100MB
+	totalMem := uint64(1024 * 1024 * 1024) // 1GB
+	localDiskUsage := int64(100 * 1024)    // 100KB
+
+	_, _, err = suite.loader.checkSegmentSize(ctx, []*querypb.SegmentLoadInfo{loadInfo}, memUsage, totalMem, localDiskUsage)
+	suite.Error(err)
+	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
+}
+
+func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithMemoryLimit() {
+	ctx := context.Background()
+
+	// Create a test segment that would exceed the memory limit
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    suite.segmentID,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		NumOfRows:    1000,
+		BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "test_path",
+						LogSize:    1024 * 1024,       // 1MB
+						MemorySize: 1024 * 1024 * 900, // 900MB
+					},
+				},
+			},
+		},
+	}
+
+	memUsage := uint64(100 * 1024 * 1024)  // 100MB
+	totalMem := uint64(1024 * 1024 * 1024) // 1GB
+	localDiskUsage := int64(100 * 1024)    // 100KB
+
+	// Set memory threshold to 80%
+	paramtable.Get().Save("queryNode.overloadedMemoryThresholdPercentage", "0.8")
+
+	_, _, err := suite.loader.checkSegmentSize(ctx, []*querypb.SegmentLoadInfo{loadInfo}, memUsage, totalMem, localDiskUsage)
+	suite.Error(err)
+	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
+}
+
 func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 	suite.Run(t, &SegmentLoaderDetailSuite{})

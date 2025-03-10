@@ -2013,6 +2013,8 @@ type queryCoordConfig struct {
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
 	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
+
+	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2597,6 +2599,17 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.AutoBalanceInterval.Init(base.mgr)
+
+	p.ResourceExhaustionPenaltyDuration = ParamItem{
+		Key:          "queryCoord.resourceExhaustionPenaltyDuration",
+		Version:      "2.4.0",
+		DefaultValue: "30",
+		Doc: `Duration (in seconds) that a query node remains marked as resource exhausted after reaching resource limits.
+During this period, the node won't receive new tasks to loading resource.
+Set to 0 to disable the penalty period.`,
+		Export: true,
+	}
+	p.ResourceExhaustionPenaltyDuration.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
