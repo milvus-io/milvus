@@ -20,7 +20,6 @@ package function
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -45,9 +44,6 @@ type VoyageAIEmbeddingProvider struct {
 
 func createVoyageAIEmbeddingClient(apiKey string, url string) (*voyageai.VoyageAIEmbedding, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv(voyageAIAKEnvStr)
-	}
-	if apiKey == "" {
 		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", voyageAIAKEnvStr)
 	}
 
@@ -59,12 +55,12 @@ func createVoyageAIEmbeddingClient(apiKey string, url string) (*voyageai.VoyageA
 	return c, nil
 }
 
-func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema) (*VoyageAIEmbeddingProvider, error) {
+func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*VoyageAIEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	apiKey, url := parseAKAndURL(functionSchema.Params)
+	apiKey, url := parseAKAndURL(functionSchema.Params, params, voyageAIAKEnvStr)
 	var modelName string
 	dim := int64(0)
 	truncate := false
