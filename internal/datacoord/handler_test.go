@@ -238,6 +238,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 			ChannelName: "ch1",
 			MsgID:       []byte{8, 9, 10},
 			MsgGroup:    "",
+			Timestamp:   1,
 		},
 		DmlPosition: &msgpb.MsgPosition{
 			ChannelName: "ch1",
@@ -268,6 +269,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		infos := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0}, 1)
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, 1, len(infos.GetLevelZeroSegmentIds()))
+		assert.EqualValues(t, uint64(1), infos.GetDeleteCheckpoint().GetTimestamp())
 	})
 
 	t.Run("empty collection with passed positions", func(t *testing.T) {
