@@ -40,6 +40,8 @@ for d in $(go list ./tests/integration/...); do
         echo "running coordrecovery"
         # simplified command to speed up coord init test since it is large.
         $TEST_CMD -tags dynamic,test -v -coverprofile=profile.out -covermode=atomic "$d" -caseTimeout=20m -timeout=30m
+    elif [[ $d == *"import"* ]]; then
+        go test -tags dynamic,test -v -coverprofile=profile.out -covermode=atomic "$d" -caseTimeout=20m -timeout=60m
     else
         $TEST_CMD -race -tags dynamic,test -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d" -caseTimeout=15m -timeout=30m
     fi

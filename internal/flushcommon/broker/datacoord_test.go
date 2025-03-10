@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -323,6 +324,28 @@ func (s *dataCoordSuite) TestUpdateSegmentStatistics() {
 		s.dc.EXPECT().UpdateSegmentStatistics(mock.Anything, mock.Anything).
 			Return(merr.Status(errors.New("mock")), nil)
 		err := s.broker.UpdateSegmentStatistics(ctx, req)
+		s.Error(err)
+		s.resetMock()
+	})
+}
+
+func (s *dataCoordSuite) TestImportV2() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &internalpb.ImportRequestInternal{}
+
+	s.Run("normal_case", func() {
+		s.dc.EXPECT().ImportV2(mock.Anything, mock.Anything).
+			Return(&internalpb.ImportResponse{Status: merr.Status(nil), JobID: "1000"}, nil)
+		resp, err := s.broker.ImportV2(ctx, req)
+		s.NoError(err)
+		s.Equal("1000", resp.GetJobID())
+		s.resetMock()
+	})
+	s.Run("datacoord_return_error", func() {
+		s.dc.EXPECT().ImportV2(mock.Anything, mock.Anything).
+			Return(nil, errors.New("mock"))
+		_, err := s.broker.ImportV2(ctx, req)
 		s.Error(err)
 		s.resetMock()
 	})
