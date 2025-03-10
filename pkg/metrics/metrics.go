@@ -111,6 +111,7 @@ const (
 	cacheNameLabelName       = "cache_name"
 	cacheStateLabelName      = "cache_state"
 	dataSourceLabelName      = "data_source"
+	dataTypeLabelName        = "data_type"
 	importStageLabelName     = "import_stage"
 	requestScope             = "scope"
 	fullMethodLabelName      = "full_method"
