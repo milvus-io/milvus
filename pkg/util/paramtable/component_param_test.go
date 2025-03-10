@@ -63,7 +63,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(DefaultGracefulStopTimeout))
 		assert.Equal(t, params.QueryNodeCfg.GracefulStopTimeout.GetAsInt64(), Params.GracefulStopTimeout.GetAsInt64())
-		assert.Equal(t, params.IndexNodeCfg.GracefulStopTimeout.GetAsInt64(), Params.GracefulStopTimeout.GetAsInt64())
+		assert.Equal(t, params.DataNodeCfg.GracefulStopTimeout.GetAsInt64(), Params.GracefulStopTimeout.GetAsInt64())
 		t.Logf("default grafeful stop timeout = %d", Params.GracefulStopTimeout.GetAsInt())
 		params.Save(Params.GracefulStopTimeout.Key, "50")
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
@@ -611,15 +611,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
-	t.Run("test indexNodeConfig", func(t *testing.T) {
-		Params := &params.IndexNodeCfg
-		params.Save(Params.GracefulStopTimeout.Key, "50")
-		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
-
-		params.Save("indexnode.gracefulStopTimeout", "100")
-		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
-	})
-
 	t.Run("test streamingConfig", func(t *testing.T) {
 		assert.Equal(t, 1*time.Minute, params.StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse())
 		assert.Equal(t, 50*time.Millisecond, params.StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse())
@@ -678,8 +669,8 @@ func TestCachedParam(t *testing.T) {
 	Init()
 	params := Get()
 
-	assert.True(t, params.IndexNodeCfg.EnableDisk.GetAsBool())
-	assert.True(t, params.IndexNodeCfg.EnableDisk.GetAsBool())
+	assert.True(t, params.DataNodeCfg.EnableDisk.GetAsBool())
+	assert.True(t, params.DataNodeCfg.EnableDisk.GetAsBool())
 
 	assert.Equal(t, 256*1024*1024, params.QueryCoordGrpcServerCfg.ServerMaxRecvSize.GetAsInt())
 	assert.Equal(t, 256*1024*1024, params.QueryCoordGrpcServerCfg.ServerMaxRecvSize.GetAsInt())

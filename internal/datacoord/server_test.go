@@ -2406,7 +2406,7 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 	svr.SetTiKVClient(globalTestTikv)
 
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		return newMockDataNodeClient(0, nil)
+		return mocks.NewMockDataNodeClient(t), nil
 	}
 	svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 		return newMockRootCoordClient(), nil
@@ -2457,20 +2457,19 @@ func closeTestServer(t *testing.T, svr *Server) {
 
 func Test_CheckHealth(t *testing.T) {
 	getSessionManager := func(isHealthy bool) *session.DataNodeManagerImpl {
-		var client *mockDataNodeClient
-		if isHealthy {
-			client = &mockDataNodeClient{
-				id:    1,
-				state: commonpb.StateCode_Healthy,
-			}
-		} else {
-			client = &mockDataNodeClient{
-				id:    1,
-				state: commonpb.StateCode_Abnormal,
-			}
-		}
-
 		sm := session.NewDataNodeManagerImpl(session.WithDataNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+			var client *mocks.MockDataNodeClient
+			if isHealthy {
+				client = mocks.NewMockDataNodeClient(t)
+				client.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+					State: &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
+				}, nil)
+			} else {
+				client = mocks.NewMockDataNodeClient(t)
+				client.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+					State: &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
+				}, nil)
+			}
 			return client, nil
 		}))
 		sm.AddSession(&session.NodeInfo{

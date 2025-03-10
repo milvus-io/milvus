@@ -14,12 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package index
 
 import (
 	"container/list"
 	"context"
-	"fmt"
 	"runtime/debug"
 	"sync"
 
@@ -27,7 +26,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -38,18 +36,18 @@ type TaskQueue interface {
 	utChan() <-chan int
 	utEmpty() bool
 	utFull() bool
-	addUnissuedTask(t task) error
-	PopUnissuedTask() task
-	AddActiveTask(t task)
-	PopActiveTask(tName string) task
-	Enqueue(t task) error
+	addUnissuedTask(t Task) error
+	PopUnissuedTask() Task
+	AddActiveTask(t Task)
+	PopActiveTask(tName string) Task
+	Enqueue(t Task) error
 	GetTaskNum() (int, int)
 }
 
 // BaseTaskQueue is a basic instance of TaskQueue.
 type IndexTaskQueue struct {
 	unissuedTasks *list.List
-	activeTasks   map[string]task
+	activeTasks   map[string]Task
 	utLock        sync.Mutex
 	atLock        sync.Mutex
 
@@ -73,12 +71,12 @@ func (queue *IndexTaskQueue) utFull() bool {
 	return int64(queue.unissuedTasks.Len()) >= queue.maxTaskNum
 }
 
-func (queue *IndexTaskQueue) addUnissuedTask(t task) error {
+func (queue *IndexTaskQueue) addUnissuedTask(t Task) error {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
 	if queue.utFull() {
-		return errors.New("IndexNode task queue is full")
+		return errors.New("index task queue is full")
 	}
 	queue.unissuedTasks.PushBack(t)
 	queue.utBufChan <- 1
@@ -86,7 +84,7 @@ func (queue *IndexTaskQueue) addUnissuedTask(t task) error {
 }
 
 // PopUnissuedTask pops a task from tasks queue.
-func (queue *IndexTaskQueue) PopUnissuedTask() task {
+func (queue *IndexTaskQueue) PopUnissuedTask() Task {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
@@ -97,25 +95,25 @@ func (queue *IndexTaskQueue) PopUnissuedTask() task {
 	ft := queue.unissuedTasks.Front()
 	queue.unissuedTasks.Remove(ft)
 
-	return ft.Value.(task)
+	return ft.Value.(Task)
 }
 
 // AddActiveTask adds a task to activeTasks.
-func (queue *IndexTaskQueue) AddActiveTask(t task) {
+func (queue *IndexTaskQueue) AddActiveTask(t Task) {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
 
 	tName := t.Name()
 	_, ok := queue.activeTasks[tName]
 	if ok {
-		log.Ctx(context.TODO()).Debug("IndexNode task already in active task list", zap.String("TaskID", tName))
+		log.Ctx(context.TODO()).Debug("task already in active task list", zap.String("TaskID", tName))
 	}
 
 	queue.activeTasks[tName] = t
 }
 
 // PopActiveTask pops a task from activateTask and the task will be executed.
-func (queue *IndexTaskQueue) PopActiveTask(tName string) task {
+func (queue *IndexTaskQueue) PopActiveTask(tName string) Task {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
 
@@ -124,12 +122,12 @@ func (queue *IndexTaskQueue) PopActiveTask(tName string) task {
 		delete(queue.activeTasks, tName)
 		return t
 	}
-	log.Ctx(queue.sched.ctx).Debug("IndexNode task was not found in the active task list", zap.String("TaskName", tName))
+	log.Ctx(queue.sched.ctx).Debug("task was not found in the active task list", zap.String("TaskName", tName))
 	return nil
 }
 
 // Enqueue adds a task to TaskQueue.
-func (queue *IndexTaskQueue) Enqueue(t task) error {
+func (queue *IndexTaskQueue) Enqueue(t Task) error {
 	err := t.OnEnqueue(t.Ctx())
 	if err != nil {
 		return err
@@ -158,7 +156,7 @@ func (queue *IndexTaskQueue) GetTaskNum() (int, int) {
 func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 	return &IndexTaskQueue{
 		unissuedTasks: list.New(),
-		activeTasks:   make(map[string]task),
+		activeTasks:   make(map[string]Task),
 		maxTaskNum:    1024,
 
 		utBufChan: make(chan int, 1024),
@@ -170,7 +168,7 @@ func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 type TaskScheduler struct {
 	TaskQueue TaskQueue
 
-	buildParallel int
+	BuildParallel int
 	wg            sync.WaitGroup
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -182,16 +180,16 @@ func NewTaskScheduler(ctx context.Context) *TaskScheduler {
 	s := &TaskScheduler{
 		ctx:           ctx1,
 		cancel:        cancel,
-		buildParallel: Params.IndexNodeCfg.BuildParallel.GetAsInt(),
+		BuildParallel: paramtable.Get().DataNodeCfg.BuildParallel.GetAsInt(),
 	}
 	s.TaskQueue = NewIndexBuildTaskQueue(s)
 
 	return s
 }
 
-func (sched *TaskScheduler) scheduleIndexBuildTask() []task {
-	ret := make([]task, 0)
-	for i := 0; i < sched.buildParallel; i++ {
+func (sched *TaskScheduler) scheduleIndexBuildTask() []Task {
+	ret := make([]Task, 0)
+	for i := 0; i < sched.BuildParallel; i++ {
 		t := sched.TaskQueue.PopUnissuedTask()
 		if t == nil {
 			return ret
@@ -213,7 +211,7 @@ func getStateFromError(err error) indexpb.JobState {
 	return indexpb.JobState_JobStateRetry
 }
 
-func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
+func (sched *TaskScheduler) processTask(t Task, q TaskQueue) {
 	wrap := func(fn func(ctx context.Context) error) error {
 		select {
 		case <-t.Ctx().Done():
@@ -239,14 +237,10 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 		}
 	}
 	t.SetState(indexpb.JobState_JobStateFinished, "")
-	if indexBuildTask, ok := t.(*indexBuildTask); ok {
-		metrics.IndexNodeBuildIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(indexBuildTask.tr.ElapseSpan().Seconds())
-		metrics.IndexNodeIndexTaskLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(indexBuildTask.queueDur.Milliseconds()))
-	}
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {
-	log.Ctx(sched.ctx).Debug("IndexNode TaskScheduler start build loop ...")
+	log.Ctx(sched.ctx).Debug("TaskScheduler start build loop ...")
 	defer sched.wg.Done()
 	for {
 		select {
@@ -257,7 +251,7 @@ func (sched *TaskScheduler) indexBuildLoop() {
 			var wg sync.WaitGroup
 			for _, t := range tasks {
 				wg.Add(1)
-				go func(group *sync.WaitGroup, t task) {
+				go func(group *sync.WaitGroup, t Task) {
 					defer group.Done()
 					sched.processTask(t, sched.TaskQueue)
 				}(&wg, t)

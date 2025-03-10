@@ -113,19 +113,19 @@ func (_c *MockWorkerManager_ClientSupportDisk_Call) RunAndReturn(run func() bool
 }
 
 // GetAllClients provides a mock function with given fields:
-func (_m *MockWorkerManager) GetAllClients() map[int64]types.IndexNodeClient {
+func (_m *MockWorkerManager) GetAllClients() map[int64]types.DataNodeClient {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAllClients")
 	}
 
-	var r0 map[int64]types.IndexNodeClient
-	if rf, ok := ret.Get(0).(func() map[int64]types.IndexNodeClient); ok {
+	var r0 map[int64]types.DataNodeClient
+	if rf, ok := ret.Get(0).(func() map[int64]types.DataNodeClient); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[int64]types.IndexNodeClient)
+			r0 = ret.Get(0).(map[int64]types.DataNodeClient)
 		}
 	}
 
@@ -149,34 +149,34 @@ func (_c *MockWorkerManager_GetAllClients_Call) Run(run func()) *MockWorkerManag
 	return _c
 }
 
-func (_c *MockWorkerManager_GetAllClients_Call) Return(_a0 map[int64]types.IndexNodeClient) *MockWorkerManager_GetAllClients_Call {
+func (_c *MockWorkerManager_GetAllClients_Call) Return(_a0 map[int64]types.DataNodeClient) *MockWorkerManager_GetAllClients_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWorkerManager_GetAllClients_Call) RunAndReturn(run func() map[int64]types.IndexNodeClient) *MockWorkerManager_GetAllClients_Call {
+func (_c *MockWorkerManager_GetAllClients_Call) RunAndReturn(run func() map[int64]types.DataNodeClient) *MockWorkerManager_GetAllClients_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetClientByID provides a mock function with given fields: nodeID
-func (_m *MockWorkerManager) GetClientByID(nodeID int64) (types.IndexNodeClient, bool) {
+func (_m *MockWorkerManager) GetClientByID(nodeID int64) (types.DataNodeClient, bool) {
 	ret := _m.Called(nodeID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetClientByID")
 	}
 
-	var r0 types.IndexNodeClient
+	var r0 types.DataNodeClient
 	var r1 bool
-	if rf, ok := ret.Get(0).(func(int64) (types.IndexNodeClient, bool)); ok {
+	if rf, ok := ret.Get(0).(func(int64) (types.DataNodeClient, bool)); ok {
 		return rf(nodeID)
 	}
-	if rf, ok := ret.Get(0).(func(int64) types.IndexNodeClient); ok {
+	if rf, ok := ret.Get(0).(func(int64) types.DataNodeClient); ok {
 		r0 = rf(nodeID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(types.IndexNodeClient)
+			r0 = ret.Get(0).(types.DataNodeClient)
 		}
 	}
 
@@ -207,18 +207,18 @@ func (_c *MockWorkerManager_GetClientByID_Call) Run(run func(nodeID int64)) *Moc
 	return _c
 }
 
-func (_c *MockWorkerManager_GetClientByID_Call) Return(_a0 types.IndexNodeClient, _a1 bool) *MockWorkerManager_GetClientByID_Call {
+func (_c *MockWorkerManager_GetClientByID_Call) Return(_a0 types.DataNodeClient, _a1 bool) *MockWorkerManager_GetClientByID_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockWorkerManager_GetClientByID_Call) RunAndReturn(run func(int64) (types.IndexNodeClient, bool)) *MockWorkerManager_GetClientByID_Call {
+func (_c *MockWorkerManager_GetClientByID_Call) RunAndReturn(run func(int64) (types.DataNodeClient, bool)) *MockWorkerManager_GetClientByID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // PickClient provides a mock function with given fields:
-func (_m *MockWorkerManager) PickClient() (int64, types.IndexNodeClient) {
+func (_m *MockWorkerManager) PickClient() (int64, types.DataNodeClient) {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
@@ -226,8 +226,8 @@ func (_m *MockWorkerManager) PickClient() (int64, types.IndexNodeClient) {
 	}
 
 	var r0 int64
-	var r1 types.IndexNodeClient
-	if rf, ok := ret.Get(0).(func() (int64, types.IndexNodeClient)); ok {
+	var r1 types.DataNodeClient
+	if rf, ok := ret.Get(0).(func() (int64, types.DataNodeClient)); ok {
 		return rf()
 	}
 	if rf, ok := ret.Get(0).(func() int64); ok {
@@ -236,11 +236,11 @@ func (_m *MockWorkerManager) PickClient() (int64, types.IndexNodeClient) {
 		r0 = ret.Get(0).(int64)
 	}
 
-	if rf, ok := ret.Get(1).(func() types.IndexNodeClient); ok {
+	if rf, ok := ret.Get(1).(func() types.DataNodeClient); ok {
 		r1 = rf()
 	} else {
 		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(types.IndexNodeClient)
+			r1 = ret.Get(1).(types.DataNodeClient)
 		}
 	}
 
@@ -264,12 +264,12 @@ func (_c *MockWorkerManager_PickClient_Call) Run(run func()) *MockWorkerManager_
 	return _c
 }
 
-func (_c *MockWorkerManager_PickClient_Call) Return(_a0 int64, _a1 types.IndexNodeClient) *MockWorkerManager_PickClient_Call {
+func (_c *MockWorkerManager_PickClient_Call) Return(_a0 int64, _a1 types.DataNodeClient) *MockWorkerManager_PickClient_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockWorkerManager_PickClient_Call) RunAndReturn(run func() (int64, types.IndexNodeClient)) *MockWorkerManager_PickClient_Call {
+func (_c *MockWorkerManager_PickClient_Call) RunAndReturn(run func() (int64, types.DataNodeClient)) *MockWorkerManager_PickClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
