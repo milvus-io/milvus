@@ -39,7 +39,6 @@ func stopWithTimeout(stop func() error, timeout time.Duration) error {
 	defer cancel()
 
 	future := conc.Go(func() (struct{}, error) {
-		time.Sleep(10 * time.Second)
 		return struct{}{}, stop()
 	})
 	select {
@@ -76,6 +75,7 @@ func dumpPprof() {
 		log.Error("failed to create pprof directory",
 			zap.String("path", pprofDir),
 			zap.Error(err))
+		return
 	}
 
 	// Generate base file path with timestamp
@@ -131,6 +131,7 @@ func dumpPprof() {
 				f.Close()
 				os.Remove(filename)
 			}
+			return
 		}
 		files[p.filename] = f
 	}
