@@ -332,6 +332,8 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
                        "binlog number should less than row_count");
             auto lack_num = info.row_count - total;
             auto field_meta = get_schema()[field_id];
+            AssertInfo(field_meta.is_nullable(),
+                       "nullable must be true when lack rows");
             auto field_data = storage::CreateFieldData(
                 static_cast<DataType>(field_meta.get_data_type()),
                 true,
@@ -1236,21 +1238,23 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     auto& request_fields = plan->extra_info_opt_.value().involved_fields_;
     auto field_ready_bitset =
         field_data_ready_bitset_ | index_ready_bitset_ | binlog_index_bitset_;
-    // request field may has added field
+
     AssertInfo(request_fields.size() >= field_ready_bitset.size(),
                "Request fields size less than field ready bitset size when "
                "check search");
     auto absent_fields = request_fields - field_ready_bitset;
-
-    // if (absent_fields.any()) {
-    //     // absent_fields.find_first() returns std::optional<>
-    //     auto field_id =
-    //         FieldId(absent_fields.find_first().value() + START_USER_FIELDID);
-    //     auto& field_meta = schema_->operator[](field_id);
-    //     PanicInfo(
-    //         FieldNotLoaded,
-    //         "User Field(" + field_meta.get_name().get() + ") is not loaded");
-    // }
+    if (absent_fields.any()) {
+        // absent_fields.find_first() returns std::optional<>
+        auto field_id =
+            FieldId(absent_fields.find_first().value() + START_USER_FIELDID);
+        auto& field_meta = schema_->operator[](field_id);
+        // request field may has added field
+        if (!field_meta.is_nullable()) {
+            PanicInfo(FieldNotLoaded,
+                      "User Field(" + field_meta.get_name().get() +
+                          ") is not loaded");
+        }
+    }
 }
 
 SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
