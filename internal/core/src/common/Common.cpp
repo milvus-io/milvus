@@ -29,7 +29,7 @@ int64_t LOW_PRIORITY_THREAD_CORE_COEFFICIENT =
 int CPU_NUM = DEFAULT_CPU_NUM;
 int64_t EXEC_EVAL_EXPR_BATCH_SIZE = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
 
-int64_t JSON_INDEX_COMMIT_INTERVAL = DEFAULT_JSON_INDEX_COMMIT_INTERVAL;
+int64_t JSON_KEY_STATS_COMMIT_INTERVAL = DEFAULT_JSON_KEY_STATS_COMMIT_INTERVAL;
 bool JSON_KEY_STATS_ENABLED = DEFAULT_JSON_KEY_STATS_ENABLED;
 
 void
@@ -71,10 +71,10 @@ SetCpuNum(const int num) {
 }
 
 void
-SetDefaultJSONKeyIndexCommitInterval(int64_t val) {
-    JSON_INDEX_COMMIT_INTERVAL = val;
-    LOG_INFO("set default json key index commit interval: {}",
-             JSON_INDEX_COMMIT_INTERVAL);
+SetDefaultJSONKeyStatsCommitInterval(int64_t val) {
+    JSON_KEY_STATS_COMMIT_INTERVAL = val;
+    LOG_INFO("set default json key Stats commit interval: {}",
+             JSON_KEY_STATS_COMMIT_INTERVAL);
 }
 
 void

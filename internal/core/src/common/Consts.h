@@ -79,8 +79,8 @@ const int64_t DEFAULT_HYBRID_INDEX_BITMAP_CARDINALITY_LIMIT = 100;
 
 const size_t MARISA_NULL_KEY_ID = -1;
 
-const int64_t DEFAULT_JSON_INDEX_COMMIT_INTERVAL = 200;
 const bool DEFAULT_JSON_INDEX_ENABLED = true;
 const std::string JSON_CAST_TYPE = "json_cast_type";
 const std::string JSON_PATH = "json_path";
 const bool DEFAULT_JSON_KEY_STATS_ENABLED = false;
+const int64_t DEFAULT_JSON_KEY_STATS_COMMIT_INTERVAL = 200;

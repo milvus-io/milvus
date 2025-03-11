@@ -234,7 +234,7 @@ func (node *QueryNode) InitSegcore() error {
 	C.InitDefaultExprEvalBatchSize(cExprBatchSize)
 
 	cJSONIndexCommitInterval := C.int64_t(paramtable.Get().QueryNodeCfg.JSONIndexCommitInterval.GetAsInt64())
-	C.InitDefaultJSONKeyIndexCommitInterval(cJSONIndexCommitInterval)
+	C.InitDefaultJSONKeyStatsCommitInterval(cJSONIndexCommitInterval)
 
 	cJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool())
 	C.InitDefaultJSONKeyStatsEnable(cJSONKeyStatsEnabled)

@@ -79,10 +79,10 @@ InitDefaultExprEvalBatchSize(int64_t val) {
 }
 
 void
-InitDefaultJSONKeyIndexCommitInterval(int64_t val) {
+InitDefaultJSONKeyStatsCommitInterval(int64_t val) {
     std::call_once(
         flag8,
-        [](int val) { milvus::SetDefaultJSONKeyIndexCommitInterval(val); },
+        [](int val) { milvus::SetDefaultJSONKeyStatsCommitInterval(val); },
         val);
 }
 
