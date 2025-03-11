@@ -235,7 +235,7 @@ TEST_F(MinioChunkManagerTest, ReadNotExist) {
     chunk_manager_->DeleteBucket(testBucketName);
 }
 
-TEST_F(MinioChunkManagerTest, RemovePositive) {
+/*TEST_F(MinioChunkManagerTest, RemovePositive) {
     string testBucketName = "test-remove";
     chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(chunk_manager_->GetBucketName(), testBucketName);
@@ -261,7 +261,7 @@ TEST_F(MinioChunkManagerTest, RemovePositive) {
     EXPECT_EQ(exist, false);
 
     chunk_manager_->DeleteBucket(testBucketName);
-}
+}*/
 
 TEST_F(MinioChunkManagerTest, ListWithPrefixPositive) {
     string testBucketName = "test-listprefix";

@@ -122,7 +122,7 @@ if ( BUILD_DISK_ANN STREQUAL "ON" )
     set(MILVUS_TEST_FILES
             ${MILVUS_TEST_FILES}
             #need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/1757
-            #test_minio_chunk_manager.cpp
+            test_minio_chunk_manager.cpp
             )
 endif()
 
