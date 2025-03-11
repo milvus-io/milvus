@@ -36,8 +36,11 @@ func TestAssignmentService(t *testing.T) {
 						Version: &streamingpb.VersionPair{Global: 1, Local: 2},
 						Assignments: []*streamingpb.StreamingNodeAssignment{
 							{
-								Node:     &streamingpb.StreamingNodeInfo{ServerId: 1},
-								Channels: []*streamingpb.PChannelInfo{{Name: "c1", Term: 1}, {Name: "c2", Term: 2}},
+								Node: &streamingpb.StreamingNodeInfo{ServerId: 1},
+								Channels: []*streamingpb.PChannelInfo{
+									{Name: "c1", Term: 1, AccessMode: streamingpb.PChannelAccessMode(types.AccessModeRW)},
+									{Name: "c2", Term: 2, AccessMode: streamingpb.PChannelAccessMode(types.AccessModeRW)},
+								},
 							},
 						},
 					},
@@ -49,12 +52,18 @@ func TestAssignmentService(t *testing.T) {
 						Version: &streamingpb.VersionPair{Global: 2, Local: 3},
 						Assignments: []*streamingpb.StreamingNodeAssignment{
 							{
-								Node:     &streamingpb.StreamingNodeInfo{ServerId: 1},
-								Channels: []*streamingpb.PChannelInfo{{Name: "c1", Term: 1}, {Name: "c2", Term: 2}},
+								Node: &streamingpb.StreamingNodeInfo{ServerId: 1},
+								Channels: []*streamingpb.PChannelInfo{
+									{Name: "c1", Term: 1, AccessMode: streamingpb.PChannelAccessMode(types.AccessModeRW)},
+									{Name: "c2", Term: 2, AccessMode: streamingpb.PChannelAccessMode(types.AccessModeRW)},
+								},
 							},
 							{
-								Node:     &streamingpb.StreamingNodeInfo{ServerId: 2},
-								Channels: []*streamingpb.PChannelInfo{{Name: "c3", Term: 1}, {Name: "c4", Term: 2}},
+								Node: &streamingpb.StreamingNodeInfo{ServerId: 2},
+								Channels: []*streamingpb.PChannelInfo{
+									{Name: "c3", Term: 1, AccessMode: streamingpb.PChannelAccessMode(types.AccessModeRW)},
+									{Name: "c4", Term: 2, AccessMode: streamingpb.PChannelAccessMode(types.AccessModeRW)},
+								},
 							},
 						},
 					},
@@ -93,11 +102,11 @@ func TestAssignmentService(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.True(t, finalAssignments.Version.EQ(typeutil.VersionInt64Pair{Global: 2, Local: 3}))
 
-	assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1}, errors.New("test"))
+	assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1, AccessMode: types.AccessModeRW}, errors.New("test"))
 
 	// Repeated report error at the same term should be ignored.
-	assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1}, errors.New("test"))
-	assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1}, errors.New("test"))
+	assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1, AccessMode: types.AccessModeRW}, errors.New("test"))
+	assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1, AccessMode: types.AccessModeRW}, errors.New("test"))
 
 	// test close
 	go close(closeCh)
@@ -111,7 +120,7 @@ func TestAssignmentService(t *testing.T) {
 	se := status.AsStreamingError(err)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, se.Code)
 
-	err = assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1}, errors.New("test"))
+	err = assignmentService.ReportAssignmentError(ctx, types.PChannelInfo{Name: "c1", Term: 1, AccessMode: types.AccessModeRW}, errors.New("test"))
 	se = status.AsStreamingError(err)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, se.Code)
 }

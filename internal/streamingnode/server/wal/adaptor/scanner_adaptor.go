@@ -24,7 +24,7 @@ var _ wal.Scanner = (*scannerAdaptorImpl)(nil)
 // newScannerAdaptor creates a new scanner adaptor.
 func newScannerAdaptor(
 	name string,
-	l walimpls.WALImpls,
+	l walimpls.ROWALImpls,
 	readOption wal.ReadOption,
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
@@ -58,7 +58,7 @@ func newScannerAdaptor(
 type scannerAdaptorImpl struct {
 	*helper.ScannerHelper
 	logger        *log.MLogger
-	innerWAL      walimpls.WALImpls
+	innerWAL      walimpls.ROWALImpls
 	readOption    wal.ReadOption
 	filterFunc    func(message.ImmutableMessage) bool
 	reorderBuffer *utility.ReOrderByTimeTickBuffer // support time tick reorder.

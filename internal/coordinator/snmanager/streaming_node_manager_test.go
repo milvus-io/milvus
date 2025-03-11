@@ -45,7 +45,7 @@ func TestStreamingNodeManager(t *testing.T) {
 		},
 		pchannels: []types.PChannelInfoAssigned{
 			{
-				Channel: types.PChannelInfo{Name: "a_test", Term: 1},
+				Channel: types.PChannelInfo{Name: "a_test", Term: 1, AccessMode: types.AccessModeRW},
 				Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
 			},
 		},

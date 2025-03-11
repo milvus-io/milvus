@@ -28,7 +28,7 @@ import (
 
 func TestHandlerClient(t *testing.T) {
 	assignment := &types.PChannelInfoAssigned{
-		Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRW},
 		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
 	}
 

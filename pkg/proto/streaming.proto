@@ -13,6 +13,13 @@ import "google/protobuf/any.proto";
 // Common
 //
 
+// PChannelAccessMode is the access mode of a pchannel.
+enum PChannelAccessMode {
+    PCHANNEL_ACCESS_UNKNOWN = 0;  // should never used.
+    PCHANNEL_ACCESS_READONLY = 1;  // read only.
+    PCHANNEL_ACCESS_READWRITE = 2;  // read and write.
+}
+
 // PChannelInfo is the information of a pchannel info, should only keep the
 // basic info of a pchannel. It's used in many rpc and meta, so keep it simple.
 message PChannelInfo {
@@ -20,6 +27,7 @@ message PChannelInfo {
     int64 term  = 2;  // A monotonic increasing term, every time the channel is
                       // recovered or moved to another streamingnode, the term
                       // will increase by meta server.
+    PChannelAccessMode access_mode = 3;  // access mode of the channel.
 }
 
 // PChannelAssignmentLog is the log of meta information of a pchannel, should
@@ -28,6 +36,7 @@ message PChannelAssignmentLog {
     int64 term = 1;  // term when server assigned.
     StreamingNodeInfo node =
         2;  // streaming node that the channel is assigned to.
+    PChannelAccessMode access_mode = 3;  // access mode of the channel.
 }
 
 // PChannelMetaState

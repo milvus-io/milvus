@@ -26,7 +26,7 @@ var (
 func newSwithableScanner(
 	scannerName string,
 	logger *log.MLogger,
-	innerWAL walimpls.WALImpls,
+	innerWAL walimpls.ROWALImpls,
 	writeAheadBuffer wab.ROWriteAheadBuffer,
 	deliverPolicy options.DeliverPolicy,
 	msgChan chan<- message.ImmutableMessage,
@@ -55,7 +55,7 @@ type switchableScanner interface {
 type switchableScannerImpl struct {
 	scannerName      string
 	logger           *log.MLogger
-	innerWAL         walimpls.WALImpls
+	innerWAL         walimpls.ROWALImpls
 	msgChan          chan<- message.ImmutableMessage
 	writeAheadBuffer wab.ROWriteAheadBuffer
 }

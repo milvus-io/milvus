@@ -95,8 +95,9 @@ func TestBalancer(t *testing.T) {
 	assert.NotNil(t, b)
 
 	b.MarkAsUnavailable(ctx, []types.PChannelInfo{{
-		Name: "test-channel-1",
-		Term: 1,
+		Name:       "test-channel-1",
+		Term:       1,
+		AccessMode: types.AccessModeRW,
 	}})
 	b.Trigger(ctx)
 

@@ -53,7 +53,7 @@ func TestChannelAssignmentDiscoverer(t *testing.T) {
 				1: {
 					NodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
 					Channels: map[string]types.PChannelInfo{
-						"ch1": {Name: "ch1", Term: 1},
+						"ch1": {Name: "ch1", Term: 1, AccessMode: types.AccessModeRW},
 					},
 				},
 			},
@@ -74,7 +74,7 @@ func TestChannelAssignmentDiscoverer(t *testing.T) {
 				1: {
 					NodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
 					Channels: map[string]types.PChannelInfo{
-						"ch2": {Name: "ch2", Term: 1},
+						"ch2": {Name: "ch2", Term: 1, AccessMode: types.AccessModeRW},
 					},
 				},
 			},

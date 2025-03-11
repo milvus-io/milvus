@@ -213,29 +213,29 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 		pchans := [][]types.PChannelInfoAssigned{
 			{
 				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+					Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRW},
 					Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
 				},
 				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1},
+					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1, AccessMode: types.AccessModeRW},
 					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
 				},
 				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel3", Term: 1},
+					Channel: types.PChannelInfo{Name: "pchannel3", Term: 1, AccessMode: types.AccessModeRW},
 					Node:    types.StreamingNodeInfo{ServerID: 3, Address: "localhost:1"},
 				},
 			},
 			{
 				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+					Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRW},
 					Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
 				},
 				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1},
+					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1, AccessMode: types.AccessModeRW},
 					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
 				},
 				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel3", Term: 2},
+					Channel: types.PChannelInfo{Name: "pchannel3", Term: 2, AccessMode: types.AccessModeRW},
 					Node:    types.StreamingNodeInfo{ServerID: 2, Address: "localhost:1"},
 				},
 			},

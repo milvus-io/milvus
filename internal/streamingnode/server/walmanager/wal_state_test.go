@@ -147,7 +147,8 @@ func TestStateWithCond(t *testing.T) {
 				if i%2 == 0 {
 					l := mock_wal.NewMockWAL(t)
 					l.EXPECT().Channel().Return(types.PChannelInfo{
-						Term: i % 2,
+						Term:       i % 2,
+						AccessMode: types.AccessModeRW,
 					}).Maybe()
 					newState = newAvailableCurrentState(l)
 				} else {

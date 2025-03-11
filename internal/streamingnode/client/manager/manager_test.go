@@ -98,7 +98,7 @@ func TestManager(t *testing.T) {
 			return nil, nil
 		})
 	err = m.Assign(context.Background(), types.PChannelInfoAssigned{
-		Channel: types.PChannelInfo{Name: "p", Term: 1},
+		Channel: types.PChannelInfo{Name: "p", Term: 1, AccessMode: types.AccessModeRW},
 		Node:    types.StreamingNodeInfo{ServerID: serverID},
 	})
 	assert.NoError(t, err)
@@ -113,7 +113,7 @@ func TestManager(t *testing.T) {
 			return nil, nil
 		})
 	err = m.Remove(context.Background(), types.PChannelInfoAssigned{
-		Channel: types.PChannelInfo{Name: "p", Term: 1},
+		Channel: types.PChannelInfo{Name: "p", Term: 1, AccessMode: types.AccessModeRW},
 		Node:    types.StreamingNodeInfo{ServerID: serverID},
 	})
 	assert.NoError(t, err)

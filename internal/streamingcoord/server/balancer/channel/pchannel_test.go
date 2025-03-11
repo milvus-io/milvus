@@ -28,8 +28,9 @@ func TestPChannel(t *testing.T) {
 	assert.Empty(t, pchannel.AssignHistories())
 	assert.Equal(t, types.PChannelInfoAssigned{
 		Channel: types.PChannelInfo{
-			Name: "test-channel",
-			Term: 1,
+			Name:       "test-channel",
+			Term:       1,
+			AccessMode: types.AccessModeRW,
 		},
 		Node: types.StreamingNodeInfo{
 			ServerID: 123,

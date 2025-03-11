@@ -98,8 +98,9 @@ func (f *testOneWALImplsFramework) Run() {
 	// test a read write loop
 	for ; f.term <= 3; f.term++ {
 		pChannel := types.PChannelInfo{
-			Name: f.pchannel,
-			Term: int64(f.term),
+			Name:       f.pchannel,
+			Term:       int64(f.term),
+			AccessMode: types.AccessModeRW,
 		}
 		// create a wal.
 		w, err := f.opener.Open(ctx, &OpenOption{
@@ -113,6 +114,26 @@ func (f *testOneWALImplsFramework) Run() {
 		f.testReadAndWrite(ctx, w)
 		// close the wal
 		w.Close()
+
+		// test ro path
+		pChannel.AccessMode = types.AccessModeRO
+		w, err = f.opener.Open(ctx, &OpenOption{
+			Channel: pChannel,
+		})
+		assert.NoError(f.t, err)
+		assert.NotNil(f.t, w)
+		assert.Panics(f.t, func() {
+			w.Append(ctx, nil)
+		})
+		w.Close()
+
+		// test wrong param
+		pChannel.AccessMode = types.AccessMode(0)
+		w, err = f.opener.Open(ctx, &OpenOption{
+			Channel: pChannel,
+		})
+		assert.Error(f.t, err)
+		assert.Nil(f.t, w)
 	}
 }
 
@@ -266,7 +287,7 @@ func (f *testOneWALImplsFramework) testAppend(ctx context.Context, w WALImpls) (
 	return ids, nil
 }
 
-func (f *testOneWALImplsFramework) testRead(ctx context.Context, w WALImpls, name string) ([]message.ImmutableMessage, error) {
+func (f *testOneWALImplsFramework) testRead(ctx context.Context, w ROWALImpls, name string) ([]message.ImmutableMessage, error) {
 	s, err := w.Read(ctx, ReadOption{
 		Name:                name,
 		DeliverPolicy:       options.DeliverPolicyAll(),

@@ -71,6 +71,8 @@ func (m *managerImpl) Open(ctx context.Context, channel types.PChannelInfo) (err
 		m.logger.Info("open wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
 	}()
 
+	// TODO: support RO channel.
+	channel.AccessMode = types.AccessModeRW
 	return m.getWALLifetime(channel.Name).Open(ctx, channel)
 }
 

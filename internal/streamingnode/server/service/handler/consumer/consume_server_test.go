@@ -42,21 +42,22 @@ func TestCreateConsumeServer(t *testing.T) {
 	// wal not exist should report error.
 	meta, _ := metadata.FromOutgoingContext(contextutil.WithCreateConsumer(context.Background(), &streamingpb.CreateConsumerRequest{
 		Pchannel: &streamingpb.PChannelInfo{
-			Name: "test",
-			Term: 1,
+			Name:       "test",
+			Term:       1,
+			AccessMode: streamingpb.PChannelAccessMode(types.AccessModeRW),
 		},
 	}))
 	ctx := metadata.NewIncomingContext(context.Background(), meta)
 	grpcConsumeServer.ExpectedCalls = nil
 	grpcConsumeServer.EXPECT().Context().Return(ctx)
-	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: int64(1)}).Return(nil, errors.New("wal not exist"))
+	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: 1, AccessMode: types.AccessModeRW}).Return(nil, errors.New("wal not exist"))
 	assertCreateConsumeServerFail(t, manager, grpcConsumeServer)
 
 	// Return error if send created failed.
 	l := mock_wal.NewMockWAL(t)
 	manager.ExpectedCalls = nil
 	l.EXPECT().WALName().Return("test")
-	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: int64(1)}).Return(l, nil)
+	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: 1, AccessMode: types.AccessModeRW}).Return(l, nil)
 	grpcConsumeServer.EXPECT().Send(mock.Anything).Return(errors.New("send created failed"))
 	assertCreateConsumeServerFail(t, manager, grpcConsumeServer)
 
@@ -79,7 +80,7 @@ func TestCreateConsumeServer(t *testing.T) {
 	l.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, errors.New("create scanner failed"))
 	l.EXPECT().WALName().Return("test")
 	manager.ExpectedCalls = nil
-	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: int64(1)}).Return(l, nil)
+	manager.EXPECT().GetAvailableWAL(types.PChannelInfo{Name: "test", Term: 1, AccessMode: types.AccessModeRW}).Return(l, nil)
 	assertCreateConsumeServerFail(t, manager, grpcConsumeServer)
 
 	// Return error if send created failed.
@@ -103,8 +104,9 @@ func TestCreateConsumeServer(t *testing.T) {
 	grpcConsumeServer.EXPECT().Send(mock.Anything).Return(nil)
 
 	l.EXPECT().Channel().Return(types.PChannelInfo{
-		Name: "test",
-		Term: 1,
+		Name:       "test",
+		Term:       1,
+		AccessMode: types.AccessModeRW,
 	})
 	server, err := CreateConsumeServer(manager, grpcConsumeServer)
 	assert.NoError(t, err)

@@ -155,6 +155,9 @@ type handlerCreateFunc func(ctx context.Context, assign *types.PChannelInfoAssig
 func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Context, logger *log.MLogger, pchannel string, create handlerCreateFunc) (any, error) {
 	// TODO: backoff should be configurable.
 	backoff := backoff.NewExponentialBackOff()
+	backoff.InitialInterval = 100 * time.Millisecond
+	backoff.MaxInterval = 10 * time.Second
+	backoff.MaxElapsedTime = 0
 	for {
 		assign := hc.watcher.Get(ctx, pchannel)
 		if assign != nil {

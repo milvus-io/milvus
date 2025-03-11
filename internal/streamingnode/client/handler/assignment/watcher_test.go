@@ -58,12 +58,14 @@ func TestWatcher(t *testing.T) {
 							},
 							Channels: map[string]types.PChannelInfo{
 								"test_pchannel": {
-									Name: "test_pchannel",
-									Term: 1,
+									Name:       "test_pchannel",
+									Term:       1,
+									AccessMode: types.AccessModeRW,
 								},
 								"test_pchannel_2": {
-									Name: "test_pchannel_2",
-									Term: 2,
+									Name:       "test_pchannel_2",
+									Term:       2,
+									AccessMode: types.AccessModeRW,
 								},
 							},
 						},

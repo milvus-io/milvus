@@ -26,17 +26,17 @@ func TestAssignmentDiscover(t *testing.T) {
 		pchans := [][]types.PChannelInfoAssigned{
 			{
 				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+					Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRW},
 					Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
 				},
 			},
 			{
 				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+					Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRW},
 					Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
 				},
 				types.PChannelInfoAssigned{
-					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1},
+					Channel: types.PChannelInfo{Name: "pchannel2", Term: 1, AccessMode: types.AccessModeRW},
 					Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"},
 				},
 			},
@@ -57,8 +57,9 @@ func TestAssignmentDiscover(t *testing.T) {
 			Command: &streamingpb.AssignmentDiscoverRequest_ReportError{
 				ReportError: &streamingpb.ReportAssignmentErrorRequest{
 					Pchannel: &streamingpb.PChannelInfo{
-						Name: "pchannel",
-						Term: 1,
+						Name:       "pchannel",
+						Term:       1,
+						AccessMode: streamingpb.PChannelAccessMode(types.AccessModeRW),
 					},
 					Err: &streamingpb.StreamingError{
 						Code: streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_NOT_EXIST,

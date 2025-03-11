@@ -17,6 +17,9 @@ type openerImpl struct {
 
 // Open opens a new wal.
 func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimpls.WALImpls, error) {
+	if err := opt.Validate(); err != nil {
+		return nil, err
+	}
 	p, err := o.c.CreateProducer(client.ProducerOptions{
 		Topic: opt.Channel.Name,
 	})

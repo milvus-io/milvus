@@ -70,8 +70,9 @@ func (c *PChannelMeta) AssignHistories() []types.PChannelInfoAssigned {
 	for _, h := range c.inner.Histories {
 		history = append(history, types.PChannelInfoAssigned{
 			Channel: types.PChannelInfo{
-				Name: c.inner.GetChannel().GetName(),
-				Term: h.Term,
+				Name:       c.inner.GetChannel().GetName(),
+				Term:       h.Term,
+				AccessMode: types.AccessMode(h.AccessMode),
 			},
 			Node: types.NewStreamingNodeInfoFromProto(h.Node),
 		})

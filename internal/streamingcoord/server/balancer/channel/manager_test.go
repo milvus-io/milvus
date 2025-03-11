@@ -52,8 +52,9 @@ func TestChannelManager(t *testing.T) {
 	err = m.AssignPChannelsDone(ctx, []string{"test-channel"})
 	assert.Error(t, err)
 	err = m.MarkAsUnavailable(ctx, []types.PChannelInfo{{
-		Name: "test-channel",
-		Term: 2,
+		Name:       "test-channel",
+		Term:       2,
+		AccessMode: types.AccessModeRW,
 	}})
 	assert.Error(t, err)
 
@@ -64,8 +65,9 @@ func TestChannelManager(t *testing.T) {
 	err = m.AssignPChannelsDone(ctx, []string{"non-exist-channel"})
 	assert.ErrorIs(t, err, ErrChannelNotExist)
 	err = m.MarkAsUnavailable(ctx, []types.PChannelInfo{{
-		Name: "non-exist-channel",
-		Term: 2,
+		Name:       "non-exist-channel",
+		Term:       2,
+		AccessMode: types.AccessModeRW,
 	}})
 	assert.ErrorIs(t, err, ErrChannelNotExist)
 
@@ -79,8 +81,9 @@ func TestChannelManager(t *testing.T) {
 	err = m.AssignPChannelsDone(ctx, []string{"test-channel"})
 	assert.NoError(t, err)
 	err = m.MarkAsUnavailable(ctx, []types.PChannelInfo{{
-		Name: "test-channel",
-		Term: 2,
+		Name:       "test-channel",
+		Term:       2,
+		AccessMode: types.AccessModeRW,
 	}})
 	assert.NoError(t, err)
 
@@ -134,8 +137,9 @@ func TestChannelManagerWatch(t *testing.T) {
 
 	<-called
 	manager.MarkAsUnavailable(ctx, []types.PChannelInfo{{
-		Name: "test-channel",
-		Term: 2,
+		Name:       "test-channel",
+		Term:       2,
+		AccessMode: types.AccessModeRW,
 	}})
 	<-called
 	cancel()

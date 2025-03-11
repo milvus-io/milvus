@@ -142,7 +142,7 @@ func newMockedConsumerImpl(t *testing.T, ctx context.Context, h message.Handler)
 	opts := &ConsumerOptions{
 		VChannel: "test-1",
 		Assignment: &types.PChannelInfoAssigned{
-			Channel: types.PChannelInfo{Name: "test", Term: 1},
+			Channel: types.PChannelInfo{Name: "test", Term: 1, AccessMode: types.AccessModeRW},
 			Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
 		},
 		DeliverPolicy: options.DeliverPolicyAll(),

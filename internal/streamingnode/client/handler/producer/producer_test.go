@@ -43,7 +43,7 @@ func TestProducer(t *testing.T) {
 	ctx := context.Background()
 	opts := &ProducerOptions{
 		Assignment: &types.PChannelInfoAssigned{
-			Channel: types.PChannelInfo{Name: "test", Term: 1},
+			Channel: types.PChannelInfo{Name: "test", Term: 1, AccessMode: types.AccessModeRW},
 			Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
 		},
 	}
