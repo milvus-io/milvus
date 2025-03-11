@@ -30,6 +30,8 @@
 #include <aws/core/http/standard/StandardHttpRequest.h>
 #include <aws/core/utils/logging/FormattedLogSystem.h>
 #include <aws/s3/S3Client.h>
+#include <aws/s3-crt/S3CrtClient.h>
+#include <aws/s3-crt/S3CrtErrors.h>
 #include <fmt/core.h>
 #include <google/cloud/credentials.h>
 #include <google/cloud/internal/oauth2_credentials.h>
@@ -77,10 +79,32 @@ ThrowS3Error(const std::string& func,
     throw SegcoreError(S3Error, error_message);
 }
 
+
+template <typename... Args>
+static SegcoreError
+ThrowS3CrtError(const std::string& func,
+                const Aws::S3Crt::S3CrtError& err,
+                const std::string& fmtString,
+                Args&&... args){
+    std::ostringstream oss;
+    const auto& message = fmt::format(fmtString, std::forward<Args>(args)...);
+    oss << "Error in " << func << "[errcode:" << int(err.GetResponseCode())
+        << ", exception:" << err.GetExceptionName()
+        << ", errmessage:" << err.GetMessage() << ", params:" << message << "]";
+    throw SegcoreError(S3Error, oss.str());
+}
+
+
 static bool
 IsNotFound(const Aws::S3::S3Errors& s3err) {
     return (s3err == Aws::S3::S3Errors::NO_SUCH_KEY ||
             s3err == Aws::S3::S3Errors::RESOURCE_NOT_FOUND);
+}
+
+static bool
+IsNotFound(const Aws::S3Crt::S3CrtErrors& s3CrtErr){
+    return (s3CrtErr == Aws::S3Crt::S3CrtErrors::NO_SUCH_KEY ||
+            s3CrtErr == Aws::S3Crt::S3CrtErrors::RESOURCE_NOT_FOUND);
 }
 
 /**
@@ -224,23 +248,44 @@ class MinioChunkManager : public ChunkManager {
     ShutdownSDKAPI();
     void
     BuildS3Client(const StorageConfig& storage_config,
-                  const Aws::Client::ClientConfiguration& config);
+                  const Aws::S3Crt::ClientConfiguration& config);
     void
     BuildAliyunCloudClient(const StorageConfig& storage_config,
-                           const Aws::Client::ClientConfiguration& config);
+                           const Aws::S3Crt::ClientConfiguration& config);
     void
     BuildGoogleCloudClient(const StorageConfig& storage_config,
-                           const Aws::Client::ClientConfiguration& config);
+                           const Aws::S3Crt::ClientConfiguration& config);
 
  protected:
     void
     BuildAccessKeyClient(const StorageConfig& storage_config,
-                         const Aws::Client::ClientConfiguration& config);
+                         const Aws::S3Crt::ClientConfiguration& config);
+
+    template<typename CredentialProviderType>
+    void
+    BuildIAMClient(const StorageConfig& storage_config, const Aws::S3Crt::ClientConfiguration& config, const char * description) {
+        auto provider =
+                Aws::MakeShared<CredentialProviderType>(description);
+        auto aws_credentials = provider->GetAWSCredentials();
+        AssertInfo(!aws_credentials.GetAWSAccessKeyId().empty(),
+                   "if use iam, access key id should not be empty");
+        AssertInfo(!aws_credentials.GetAWSSecretKey().empty(),
+                   "if use iam, secret key should not be empty");
+        AssertInfo(!aws_credentials.GetSessionToken().empty(),
+                   "if use iam, token should not be empty");
+
+        crt_client_ = std::make_shared<Aws::S3Crt::S3CrtClient>(
+                provider,
+                config,
+                Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+                storage_config.useVirtualHost);
+    }
 
     Aws::SDKOptions sdk_options_;
     static std::atomic<size_t> init_count_;
     static std::mutex client_mutex_;
     std::shared_ptr<Aws::S3::S3Client> client_;
+    std::shared_ptr<Aws::S3Crt::S3CrtClient> crt_client_;
     std::string default_bucket_name_;
     std::string remote_root_path_;
 };

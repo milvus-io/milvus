@@ -68,6 +68,7 @@ class MilvusConan(ConanFile):
         "arrow:with_jemalloc": True,
         "arrow:shared": False,
         "arrow:with_s3": True,
+        "aws-sdk-cpp:s3-crt": True,
         "aws-sdk-cpp:config": True,
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
