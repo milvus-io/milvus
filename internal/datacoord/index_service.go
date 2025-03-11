@@ -232,6 +232,12 @@ func (s *Server) parseAndVerifyNestedPath(identifier string, schema *schemapb.Co
 	}
 
 	nestedPath := identifierExpr.GetColumnExpr().GetInfo().GetNestedPath()
+	// escape the nested path to avoid the path being interpreted as a JSON Pointer
+	nestedPath = lo.Map(nestedPath, func(path string, _ int) string {
+		s := strings.ReplaceAll(path, "~", "~0")
+		s = strings.ReplaceAll(s, "/", "~1")
+		return s
+	})
 	return "/" + strings.Join(nestedPath, "/"), nil
 }
 
