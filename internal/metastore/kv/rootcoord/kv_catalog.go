@@ -1325,13 +1325,20 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 				continue
 			}
 			dbName, objectName := funcutil.SplitObjectName(grantInfos[2])
+
+			var privilegeName string
+			if granteeIDInfos[0] == util.AnyWord {
+				privilegeName = util.AnyWord
+			} else {
+				privilegeName = util.PrivilegeNameForAPI(granteeIDInfos[0])
+			}
 			grants = append(grants, &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: grantInfos[0]},
 				Object:     &milvuspb.ObjectEntity{Name: grantInfos[1]},
 				ObjectName: objectName,
 				DbName:     dbName,
 				Grantor: &milvuspb.GrantorEntity{
-					Privilege: &milvuspb.PrivilegeEntity{Name: util.PrivilegeNameForAPI(granteeIDInfos[0])},
+					Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
 				},
 			})
 		}
