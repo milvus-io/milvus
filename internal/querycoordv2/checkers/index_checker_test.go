@@ -346,21 +346,6 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 				IndexFilePaths: []string{"index"},
 			},
 		}}, nil)
-	suite.broker.EXPECT().GetIndexInfo(mock.Anything, mock.Anything, mock.AnythingOfType("int64")).
-		Return(map[int64][]*querypb.FieldIndexInfo{2: {
-			{
-				FieldID:        101,
-				IndexID:        1000,
-				EnableIndex:    true,
-				IndexFilePaths: []string{"index"},
-			},
-			{
-				FieldID:        102,
-				IndexID:        1001,
-				EnableIndex:    true,
-				IndexFilePaths: []string{"index"},
-			},
-		}}, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).
 		Return([]*datapb.SegmentInfo{}, nil).Maybe()
 	tasks := checker.Check(context.Background())
@@ -407,7 +392,7 @@ func (suite *IndexCheckerSuite) TestLoadJsonIndex() {
 	}
 
 	indexInfo := make(map[int64]*querypb.FieldIndexInfo)
-	indexInfo[fieldIndexInfo.FieldID] = fieldIndexInfo
+	indexInfo[fieldIndexInfo.IndexID] = fieldIndexInfo
 	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")
 	segment.IndexInfo = indexInfo
 	checker.dist.SegmentDistManager.Update(1, segment)
@@ -555,7 +540,7 @@ func (suite *IndexCheckerSuite) TestCreateNewJsonIndex() {
 	}
 
 	indexInfo := make(map[int64]*querypb.FieldIndexInfo)
-	indexInfo[fieldIndexInfo.FieldID] = fieldIndexInfo
+	indexInfo[fieldIndexInfo.IndexID] = fieldIndexInfo
 	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")
 	segment.IndexInfo = indexInfo
 	checker.dist.SegmentDistManager.Update(1, segment)
