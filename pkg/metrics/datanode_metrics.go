@@ -58,15 +58,16 @@ var (
 			segmentLevelLabelName,
 		})
 
-	DataNodeWriteBinlogSize = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
+	DataNodeWriteDataCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataNodeRole,
-			Name:      "write_data_size",
+			Name:      "write_data_count",
 			Help:      "byte size of datanode write to object storage, including flushed size",
 		}, []string{
 			nodeIDLabelName,
 			dataSourceLabelName,
+			dataTypeLabelName,
 			collectionIDLabelName,
 		})
 
@@ -336,7 +337,7 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeFlushReqCounter)
 	registry.MustRegister(DataNodeFlushedSize)
 	registry.MustRegister(DataNodeFlushedRows)
-	registry.MustRegister(DataNodeWriteBinlogSize)
+	registry.MustRegister(DataNodeWriteDataCount)
 	// compaction related
 	registry.MustRegister(DataNodeCompactionLatency)
 	registry.MustRegister(DataNodeCompactionLatencyInQueue)
@@ -389,7 +390,7 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 
-	DataNodeWriteBinlogSize.Delete(prometheus.Labels{
+	DataNodeWriteDataCount.Delete(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 }

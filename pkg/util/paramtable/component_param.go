@@ -3476,6 +3476,8 @@ type dataCoordConfig struct {
 	GrowingSegmentsMemSizeInMB     ParamItem `refreshable:"true"`
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
+	BlockingL0EntryNum             ParamItem `refreshable:"true"`
+	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
 
 	// compaction
 	EnableCompaction            ParamItem `refreshable:"false"`
@@ -3738,6 +3740,26 @@ exceeds this threshold, the largest growing segment will be sealed.`,
 		Export: true,
 	}
 	p.GrowingSegmentsMemSizeInMB.Init(base.mgr)
+
+	p.BlockingL0EntryNum = ParamItem{
+		Key:          "dataCoord.sealPolicy.channel.blockingL0EntryNum",
+		Version:      "2.5.7",
+		DefaultValue: "5000000",
+		Doc: `If the total entry number of l0 logs of each shard 
+exceeds this threshold, the earliest growing segments will be sealed.`,
+		Export: true,
+	}
+	p.BlockingL0EntryNum.Init(base.mgr)
+
+	p.BlockingL0SizeInMB = ParamItem{
+		Key:          "dataCoord.sealPolicy.channel.blockingL0SizeInMB",
+		Version:      "2.5.7",
+		DefaultValue: "64",
+		Doc: `The size threshold in MB, if the total entry number of l0 logs of each shard 
+exceeds this threshold, the earliest growing segments will be sealed.`,
+		Export: true,
+	}
+	p.BlockingL0SizeInMB.Init(base.mgr)
 
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",

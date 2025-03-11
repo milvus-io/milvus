@@ -1201,8 +1201,8 @@ class TestMilvusClientCollectionPropertiesInvalid(TestMilvusClientV2Base):
         properties = {'mmap.enabled': True}
         error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={drop_name}]"}
         self.drop_collection_properties(client, drop_name, properties,
-                                     check_task=CheckTasks.err_res,
-                                     check_items=error)
+                                        check_task=CheckTasks.err_res,
+                                        check_items=error)
         
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("property_keys", ["", {}, []])

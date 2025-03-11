@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -2850,6 +2851,8 @@ func TestValidateFunction(t *testing.T) {
 
 func TestValidateModelFunction(t *testing.T) {
 	t.Run("Valid model function schema", func(t *testing.T) {
+		ts := function.CreateOpenAIEmbeddingServer()
+		defer ts.Close()
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
@@ -2877,7 +2880,7 @@ func TestValidateModelFunction(t *testing.T) {
 						{Key: "provider", Value: "openai"},
 						{Key: "model_name", Value: "text-embedding-ada-002"},
 						{Key: "api_key", Value: "mock"},
-						{Key: "url", Value: "mock_url"},
+						{Key: "url", Value: ts.URL},
 						{Key: "dim", Value: "4"},
 					},
 				},

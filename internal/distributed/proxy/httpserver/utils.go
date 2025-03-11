@@ -283,10 +283,10 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 
 // --------------------- insert param --------------------- //
 
-func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error, []map[string]interface{}, map[string][]bool) {
+func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema) (error, []map[string]interface{}, map[string][]bool) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
-	dataResult := gjson.Get(body, HTTPRequestData)
+	dataResult := gjson.GetBytes(body, HTTPRequestData)
 	dataResultArray := dataResult.Array()
 	if len(dataResultArray) == 0 {
 		return merr.ErrMissingRequiredParameters, reallyDataArray, validDataMap

@@ -62,16 +62,13 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 	if err != nil {
 		return nil, err
 	}
-	var apiKey, url, modelName string
+	apiKey, url := parseAKAndURL(functionSchema.Params)
+	var modelName string
 	truncate := "END"
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
 		case modelNameParamKey:
 			modelName = param.Value
-		case apiKeyParamKey:
-			apiKey = param.Value
-		case embeddingURLParamKey:
-			url = param.Value
 		case truncateParamKey:
 			if param.Value != "NONE" && param.Value != "START" && param.Value != "END" {
 				return nil, fmt.Errorf("Illegal parameters, %s only supports [NONE, START, END]", truncateParamKey)
@@ -79,11 +76,6 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 			truncate = param.Value
 		default:
 		}
-	}
-
-	if modelName != embedEnglishV30 && modelName != embedMultilingualV30 && modelName != embedEnglishLightV30 && modelName != embedMultilingualLightV30 && modelName != embedEnglishV20 && modelName != embedEnglishLightV20 && modelName != embedMultilingualV20 {
-		return nil, fmt.Errorf("Unsupported model: %s, only support [%s, %s, %s, %s, %s, %s, %s]",
-			modelName, embedEnglishV30, embedMultilingualV30, embedEnglishLightV30, embedMultilingualLightV30, embedEnglishV20, embedEnglishLightV20, embedMultilingualV20)
 	}
 
 	c, err := createCohereEmbeddingClient(apiKey, url)
@@ -102,12 +94,6 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		}
 		return "int8"
 	}()
-
-	if outputType == "int8" {
-		if modelName != embedEnglishV30 && modelName != embedMultilingualV30 && modelName != embedEnglishLightV30 && modelName != embedMultilingualLightV30 {
-			return nil, fmt.Errorf("Cohere text embedding model: [%s] doesn't supports int8. Valid for only v3 models.", modelName)
-		}
-	}
 
 	provider := CohereEmbeddingProvider{
 		client:     c,
@@ -132,7 +118,8 @@ func (provider *CohereEmbeddingProvider) FieldDim() int64 {
 
 // Specifies the type of input passed to the model. Required for embedding models v3 and higher.
 func (provider *CohereEmbeddingProvider) getInputType(mode TextEmbeddingMode) string {
-	if provider.modelName == embedEnglishV20 || provider.modelName == embedEnglishLightV20 || provider.modelName == embedMultilingualV20 {
+	// v2 models not support instructor
+	if strings.HasSuffix(provider.modelName, "v2.0") {
 		return ""
 	}
 	if mode == InsertMode {

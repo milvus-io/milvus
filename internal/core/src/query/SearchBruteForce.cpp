@@ -94,24 +94,6 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
     if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
         base_dataset->SetIsSparse(true);
         query_dataset->SetIsSparse(true);
-    } else if (data_type == DataType::VECTOR_BFLOAT16) {
-        //todo: if knowhere support real fp16/bf16 bf, remove convert
-        base_dataset =
-            knowhere::ConvertFromDataTypeIfNeeded<bfloat16>(base_dataset);
-        query_dataset =
-            knowhere::ConvertFromDataTypeIfNeeded<bfloat16>(query_dataset);
-    } else if (data_type == DataType::VECTOR_FLOAT16) {
-        //todo: if knowhere support real fp16/bf16 bf, remove convert
-        base_dataset =
-            knowhere::ConvertFromDataTypeIfNeeded<float16>(base_dataset);
-        query_dataset =
-            knowhere::ConvertFromDataTypeIfNeeded<float16>(query_dataset);
-    } else if (data_type == DataType::VECTOR_INT8) {
-        // TODO caiyd: if knowhere support real int8 bf, remove this
-        base_dataset =
-            knowhere::ConvertFromDataTypeIfNeeded<int8>(base_dataset);
-        query_dataset =
-            knowhere::ConvertFromDataTypeIfNeeded<int8>(query_dataset);
     }
     base_dataset->SetTensorBeginId(raw_ds.begin_id);
     return std::make_pair(query_dataset, base_dataset);
@@ -151,23 +133,20 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
             res = knowhere::BruteForce::RangeSearch<float>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_FLOAT16) {
-            //todo: if knowhere support real fp16/bf16 bf, change it
-            res = knowhere::BruteForce::RangeSearch<float>(
+            res = knowhere::BruteForce::RangeSearch<float16>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_BFLOAT16) {
-            //todo: if knowhere support real fp16/bf16 bf, change it
-            res = knowhere::BruteForce::RangeSearch<float>(
+            res = knowhere::BruteForce::RangeSearch<bfloat16>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_BINARY) {
-            res = knowhere::BruteForce::RangeSearch<uint8_t>(
+            res = knowhere::BruteForce::RangeSearch<bin1>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
             res = knowhere::BruteForce::RangeSearch<
                 knowhere::sparse::SparseRow<float>>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else if (data_type == DataType::VECTOR_INT8) {
-            // TODO caiyd: if knowhere support real int8 bf, change it
-            res = knowhere::BruteForce::RangeSearch<float>(
+            res = knowhere::BruteForce::RangeSearch<int8>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else {
             PanicInfo(
@@ -200,8 +179,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 search_cfg,
                 bitset);
         } else if (data_type == DataType::VECTOR_FLOAT16) {
-            //todo: if knowhere support real fp16/bf16 bf, change it
-            stat = knowhere::BruteForce::SearchWithBuf<float>(
+            stat = knowhere::BruteForce::SearchWithBuf<float16>(
                 base_dataset,
                 query_dataset,
                 sub_result.mutable_seg_offsets().data(),
@@ -209,8 +187,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 search_cfg,
                 bitset);
         } else if (data_type == DataType::VECTOR_BFLOAT16) {
-            //todo: if knowhere support real fp16/bf16 bf, change it
-            stat = knowhere::BruteForce::SearchWithBuf<float>(
+            stat = knowhere::BruteForce::SearchWithBuf<bfloat16>(
                 base_dataset,
                 query_dataset,
                 sub_result.mutable_seg_offsets().data(),
@@ -218,7 +195,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 search_cfg,
                 bitset);
         } else if (data_type == DataType::VECTOR_BINARY) {
-            stat = knowhere::BruteForce::SearchWithBuf<uint8_t>(
+            stat = knowhere::BruteForce::SearchWithBuf<bin1>(
                 base_dataset,
                 query_dataset,
                 sub_result.mutable_seg_offsets().data(),
@@ -234,8 +211,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 search_cfg,
                 bitset);
         } else if (data_type == DataType::VECTOR_INT8) {
-            // TODO caiyd: if knowhere support real int8 bf, change it
-            stat = knowhere::BruteForce::SearchWithBuf<float>(
+            stat = knowhere::BruteForce::SearchWithBuf<int8>(
                 base_dataset,
                 query_dataset,
                 sub_result.mutable_seg_offsets().data(),
@@ -268,20 +244,17 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
             return knowhere::BruteForce::AnnIterator<float>(
                 base_dataset, query_dataset, config, bitset);
         case DataType::VECTOR_FLOAT16:
-            //todo: if knowhere support real fp16/bf16 bf, change it
-            return knowhere::BruteForce::AnnIterator<float>(
+            return knowhere::BruteForce::AnnIterator<float16>(
                 base_dataset, query_dataset, config, bitset);
         case DataType::VECTOR_BFLOAT16:
-            //todo: if knowhere support real fp16/bf16 bf, change it
-            return knowhere::BruteForce::AnnIterator<float>(
+            return knowhere::BruteForce::AnnIterator<bfloat16>(
                 base_dataset, query_dataset, config, bitset);
         case DataType::VECTOR_SPARSE_FLOAT:
             return knowhere::BruteForce::AnnIterator<
                 knowhere::sparse::SparseRow<float>>(
                 base_dataset, query_dataset, config, bitset);
         case DataType::VECTOR_INT8:
-            // TODO caiyd: if knowhere support real int8 bf, change it
-            return knowhere::BruteForce::AnnIterator<float>(
+            return knowhere::BruteForce::AnnIterator<int8>(
                 base_dataset, query_dataset, config, bitset);
         default:
             PanicInfo(ErrorCode::Unsupported,

@@ -111,6 +111,7 @@ const (
 	cacheNameLabelName       = "cache_name"
 	cacheStateLabelName      = "cache_state"
 	dataSourceLabelName      = "data_source"
+	dataTypeLabelName        = "data_type"
 	importStageLabelName     = "import_stage"
 	requestScope             = "scope"
 	fullMethodLabelName      = "full_method"
@@ -125,6 +126,11 @@ const (
 	cgoNameLabelName         = `cgo_name`
 	cgoTypeLabelName         = `cgo_type`
 	queueTypeLabelName       = `queue_type`
+
+	// model function/UDF labels
+	functionTypeName = "function_type_name"
+	functionProvider = "function_provider"
+	functionName     = "function_name"
 
 	// entities label
 	LoadedLabel         = "loaded"

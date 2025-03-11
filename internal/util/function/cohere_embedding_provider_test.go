@@ -69,7 +69,7 @@ func createCohereProvider(url string, schema *schemapb.FieldSchema, providerName
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: embedEnglishLightV30},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: embeddingURLParamKey, Value: url},
 		},
@@ -142,25 +142,6 @@ func (s *CohereTextEmbeddingProviderSuite) TestEmbeddingInt8() {
 			ret, _ := provider.CallEmbedding(data, SearchMode)
 			s.Equal([][]int8{{0, 1, 2, 3}, {1, 2, 3, 4}, {2, 3, 4, 5}}, ret)
 		}
-	}
-
-	// Invalid model name
-	{
-		functionSchema := &schemapb.FunctionSchema{
-			Name:             "test",
-			Type:             schemapb.FunctionType_TextEmbedding,
-			InputFieldNames:  []string{"text"},
-			OutputFieldNames: []string{"vector"},
-			InputFieldIds:    []int64{101},
-			OutputFieldIds:   []int64{102},
-			Params: []*commonpb.KeyValuePair{
-				{Key: modelNameParamKey, Value: embedEnglishLightV20},
-				{Key: apiKeyParamKey, Value: "mock"},
-				{Key: embeddingURLParamKey, Value: ts.URL},
-			},
-		}
-		_, err := NewCohereEmbeddingProvider(int8VecField, functionSchema)
-		s.Error(err)
 	}
 }
 
@@ -278,7 +259,7 @@ func (s *CohereTextEmbeddingProviderSuite) TestNewCohereProvider() {
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: embedEnglishLightV20},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: apiKeyParamKey, Value: "mock"},
 		},
 	}
@@ -296,12 +277,6 @@ func (s *CohereTextEmbeddingProviderSuite) TestNewCohereProvider() {
 	functionSchema.Params[2].Value = "Unknow"
 	_, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema)
 	s.Error(err)
-
-	// Invalid ModelName
-	functionSchema.Params[2].Value = "END"
-	functionSchema.Params[0].Value = "Unknow"
-	_, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema)
-	s.Error(err)
 }
 
 func (s *CohereTextEmbeddingProviderSuite) TestGetInputType() {
@@ -313,7 +288,7 @@ func (s *CohereTextEmbeddingProviderSuite) TestGetInputType() {
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: embedEnglishLightV20},
+			{Key: modelNameParamKey, Value: "model-v2.0"},
 			{Key: apiKeyParamKey, Value: "mock"},
 		},
 	}
@@ -323,7 +298,7 @@ func (s *CohereTextEmbeddingProviderSuite) TestGetInputType() {
 	s.Equal(provider.getInputType(InsertMode), "")
 	s.Equal(provider.getInputType(SearchMode), "")
 
-	functionSchema.Params[0].Value = embedEnglishLightV30
+	functionSchema.Params[0].Value = "model-v3.0"
 	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema)
 	s.NoError(err)
 	s.Equal(provider.getInputType(InsertMode), "search_document")
