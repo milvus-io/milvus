@@ -197,18 +197,7 @@ func (m *ChannelManagerImpl) AddNode(nodeID UniqueID) error {
 	log.Info("register node", zap.Int64("registered node", nodeID))
 
 	m.store.AddNode(nodeID)
-	updates := m.assignPolicy(m.store.GetNodesChannels(), m.store.GetBufferChannelInfo(), m.legacyNodes.Collect())
-
-	if updates == nil {
-		log.Info("register node with no reassignment", zap.Int64("registered node", nodeID))
-		return nil
-	}
-
-	err := m.execute(updates)
-	if err != nil {
-		log.Warn("fail to update channel operation updates into meta", zap.Error(err))
-	}
-	return err
+	return nil
 }
 
 // Release writes ToRelease channel watch states for a channel
