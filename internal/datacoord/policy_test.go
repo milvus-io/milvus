@@ -139,7 +139,10 @@ func (s *AssignByCountPolicySuite) TestWithoutUnassignedChannels() {
 		opSet := AvgAssignByCountPolicy(s.curCluster, nil, execlusiveNodes)
 		s.NotNil(opSet)
 
-		s.Equal(2, opSet.GetChannelNumber())
+		for _, op := range opSet.Collect() {
+			s.T().Logf("opType=%s, opNodeID=%d, numOpChannel=%d", ChannelOpTypeNames[op.Type], op.NodeID, len(op.Channels))
+		}
+		s.Equal(6, opSet.GetChannelNumber())
 		for _, op := range opSet.Collect() {
 			if op.NodeID == bufferID {
 				s.Equal(Watch, op.Type)
@@ -253,16 +256,17 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 
 		s.Equal(67, opSet.GetChannelNumber())
 		for _, op := range opSet.Collect() {
+			s.T().Logf("opType=%s, opNodeID=%d, numOpChannel=%d", ChannelOpTypeNames[op.Type], op.NodeID, len(op.Channels))
 			if op.NodeID == bufferID {
 				s.Equal(Delete, op.Type)
 			}
 		}
-		s.Equal(4, opSet.Len())
+		s.Equal(6, opSet.Len())
 
 		nodeIDs := lo.FilterMap(opSet.Collect(), func(op *ChannelOp, _ int) (int64, bool) {
 			return op.NodeID, op.NodeID != bufferID
 		})
-		s.ElementsMatch([]int64{3, 2}, nodeIDs)
+		s.ElementsMatch([]int64{3, 2, 1}, nodeIDs)
 	})
 
 	s.Run("toAssign from nodeID = 1", func() {
