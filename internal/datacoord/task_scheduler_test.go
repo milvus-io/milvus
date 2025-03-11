@@ -2248,7 +2248,7 @@ func (s *taskSchedulerSuite) Test_zeroSegmentStats() {
 	cm := mocks.NewChunkManager(s.T())
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
-	in := mocks.NewMockIndexNodeClient(s.T())
+	in := mocks.NewMockDataNodeClient(s.T())
 	in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 	workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true)
 
