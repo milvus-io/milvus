@@ -2586,13 +2586,17 @@ func TestRBAC_Grant(t *testing.T) {
 		)
 
 		grant := func(role, obj, objName, privilege, dbName string) *milvuspb.GrantEntity {
+			privilegeName := util.PrivilegeNameForAPI(privilege)
+			if privilege == util.AnyWord {
+				privilegeName = util.AnyWord
+			}
 			return &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: role},
 				Object:     &milvuspb.ObjectEntity{Name: obj},
 				ObjectName: objName,
 				DbName:     dbName,
 				Grantor: &milvuspb.GrantorEntity{
-					Privilege: &milvuspb.PrivilegeEntity{Name: util.PrivilegeNameForAPI(privilege)},
+					Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
 				},
 			}
 		}
@@ -2606,6 +2610,7 @@ func TestRBAC_Grant(t *testing.T) {
 							fmt.Sprintf("%s/%s", key, "PrivilegeLoad"),
 							fmt.Sprintf("%s/%s", key, "PrivilegeRelease"),
 							fmt.Sprintf("%s/%s", key, "random/a/b/c"),
+							fmt.Sprintf("%s/%s", key, util.AnyWord),
 						}
 					}
 					return nil
@@ -2668,12 +2673,14 @@ func TestRBAC_Grant(t *testing.T) {
 				policy, err := c.ListPolicy(ctx, tenant)
 				if test.isValid {
 					assert.NoError(t, err)
-					assert.Equal(t, 4, len(policy))
+					assert.Equal(t, 6, len(policy))
 					ps := []*milvuspb.GrantEntity{
 						grant("role1", "obj1", "obj_name1", "PrivilegeLoad", "default"),
 						grant("role1", "obj1", "obj_name1", "PrivilegeRelease", "default"),
+						grant("role1", "obj1", "obj_name1", util.AnyWord, "default"),
 						grant("role2", "obj2", "obj_name2", "PrivilegeLoad", "default"),
 						grant("role2", "obj2", "obj_name2", "PrivilegeRelease", "default"),
+						grant("role2", "obj2", "obj_name2", util.AnyWord, "default"),
 					}
 					assert.ElementsMatch(t, ps, policy)
 				} else {
