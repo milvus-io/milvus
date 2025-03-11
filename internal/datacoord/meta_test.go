@@ -655,7 +655,7 @@ func TestMeta_Basic(t *testing.T) {
 		const rowCount1 = 300
 
 		// no segment
-		nums := meta.GetNumRowsOfCollection(collID)
+		nums := meta.GetNumRowsOfCollection(context.Background(), collID)
 		assert.EqualValues(t, 0, nums)
 
 		// add seg1 with 100 rows
@@ -675,7 +675,7 @@ func TestMeta_Basic(t *testing.T) {
 		// check partition/collection statistics
 		nums = meta.GetNumRowsOfPartition(context.TODO(), collID, partID0)
 		assert.EqualValues(t, (rowCount0 + rowCount1), nums)
-		nums = meta.GetNumRowsOfCollection(collID)
+		nums = meta.GetNumRowsOfCollection(context.Background(), collID)
 		assert.EqualValues(t, (rowCount0 + rowCount1), nums)
 	})
 

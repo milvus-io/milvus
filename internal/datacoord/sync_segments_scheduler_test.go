@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 )
 
 type SyncSegmentsSchedulerSuite struct {
@@ -46,7 +45,6 @@ func Test_SyncSegmentsSchedulerSuite(t *testing.T) {
 
 func (s *SyncSegmentsSchedulerSuite) initParams() {
 	s.m = &meta{
-		RWMutex: lock.RWMutex{},
 		collections: map[UniqueID]*collectionInfo{
 			1: {
 				ID: 1,

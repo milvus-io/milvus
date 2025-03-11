@@ -82,12 +82,16 @@ type CompactionMeta interface {
 var _ CompactionMeta = (*meta)(nil)
 
 type meta struct {
-	lock.RWMutex
-	ctx          context.Context
-	catalog      metastore.DataCoordCatalog
-	collections  map[UniqueID]*collectionInfo // collection id to collection info
-	segments     *SegmentsInfo                // segment id to segment info
-	channelCPs   *channelCPs                  // vChannel -> channel checkpoint/see position
+	ctx     context.Context
+	catalog metastore.DataCoordCatalog
+
+	collMu      lock.RWMutex
+	collections map[UniqueID]*collectionInfo // collection id to collection info
+
+	segMu    lock.RWMutex
+	segments *SegmentsInfo // segment id to segment info
+
+	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
 
 	indexMeta          *indexMeta
@@ -334,8 +338,8 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 // Note that collection info is just for caching and will not be set into etcd from datacoord
 func (m *meta) AddCollection(collection *collectionInfo) {
 	log.Info("meta update: add collection", zap.Int64("collectionID", collection.ID))
-	m.Lock()
-	defer m.Unlock()
+	m.collMu.Lock()
+	defer m.collMu.Unlock()
 	m.collections[collection.ID] = collection
 	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
 	log.Info("meta update: add collection - complete", zap.Int64("collectionID", collection.ID))
@@ -344,8 +348,8 @@ func (m *meta) AddCollection(collection *collectionInfo) {
 // DropCollection drop a collection from meta
 func (m *meta) DropCollection(collectionID int64) {
 	log.Info("meta update: drop collection", zap.Int64("collectionID", collectionID))
-	m.Lock()
-	defer m.Unlock()
+	m.collMu.Lock()
+	defer m.collMu.Unlock()
 	delete(m.collections, collectionID)
 	metrics.CleanupDataCoordWithCollectionID(collectionID)
 	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
@@ -354,8 +358,8 @@ func (m *meta) DropCollection(collectionID int64) {
 
 // GetCollection returns collection info with provided collection id from local cache
 func (m *meta) GetCollection(collectionID UniqueID) *collectionInfo {
-	m.RLock()
-	defer m.RUnlock()
+	m.collMu.RLock()
+	defer m.collMu.RUnlock()
 	collection, ok := m.collections[collectionID]
 	if !ok {
 		return nil
@@ -365,8 +369,8 @@ func (m *meta) GetCollection(collectionID UniqueID) *collectionInfo {
 
 // GetCollections returns collections from local cache
 func (m *meta) GetCollections() []*collectionInfo {
-	m.RLock()
-	defer m.RUnlock()
+	m.collMu.RLock()
+	defer m.collMu.RUnlock()
 	collections := make([]*collectionInfo, 0)
 	for _, coll := range m.collections {
 		collections = append(collections, coll)
@@ -375,8 +379,8 @@ func (m *meta) GetCollections() []*collectionInfo {
 }
 
 func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
-	m.RLock()
-	defer m.RUnlock()
+	m.collMu.RLock()
+	defer m.collMu.RUnlock()
 
 	coll, ok := m.collections[collectionID]
 	if !ok {
@@ -432,22 +436,16 @@ func GetSegmentsChanPart(m *meta, collectionID int64, filters ...SegmentFilter) 
 	return result
 }
 
-func (m *meta) getNumRowsOfCollectionUnsafe(collectionID UniqueID) int64 {
+// GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
+func (m *meta) GetNumRowsOfCollection(ctx context.Context, collectionID UniqueID) int64 {
 	var ret int64
-	segments := m.segments.GetSegments()
+	segments := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
+		return isSegmentHealthy(si)
+	}))
 	for _, segment := range segments {
-		if isSegmentHealthy(segment) && segment.GetCollectionID() == collectionID {
-			ret += segment.GetNumOfRows()
-		}
+		ret += segment.GetNumOfRows()
 	}
 	return ret
-}
-
-// GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
-func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
-	m.RLock()
-	defer m.RUnlock()
-	return m.getNumRowsOfCollectionUnsafe(collectionID)
 }
 
 func getBinlogFileCount(s *datapb.SegmentInfo) int {
@@ -468,8 +466,10 @@ func getBinlogFileCount(s *datapb.SegmentInfo) int {
 
 func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	info := &metricsinfo.DataCoordQuotaMetrics{}
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	m.collMu.RLock()
+	defer m.collMu.RUnlock()
 	collectionBinlogSize := make(map[UniqueID]int64)
 	partitionBinlogSize := make(map[UniqueID]map[UniqueID]int64)
 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
@@ -542,14 +542,16 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 // SetStoredIndexFileSizeMetric returns the total index files size of all segment for each collection.
 func (m *meta) SetStoredIndexFileSizeMetric() uint64 {
-	m.RLock()
-	defer m.RUnlock()
+	m.collMu.RLock()
+	defer m.collMu.RUnlock()
 	return m.indexMeta.SetStoredIndexFileSizeMetric(m.collections)
 }
 
 func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	m.collMu.RLock()
+	defer m.collMu.RUnlock()
 	ret := make(map[int64]int64, len(m.collections))
 	segments := m.segments.GetSegments()
 	for _, segment := range segments {
@@ -564,8 +566,8 @@ func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
 func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
 	log := log.Ctx(ctx).With(zap.String("channel", segment.GetInsertChannel()))
 	log.Info("meta update: adding segment - Start", zap.Int64("segmentID", segment.GetID()))
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	if err := m.catalog.AddSegment(ctx, segment.SegmentInfo); err != nil {
 		log.Error("meta update: adding segment failed",
 			zap.Int64("segmentID", segment.GetID()),
@@ -583,8 +585,8 @@ func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
 func (m *meta) DropSegment(ctx context.Context, segmentID UniqueID) error {
 	log := log.Ctx(ctx)
 	log.Debug("meta update: dropping segment", zap.Int64("segmentID", segmentID))
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	segment := m.segments.GetSegment(segmentID)
 	if segment == nil {
 		log.Warn("meta update: dropping segment failed - segment not found",
@@ -608,8 +610,8 @@ func (m *meta) DropSegment(ctx context.Context, segmentID UniqueID) error {
 // GetHealthySegment returns segment info with provided id
 // if not segment is found, nil will be returned
 func (m *meta) GetHealthySegment(ctx context.Context, segID UniqueID) *SegmentInfo {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 	segment := m.segments.GetSegment(segID)
 	if segment != nil && isSegmentHealthy(segment) {
 		return segment
@@ -619,8 +621,8 @@ func (m *meta) GetHealthySegment(ctx context.Context, segID UniqueID) *SegmentIn
 
 // Get segments By filter function
 func (m *meta) GetSegments(segIDs []UniqueID, filterFunc SegmentInfoSelector) []UniqueID {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 	var result []UniqueID
 	for _, id := range segIDs {
 		segment := m.segments.GetSegment(id)
@@ -635,21 +637,21 @@ func (m *meta) GetSegments(segIDs []UniqueID, filterFunc SegmentInfoSelector) []
 // include the unhealthy segment
 // if not segment is found, nil will be returned
 func (m *meta) GetSegment(ctx context.Context, segID UniqueID) *SegmentInfo {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 	return m.segments.GetSegment(segID)
 }
 
 // GetAllSegmentsUnsafe returns all segments
 func (m *meta) GetAllSegmentsUnsafe() []*SegmentInfo {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 	return m.segments.GetSegments()
 }
 
 func (m *meta) GetSegmentsTotalNumRows(segmentIDs []UniqueID) int64 {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 	var sum int64 = 0
 	for _, segmentID := range segmentIDs {
 		segment := m.segments.GetSegment(segmentID)
@@ -663,8 +665,8 @@ func (m *meta) GetSegmentsTotalNumRows(segmentIDs []UniqueID) int64 {
 }
 
 func (m *meta) GetSegmentsChannels(segmentIDs []UniqueID) (map[int64]string, error) {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 	segChannels := make(map[int64]string)
 	for _, segmentID := range segmentIDs {
 		segment := m.segments.GetSegment(segmentID)
@@ -682,8 +684,8 @@ func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState com
 	log.Debug("meta update: setting segment state",
 		zap.Int64("segmentID", segmentID),
 		zap.Any("target state", targetState))
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	curSegInfo := m.segments.GetSegment(segmentID)
 	if curSegInfo == nil {
 		log.Warn("meta update: setting segment state - segment not found",
@@ -722,8 +724,8 @@ func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState com
 }
 
 func (m *meta) UpdateSegment(segmentID int64, operators ...SegmentOperator) error {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	log := log.Ctx(context.TODO())
 	info := m.segments.GetSegment(segmentID)
 	if info == nil {
@@ -1121,8 +1123,8 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 // updateSegmentsInfo update segment infos
 // will exec all operators, and update all changed segments
 func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	updatePack := &updateSegmentPack{
 		meta:       m,
 		segments:   make(map[int64]*SegmentInfo),
@@ -1165,8 +1167,8 @@ func (m *meta) UpdateDropChannelSegmentInfo(ctx context.Context, channel string,
 	log := log.Ctx(ctx)
 	log.Debug("meta update: update drop channel segment info",
 		zap.String("channel", channel))
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 
 	// Prepare segment metric mutation.
 	metricMutation := &segMetricMutation{
@@ -1391,14 +1393,14 @@ func (m *meta) GetFlushingSegments() []*SegmentInfo {
 
 // SelectSegments select segments with selector
 func (m *meta) SelectSegments(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 	return m.segments.GetSegmentsBySelector(filters...)
 }
 
 func (m *meta) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 	return m.segments.GetRealSegmentsForChannel(channel)
 }
 
@@ -1407,8 +1409,8 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	log.Ctx(m.ctx).Debug("meta update: add allocation",
 		zap.Int64("segmentID", segmentID),
 		zap.Any("allocation", allocation))
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	curSegInfo := m.segments.GetSegment(segmentID)
 	if curSegInfo == nil {
 		// TODO: Error handling.
@@ -1423,24 +1425,24 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 }
 
 func (m *meta) SetRowCount(segmentID UniqueID, rowCount int64) {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	m.segments.SetRowCount(segmentID, rowCount)
 }
 
 // SetAllocations set Segment allocations, will overwrite ALL original allocations
 // Note that allocations is not persisted in KV store
 func (m *meta) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	m.segments.SetAllocations(segmentID, allocations)
 }
 
 // SetLastExpire set lastExpire time for segment
 // Note that last is not necessary to store in KV meta
 func (m *meta) SetLastExpire(segmentID UniqueID, lastExpire uint64) {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	clonedSegment := m.segments.GetSegment(segmentID).Clone()
 	clonedSegment.LastExpireTime = lastExpire
 	m.segments.SetSegment(segmentID, clonedSegment)
@@ -1449,22 +1451,22 @@ func (m *meta) SetLastExpire(segmentID UniqueID, lastExpire uint64) {
 // SetLastFlushTime set LastFlushTime for segment with provided `segmentID`
 // Note that lastFlushTime is not persisted in KV store
 func (m *meta) SetLastFlushTime(segmentID UniqueID, t time.Time) {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	m.segments.SetFlushTime(segmentID, t)
 }
 
 // SetLastWrittenTime set LastWrittenTime for segment with provided `segmentID`
 // Note that lastWrittenTime is not persisted in KV store
 func (m *meta) SetLastWrittenTime(segmentID UniqueID) {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	m.segments.SetLastWrittenTime(segmentID)
 }
 
 func (m *meta) CheckSegmentsStating(ctx context.Context, segmentIDs []UniqueID) (exist bool, hasStating bool) {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 	exist = true
 	for _, segmentID := range segmentIDs {
 		seg := m.segments.GetSegment(segmentID)
@@ -1481,16 +1483,16 @@ func (m *meta) CheckSegmentsStating(ctx context.Context, segmentIDs []UniqueID) 
 }
 
 func (m *meta) SetSegmentStating(segmentID UniqueID, stating bool) {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 
 	m.segments.SetIsStating(segmentID, stating)
 }
 
 // SetSegmentCompacting sets compaction state for segment
 func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 
 	m.segments.SetIsCompacting(segmentID, compacting)
 }
@@ -1499,8 +1501,8 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 // if true, set them compacting and return true
 // if false, skip setting and
 func (m *meta) CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []UniqueID) (exist, canDo bool) {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	var hasCompacting bool
 	exist = true
 	for _, segmentID := range segmentIDs {
@@ -1524,8 +1526,8 @@ func (m *meta) CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []U
 }
 
 func (m *meta) SetSegmentsCompacting(ctx context.Context, segmentIDs []UniqueID, compacting bool) {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	for _, segmentID := range segmentIDs {
 		m.segments.SetIsCompacting(segmentID, compacting)
 	}
@@ -1533,8 +1535,8 @@ func (m *meta) SetSegmentsCompacting(ctx context.Context, segmentIDs []UniqueID,
 
 // SetSegmentLevel sets level for segment
 func (m *meta) SetSegmentLevel(segmentID UniqueID, level datapb.SegmentLevel) {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 
 	m.segments.SetLevel(segmentID, level)
 }
@@ -1739,8 +1741,8 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 }
 
 func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 	switch t.GetType() {
 	case datapb.CompactionType_MixCompaction:
 		return m.completeMixCompactionMutation(t, result)
@@ -1771,8 +1773,8 @@ func isSegmentHealthy(segment *SegmentInfo) bool {
 }
 
 func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 
 	for _, segID := range segIDs {
 		if _, ok := m.segments.segments[segID]; !ok {
@@ -1784,8 +1786,8 @@ func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 
 // GetCompactionTo returns the segment info of the segment to be compacted to.
 func (m *meta) GetCompactionTo(segmentID int64) ([]*SegmentInfo, bool) {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 
 	return m.segments.GetCompactionTo(segmentID)
 }
@@ -2015,8 +2017,8 @@ func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commo
 }
 
 func (m *meta) ListCollections() []int64 {
-	m.RLock()
-	defer m.RUnlock()
+	m.collMu.RLock()
+	defer m.collMu.RUnlock()
 
 	return lo.Keys(m.collections)
 }
@@ -2093,8 +2095,8 @@ func (m *meta) CleanPartitionStatsInfo(ctx context.Context, info *datapb.Partiti
 }
 
 func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.StatsResult) (*segMetricMutation, error) {
-	m.Lock()
-	defer m.Unlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 
 	log := log.Ctx(m.ctx).With(zap.Int64("collectionID", result.GetCollectionID()),
 		zap.Int64("partitionID", result.GetPartitionID()),
@@ -2169,8 +2171,8 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 }
 
 func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
-	m.RLock()
-	defer m.RUnlock()
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 
 	segments := make([]*metricsinfo.Segment, 0, len(m.segments.segments))
 	for _, s := range m.segments.segments {
