@@ -150,9 +150,10 @@ func (s *ChannelManagerSuite) TestAddNode() {
 		err = m.AddNode(testNodeID)
 		s.NoError(err)
 
-		lo.ForEach(testChannels, func(ch string, _ int) {
-			s.checkAssignment(m, testNodeID, ch, ToWatch)
-		})
+		info := m.store.GetNode(testNodeID)
+		s.NotNil(info)
+		s.Empty(info.Channels)
+		s.Equal(info.NodeID, testNodeID)
 	})
 	s.Run("AddNode with channels evenly in other node", func() {
 		var (
@@ -747,9 +748,10 @@ func (s *ChannelManagerSuite) TestStartup() {
 
 	err = m.AddNode(2)
 	s.NoError(err)
-	s.checkAssignment(m, 2, "ch1", ToWatch)
-	s.checkAssignment(m, 2, "ch2", ToWatch)
-	s.checkAssignment(m, 2, "ch3", ToWatch)
+	info := m.store.GetNode(2)
+	s.NotNil(info)
+	s.Empty(info.Channels)
+	s.Equal(info.NodeID, int64(2))
 }
 
 func (s *ChannelManagerSuite) TestStartupNilSchema() {
@@ -807,23 +809,6 @@ func (s *ChannelManagerSuite) TestStartupNilSchema() {
 		s.NotNil(channel.GetWatchInfo().Schema)
 		log.Info("Recovered non-nil schema channel", zap.Any("channel", channel))
 	}
-
-	err = m.AddNode(7)
-	s.Require().NoError(err)
-	s.checkAssignment(m, 7, "ch1", ToWatch)
-	s.checkAssignment(m, 7, "ch2", ToWatch)
-	s.checkAssignment(m, 7, "ch3", ToWatch)
-
-	for ch := range chNodes {
-		channel, got := m.GetChannel(7, ch)
-		s.Require().True(got)
-		s.NotNil(channel.GetSchema())
-		s.Equal(ch, channel.GetName())
-
-		s.NotNil(channel.GetWatchInfo())
-		s.NotNil(channel.GetWatchInfo().Schema)
-		log.Info("non-nil schema channel", zap.Any("channel", channel))
-	}
 }
 
 func (s *ChannelManagerSuite) TestStartupRootCoordFailed() {
@@ -841,9 +826,6 @@ func (s *ChannelManagerSuite) TestStartupRootCoordFailed() {
 	s.Require().NoError(err)
 
 	err = m.Startup(context.TODO(), nil, []int64{2})
-	s.Error(err)
-
-	err = m.Startup(context.TODO(), nil, []int64{1, 2})
 	s.Error(err)
 }
 

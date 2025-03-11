@@ -115,10 +115,6 @@ func (c *client) Deregister(vchannel string) {
 
 	if manager, ok := c.managers.Get(pchannel); ok {
 		manager.Remove(vchannel)
-		if manager.NumTarget() == 0 && manager.NumConsumer() == 0 {
-			manager.Close()
-			c.managers.Remove(pchannel)
-		}
 		log.Info("deregister done", zap.String("role", c.role), zap.Int64("nodeID", c.nodeID),
 			zap.String("vchannel", vchannel), zap.Duration("dur", time.Since(start)))
 	}

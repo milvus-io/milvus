@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -806,10 +807,29 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 				params = wrapUserIndexParams(metricType)
 			}
 		}
+		fieldName := field.Name
+		if field.IsDynamic {
+			jsonPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, indexInfo.GetIndexParams())
+			if err != nil {
+				log.Ctx(ctx).Warn("failed to get json path for dynamic field", zap.Error(err))
+			} else if jsonPath != "" {
+				// Skip leading "/" and find next "/" to get first path segment
+				trimmedPath := strings.TrimPrefix(jsonPath, "/")
+				slashIndex := strings.Index(trimmedPath, "/")
+				if slashIndex == -1 {
+					fieldName = trimmedPath // Use full remaining path if no more "/"
+				} else {
+					fieldName = trimmedPath[:slashIndex]
+				}
+				// Unescape JSON Pointer path: ~1 -> / and ~0 -> ~
+				fieldName = strings.ReplaceAll(fieldName, "~1", "/")
+				fieldName = strings.ReplaceAll(fieldName, "~0", "~")
+			}
+		}
 		desc := &milvuspb.IndexDescription{
 			IndexName:            indexInfo.GetIndexName(),
 			IndexID:              indexInfo.GetIndexID(),
-			FieldName:            field.Name,
+			FieldName:            fieldName,
 			Params:               params,
 			IndexedRows:          indexInfo.GetIndexedRows(),
 			TotalRows:            indexInfo.GetTotalRows(),

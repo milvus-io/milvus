@@ -149,130 +149,211 @@ func EmptyAssignPolicy(currentCluster Assignments, toAssign *NodeChannelInfo, ex
 	return nil
 }
 
-func AvgAssignByCountPolicy(currentCluster Assignments, toAssign *NodeChannelInfo, execlusiveNodes []int64) *ChannelOpSet {
+// AvgAssignByCountPolicy balances channel distribution across nodes based on count
+func AvgAssignByCountPolicy(currentCluster Assignments, toAssign *NodeChannelInfo, exclusiveNodes []int64) *ChannelOpSet {
 	var (
-		toCluster   Assignments
-		fromCluster Assignments
-		channelNum  int = 0
+		availableNodes    Assignments // Nodes that can receive channels
+		sourceNodes       Assignments // Nodes that can provide channels
+		totalChannelCount int         // Total number of channels in the cluster
 	)
 
-	nodeToAvg := typeutil.NewUniqueSet()
-	lo.ForEach(currentCluster, func(info *NodeChannelInfo, _ int) {
-		// Get fromCluster
-		if toAssign == nil && len(info.Channels) > 0 {
-			fromCluster = append(fromCluster, info)
-			channelNum += len(info.Channels)
-			nodeToAvg.Insert(info.NodeID)
+	// Create a set to track unique node IDs for average calculation
+	uniqueNodeIDs := typeutil.NewUniqueSet()
+
+	// Iterate through each node in the current cluster
+	lo.ForEach(currentCluster, func(nodeInfo *NodeChannelInfo, _ int) {
+		// If we're balancing existing channels (not assigning new ones) and this node has channels
+		if toAssign == nil && len(nodeInfo.Channels) > 0 {
+			sourceNodes = append(sourceNodes, nodeInfo) // Add to source nodes
+			totalChannelCount += len(nodeInfo.Channels) // Count its channels
+			uniqueNodeIDs.Insert(nodeInfo.NodeID)       // Track this node for average calculation
 			return
 		}
 
-		// Get toCluster by filtering out execlusive nodes
-		if lo.Contains(execlusiveNodes, info.NodeID) || (toAssign != nil && info.NodeID == toAssign.NodeID) {
+		// Skip nodes that are in the exclusive list or the node we're reassigning from
+		if lo.Contains(exclusiveNodes, nodeInfo.NodeID) || (toAssign != nil && nodeInfo.NodeID == toAssign.NodeID) {
 			return
 		}
 
-		toCluster = append(toCluster, info)
-		channelNum += len(info.Channels)
-		nodeToAvg.Insert(info.NodeID)
+		// This node can receive channels
+		availableNodes = append(availableNodes, nodeInfo) // Add to target nodes
+		totalChannelCount += len(nodeInfo.Channels)       // Count its channels
+		uniqueNodeIDs.Insert(nodeInfo.NodeID)             // Track this node for average calculation
 	})
 
-	// If no datanode alive, do nothing
-	if len(toCluster) == 0 {
+	// If no nodes are available to receive channels, do nothing
+	if len(availableNodes) == 0 {
+		log.Info("No available nodes to receive channels")
 		return nil
 	}
 
-	// 1. assign unassigned channels first
+	// CASE 1: Assign unassigned channels to nodes
 	if toAssign != nil && len(toAssign.Channels) > 0 {
-		chPerNode := (len(toAssign.Channels) + channelNum) / nodeToAvg.Len()
+		return assignNewChannels(availableNodes, toAssign, uniqueNodeIDs.Len(), totalChannelCount, exclusiveNodes)
+	}
 
-		// sort by assigned channels count ascsending
-		sort.Slice(toCluster, func(i, j int) bool {
-			return len(toCluster[i].Channels) <= len(toCluster[j].Channels)
+	// Check if auto-balancing is enabled
+	if !Params.DataCoordCfg.AutoBalance.GetAsBool() {
+		log.Info("Auto balance disabled")
+		return nil
+	}
+
+	// CASE 2: Balance existing channels across nodes
+	if len(sourceNodes) == 0 {
+		log.Info("No source nodes to rebalance from")
+		return nil
+	}
+
+	return balanceExistingChannels(currentCluster, sourceNodes, uniqueNodeIDs.Len(), totalChannelCount, exclusiveNodes)
+}
+
+// assignNewChannels handles assigning new channels to available nodes
+func assignNewChannels(availableNodes Assignments, toAssign *NodeChannelInfo, nodeCount int, totalChannelCount int, exclusiveNodes []int64) *ChannelOpSet {
+	// Calculate total channels after assignment
+	totalChannelsAfterAssignment := totalChannelCount + len(toAssign.Channels)
+
+	// Calculate ideal distribution (channels per node)
+	baseChannelsPerNode := totalChannelsAfterAssignment / nodeCount
+	extraChannels := totalChannelsAfterAssignment % nodeCount
+
+	// Create a map to track target channel count for each node
+	targetChannelCounts := make(map[int64]int)
+	for _, nodeInfo := range availableNodes {
+		targetChannelCounts[nodeInfo.NodeID] = baseChannelsPerNode
+		if extraChannels > 0 {
+			targetChannelCounts[nodeInfo.NodeID]++ // Distribute remainder one by one
+			extraChannels--
+		}
+	}
+
+	// Track which channels will be assigned to which nodes
+	nodeAssignments := make(map[int64][]RWChannel)
+
+	// Create a working copy of available nodes that we can sort
+	sortedNodes := make([]*NodeChannelInfo, len(availableNodes))
+	copy(sortedNodes, availableNodes)
+
+	// Assign channels to nodes, prioritizing nodes with fewer channels
+	for _, channel := range toAssign.GetChannels() {
+		// Sort nodes by their current load (existing + newly assigned channels)
+		sort.Slice(sortedNodes, func(i, j int) bool {
+			// Compare total channels (existing + newly assigned)
+			iTotal := len(sortedNodes[i].Channels) + len(nodeAssignments[sortedNodes[i].NodeID])
+			jTotal := len(sortedNodes[j].Channels) + len(nodeAssignments[sortedNodes[j].NodeID])
+			return iTotal < jTotal
 		})
 
-		nodesLackOfChannels := Assignments(lo.Filter(toCluster, func(info *NodeChannelInfo, _ int) bool {
-			return len(info.Channels) < chPerNode
-		}))
+		// Find the best node to assign to (the one with fewest channels)
+		bestNode := sortedNodes[0]
 
-		if len(nodesLackOfChannels) == 0 {
-			nodesLackOfChannels = toCluster
+		// Try to find a node that's below its target count
+		for _, node := range sortedNodes {
+			currentTotal := len(node.Channels) + len(nodeAssignments[node.NodeID])
+			if currentTotal < targetChannelCounts[node.NodeID] {
+				bestNode = node
+				break
+			}
 		}
 
-		updates := make(map[int64][]RWChannel)
-		for i, newChannel := range toAssign.GetChannels() {
-			n := nodesLackOfChannels[i%len(nodesLackOfChannels)].NodeID
-			updates[n] = append(updates[n], newChannel)
-		}
-
-		opSet := NewChannelOpSet()
-		for id, chs := range updates {
-			opSet.Append(id, Watch, chs...)
-			opSet.Delete(toAssign.NodeID, chs...)
-		}
-
-		log.Info("Assign channels to nodes by channel count",
-			zap.Int("toAssign channel count", len(toAssign.Channels)),
-			zap.Any("original nodeID", toAssign.NodeID),
-			zap.Int64s("exclusive nodes", execlusiveNodes),
-			zap.Any("operations", opSet),
-			zap.Int64s("nodesLackOfChannels", lo.Map(nodesLackOfChannels, func(info *NodeChannelInfo, _ int) int64 {
-				return info.NodeID
-			})),
-		)
-		return opSet
+		// Assign the channel to the selected node
+		nodeAssignments[bestNode.NodeID] = append(nodeAssignments[bestNode.NodeID], channel)
 	}
 
-	if !Params.DataCoordCfg.AutoBalance.GetAsBool() {
-		log.Info("auto balance disabled")
+	// Create operations to watch channels on new nodes and delete from original node
+	operations := NewChannelOpSet()
+	for nodeID, channels := range nodeAssignments {
+		operations.Append(nodeID, Watch, channels...)   // New node watches channels
+		operations.Delete(toAssign.NodeID, channels...) // Remove channels from original node
+	}
+
+	// Log the assignment operations
+	log.Info("Assign channels to nodes by channel count",
+		zap.Int("toAssign channel count", len(toAssign.Channels)),
+		zap.Any("original nodeID", toAssign.NodeID),
+		zap.Int64s("exclusive nodes", exclusiveNodes),
+		zap.Any("operations", operations),
+		zap.Any("target distribution", targetChannelCounts),
+	)
+
+	return operations
+}
+
+// balanceExistingChannels handles rebalancing existing channels across nodes
+func balanceExistingChannels(currentCluster Assignments, sourceNodes Assignments, nodeCount int, totalChannelCount int, exclusiveNodes []int64) *ChannelOpSet {
+	// Calculate ideal distribution
+	baseChannelsPerNode := totalChannelCount / nodeCount
+	extraChannels := totalChannelCount % nodeCount
+
+	// If there are too few channels to distribute, do nothing
+	if baseChannelsPerNode == 0 {
+		log.Info("Too few channels to distribute meaningfully")
 		return nil
 	}
 
-	// 2. balance fromCluster to toCluster if no unassignedChannels
-	if len(fromCluster) == 0 {
-		return nil
-	}
-	chPerNode := channelNum / nodeToAvg.Len()
-	if chPerNode == 0 {
-		return nil
-	}
-
-	// sort in descending order and reallocate
-	sort.Slice(fromCluster, func(i, j int) bool {
-		return len(fromCluster[i].Channels) > len(fromCluster[j].Channels)
-	})
-
-	releases := make(map[int64][]RWChannel)
-	for _, info := range fromCluster {
-		if len(info.Channels) > chPerNode {
-			cnt := 0
-			for _, ch := range info.Channels {
-				cnt++
-				if cnt > chPerNode {
-					releases[info.NodeID] = append(releases[info.NodeID], ch)
-				}
+	// Create a map to track target channel count for each node
+	targetChannelCounts := make(map[int64]int)
+	for _, nodeInfo := range currentCluster {
+		if !lo.Contains(exclusiveNodes, nodeInfo.NodeID) {
+			targetChannelCounts[nodeInfo.NodeID] = baseChannelsPerNode
+			if extraChannels > 0 {
+				targetChannelCounts[nodeInfo.NodeID]++ // Distribute remainder one by one
+				extraChannels--
 			}
 		}
 	}
 
-	// Channels in `releases` are reassigned eventually by channel manager.
-	opSet := NewChannelOpSet()
-	for k, v := range releases {
-		if lo.Contains(execlusiveNodes, k) {
-			opSet.Append(k, Delete, v...)
-			opSet.Append(bufferID, Watch, v...)
-		} else {
-			opSet.Append(k, Release, v...)
+	// Sort nodes by channel count (descending) to take from nodes with most channels
+	sort.Slice(sourceNodes, func(i, j int) bool {
+		return len(sourceNodes[i].Channels) > len(sourceNodes[j].Channels)
+	})
+
+	// Track which channels will be released from which nodes
+	channelsToRelease := make(map[int64][]RWChannel)
+
+	// First handle exclusive nodes - we need to remove all channels from them
+	for _, nodeInfo := range sourceNodes {
+		if lo.Contains(exclusiveNodes, nodeInfo.NodeID) {
+			channelsToRelease[nodeInfo.NodeID] = lo.Values(nodeInfo.Channels)
+			continue
+		}
+
+		// For regular nodes, only release if they have more than their target
+		targetCount := targetChannelCounts[nodeInfo.NodeID]
+		currentCount := len(nodeInfo.Channels)
+
+		if currentCount > targetCount {
+			// Calculate how many channels to release
+			excessCount := currentCount - targetCount
+
+			// Get the channels to release (we'll take the last ones)
+			channels := lo.Values(nodeInfo.Channels)
+			channelsToRelease[nodeInfo.NodeID] = channels[len(channels)-excessCount:]
 		}
 	}
 
-	log.Info("Assign channels to nodes by channel count",
-		zap.Int64s("exclusive nodes", execlusiveNodes),
-		zap.Int("channel count", channelNum),
-		zap.Int("channel per node", chPerNode),
-		zap.Any("operations", opSet),
-		zap.Array("fromCluster", fromCluster),
-		zap.Array("toCluster", toCluster),
+	// Create operations to release channels from overloaded nodes
+	operations := NewChannelOpSet()
+	for nodeID, channels := range channelsToRelease {
+		if len(channels) == 0 {
+			continue
+		}
+
+		if lo.Contains(exclusiveNodes, nodeID) {
+			operations.Append(nodeID, Delete, channels...)  // Delete channels from exclusive nodes
+			operations.Append(bufferID, Watch, channels...) // Move to buffer temporarily
+		} else {
+			operations.Append(nodeID, Release, channels...) // Release channels from regular nodes
+		}
+	}
+
+	// Log the balancing operations
+	log.Info("Balance channels across nodes",
+		zap.Int64s("exclusive nodes", exclusiveNodes),
+		zap.Int("total channel count", totalChannelCount),
+		zap.Int("target channels per node", baseChannelsPerNode),
+		zap.Any("target distribution", targetChannelCounts),
+		zap.Any("operations", operations),
 	)
 
-	return opSet
+	return operations
 }
