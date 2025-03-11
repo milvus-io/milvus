@@ -114,8 +114,8 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(errors.New("mock"))
 		meta.On("ListAliasesByID", mock.Anything, mock.Anything).Return([]string{})
-
-		core := newTestCore(withValidProxyManager(), withMeta(meta))
+		alloc := newMockIDAllocator()
+		core := newTestCore(withValidProxyManager(), withMeta(meta), withIDAllocator(alloc))
 		task := &addCollectionFieldTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AddCollectionFieldRequest{
@@ -162,8 +162,8 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
 			return errors.New("mock")
 		}
-
-		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker))
+		alloc := newMockIDAllocator()
+		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker), withIDAllocator(alloc))
 		task := &addCollectionFieldTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AddCollectionFieldRequest{
@@ -211,7 +211,8 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 			return nil
 		}
 
-		core := newTestCore(withInvalidProxyManager(), withMeta(meta), withBroker(broker))
+		alloc := newMockIDAllocator()
+		core := newTestCore(withInvalidProxyManager(), withMeta(meta), withBroker(broker), withIDAllocator(alloc))
 		task := &addCollectionFieldTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AddCollectionFieldRequest{
@@ -258,8 +259,8 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
 			return nil
 		}
-
-		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker))
+		alloc := newMockIDAllocator()
+		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker), withIDAllocator(alloc))
 		task := &addCollectionFieldTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AddCollectionFieldRequest{
