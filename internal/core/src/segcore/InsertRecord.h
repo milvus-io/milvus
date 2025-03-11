@@ -548,7 +548,7 @@ struct InsertRecord {
 
     void
     append_field_meta(FieldId field_id,
-                      FieldMeta& field_meta,
+                      const FieldMeta& field_meta,
                       int64_t size_per_chunk) {
         if (field_meta.is_nullable()) {
             this->append_valid_data(field_id);

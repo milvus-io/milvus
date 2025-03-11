@@ -88,7 +88,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         AssertInfo(!field_id_to_offset.count(field_id), "duplicate field data");
         field_id_to_offset.emplace(field_id, field_offset++);
         // may be added field, add the null if has existed data
-        if (exist_rows > 0) {
+        if (exist_rows > 0 && !insert_record_.is_data_exist(field_id)) {
             schema_->AddField(FieldName(field.field_name()),
                               field_id,
                               DataType(field.type()),
@@ -237,8 +237,10 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         }
         if (total != info.row_count) {
             AssertInfo(total <= info.row_count,
-                       "binlog number should less than row_count");
+                       "binlog number should less than or equal row_count");
             auto field_meta = get_schema()[field_id];
+            AssertInfo(field_meta.is_nullable(),
+                       "nullable must be true when lack rows");
             auto lack_num = info.row_count - total;
             auto field_data = storage::CreateFieldData(
                 static_cast<DataType>(field_meta.get_data_type()),

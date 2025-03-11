@@ -509,9 +509,6 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if !t.fieldSchema.Nullable {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("added field must be nullable, please check it, field name = %s", t.fieldSchema.Name))
 	}
-	if t.fieldSchema.IsPartitionKey || Params.ProxyCfg.MustUsePartitionKey.GetAsBool() {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("partition key field not support to be nullable, MustUsePartitionKey = %t ,field name = %s", Params.ProxyCfg.MustUsePartitionKey.GetAsBool(), t.fieldSchema.Name))
-	}
 	if t.fieldSchema.AutoID {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("only primary field can speficy AutoID with true, field name = %s", t.fieldSchema.Name))
 	}

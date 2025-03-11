@@ -19,18 +19,21 @@ package rootcoord
 import (
 	"context"
 
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 )
 
 type addCollectionFieldTask struct {
-	Req *milvuspb.AddCollectionFieldRequest
+	baseTask
+	Req         *milvuspb.AddCollectionFieldRequest
+	fieldSchema *schemapb.FieldSchema
 }
 
 func (t *addCollectionFieldTask) Prepare(ctx context.Context) error {
@@ -56,9 +59,12 @@ func (t *addCollectionFieldTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	start := len(oldColl.Fields) - 2
+	id, err := t.core.idAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
 	// assign field id
-	t.fieldSchema.FieldID = int64(StartOfUserFieldID + start)
+	t.fieldSchema.FieldID = id
 
 	newField := model.UnmarshalFieldModel(t.fieldSchema)
 

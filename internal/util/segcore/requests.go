@@ -59,7 +59,6 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 
 	for _, field := range req.Fields {
 		cFieldID := C.int64_t(field.Field.GetFieldID())
-		// append here
 		status = C.AppendLoadFieldInfo(cLoadFieldDataInfo, cFieldID, rowCount)
 		if err := ConsumeCStatusIntoError(&status); err != nil {
 			return nil, errors.Wrapf(err, "AppendLoadFieldInfo failed at fieldID, %d", field.Field.GetFieldID())

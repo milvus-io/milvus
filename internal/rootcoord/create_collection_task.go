@@ -146,7 +146,6 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 	return check(maxColNumPerDB)
 }
 
-
 func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) bool {
 	for _, f := range schema.GetFields() {
 		if funcutil.SliceContain(systemFields, f.GetName()) {
