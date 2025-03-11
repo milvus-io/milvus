@@ -22,7 +22,7 @@ constexpr const char* TMP_JSON_INVERTED_LOG_PREFIX =
 
 void
 JsonKeyInvertedIndex::AddInvertedRecord(const std::vector<std::string>& paths,
-                                        uint8_t valid,
+                                        uint8_t flag,
                                         uint8_t type,
                                         uint32_t row_id,
                                         uint16_t offset,
@@ -33,20 +33,22 @@ JsonKeyInvertedIndex::AddInvertedRecord(const std::vector<std::string>& paths,
         key = std::string("/") + Join(paths, "/");
     }
     LOG_DEBUG(
-        "insert inverted key: {}, valid: {}, type: {}, row_id: {}, offset: "
+        "insert inverted key: {}, flag: {}, type: {}, row_id: {}, offset: "
         "{}, length:{}, value:{}",
         key,
-        valid,
+        flag,
         type,
         row_id,
         offset,
         length,
         value);
     int64_t combine_id = 0;
-    if (valid) {
-        combine_id = EncodeValue(valid, type, row_id, value);
-    } else {
-        combine_id = EncodeOffset(valid, type, row_id, offset, length);
+    if (build_type_ == 0) {
+        if (flag) {
+            combine_id = EncodeValue(flag, type, row_id, value);
+        } else {
+            combine_id = EncodeOffset(flag, type, row_id, offset, length);
+        }
     }
 
     wrapper_->add_multi_data<std::string>(&key, 1, combine_id);
@@ -221,16 +223,20 @@ JsonKeyInvertedIndex::AddJson(const char* json, int64_t offset) {
 JsonKeyInvertedIndex::JsonKeyInvertedIndex(
     const storage::FileManagerContext& ctx,
     bool is_load,
+    int64_t json_stats_build_type,
     int64_t json_stats_tantivy_memory_budget)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
-    LOG_INFO("JsonKeyInvertedIndex json_stats_tantivy_memory_budget:{}",
-             json_stats_tantivy_memory_budget);
+    LOG_INFO(
+        "JsonKeyInvertedIndex json_stats_tantivy_memory_budget:{}, "
+        "json_stats_build_type:{}",
+        json_stats_tantivy_memory_budget,
+        json_stats_build_type);
     schema_ = ctx.fieldDataMeta.field_schema;
     field_id_ = ctx.fieldDataMeta.field_id;
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
-
+    build_type_ = json_stats_build_type;
     if (is_load) {
         auto prefix = disk_file_manager_->GetLocalJsonKeyIndexPrefix();
         path_ = prefix;

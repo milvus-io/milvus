@@ -241,6 +241,7 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		BinlogMaxSize:             Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		EnableJsonKeyStats:        Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
 		JsonKeyStatsTantivyMemory: Params.DataCoordCfg.JSONKeyStatsMemoryBudgetInTantivy.GetAsInt64(),
+		JsonKeyStatsBuildType:     0,
 	}
 
 	return true

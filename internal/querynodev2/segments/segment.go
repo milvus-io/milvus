@@ -1181,6 +1181,7 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		Schema:       f,
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
+		BuildType:    jsonKeyStats.GetBuildType(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
