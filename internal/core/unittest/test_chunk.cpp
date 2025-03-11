@@ -16,6 +16,7 @@
 #include <parquet/arrow/reader.h>
 #include <unistd.h>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "boost/filesystem/operations.hpp"
@@ -147,8 +148,11 @@ TEST(chunk, test_json_field) {
     {
         auto rb_reader = get_record_batch_reader();
         // nullable=false
-        FieldMeta field_meta(
-            FieldName("a"), milvus::FieldId(1), DataType::JSON, false);
+        FieldMeta field_meta(FieldName("a"),
+                             milvus::FieldId(1),
+                             DataType::JSON,
+                             false,
+                             std::nullopt);
         auto chunk = create_chunk(field_meta, 1, rb_reader);
         {
             auto [views, valid] =
@@ -175,8 +179,11 @@ TEST(chunk, test_json_field) {
     {
         auto rb_reader = get_record_batch_reader();
         // nullable=true
-        FieldMeta field_meta(
-            FieldName("a"), milvus::FieldId(1), DataType::JSON, true);
+        FieldMeta field_meta(FieldName("a"),
+                             milvus::FieldId(1),
+                             DataType::JSON,
+                             true,
+                             std::nullopt);
         auto chunk = create_chunk(field_meta, 1, rb_reader);
         {
             auto [views, valid] =
@@ -358,7 +365,8 @@ TEST(chunk, test_array_views) {
                          milvus::FieldId(1),
                          DataType::ARRAY,
                          DataType::STRING,
-                         true);
+                         true,
+                         std::nullopt);
     auto chunk = create_chunk(field_meta, 1, rb_reader);
 
     {

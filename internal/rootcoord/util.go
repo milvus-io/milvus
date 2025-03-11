@@ -382,8 +382,8 @@ func CheckTimeTickLagExceeded(ctx context.Context, queryCoord types.QueryCoordCl
 	return nil
 }
 
-func checkFieldSchema(schema *schemapb.CollectionSchema) error {
-	for _, fieldSchema := range schema.Fields {
+func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
+	for _, fieldSchema := range fieldSchemas {
 		if fieldSchema.GetNullable() && typeutil.IsVectorType(fieldSchema.GetDataType()) {
 			msg := fmt.Sprintf("vector type not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)

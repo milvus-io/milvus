@@ -30,7 +30,9 @@ import (
 )
 
 type addCollectionFieldTask struct {
-	Req *milvuspb.AddCollectionFieldRequest
+	baseTask
+	Req         *milvuspb.AddCollectionFieldRequest
+	fieldSchema *schemapb.FieldSchema
 }
 
 func (t *addCollectionFieldTask) Prepare(ctx context.Context) error {
