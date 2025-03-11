@@ -72,7 +72,7 @@ class IndexBase {
         return index_type_;
     }
 
-    virtual enum DataType
+    virtual DataType
     JsonCastType() const {
         return DataType::NONE;
     }
