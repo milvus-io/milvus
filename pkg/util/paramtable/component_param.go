@@ -2555,8 +2555,8 @@ type queryNodeConfig struct {
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
-	EnableSegmentPrune                      ParamItem `refreshable:"false"`
-	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
+	EnableSegmentPrune                      ParamItem `refreshable:"true"`
+	DefaultSegmentFilterRatio               ParamItem `refreshable:"true"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 
 	// BF
