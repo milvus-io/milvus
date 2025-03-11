@@ -120,7 +120,7 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	err = cm.Write(ctx, suite.dataPath, blobs[0].Value)
 	suite.NoError(err)
 
-	t := NewIndexBuildTask(ctx, cancel, req, cm, NewManager(context.Background()))
+	t := NewIndexBuildTask(ctx, cancel, req, cm, NewTaskManager(context.Background()))
 
 	err = t.PreExecute(context.Background())
 	suite.NoError(err)
@@ -226,7 +226,7 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 		req:      req,
 		tr:       timerecord.NewTimeRecorder("test-indexBuildTask"),
 		queueDur: 0,
-		manager:  NewManager(context.Background()),
+		manager:  NewTaskManager(context.Background()),
 	}
 
 	err = t.PreExecute(context.Background())

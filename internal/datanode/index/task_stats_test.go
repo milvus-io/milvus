@@ -100,7 +100,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 		ctx, cancel := context.WithCancel(context.Background())
 
 		testTaskKey := Key{ClusterID: s.clusterID, TaskID: 100}
-		manager := NewManager(ctx)
+		manager := NewTaskManager(ctx)
 		manager.LoadOrStoreStatsTask(s.clusterID, testTaskKey.TaskID, &StatsTaskInfo{SegID: 1})
 		task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
 			CollectionID:    s.collectionID,
@@ -150,7 +150,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 		ctx, cancel := context.WithCancel(context.Background())
 
 		testTaskKey := Key{ClusterID: s.clusterID, TaskID: 100}
-		manager := NewManager(ctx)
+		manager := NewTaskManager(ctx)
 		manager.LoadOrStoreStatsTask(s.clusterID, testTaskKey.TaskID, &StatsTaskInfo{SegID: 1})
 		task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
 			CollectionID:    s.collectionID,

@@ -48,7 +48,7 @@ import (
 func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	ctx := context.TODO()
 	paramtable.Init()
-	manager := index.NewManager(ctx)
+	manager := index.NewTaskManager(ctx)
 
 	manager.LoadOrStoreIndexTask("cluster-1", 1, &index.IndexTaskInfo{
 		State: commonpb.IndexState_InProgress,

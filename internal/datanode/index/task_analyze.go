@@ -44,14 +44,14 @@ type analyzeTask struct {
 
 	tr       *timerecord.TimeRecorder
 	queueDur time.Duration
-	manager  *Manager
+	manager  *TaskManager
 	analyze  analyzecgowrapper.CodecAnalyze
 }
 
 func NewAnalyzeTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.AnalyzeRequest,
-	manager *Manager,
+	manager *TaskManager,
 ) *analyzeTask {
 	return &analyzeTask{
 		ident:   fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),

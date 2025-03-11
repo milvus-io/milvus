@@ -48,7 +48,7 @@ type IndexTaskInfo struct {
 	statistic *indexpb.JobInfo
 }
 
-type Manager struct {
+type TaskManager struct {
 	ctx          context.Context
 	stateLock    sync.Mutex
 	indexTasks   map[Key]*IndexTaskInfo
@@ -56,8 +56,8 @@ type Manager struct {
 	statsTasks   map[Key]*StatsTaskInfo
 }
 
-func NewManager(ctx context.Context) *Manager {
-	return &Manager{
+func NewTaskManager(ctx context.Context) *TaskManager {
+	return &TaskManager{
 		ctx:          ctx,
 		indexTasks:   make(map[Key]*IndexTaskInfo),
 		analyzeTasks: make(map[Key]*AnalyzeTaskInfo),
@@ -65,7 +65,7 @@ func NewManager(ctx context.Context) *Manager {
 	}
 }
 
-func (m *Manager) LoadOrStoreIndexTask(ClusterID string, buildID typeutil.UniqueID, info *IndexTaskInfo) *IndexTaskInfo {
+func (m *TaskManager) LoadOrStoreIndexTask(ClusterID string, buildID typeutil.UniqueID, info *IndexTaskInfo) *IndexTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	key := Key{ClusterID: ClusterID, TaskID: buildID}
@@ -77,7 +77,7 @@ func (m *Manager) LoadOrStoreIndexTask(ClusterID string, buildID typeutil.Unique
 	return nil
 }
 
-func (m *Manager) LoadIndexTaskState(ClusterID string, buildID typeutil.UniqueID) commonpb.IndexState {
+func (m *TaskManager) LoadIndexTaskState(ClusterID string, buildID typeutil.UniqueID) commonpb.IndexState {
 	key := Key{ClusterID: ClusterID, TaskID: buildID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
@@ -88,7 +88,7 @@ func (m *Manager) LoadIndexTaskState(ClusterID string, buildID typeutil.UniqueID
 	return task.State
 }
 
-func (m *Manager) StoreIndexTaskState(ClusterID string, buildID typeutil.UniqueID, state commonpb.IndexState, failReason string) {
+func (m *TaskManager) StoreIndexTaskState(ClusterID string, buildID typeutil.UniqueID, state commonpb.IndexState, failReason string) {
 	key := Key{ClusterID: ClusterID, TaskID: buildID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
@@ -100,7 +100,7 @@ func (m *Manager) StoreIndexTaskState(ClusterID string, buildID typeutil.UniqueI
 	}
 }
 
-func (m *Manager) ForeachIndexTaskInfo(fn func(ClusterID string, buildID typeutil.UniqueID, info *IndexTaskInfo)) {
+func (m *TaskManager) ForeachIndexTaskInfo(fn func(ClusterID string, buildID typeutil.UniqueID, info *IndexTaskInfo)) {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	for key, info := range m.indexTasks {
@@ -108,7 +108,7 @@ func (m *Manager) ForeachIndexTaskInfo(fn func(ClusterID string, buildID typeuti
 	}
 }
 
-func (m *Manager) StoreIndexFilesAndStatistic(
+func (m *TaskManager) StoreIndexFilesAndStatistic(
 	ClusterID string,
 	buildID typeutil.UniqueID,
 	fileKeys []string,
@@ -130,7 +130,7 @@ func (m *Manager) StoreIndexFilesAndStatistic(
 	}
 }
 
-func (m *Manager) DeleteIndexTaskInfos(ctx context.Context, keys []Key) []*IndexTaskInfo {
+func (m *TaskManager) DeleteIndexTaskInfos(ctx context.Context, keys []Key) []*IndexTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	deleted := make([]*IndexTaskInfo, 0, len(keys))
@@ -146,7 +146,7 @@ func (m *Manager) DeleteIndexTaskInfos(ctx context.Context, keys []Key) []*Index
 	return deleted
 }
 
-func (m *Manager) deleteAllIndexTasks() []*IndexTaskInfo {
+func (m *TaskManager) deleteAllIndexTasks() []*IndexTaskInfo {
 	m.stateLock.Lock()
 	deletedTasks := m.indexTasks
 	m.indexTasks = make(map[Key]*IndexTaskInfo)
@@ -166,7 +166,7 @@ type AnalyzeTaskInfo struct {
 	CentroidsFile string
 }
 
-func (m *Manager) LoadOrStoreAnalyzeTask(clusterID string, taskID typeutil.UniqueID, info *AnalyzeTaskInfo) *AnalyzeTaskInfo {
+func (m *TaskManager) LoadOrStoreAnalyzeTask(clusterID string, taskID typeutil.UniqueID, info *AnalyzeTaskInfo) *AnalyzeTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	key := Key{ClusterID: clusterID, TaskID: taskID}
@@ -178,7 +178,7 @@ func (m *Manager) LoadOrStoreAnalyzeTask(clusterID string, taskID typeutil.Uniqu
 	return nil
 }
 
-func (m *Manager) LoadAnalyzeTaskState(clusterID string, taskID typeutil.UniqueID) indexpb.JobState {
+func (m *TaskManager) LoadAnalyzeTaskState(clusterID string, taskID typeutil.UniqueID) indexpb.JobState {
 	key := Key{ClusterID: clusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
@@ -189,7 +189,7 @@ func (m *Manager) LoadAnalyzeTaskState(clusterID string, taskID typeutil.UniqueI
 	return task.State
 }
 
-func (m *Manager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.UniqueID, state indexpb.JobState, failReason string) {
+func (m *TaskManager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.UniqueID, state indexpb.JobState, failReason string) {
 	key := Key{ClusterID: clusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
@@ -201,7 +201,7 @@ func (m *Manager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.Unique
 	}
 }
 
-func (m *Manager) StoreAnalyzeFilesAndStatistic(
+func (m *TaskManager) StoreAnalyzeFilesAndStatistic(
 	ClusterID string,
 	taskID typeutil.UniqueID,
 	centroidsFile string,
@@ -215,7 +215,7 @@ func (m *Manager) StoreAnalyzeFilesAndStatistic(
 	}
 }
 
-func (m *Manager) GetAnalyzeTaskInfo(clusterID string, taskID typeutil.UniqueID) *AnalyzeTaskInfo {
+func (m *TaskManager) GetAnalyzeTaskInfo(clusterID string, taskID typeutil.UniqueID) *AnalyzeTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 
@@ -230,7 +230,7 @@ func (m *Manager) GetAnalyzeTaskInfo(clusterID string, taskID typeutil.UniqueID)
 	return nil
 }
 
-func (m *Manager) DeleteAnalyzeTaskInfos(ctx context.Context, keys []Key) []*AnalyzeTaskInfo {
+func (m *TaskManager) DeleteAnalyzeTaskInfos(ctx context.Context, keys []Key) []*AnalyzeTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	deleted := make([]*AnalyzeTaskInfo, 0, len(keys))
@@ -246,7 +246,7 @@ func (m *Manager) DeleteAnalyzeTaskInfos(ctx context.Context, keys []Key) []*Ana
 	return deleted
 }
 
-func (m *Manager) deleteAllAnalyzeTasks() []*AnalyzeTaskInfo {
+func (m *TaskManager) deleteAllAnalyzeTasks() []*AnalyzeTaskInfo {
 	m.stateLock.Lock()
 	deletedTasks := m.analyzeTasks
 	m.analyzeTasks = make(map[Key]*AnalyzeTaskInfo)
@@ -259,7 +259,7 @@ func (m *Manager) deleteAllAnalyzeTasks() []*AnalyzeTaskInfo {
 	return deleted
 }
 
-func (m *Manager) HasInProgressTask() bool {
+func (m *TaskManager) HasInProgressTask() bool {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	for _, info := range m.indexTasks {
@@ -276,7 +276,7 @@ func (m *Manager) HasInProgressTask() bool {
 	return false
 }
 
-func (m *Manager) WaitTaskFinish() {
+func (m *TaskManager) WaitTaskFinish() {
 	if !m.HasInProgressTask() {
 		return
 	}
@@ -325,7 +325,7 @@ type StatsTaskInfo struct {
 	Bm25Logs      []*datapb.FieldBinlog
 }
 
-func (m *Manager) LoadOrStoreStatsTask(clusterID string, taskID typeutil.UniqueID, info *StatsTaskInfo) *StatsTaskInfo {
+func (m *TaskManager) LoadOrStoreStatsTask(clusterID string, taskID typeutil.UniqueID, info *StatsTaskInfo) *StatsTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	key := Key{ClusterID: clusterID, TaskID: taskID}
@@ -337,7 +337,7 @@ func (m *Manager) LoadOrStoreStatsTask(clusterID string, taskID typeutil.UniqueI
 	return nil
 }
 
-func (m *Manager) GetStatsTaskState(clusterID string, taskID typeutil.UniqueID) indexpb.JobState {
+func (m *TaskManager) GetStatsTaskState(clusterID string, taskID typeutil.UniqueID) indexpb.JobState {
 	key := Key{ClusterID: clusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
@@ -348,7 +348,7 @@ func (m *Manager) GetStatsTaskState(clusterID string, taskID typeutil.UniqueID) 
 	return task.State
 }
 
-func (m *Manager) StoreStatsTaskState(clusterID string, taskID typeutil.UniqueID, state indexpb.JobState, failReason string) {
+func (m *TaskManager) StoreStatsTaskState(clusterID string, taskID typeutil.UniqueID, state indexpb.JobState, failReason string) {
 	key := Key{ClusterID: clusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
@@ -360,7 +360,7 @@ func (m *Manager) StoreStatsTaskState(clusterID string, taskID typeutil.UniqueID
 	}
 }
 
-func (m *Manager) StorePKSortStatsResult(
+func (m *TaskManager) StorePKSortStatsResult(
 	ClusterID string,
 	taskID typeutil.UniqueID,
 	collID typeutil.UniqueID,
@@ -388,7 +388,7 @@ func (m *Manager) StorePKSortStatsResult(
 	}
 }
 
-func (m *Manager) StoreStatsTextIndexResult(
+func (m *TaskManager) StoreStatsTextIndexResult(
 	ClusterID string,
 	taskID typeutil.UniqueID,
 	collID typeutil.UniqueID,
@@ -409,7 +409,7 @@ func (m *Manager) StoreStatsTextIndexResult(
 	}
 }
 
-func (m *Manager) GetStatsTaskInfo(clusterID string, taskID typeutil.UniqueID) *StatsTaskInfo {
+func (m *TaskManager) GetStatsTaskInfo(clusterID string, taskID typeutil.UniqueID) *StatsTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 
@@ -432,7 +432,7 @@ func (m *Manager) GetStatsTaskInfo(clusterID string, taskID typeutil.UniqueID) *
 	return nil
 }
 
-func (m *Manager) DeleteStatsTaskInfos(ctx context.Context, keys []Key) []*StatsTaskInfo {
+func (m *TaskManager) DeleteStatsTaskInfos(ctx context.Context, keys []Key) []*StatsTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 	deleted := make([]*StatsTaskInfo, 0, len(keys))
@@ -448,7 +448,7 @@ func (m *Manager) DeleteStatsTaskInfos(ctx context.Context, keys []Key) []*Stats
 	return deleted
 }
 
-func (m *Manager) deleteAllStatsTasks() []*StatsTaskInfo {
+func (m *TaskManager) deleteAllStatsTasks() []*StatsTaskInfo {
 	m.stateLock.Lock()
 	deletedTasks := m.statsTasks
 	m.statsTasks = make(map[Key]*StatsTaskInfo)
@@ -461,7 +461,7 @@ func (m *Manager) deleteAllStatsTasks() []*StatsTaskInfo {
 	return deleted
 }
 
-func (m *Manager) DeleteAllTasks() {
+func (m *TaskManager) DeleteAllTasks() {
 	deletedIndexTasks := m.deleteAllIndexTasks()
 	for _, t := range deletedIndexTasks {
 		if t.Cancel != nil {

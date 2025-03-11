@@ -33,6 +33,7 @@ indexCoordinator:
   profiling:
     enabled: true
 indexNode:
+  enabled: false
   disk:
     enabled: true
   profiling:

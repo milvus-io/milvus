@@ -61,7 +61,7 @@ type statsTask struct {
 
 	tr       *timerecord.TimeRecorder
 	queueDur time.Duration
-	manager  *Manager
+	manager  *TaskManager
 	binlogIO io.BinlogIO
 
 	deltaLogs   []string
@@ -72,7 +72,7 @@ type statsTask struct {
 func NewStatsTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.CreateStatsRequest,
-	manager *Manager,
+	manager *TaskManager,
 	binlogIO io.BinlogIO,
 ) *statsTask {
 	return &statsTask{

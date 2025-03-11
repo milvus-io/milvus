@@ -19,28 +19,14 @@
 // Data node persists insert logs into persistent storage like minIO/S3.
 package datanode
 
-/*
-#cgo pkg-config: milvus_core
-
-#include <stdlib.h>
-#include <stdint.h>
-#include "common/init_c.h"
-#include "segcore/segcore_init_c.h"
-#include "indexbuilder/init_c.h"
-*/
-import "C"
-
 import (
 	"context"
 	"fmt"
 	"io"
 	"math/rand"
 	"os"
-	"path"
-	"path/filepath"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"github.com/tidwall/gjson"
@@ -65,7 +51,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
@@ -74,7 +59,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -122,7 +106,7 @@ type DataNode struct {
 	// indexnode related
 	storageFactory StorageFactory
 	taskScheduler  *index.TaskScheduler
-	taskManager    *index.Manager
+	taskManager    *index.TaskManager
 
 	segmentCache             *util.Cache
 	compactionExecutor       compactor.Executor
@@ -177,7 +161,7 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 	sc := index.NewTaskScheduler(ctx2)
 	node.storageFactory = NewChunkMgrFactory()
 	node.taskScheduler = sc
-	node.taskManager = index.NewManager(ctx2)
+	node.taskManager = index.NewTaskManager(ctx2)
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("datanode", node)
 	return node
@@ -302,7 +286,7 @@ func (node *DataNode) Init() error {
 		node.channelCheckpointUpdater = util2.NewChannelCheckpointUpdater(node.broker)
 		node.flowgraphManager = pipeline.NewFlowgraphManager()
 
-		initSegcore()
+		index.InitSegcore()
 
 		log.Info("init datanode done", zap.String("Address", node.address))
 	})
@@ -480,7 +464,7 @@ func (node *DataNode) Stop() error {
 			node.taskScheduler.Close()
 		}
 
-		CloseSegcore()
+		index.CloseSegcore()
 
 		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
 		node.cancel()
@@ -518,50 +502,4 @@ func getPipelineParams(node *DataNode) *util2.PipelineParams {
 		Allocator:          node.allocator,
 		MsgHandler:         msghandlerimpl.NewMsgHandlerImpl(node.broker),
 	}
-}
-
-func initSegcore() {
-	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
-	C.IndexBuilderInit(cGlogConf)
-	C.free(unsafe.Pointer(cGlogConf))
-
-	// override index builder SIMD type
-	cSimdType := C.CString(Params.CommonCfg.SimdType.GetValue())
-	C.IndexBuilderSetSimdType(cSimdType)
-	C.free(unsafe.Pointer(cSimdType))
-
-	// override segcore index slice size
-	cIndexSliceSize := C.int64_t(Params.CommonCfg.IndexSliceSize.GetAsInt64())
-	C.InitIndexSliceSize(cIndexSliceSize)
-
-	// set up thread pool for different priorities
-	cHighPriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt64())
-	C.InitHighPriorityThreadCoreCoefficient(cHighPriorityThreadCoreCoefficient)
-	cMiddlePriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt64())
-	C.InitMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
-	cLowPriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt64())
-	C.InitLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
-
-	cCPUNum := C.int(hardware.GetCPUNum())
-	C.InitCpuNum(cCPUNum)
-
-	cKnowhereThreadPoolSize := C.uint32_t(hardware.GetCPUNum() * paramtable.DefaultKnowhereThreadPoolNumRatioInBuild)
-	if paramtable.GetRole() == typeutil.StandaloneRole {
-		threadPoolSize := int(float64(hardware.GetCPUNum()) * Params.CommonCfg.BuildIndexThreadPoolRatio.GetAsFloat())
-		if threadPoolSize < 1 {
-			threadPoolSize = 1
-		}
-		cKnowhereThreadPoolSize = C.uint32_t(threadPoolSize)
-	}
-	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereThreadPoolSize)
-
-	localDataRootPath := filepath.Join(Params.LocalStorageCfg.Path.GetValue(), typeutil.IndexNodeRole)
-	initcore.InitLocalChunkManager(localDataRootPath)
-	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
-	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
-	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
-}
-
-func CloseSegcore() {
-	initcore.CleanGlogManager()
 }

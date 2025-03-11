@@ -57,14 +57,14 @@ type indexBuildTask struct {
 	newIndexParams map[string]string
 	tr             *timerecord.TimeRecorder
 	queueDur       time.Duration
-	manager        *Manager
+	manager        *TaskManager
 }
 
 func NewIndexBuildTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.CreateJobRequest,
 	cm storage.ChunkManager,
-	manager *Manager,
+	manager *TaskManager,
 ) *indexBuildTask {
 	t := &indexBuildTask{
 		ident:   fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetBuildID()),

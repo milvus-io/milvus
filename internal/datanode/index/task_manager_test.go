@@ -30,7 +30,7 @@ type statsTaskInfoSuite struct {
 	suite.Suite
 
 	ctx     context.Context
-	manager *Manager
+	manager *TaskManager
 
 	cluster string
 	taskID  int64
@@ -41,7 +41,7 @@ func Test_statsTaskInfoSuite(t *testing.T) {
 }
 
 func (s *statsTaskInfoSuite) SetupSuite() {
-	s.manager = NewManager(context.Background())
+	s.manager = NewTaskManager(context.Background())
 
 	s.cluster = "test"
 	s.taskID = 100
