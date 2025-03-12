@@ -82,8 +82,10 @@ func (b *ServerBuilder) Build() *Server {
 		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(b.kv)),
 	)
 	resource.Done()
-	return &Server{
+	s := &Server{
 		session:    b.session,
 		grpcServer: b.grpcServer,
 	}
+	s.init()
+	return s
 }
