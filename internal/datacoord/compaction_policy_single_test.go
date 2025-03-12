@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -122,20 +123,23 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
 
-	segments := make(map[UniqueID]*SegmentInfo, 0)
-	segments[101] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 0, 10000, 201)
-	segments[102] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 500, 10000, 10)
-	segments[103] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 100, 10000, 1)
+	segments := typeutil.NewConcurrentMap[UniqueID, *SegmentInfo]()
+	s1 := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 0, 10000, 201)
+	s2 := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 500, 10000, 10)
+	s3 := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 100, 10000, 1)
+	segments.Insert(101, s1)
+	segments.Insert(102, s2)
+	segments.Insert(103, s3)
+	coll2Segments := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *SegmentInfo]]()
+	collectionSegments := typeutil.NewConcurrentMap[UniqueID, *SegmentInfo]()
+	collectionSegments.Insert(101, s1)
+	collectionSegments.Insert(102, s2)
+	collectionSegments.Insert(103, s3)
+	coll2Segments.Insert(collID, collectionSegments)
 	segmentsInfo := &SegmentsInfo{
 		segments: segments,
 		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: {
-					101: segments[101],
-					102: segments[102],
-					103: segments[103],
-				},
-			},
+			coll2Segments: coll2Segments,
 		},
 	}
 

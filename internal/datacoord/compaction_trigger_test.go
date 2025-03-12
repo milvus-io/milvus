@@ -154,23 +154,22 @@ func Test_compactionTrigger_force_without_index(t *testing.T) {
 		ID:     collectionID,
 		Schema: schema,
 	})
+	segments := typeutil.NewConcurrentMap[UniqueID, *SegmentInfo]()
+	segments.Insert(1, &SegmentInfo{
+		SegmentInfo: segInfo,
+	})
+	coll2Segments := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *SegmentInfo]]()
+	collectionSegments := typeutil.NewConcurrentMap[UniqueID, *SegmentInfo]()
+	collectionSegments.Insert(1, &SegmentInfo{
+		SegmentInfo: segInfo,
+	})
 	m := &meta{
 		catalog:    catalog,
 		channelCPs: newChannelCps(),
 		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				1: {
-					SegmentInfo: segInfo,
-				},
-			},
+			segments: segments,
 			secondaryIndexes: segmentInfoIndexes{
-				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-					collectionID: {
-						1: {
-							SegmentInfo: segInfo,
-						},
-					},
-				},
+				coll2Segments: coll2Segments,
 			},
 		},
 		indexMeta: &indexMeta{
