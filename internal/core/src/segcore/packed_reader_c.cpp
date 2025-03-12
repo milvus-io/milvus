@@ -92,13 +92,13 @@ ReadNext(CPackedReader c_packed_reader,
 
 CStatus
 CloseReader(CPackedReader c_packed_reader) {
-    auto packed_reader =
-        static_cast<milvus_storage::PackedRecordBatchReader*>(c_packed_reader);
-    auto status = packed_reader->Close();
-    if (!status.ok()) {
-        return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
-                                      status.ToString());
+    try {
+        auto packed_reader =
+            static_cast<milvus_storage::PackedRecordBatchReader*>(
+                c_packed_reader);
+        delete packed_reader;
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
     }
-    delete packed_reader;
-    return milvus::SuccessCStatus();
 }
