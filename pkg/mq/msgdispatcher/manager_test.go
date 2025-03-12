@@ -25,10 +25,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-<<<<<<< HEAD
-	"github.com/stretchr/testify/suite"
-=======
->>>>>>> 004a1875dc (enhance: Introduce batch subscription in msgdispatcher (#39863))
 
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
