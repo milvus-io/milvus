@@ -160,9 +160,10 @@ func (st *statsTask) UpdateMetaBuildingState(meta *meta) error {
 }
 
 func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bool {
-	log := log.Ctx(ctx).With(zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
+	log := log.Ctx(ctx).With(zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID),
+		zap.Int64("targetSegmentID", st.targetSegmentID))
 
-	statsMeta := dependency.meta.statsTaskMeta.GetStatsTaskBySegmentID(st.segmentID, st.subJobType)
+	statsMeta := dependency.meta.statsTaskMeta.GetStatsTask(st.taskID)
 	if statsMeta == nil {
 		log.Warn("stats task meta is null, skip it")
 		st.SetState(indexpb.JobState_JobStateNone, "stats task meta is null")
@@ -240,6 +241,9 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		TaskVersion:   statsMeta.GetVersion() + 1,
 		BinlogMaxSize: Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 	}
+
+	log.Info("stats task pre check successfully", zap.String("subJobType", st.subJobType.String()),
+		zap.Int64("num rows", segment.GetNumOfRows()), zap.Int64("task version", st.req.GetTaskVersion()))
 
 	return true
 }

@@ -96,10 +96,11 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 			},
 		},
 		statsTaskMeta: &statsTaskMeta{
-			ctx:     ctx,
-			catalog: catalog,
-			keyLock: lock.NewKeyLock[UniqueID](),
-			tasks:   typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
+			ctx:             ctx,
+			catalog:         catalog,
+			keyLock:         lock.NewKeyLock[UniqueID](),
+			tasks:           typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
+			segmentID2Tasks: typeutil.NewConcurrentMap[string, *indexpb.StatsTask](),
 		},
 	}
 

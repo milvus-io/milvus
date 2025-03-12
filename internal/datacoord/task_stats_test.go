@@ -57,7 +57,7 @@ func (s *statsTaskSuite) SetupSuite() {
 	s.targetID = 1180
 
 	tasks := typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
-	tasks.Insert(s.taskID, &indexpb.StatsTask{
+	statsTask := &indexpb.StatsTask{
 		CollectionID:  1,
 		PartitionID:   2,
 		SegmentID:     s.segID,
@@ -68,7 +68,12 @@ func (s *statsTaskSuite) SetupSuite() {
 		NodeID:        0,
 		State:         indexpb.JobState_JobStateInit,
 		FailReason:    "",
-	})
+	}
+	tasks.Insert(s.taskID, statsTask)
+	secondaryIndex := typeutil.NewConcurrentMap[string, *indexpb.StatsTask]()
+	secondaryKey := createSecondaryIndexKey(statsTask.GetSegmentID(), statsTask.GetSubJobType().String())
+	secondaryIndex.Insert(secondaryKey, statsTask)
+
 	s.mt = &meta{
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
@@ -123,10 +128,11 @@ func (s *statsTaskSuite) SetupSuite() {
 		},
 
 		statsTaskMeta: &statsTaskMeta{
-			keyLock: lock.NewKeyLock[UniqueID](),
-			ctx:     context.Background(),
-			catalog: nil,
-			tasks:   tasks,
+			keyLock:         lock.NewKeyLock[UniqueID](),
+			ctx:             context.Background(),
+			catalog:         nil,
+			tasks:           tasks,
+			segmentID2Tasks: secondaryIndex,
 		},
 	}
 }
