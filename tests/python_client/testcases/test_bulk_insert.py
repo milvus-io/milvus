@@ -2,7 +2,7 @@ import logging
 import random
 import time
 import pytest
-from pymilvus import DataType, Function, FunctionType
+from pymilvus import DataType, Function, FunctionType, FieldSchema, CollectionSchema
 from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 import numpy as np
 from pathlib import Path
@@ -2409,3 +2409,97 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             check_task=CheckTasks.check_search_results,
             check_items={"nq": ct.default_nq,
                          "limit": ct.default_limit})
+
+class TestImportWithTextEmbedding(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test import with text embedding
+    ******************************************************************
+    """
+
+    @pytest.mark.parametrize("file_format", ["json", "parquet", "numpy"])
+    def test_import_without_embedding(self, tei_endpoint, minio_host, file_format):
+        """
+        target: test import data without embedding
+        method: 1. create collection
+                2. import data without embedding field
+                3. verify embeddings are generated
+        expected: embeddings should be generated after import
+        """
+        dim = 768
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+
+        text_embedding_function = Function(
+            name="text_embedding",
+            function_type=FunctionType.TEXTEMBEDDING,
+            input_field_names=["document"],
+            output_field_names="dense",
+            params={
+                "provider": "TEI",
+                "endpoint": tei_endpoint,
+            },
+        )
+        schema.add_function(text_embedding_function)
+        c_name = cf.gen_unique_str("import_without_embedding")
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+
+        # prepare import data without embedding
+        nb = 1000
+        if file_format == "json":
+            file_type = BulkFileType.JSON
+        elif file_format == "numpy":
+            file_type = BulkFileType.NUMPY
+        else:
+            file_type = BulkFileType.PARQUET
+        with RemoteBulkWriter(
+            schema=schema,
+            remote_path="bulk_data",
+            connect_param=RemoteBulkWriter.ConnectParam(
+                bucket_name="milvus-bucket",
+                endpoint=f"{minio_host}:9000",
+                access_key="minioadmin",
+                secret_key="minioadmin",
+            ),
+            file_type=file_type,
+        ) as remote_writer:
+            for i in range(nb):
+                row = {"id": i, "document": f"This is test document {i}"}
+                remote_writer.append_row(row)
+            remote_writer.commit()
+            files = remote_writer.batch_files
+        # import data
+        for f in files:
+            t0 = time.time()
+            task_id, _ = self.utility_wrap.do_bulk_insert(
+                collection_name=c_name, files=f
+            )
+            log.info(f"bulk insert task ids:{task_id}")
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+                task_ids=[task_id], timeout=300
+            )
+            tt = time.time() - t0
+            log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+            assert success
+        num_entities = collection_w.num_entities
+        log.info(f" collection entities: {num_entities}")
+        assert num_entities == nb
+
+        # create index and load
+        index_params = {
+            "index_type": "AUTOINDEX",
+            "metric_type": "COSINE",
+            "params": {},
+        }
+        collection_w.create_index("dense", index_params)
+        collection_w.load()
+        # verify embeddings are generated
+        res, _ = collection_w.query(expr="id >= 0", output_fields=["dense"])
+        assert len(res) == nb
+        for r in res:
+            assert "dense" in r
+            assert len(r["dense"]) == dim
