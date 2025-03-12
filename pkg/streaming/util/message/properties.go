@@ -13,6 +13,8 @@ const (
 	messageBroadcastHeader                  = "_bh"  // message broadcast header.
 	messageHeader                           = "_h"   // specialized message header.
 	messageTxnContext                       = "_tx"  // transaction context.
+	messageSafeKey                          = "_sk"  // cipher safe key
+	messageEZK                              = "_ezk" // cipher encryption zone key
 )
 
 var (

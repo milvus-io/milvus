@@ -42,6 +42,6 @@ packages:
       StreamingCoordBroadcastService_WatchServer:
       StreamingCoordBroadcastServiceClient:
       StreamingCoordBroadcastService_WatchClient:
-  github.com/milvus-io/milvus/pkg/proto/etcdpb:
+  github.com/milvus-io/milvus/pkg/v2/proto/etcdpb:
     interfaces:
       DataBaseInfo:
