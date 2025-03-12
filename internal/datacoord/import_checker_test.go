@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -82,10 +83,10 @@ func (s *ImportCheckerSuite) SetupTest() {
 	l0CompactionTrigger := NewMockTriggerManager(s.T())
 	compactionChan := make(chan struct{}, 1)
 	close(compactionChan)
-	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
-	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
-	checker := NewImportChecker(meta, broker, cluster, s.alloc, imeta, sjm, l0CompactionTrigger).(*importChecker)
+	compactionHandler := NewMockCompactionPlanContext(s.T())
+
+	checker := NewImportChecker(meta, broker, cluster, s.alloc, imeta, sjm, l0CompactionTrigger, compactionHandler).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -552,10 +553,10 @@ func TestImportCheckerCompaction(t *testing.T) {
 	l0CompactionTrigger := NewMockTriggerManager(t)
 	compactionChan := make(chan struct{}, 1)
 	close(compactionChan)
-	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
-	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
-	checker := NewImportChecker(meta, broker, cluster, alloc, imeta, sjm, l0CompactionTrigger).(*importChecker)
+	compactionHandler := NewMockCompactionPlanContext(t)
+
+	checker := NewImportChecker(meta, broker, cluster, alloc, imeta, sjm, l0CompactionTrigger, compactionHandler).(*importChecker)
 
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -700,21 +701,6 @@ func TestImportCheckerCompaction(t *testing.T) {
 	}, 2*time.Second, 100*time.Millisecond)
 	log.Info("job index building")
 
-	// wait l0 import task
-	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
-	imeta.AddTask(context.TODO(), &importTask{
-		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:  jobID,
-			TaskID: 100000,
-			Source: datapb.ImportTaskSourceV2_L0Compaction,
-			State:  datapb.ImportTaskStateV2_InProgress,
-		},
-	})
-	time.Sleep(1200 * time.Millisecond)
-	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
-	imeta.UpdateTask(context.TODO(), 100000, UpdateState(datapb.ImportTaskStateV2_Completed))
-	log.Info("job l0 compaction")
-
 	// check index building
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 	assert.Eventually(t, func() bool {
@@ -722,4 +708,309 @@ func TestImportCheckerCompaction(t *testing.T) {
 		return job.GetState() == internalpb.ImportJobState_Completed
 	}, 2*time.Second, 100*time.Millisecond)
 	log.Info("job completed")
+}
+
+func TestUpdateSegmentStateForInvisible(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return([]*datapb.CompactionTask{
+		{
+			TriggerID:     10001,
+			Type:          datapb.CompactionType_MixCompaction,
+			InputSegments: []int64{101, 102},
+		},
+		{
+			TriggerID:     10002,
+			Type:          datapb.CompactionType_Level0DeleteCompaction,
+			InputSegments: []int64{},
+		},
+		{
+			TriggerID:      10003,
+			Type:           datapb.CompactionType_Level0DeleteCompaction,
+			InputSegments:  []int64{110},
+			ResultSegments: []int64{150},
+		},
+		{
+			TriggerID:     10004,
+			Type:          datapb.CompactionType_Level0DeleteCompaction,
+			InputSegments: []int64{111},
+		},
+	}, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+
+	broker := broker2.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	assert.NoError(t, err)
+
+	jobs := []ImportJob{
+		&importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID:        1001,
+				State:        internalpb.ImportJobState_Importing,
+				CollectionID: 1,
+			},
+		},
+		&importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID:        1002,
+				State:        internalpb.ImportJobState_Completed,
+				CollectionID: 2,
+			},
+		},
+		&importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID:        1003,
+				State:        internalpb.ImportJobState_Failed,
+				CollectionID: 3,
+			},
+		},
+	}
+
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	ctx := context.TODO()
+	meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            110,
+			CollectionID:  2,
+			InsertChannel: "ch0",
+			Level:         datapb.SegmentLevel_L0,
+			State:         commonpb.SegmentState_Flushed,
+			IsInvisible:   true,
+		},
+	})
+	meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            111,
+			CollectionID:  2,
+			InsertChannel: "ch1",
+			Level:         datapb.SegmentLevel_L0,
+			State:         commonpb.SegmentState_Flushed,
+			IsInvisible:   true,
+		},
+	})
+	meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            101,
+			CollectionID:  1,
+			InsertChannel: "ch0",
+			Level:         datapb.SegmentLevel_L0,
+			State:         commonpb.SegmentState_Flushed,
+			IsInvisible:   true,
+		},
+	})
+	meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            102,
+			CollectionID:  1,
+			InsertChannel: "ch1",
+			Level:         datapb.SegmentLevel_L0,
+			State:         commonpb.SegmentState_Flushed,
+			IsInvisible:   true,
+		},
+	})
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+
+	// importing collection: 1, keep segment 101, 102
+	// segment 110 is in l0 compaction, keep it
+	// segment 111 isn't in l0 compaction, set dropped state
+
+	checker := NewImportChecker(meta, broker, nil, nil, nil, nil, nil, nil).(*importChecker)
+	checker.updateSegmentStateForInvisible(jobs)
+
+	segment101 := meta.GetSegment(ctx, 101)
+	assert.Equal(t, commonpb.SegmentState_Flushed, segment101.GetState())
+
+	segment102 := meta.GetSegment(ctx, 102)
+	assert.Equal(t, commonpb.SegmentState_Flushed, segment102.GetState())
+
+	segment110 := meta.GetSegment(ctx, 110)
+	assert.Equal(t, commonpb.SegmentState_Flushed, segment110.GetState())
+
+	segment111 := meta.GetSegment(ctx, 111)
+	assert.Equal(t, commonpb.SegmentState_Dropped, segment111.GetState())
+}
+
+func TestCreateL0CompactionTaskForImportWhenL0(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+
+	broker := broker2.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	assert.NoError(t, err)
+
+	checker := NewImportChecker(meta, broker, nil, nil, nil, nil, nil, nil).(*importChecker)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        1001,
+			State:        internalpb.ImportJobState_Importing,
+			CollectionID: 1,
+			Options: []*commonpb.KeyValuePair{
+				{
+					Key:   importutilv2.L0Import,
+					Value: "true",
+				},
+			},
+		},
+	}
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	importingSegments := []int64{101, 102}
+	ctx := context.TODO()
+	meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            101,
+			CollectionID:  1,
+			InsertChannel: "ch1",
+			Level:         datapb.SegmentLevel_L0,
+			State:         commonpb.SegmentState_Flushed,
+			IsInvisible:   false,
+			IsImporting:   true,
+		},
+	})
+	meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            102,
+			CollectionID:  1,
+			InsertChannel: "ch2",
+			Level:         datapb.SegmentLevel_L0,
+			State:         commonpb.SegmentState_Flushed,
+			IsInvisible:   false,
+			IsImporting:   true,
+		},
+	})
+	catalog.EXPECT().SaveChannelCheckpoints(mock.Anything, mock.Anything).Return(nil)
+	meta.UpdateChannelCheckpoints(ctx, []*msgpb.MsgPosition{
+		{
+			ChannelName: "ch1",
+			MsgID:       []byte{1},
+		},
+		{
+			ChannelName: "ch2",
+			MsgID:       []byte{2},
+		},
+	})
+
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	ok := checker.updateSegmentState(job, importingSegments, nil)
+	assert.False(t, ok)
+}
+
+func TestCreateL0CompactionTaskForImportWhenNormal(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+
+	broker := broker2.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	assert.NoError(t, err)
+
+	compactionHandler := NewMockCompactionPlanContext(t)
+
+	checker := NewImportChecker(meta, broker, nil, nil, nil, nil, nil, compactionHandler).(*importChecker)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        1001,
+			State:        internalpb.ImportJobState_Importing,
+			CollectionID: 1,
+			DataTs:       1000,
+		},
+	}
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	importingSegments := []int64{101, 102}
+	ctx := context.TODO()
+	meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            101,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch1",
+			Level:         datapb.SegmentLevel_L1,
+			State:         commonpb.SegmentState_Flushed,
+			IsInvisible:   false,
+			IsImporting:   true,
+		},
+	})
+	meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            102,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch2",
+			Level:         datapb.SegmentLevel_L1,
+			State:         commonpb.SegmentState_Flushed,
+			IsInvisible:   false,
+			IsImporting:   true,
+		},
+	})
+	catalog.EXPECT().SaveChannelCheckpoints(mock.Anything, mock.Anything).Return(nil)
+	meta.UpdateChannelCheckpoints(ctx, []*msgpb.MsgPosition{
+		{
+			ChannelName: "ch1",
+			MsgID:       []byte{1},
+		},
+		{
+			ChannelName: "ch2",
+			MsgID:       []byte{2},
+		},
+	})
+
+	// add l0 segment
+	meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            103,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch1",
+			Level:         datapb.SegmentLevel_L0,
+			State:         commonpb.SegmentState_Flushed,
+			IsInvisible:   false,
+			IsImporting:   true,
+			DmlPosition: &msgpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{3},
+				Timestamp:   800,
+			},
+		},
+	})
+	meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            103,
+			CollectionID:  1,
+			PartitionID:   -1,
+			InsertChannel: "ch2",
+			Level:         datapb.SegmentLevel_L0,
+			State:         commonpb.SegmentState_Flushed,
+			IsInvisible:   false,
+			IsImporting:   true,
+			DmlPosition: &msgpb.MsgPosition{
+				ChannelName: "ch2",
+				MsgID:       []byte{3},
+				Timestamp:   1200,
+			},
+		},
+	})
+
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	compactionHandler.EXPECT().enqueueCompaction(mock.Anything).Return(nil).Once()
+	ok := checker.updateSegmentState(job, importingSegments, nil)
+	assert.False(t, ok)
 }
