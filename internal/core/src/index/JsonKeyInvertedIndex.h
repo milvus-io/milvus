@@ -33,7 +33,7 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     explicit JsonKeyInvertedIndex(
         const storage::FileManagerContext& ctx,
         bool is_load,
-        int64_t json_stats_build_type = 0,
+        int64_t json_key_data_format = 0,
         int64_t json_stats_tantivy_memory_budget = 16777216);
 
     explicit JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
@@ -72,7 +72,7 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
             LOG_INFO("json key filter size:{}", array.array_.len);
             for (size_t j = 0; j < array.array_.len; j++) {
                 auto the_offset = array.array_.array[j];
-                if (build_type_ == 0) {
+                if (json_key_data_format_ == 0) {
                     if (DecodeValid(the_offset)) {
                         auto tuple = DecodeValue(the_offset);
                         auto row_id = std::get<1>(tuple);
@@ -139,14 +139,17 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
 
  private:
     void
-    AddJson(const char* json, int64_t offset);
+    AddJson(const char* json,
+            int64_t offset,
+            std::map<std::string, std::vector<int64_t>>& mp);
 
     void
     TravelJson(const char* json,
                jsmntok* tokens,
                int& index,
                std::vector<std::string>& path,
-               int32_t offset);
+               int32_t offset,
+               std::map<std::string, std::vector<int64_t>>& mp);
 
     void
     AddJSONEncodeValue(const std::vector<std::string>& paths,
@@ -155,7 +158,8 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
                        uint32_t row_id,
                        uint16_t offset,
                        uint16_t length,
-                       uint32_t value);
+                       uint32_t value,
+                       std::map<std::string, std::vector<int64_t>>& mp);
 
     int64_t
     EncodeOffset(uint8_t flag,
@@ -280,15 +284,14 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     }
 
     void
-    AddInvertedRecord();
+    AddInvertedRecord(std::map<std::string, std::vector<int64_t>>& mp);
 
  private:
     int64_t field_id_;
     mutable std::mutex mtx_;
     std::atomic<stdclock::time_point> last_commit_time_;
     int64_t commit_interval_in_ms_;
-    int64_t build_type_ = 0;
-    std::map<std::string, std::vector<int64_t>> mp;
+    int64_t json_key_data_format_ = 0;
     std::atomic<bool> is_data_uncommitted_ = false;
 };
 }  // namespace milvus::index

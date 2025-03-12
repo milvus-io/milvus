@@ -21,13 +21,15 @@ constexpr const char* TMP_JSON_INVERTED_LOG_PREFIX =
     "/tmp/milvus/json-key-inverted-index-log/";
 
 void
-JsonKeyInvertedIndex::AddJSONEncodeValue(const std::vector<std::string>& paths,
-                                         uint8_t flag,
-                                         uint8_t type,
-                                         uint32_t row_id,
-                                         uint16_t offset,
-                                         uint16_t length,
-                                         uint32_t value) {
+JsonKeyInvertedIndex::AddJSONEncodeValue(
+    const std::vector<std::string>& paths,
+    uint8_t flag,
+    uint8_t type,
+    uint32_t row_id,
+    uint16_t offset,
+    uint16_t length,
+    uint32_t value,
+    std::map<std::string, std::vector<int64_t>>& mp) {
     std::string key = "";
     if (!paths.empty()) {
         key = std::string("/") + Join(paths, "/");
@@ -43,7 +45,7 @@ JsonKeyInvertedIndex::AddJSONEncodeValue(const std::vector<std::string>& paths,
         length,
         value);
     int64_t combine_id = 0;
-    if (build_type_ == 0) {
+    if (json_key_data_format_ == 0) {
         if (flag) {
             combine_id = EncodeValue(flag, type, row_id, value);
         } else {
@@ -54,7 +56,8 @@ JsonKeyInvertedIndex::AddJSONEncodeValue(const std::vector<std::string>& paths,
 }
 
 void
-JsonKeyInvertedIndex::AddInvertedRecord() {
+JsonKeyInvertedIndex::AddInvertedRecord(
+    std::map<std::string, std::vector<int64_t>>& mp) {
     for (auto& iter : mp) {
         for (auto value : iter.second) {
             wrapper_->add_multi_data<std::string>(&iter.first, 1, value);
@@ -63,11 +66,13 @@ JsonKeyInvertedIndex::AddInvertedRecord() {
 }
 
 void
-JsonKeyInvertedIndex::TravelJson(const char* json,
-                                 jsmntok* tokens,
-                                 int& index,
-                                 std::vector<std::string>& path,
-                                 int32_t offset) {
+JsonKeyInvertedIndex::TravelJson(
+    const char* json,
+    jsmntok* tokens,
+    int& index,
+    std::vector<std::string>& path,
+    int32_t offset,
+    std::map<std::string, std::vector<int64_t>>& mp) {
     jsmntok current = tokens[0];
     Assert(current.type != JSMN_UNDEFINED);
     if (current.type == JSMN_OBJECT) {
@@ -78,7 +83,8 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
                                offset,
                                current.start,
                                current.end - current.start,
-                               0);
+                               0,
+                               mp);
         }
         int j = 1;
         for (int i = 0; i < current.size; i++) {
@@ -88,7 +94,7 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
             path.push_back(key);
             j++;
             int consumed = 0;
-            TravelJson(json, tokens + j, consumed, path, offset);
+            TravelJson(json, tokens + j, consumed, path, offset, mp);
             path.pop_back();
             j += consumed;
         }
@@ -104,7 +110,8 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
                                offset,
                                current.start,
                                current.end - current.start,
-                               stoi(value));
+                               stoi(value),
+                               mp);
         } else if (type == JSONType::INT64) {
             AddJSONEncodeValue(path,
                                0,
@@ -112,7 +119,8 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
                                offset,
                                current.start,
                                current.end - current.start,
-                               0);
+                               0,
+                               mp);
         } else if (type == JSONType::FLOAT) {
             auto fvalue = stof(value);
             uint32_t valueBits = *reinterpret_cast<uint32_t*>(&fvalue);
@@ -122,7 +130,8 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
                                offset,
                                current.start,
                                current.end - current.start,
-                               valueBits);
+                               valueBits,
+                               mp);
         } else if (type == JSONType::DOUBLE) {
             AddJSONEncodeValue(path,
                                0,
@@ -130,7 +139,8 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
                                offset,
                                current.start,
                                current.end - current.start,
-                               0);
+                               0,
+                               mp);
         } else if (type == JSONType::BOOL) {
             AddJSONEncodeValue(path,
                                1,
@@ -138,7 +148,8 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
                                offset,
                                current.start,
                                current.end - current.start,
-                               value == "true" ? 1 : 0);
+                               value == "true" ? 1 : 0,
+                               mp);
         }
 
         index++;
@@ -149,7 +160,8 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
                            offset,
                            current.start,
                            current.end - current.start,
-                           0);
+                           0,
+                           mp);
         // skip array parse
         int count = current.size;
         int j = 1;
@@ -171,7 +183,8 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
                                offset,
                                current.start - 1,
                                current.end - current.start + 2,
-                               0);
+                               0,
+                               mp);
         } else {
             AddJSONEncodeValue(path,
                                0,
@@ -179,14 +192,17 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
                                offset,
                                current.start,
                                current.end - current.start,
-                               0);
+                               0,
+                               mp);
         }
         index++;
     }
 }
 
 void
-JsonKeyInvertedIndex::AddJson(const char* json, int64_t offset) {
+JsonKeyInvertedIndex::AddJson(const char* json,
+                              int64_t offset,
+                              std::map<std::string, std::vector<int64_t>>& mp) {
     jsmn_parser parser;
     jsmntok_t* tokens = (jsmntok_t*)malloc(16 * sizeof(jsmntok_t));
     if (!tokens) {
@@ -224,27 +240,27 @@ JsonKeyInvertedIndex::AddJson(const char* json, int64_t offset) {
 
     int index = 0;
     std::vector<std::string> paths;
-    TravelJson(json, tokens, index, paths, offset);
+    TravelJson(json, tokens, index, paths, offset, mp);
     free(tokens);
 }
 
 JsonKeyInvertedIndex::JsonKeyInvertedIndex(
     const storage::FileManagerContext& ctx,
     bool is_load,
-    int64_t json_stats_build_type,
+    int64_t json_key_data_format,
     int64_t json_stats_tantivy_memory_budget)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     LOG_INFO(
         "JsonKeyInvertedIndex json_stats_tantivy_memory_budget:{}, "
-        "json_stats_build_type:{}",
+        "json_key_data_format:{}",
         json_stats_tantivy_memory_budget,
-        json_stats_build_type);
+        json_key_data_format);
     schema_ = ctx.fieldDataMeta.field_schema;
     field_id_ = ctx.fieldDataMeta.field_id;
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
-    build_type_ = json_stats_build_type;
+    json_key_data_format_ = json_key_data_format;
     if (is_load) {
         auto prefix = disk_file_manager_->GetLocalJsonKeyIndexPrefix();
         path_ = prefix;
@@ -370,6 +386,7 @@ void
 JsonKeyInvertedIndex::BuildWithFieldData(
     const std::vector<FieldDataPtr>& field_datas, bool nullable) {
     int64_t offset = 0;
+    std::map<std::string, std::vector<int64_t>> mp;
     if (nullable) {
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
@@ -380,7 +397,8 @@ JsonKeyInvertedIndex::BuildWithFieldData(
                 AddJson(static_cast<const milvus::Json*>(data->RawValue(i))
                             ->data()
                             .data(),
-                        offset++);
+                        offset++,
+                        mp);
             }
         }
     } else {
@@ -390,11 +408,12 @@ JsonKeyInvertedIndex::BuildWithFieldData(
                 AddJson(static_cast<const milvus::Json*>(data->RawValue(i))
                             ->data()
                             .data(),
-                        offset++);
+                        offset++,
+                        mp);
             }
         }
     }
-    AddInvertedRecord();
+    AddInvertedRecord(mp);
     LOG_INFO("build json key index done for field id:{}", field_id_);
 }
 
@@ -403,14 +422,15 @@ JsonKeyInvertedIndex::AddJSONDatas(size_t n,
                                    const std::string* jsonDatas,
                                    const bool* valids,
                                    int64_t offset_begin) {
+    std::map<std::string, std::vector<int64_t>> mp;
     for (int i = 0; i < n; i++) {
         auto offset = i + offset_begin;
         if (valids != nullptr && !valids[i]) {
             continue;
         }
-        AddJson(jsonDatas[i].c_str(), offset);
+        AddJson(jsonDatas[i].c_str(), offset, mp);
     }
-    AddInvertedRecord();
+    AddInvertedRecord(mp);
     is_data_uncommitted_ = true;
     LOG_INFO("build json key index done for AddJSONDatas");
     if (shouldTriggerCommit()) {
