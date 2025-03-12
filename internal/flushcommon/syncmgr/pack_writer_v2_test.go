@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -89,7 +90,7 @@ func (s *PackWriterV2Suite) SetupTest() {
 			},
 		},
 	}
-	s.cm = storage.NewLocalChunkManager(storage.RootPath(s.rootPath))
+	s.cm = storage.NewLocalChunkManager(objectstorage.RootPath(s.rootPath))
 }
 
 func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
