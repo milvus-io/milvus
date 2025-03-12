@@ -50,6 +50,7 @@ def pytest_addoption(parser):
     parser.addoption('--uri', action='store', default="", help="uri for milvus client")
     parser.addoption('--token', action='store', default="root:Milvus", help="token for milvus client")
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
+    parser.addoption("--tei_endpoint", action="store", default="http://localhost:8080", help="tei endpoint")
 
 
 @pytest.fixture
@@ -203,6 +204,9 @@ def token(request):
 def request_duration(request):
     return request.config.getoption("--request_duration")
 
+@pytest.fixture
+def tei_endpoint(request):
+    return request.config.getoption("--tei_endpoint")
 
 """ fixture func """
 
