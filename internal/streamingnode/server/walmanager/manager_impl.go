@@ -65,10 +65,10 @@ func (m *managerImpl) Open(ctx context.Context, channel types.PChannelInfo) (err
 	defer func() {
 		m.lifetime.Done()
 		if err != nil {
-			m.logger.Warn("open wal failed", zap.Error(err), zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+			m.logger.Warn("open wal failed", zap.Error(err), zap.String("channel", channel.String()))
 			return
 		}
-		m.logger.Info("open wal success", zap.String("channel", channel.Name), zap.Int64("term", channel.Term))
+		m.logger.Info("open wal success", zap.String("channel", channel.String()))
 	}()
 
 	return m.getWALLifetime(channel.Name).Open(ctx, channel)
