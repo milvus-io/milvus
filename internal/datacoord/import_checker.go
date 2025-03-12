@@ -107,7 +107,8 @@ func (c *importChecker) Start() {
 			for collID, collJobs := range jobsByColl {
 				c.checkCollection(collID, collJobs)
 			}
-			c.LogStats()
+			c.LogJobStats(jobs)
+			c.LogTaskStats()
 		}
 	}
 }
@@ -118,7 +119,23 @@ func (c *importChecker) Close() {
 	})
 }
 
-func (c *importChecker) LogStats() {
+func (c *importChecker) LogJobStats(jobs []ImportJob) {
+	byState := lo.GroupBy(jobs, func(job ImportJob) string {
+		return job.GetState().String()
+	})
+	stateNum := make(map[string]int)
+	for state := range internalpb.ImportJobState_value {
+		if state == internalpb.ImportJobState_None.String() {
+			continue
+		}
+		num := len(byState[state])
+		stateNum[state] = num
+		metrics.ImportJobs.WithLabelValues(state).Set(float64(num))
+	}
+	log.Info("import job stats", zap.Any("stateNum", stateNum))
+}
+
+func (c *importChecker) LogTaskStats() {
 	logFunc := func(tasks []ImportTask, taskType TaskType) {
 		byState := lo.GroupBy(tasks, func(t ImportTask) datapb.ImportTaskStateV2 {
 			return t.GetState()

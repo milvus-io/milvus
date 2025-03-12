@@ -99,7 +99,6 @@ var (
 			Help:      "now time minus tt pts per physical channel",
 		}, []string{
 			nodeIDLabelName,
-			collectionIDLabelName,
 			channelNameLabelName,
 		})
 
@@ -297,9 +296,8 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 	DataNodeProduceTimeTickLag.
 		Delete(
 			prometheus.Labels{
-				nodeIDLabelName:       fmt.Sprint(nodeID),
-				collectionIDLabelName: fmt.Sprint(collectionID),
-				channelNameLabelName:  channel,
+				nodeIDLabelName:      fmt.Sprint(nodeID),
+				channelNameLabelName: channel,
 			})
 
 	for _, label := range []string{AllLabel, DeleteLabel, InsertLabel} {

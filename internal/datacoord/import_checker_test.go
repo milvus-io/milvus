@@ -133,7 +133,7 @@ func (s *ImportCheckerSuite) TestLogStats() {
 	err = s.imeta.AddTask(it1)
 	s.NoError(err)
 
-	s.checker.LogStats()
+	s.checker.LogTaskStats()
 }
 
 func (s *ImportCheckerSuite) TestCheckJob() {

@@ -73,7 +73,7 @@ func (u *mqStatsUpdater) send(ts Timestamp, segmentIDs []int64) error {
 	sub := tsoutil.SubByNow(ts)
 	pChan := funcutil.ToPhysicalChannel(u.config.vChannelName)
 	metrics.DataNodeProduceTimeTickLag.
-		WithLabelValues(fmt.Sprint(u.config.serverID), fmt.Sprint(u.config.collectionID), pChan).
+		WithLabelValues(fmt.Sprint(u.config.serverID), pChan).
 		Set(float64(sub))
 	err := u.producer.Produce(&msgPack)
 	if err != nil {
