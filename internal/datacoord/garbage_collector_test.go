@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func Test_garbageCollector_basic(t *testing.T) {
@@ -1039,6 +1040,33 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			},
 		},
 	}
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, &collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name:        "",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      fieldID,
+					Name:         "",
+					IsPrimaryKey: false,
+					Description:  "",
+					DataType:     schemapb.DataType_FloatVector,
+					TypeParams:   nil,
+					IndexParams:  nil,
+					AutoID:       false,
+					State:        0,
+				},
+			},
+		},
+		Partitions:     nil,
+		StartPositions: nil,
+		Properties:     nil,
+	})
+
 	m := &meta{
 		catalog:    catalog,
 		channelCPs: channelCPs,
@@ -1105,32 +1133,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			},
 		},
 
-		collections: map[UniqueID]*collectionInfo{
-			collID: {
-				ID: collID,
-				Schema: &schemapb.CollectionSchema{
-					Name:        "",
-					Description: "",
-					AutoID:      false,
-					Fields: []*schemapb.FieldSchema{
-						{
-							FieldID:      fieldID,
-							Name:         "",
-							IsPrimaryKey: false,
-							Description:  "",
-							DataType:     schemapb.DataType_FloatVector,
-							TypeParams:   nil,
-							IndexParams:  nil,
-							AutoID:       false,
-							State:        0,
-						},
-					},
-				},
-				Partitions:     nil,
-				StartPositions: nil,
-				Properties:     nil,
-			},
-		},
+		collections: collections,
 	}
 
 	m.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{

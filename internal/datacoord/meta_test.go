@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // MetaReloadSuite tests meta reload & meta creation related logic
@@ -742,7 +743,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
 		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
 
-		meta.collections[collID] = collInfo
+		meta.collections.Insert(collID, collInfo)
 		quotaInfo = meta.GetQuotaInfo()
 		assert.Len(t, quotaInfo.CollectionBinlogSize, 1)
 		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
@@ -754,12 +755,11 @@ func TestMeta_Basic(t *testing.T) {
 		ret := meta.SetStoredIndexFileSizeMetric()
 		assert.Equal(t, uint64(0), ret)
 
-		meta.collections = map[UniqueID]*collectionInfo{
-			100: {
-				ID:           100,
-				DatabaseName: "db",
-			},
-		}
+		meta.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		meta.collections.Insert(100, &collectionInfo{
+			ID:           100,
+			DatabaseName: "db",
+		})
 		ret = meta.SetStoredIndexFileSizeMetric()
 		assert.Equal(t, uint64(11), ret)
 	})
@@ -1347,7 +1347,7 @@ func Test_meta_GcConfirm(t *testing.T) {
 func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 	t.Run("fail to list database", func(t *testing.T) {
 		m := &meta{
-			collections: make(map[UniqueID]*collectionInfo),
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		}
 		mockBroker := broker.NewMockBroker(t)
 		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(nil, errors.New("list database failed, mocked"))
@@ -1357,7 +1357,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 
 	t.Run("fail to show collections", func(t *testing.T) {
 		m := &meta{
-			collections: make(map[UniqueID]*collectionInfo),
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		}
 		mockBroker := broker.NewMockBroker(t)
 
@@ -1371,7 +1371,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 
 	t.Run("fail to describe collection", func(t *testing.T) {
 		m := &meta{
-			collections: make(map[UniqueID]*collectionInfo),
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		}
 		mockBroker := broker.NewMockBroker(t)
 
@@ -1389,7 +1389,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 
 	t.Run("fail to show partitions", func(t *testing.T) {
 		m := &meta{
-			collections: make(map[UniqueID]*collectionInfo),
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		}
 		mockBroker := broker.NewMockBroker(t)
 
@@ -1408,7 +1408,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		m := &meta{
-			collections: make(map[UniqueID]*collectionInfo),
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		}
 		mockBroker := broker.NewMockBroker(t)
 

@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type CompactionMeta interface {
@@ -85,8 +86,7 @@ type meta struct {
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
 
-	collMu      lock.RWMutex
-	collections map[UniqueID]*collectionInfo // collection id to collection info
+	collections *typeutil.ConcurrentMap[UniqueID, *collectionInfo] // collection id to collection info
 
 	segMu    lock.RWMutex
 	segments *SegmentsInfo // segment id to segment info
@@ -182,7 +182,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt := &meta{
 		ctx:                ctx,
 		catalog:            catalog,
-		collections:        make(map[UniqueID]*collectionInfo),
+		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments:           NewSegmentsInfo(),
 		channelCPs:         newChannelCps(),
 		indexMeta:          im,
@@ -338,29 +338,24 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 // Note that collection info is just for caching and will not be set into etcd from datacoord
 func (m *meta) AddCollection(collection *collectionInfo) {
 	log.Info("meta update: add collection", zap.Int64("collectionID", collection.ID))
-	m.collMu.Lock()
-	defer m.collMu.Unlock()
-	m.collections[collection.ID] = collection
-	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
+	m.collections.Insert(collection.ID, collection)
+	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(m.collections.Len()))
 	log.Info("meta update: add collection - complete", zap.Int64("collectionID", collection.ID))
 }
 
 // DropCollection drop a collection from meta
 func (m *meta) DropCollection(collectionID int64) {
 	log.Info("meta update: drop collection", zap.Int64("collectionID", collectionID))
-	m.collMu.Lock()
-	defer m.collMu.Unlock()
-	delete(m.collections, collectionID)
-	metrics.CleanupDataCoordWithCollectionID(collectionID)
-	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
-	log.Info("meta update: drop collection - complete", zap.Int64("collectionID", collectionID))
+	if _, ok := m.collections.GetAndRemove(collectionID); ok {
+		metrics.CleanupDataCoordWithCollectionID(collectionID)
+		metrics.DataCoordNumCollections.WithLabelValues().Set(float64(m.collections.Len()))
+		log.Info("meta update: drop collection - complete", zap.Int64("collectionID", collectionID))
+	}
 }
 
 // GetCollection returns collection info with provided collection id from local cache
 func (m *meta) GetCollection(collectionID UniqueID) *collectionInfo {
-	m.collMu.RLock()
-	defer m.collMu.RUnlock()
-	collection, ok := m.collections[collectionID]
+	collection, ok := m.collections.Get(collectionID)
 	if !ok {
 		return nil
 	}
@@ -369,20 +364,11 @@ func (m *meta) GetCollection(collectionID UniqueID) *collectionInfo {
 
 // GetCollections returns collections from local cache
 func (m *meta) GetCollections() []*collectionInfo {
-	m.collMu.RLock()
-	defer m.collMu.RUnlock()
-	collections := make([]*collectionInfo, 0)
-	for _, coll := range m.collections {
-		collections = append(collections, coll)
-	}
-	return collections
+	return m.collections.Values()
 }
 
 func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
-	m.collMu.RLock()
-	defer m.collMu.RUnlock()
-
-	coll, ok := m.collections[collectionID]
+	coll, ok := m.collections.Get(collectionID)
 	if !ok {
 		return nil
 	}
@@ -468,8 +454,6 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	info := &metricsinfo.DataCoordQuotaMetrics{}
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
-	m.collMu.RLock()
-	defer m.collMu.RUnlock()
 	collectionBinlogSize := make(map[UniqueID]int64)
 	partitionBinlogSize := make(map[UniqueID]map[UniqueID]int64)
 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
@@ -493,7 +477,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 			}
 			partBinlogSize[segment.GetPartitionID()] += segmentSize
 
-			coll, ok := m.collections[segment.GetCollectionID()]
+			coll, ok := m.collections.Get(segment.GetCollectionID())
 			if ok {
 				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll.DatabaseName,
 					fmt.Sprint(segment.GetCollectionID()), segment.GetState().String()).Add(float64(segmentSize))
@@ -516,7 +500,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 	metrics.DataCoordNumStoredRows.Reset()
 	for collectionID, statesRows := range collectionRowsNum {
-		coll, ok := m.collections[collectionID]
+		coll, ok := m.collections.Get(collectionID)
 		if ok {
 			for state, rows := range statesRows {
 				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID), coll.Schema.GetName(), state.String()).Set(float64(rows))
@@ -526,7 +510,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 	metrics.DataCoordL0DeleteEntriesNum.Reset()
 	for collectionID, entriesNum := range collectionL0RowCounts {
-		coll, ok := m.collections[collectionID]
+		coll, ok := m.collections.Get(collectionID)
 		if ok {
 			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID)).Set(float64(entriesNum))
 		}
@@ -542,17 +526,13 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 // SetStoredIndexFileSizeMetric returns the total index files size of all segment for each collection.
 func (m *meta) SetStoredIndexFileSizeMetric() uint64 {
-	m.collMu.RLock()
-	defer m.collMu.RUnlock()
 	return m.indexMeta.SetStoredIndexFileSizeMetric(m.collections)
 }
 
 func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
-	m.collMu.RLock()
-	defer m.collMu.RUnlock()
-	ret := make(map[int64]int64, len(m.collections))
+	ret := make(map[int64]int64, m.collections.Len())
 	segments := m.segments.GetSegments()
 	for _, segment := range segments {
 		if isSegmentHealthy(segment) {
@@ -2017,10 +1997,7 @@ func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commo
 }
 
 func (m *meta) ListCollections() []int64 {
-	m.collMu.RLock()
-	defer m.collMu.RUnlock()
-
-	return lo.Keys(m.collections)
+	return m.collections.Keys()
 }
 
 func (m *meta) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
