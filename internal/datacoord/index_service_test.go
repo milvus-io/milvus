@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"testing"
 	"time"
 
@@ -212,7 +211,7 @@ func TestServer_CreateIndex(t *testing.T) {
 			},
 			{
 				Key:   common.JSONCastTypeKey,
-				Value: "int64",
+				Value: "double",
 			},
 			{
 				Key:   common.IndexTypeKey,
@@ -2683,7 +2682,7 @@ func TestJsonIndex(t *testing.T) {
 	req := &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "a",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "varchar"}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
 	}
 	resp, err := s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
@@ -2691,7 +2690,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json[\"c\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "varchar"}, {Key: common.JSONPathKey, Value: "json[\"c\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
@@ -2700,7 +2699,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     1,
 		IndexName:   "",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json2[\"c\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "varchar"}, {Key: common.JSONPathKey, Value: "json2[\"c\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
@@ -2709,7 +2708,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "a",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "varchar"}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
@@ -2718,7 +2717,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "a",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2727,7 +2726,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "b",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2736,7 +2735,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "a",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"b\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[\"b\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2754,7 +2753,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     1,
 		IndexName:   "c",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "bad_json[\"a\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "bad_json[\"a\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2763,7 +2762,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     2,
 		IndexName:   "",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "dynamic_a_field"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "dynamic_a_field"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
@@ -2772,7 +2771,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "d",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[a][\"b\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[a][\"b\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2781,7 +2780,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "e",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"][\"b"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[\"a\"][\"b"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2790,7 +2789,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "f",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"[\"b]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[\"a\"[\"b]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2799,7 +2798,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "g",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"][0][\"b\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[\"a\"][0][\"b\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
