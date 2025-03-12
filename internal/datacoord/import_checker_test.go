@@ -82,10 +82,10 @@ func (s *ImportCheckerSuite) SetupTest() {
 	l0CompactionTrigger := NewMockTriggerManager(s.T())
 	compactionChan := make(chan struct{}, 1)
 	close(compactionChan)
-	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
-	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
-	checker := NewImportChecker(meta, broker, cluster, s.alloc, imeta, sjm, l0CompactionTrigger).(*importChecker)
+	compactionHandler := NewMockCompactionPlanContext(s.T())
+
+	checker := NewImportChecker(meta, broker, cluster, s.alloc, imeta, sjm, l0CompactionTrigger, compactionHandler).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -552,10 +552,10 @@ func TestImportCheckerCompaction(t *testing.T) {
 	l0CompactionTrigger := NewMockTriggerManager(t)
 	compactionChan := make(chan struct{}, 1)
 	close(compactionChan)
-	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
-	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
-	checker := NewImportChecker(meta, broker, cluster, alloc, imeta, sjm, l0CompactionTrigger).(*importChecker)
+	compactionHandler := NewMockCompactionPlanContext(t)
+
+	checker := NewImportChecker(meta, broker, cluster, alloc, imeta, sjm, l0CompactionTrigger, compactionHandler).(*importChecker)
 
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
