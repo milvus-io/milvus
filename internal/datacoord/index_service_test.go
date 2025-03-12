@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -166,6 +167,21 @@ func TestServer_CreateIndex(t *testing.T) {
 					IsDynamic:      false,
 					IsPartitionKey: false,
 				},
+				{
+					FieldID:        fieldID + 1,
+					Name:           "json",
+					IsPrimaryKey:   false,
+					Description:    "",
+					DataType:       schemapb.DataType_JSON,
+					TypeParams:     nil,
+					IndexParams:    nil,
+					AutoID:         false,
+					State:          0,
+					ElementType:    0,
+					DefaultValue:   nil,
+					IsDynamic:      false,
+					IsPartitionKey: false,
+				},
 			},
 			EnableDynamicField: false,
 		},
@@ -175,6 +191,41 @@ func TestServer_CreateIndex(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		resp, err := s.CreateIndex(ctx, req)
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	})
+
+	t.Run("test json path", func(t *testing.T) {
+		req := &indexpb.CreateIndexRequest{
+			CollectionID:    collID,
+			FieldID:         fieldID + 1,
+			IndexName:       "",
+			TypeParams:      typeParams,
+			IndexParams:     indexParams,
+			Timestamp:       100,
+			IsAutoIndex:     false,
+			UserIndexParams: indexParams,
+		}
+		req.IndexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.JSONPathKey,
+				Value: "json",
+			},
+			{
+				Key:   common.JSONCastTypeKey,
+				Value: "int64",
+			},
+			{
+				Key:   common.IndexTypeKey,
+				Value: "INVERTED",
+			},
+		}
+		resp, err := s.CreateIndex(ctx, req)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
+		assert.Equal(t, 1, len(indexes))
+		jsonPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, indexes[0].IndexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, "", jsonPath)
 	})
 
 	t.Run("success with index exist", func(t *testing.T) {

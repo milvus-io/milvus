@@ -239,6 +239,11 @@ func (s *Server) parseAndVerifyNestedPath(identifier string, schema *schemapb.Co
 		s = strings.ReplaceAll(s, "/", "~1")
 		return s
 	})
+	if len(nestedPath) == 0 {
+		// if nested path is empty, it means the json path is the field name.
+		// Dont return "/" here, it not a valid json path for simdjson.
+		return "", nil
+	}
 	return "/" + strings.Join(nestedPath, "/"), nil
 }
 
