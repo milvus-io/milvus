@@ -21,13 +21,13 @@ constexpr const char* TMP_JSON_INVERTED_LOG_PREFIX =
     "/tmp/milvus/json-key-inverted-index-log/";
 
 void
-JsonKeyInvertedIndex::AddInvertedRecord(const std::vector<std::string>& paths,
-                                        uint8_t flag,
-                                        uint8_t type,
-                                        uint32_t row_id,
-                                        uint16_t offset,
-                                        uint16_t length,
-                                        uint32_t value) {
+JsonKeyInvertedIndex::AddJSONEncodeValue(const std::vector<std::string>& paths,
+                                         uint8_t flag,
+                                         uint8_t type,
+                                         uint32_t row_id,
+                                         uint16_t offset,
+                                         uint16_t length,
+                                         uint32_t value) {
     std::string key = "";
     if (!paths.empty()) {
         key = std::string("/") + Join(paths, "/");
@@ -50,8 +50,16 @@ JsonKeyInvertedIndex::AddInvertedRecord(const std::vector<std::string>& paths,
             combine_id = EncodeOffset(flag, type, row_id, offset, length);
         }
     }
+    mp[key].push_back(combine_id);
+}
 
-    wrapper_->add_multi_data<std::string>(&key, 1, combine_id);
+void
+JsonKeyInvertedIndex::AddInvertedRecord() {
+    for (auto& iter : mp) {
+        for (auto value : iter.second) {
+            wrapper_->add_multi_data<std::string>(&iter.first, 1, value);
+        }
+    }
 }
 
 void
@@ -64,13 +72,13 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
     Assert(current.type != JSMN_UNDEFINED);
     if (current.type == JSMN_OBJECT) {
         if (!path.empty()) {
-            AddInvertedRecord(path,
-                              0,
-                              0,
-                              offset,
-                              current.start,
-                              current.end - current.start,
-                              0);
+            AddJSONEncodeValue(path,
+                               0,
+                               0,
+                               offset,
+                               current.start,
+                               current.end - current.start,
+                               0);
         }
         int j = 1;
         for (int i = 0; i < current.size; i++) {
@@ -90,58 +98,58 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
         auto type = getType(value);
 
         if (type == JSONType::INT32) {
-            AddInvertedRecord(path,
-                              1,
-                              static_cast<uint8_t>(JSONType::INT32),
-                              offset,
-                              current.start,
-                              current.end - current.start,
-                              stoi(value));
+            AddJSONEncodeValue(path,
+                               1,
+                               static_cast<uint8_t>(JSONType::INT32),
+                               offset,
+                               current.start,
+                               current.end - current.start,
+                               stoi(value));
         } else if (type == JSONType::INT64) {
-            AddInvertedRecord(path,
-                              0,
-                              static_cast<uint8_t>(JSONType::INT64),
-                              offset,
-                              current.start,
-                              current.end - current.start,
-                              0);
+            AddJSONEncodeValue(path,
+                               0,
+                               static_cast<uint8_t>(JSONType::INT64),
+                               offset,
+                               current.start,
+                               current.end - current.start,
+                               0);
         } else if (type == JSONType::FLOAT) {
             auto fvalue = stof(value);
             uint32_t valueBits = *reinterpret_cast<uint32_t*>(&fvalue);
-            AddInvertedRecord(path,
-                              1,
-                              static_cast<uint8_t>(JSONType::FLOAT),
-                              offset,
-                              current.start,
-                              current.end - current.start,
-                              valueBits);
+            AddJSONEncodeValue(path,
+                               1,
+                               static_cast<uint8_t>(JSONType::FLOAT),
+                               offset,
+                               current.start,
+                               current.end - current.start,
+                               valueBits);
         } else if (type == JSONType::DOUBLE) {
-            AddInvertedRecord(path,
-                              0,
-                              static_cast<uint8_t>(JSONType::DOUBLE),
-                              offset,
-                              current.start,
-                              current.end - current.start,
-                              0);
+            AddJSONEncodeValue(path,
+                               0,
+                               static_cast<uint8_t>(JSONType::DOUBLE),
+                               offset,
+                               current.start,
+                               current.end - current.start,
+                               0);
         } else if (type == JSONType::BOOL) {
-            AddInvertedRecord(path,
-                              1,
-                              static_cast<uint8_t>(JSONType::BOOL),
-                              offset,
-                              current.start,
-                              current.end - current.start,
-                              value == "true" ? 1 : 0);
+            AddJSONEncodeValue(path,
+                               1,
+                               static_cast<uint8_t>(JSONType::BOOL),
+                               offset,
+                               current.start,
+                               current.end - current.start,
+                               value == "true" ? 1 : 0);
         }
 
         index++;
     } else if (current.type == JSMN_ARRAY) {
-        AddInvertedRecord(path,
-                          0,
-                          static_cast<uint8_t>(JSONType::UNKNOWN),
-                          offset,
-                          current.start,
-                          current.end - current.start,
-                          0);
+        AddJSONEncodeValue(path,
+                           0,
+                           static_cast<uint8_t>(JSONType::UNKNOWN),
+                           offset,
+                           current.start,
+                           current.end - current.start,
+                           0);
         // skip array parse
         int count = current.size;
         int j = 1;
@@ -157,21 +165,21 @@ JsonKeyInvertedIndex::TravelJson(const char* json,
         Assert(current.size == 0);
         std::string value(json + current.start, current.end - current.start);
         if (has_escape_sequence(value)) {
-            AddInvertedRecord(path,
-                              0,
-                              static_cast<uint8_t>(JSONType::STRING_ESCAPE),
-                              offset,
-                              current.start - 1,
-                              current.end - current.start + 2,
-                              0);
+            AddJSONEncodeValue(path,
+                               0,
+                               static_cast<uint8_t>(JSONType::STRING_ESCAPE),
+                               offset,
+                               current.start - 1,
+                               current.end - current.start + 2,
+                               0);
         } else {
-            AddInvertedRecord(path,
-                              0,
-                              static_cast<uint8_t>(JSONType::STRING),
-                              offset,
-                              current.start,
-                              current.end - current.start,
-                              0);
+            AddJSONEncodeValue(path,
+                               0,
+                               static_cast<uint8_t>(JSONType::STRING),
+                               offset,
+                               current.start,
+                               current.end - current.start,
+                               0);
         }
         index++;
     }
@@ -386,6 +394,7 @@ JsonKeyInvertedIndex::BuildWithFieldData(
             }
         }
     }
+    AddInvertedRecord();
     LOG_INFO("build json key index done for field id:{}", field_id_);
 }
 
@@ -401,6 +410,7 @@ JsonKeyInvertedIndex::AddJSONDatas(size_t n,
         }
         AddJson(jsonDatas[i].c_str(), offset);
     }
+    AddInvertedRecord();
     is_data_uncommitted_ = true;
     LOG_INFO("build json key index done for AddJSONDatas");
     if (shouldTriggerCommit()) {

@@ -149,13 +149,13 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
                int32_t offset);
 
     void
-    AddInvertedRecord(const std::vector<std::string>& paths,
-                      uint8_t flag,
-                      uint8_t type,
-                      uint32_t row_id,
-                      uint16_t offset,
-                      uint16_t length,
-                      uint32_t value);
+    AddJSONEncodeValue(const std::vector<std::string>& paths,
+                       uint8_t flag,
+                       uint8_t type,
+                       uint32_t row_id,
+                       uint16_t offset,
+                       uint16_t length,
+                       uint32_t value);
 
     int64_t
     EncodeOffset(uint8_t flag,
@@ -279,12 +279,16 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
         return JSONType::UNKNOWN;
     }
 
+    void
+    AddInvertedRecord();
+
  private:
     int64_t field_id_;
     mutable std::mutex mtx_;
     std::atomic<stdclock::time_point> last_commit_time_;
     int64_t commit_interval_in_ms_;
     int64_t build_type_ = 0;
+    std::map<std::string, std::vector<int64_t>> mp;
     std::atomic<bool> is_data_uncommitted_ = false;
 };
 }  // namespace milvus::index
