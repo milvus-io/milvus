@@ -81,25 +81,22 @@ half_nb = ct.default_nb // 2
 max_hybrid_search_req_num = ct.max_hybrid_search_req_num
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+class TestSearchDSL(TestcaseBase):
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_vector_only(self):
+        """
+        target: test search normal scenario
+        method: search vector only
+        expected: search status ok, the length of result
+        """
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, ct.default_nb)[0:5]
+        vectors = [[random.random() for _ in range(ct.default_dim)]
+                   for _ in range(nq)]
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, ct.default_top_k,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": ct.default_top_k})

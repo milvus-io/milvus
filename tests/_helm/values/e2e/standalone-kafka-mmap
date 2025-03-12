@@ -103,6 +103,8 @@ log:
 extraConfigFiles:
   user.yaml: |+
     indexCoord:
+      gc:
+        interval: 1
       scheduler:
         interval: 100
     indexNode:
@@ -115,9 +117,6 @@ extraConfigFiles:
         scalarField: true
         scalarIndex: true
         growingMmapEnabled: true
-     indexCoordinator:
-       gc:
-         interval: 1
 metrics:
   serviceMonitor:
     enabled: true
