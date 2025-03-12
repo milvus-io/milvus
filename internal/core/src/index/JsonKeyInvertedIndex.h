@@ -33,7 +33,7 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     explicit JsonKeyInvertedIndex(
         const storage::FileManagerContext& ctx,
         bool is_load,
-        int64_t json_stats_build_type = 1,
+        int64_t json_stats_build_type = 0,
         int64_t json_stats_tantivy_memory_budget = 16777216);
 
     explicit JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
