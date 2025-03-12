@@ -286,6 +286,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::In(size_t n, const T* values) {
+    LOG_INFO("InvertedIndexTantivy<T>::In");
     TargetBitmap bitset(Count());
     for (size_t i = 0; i < n; ++i) {
         wrapper_->term_query(values[i], &bitset);

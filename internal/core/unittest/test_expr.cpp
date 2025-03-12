@@ -16298,21 +16298,21 @@ class JsonIndexTestFixture : public testing::Test {
             json_path = "/bool";
             lower_bound.set_bool_val(std::numeric_limits<bool>::min());
             upper_bound.set_bool_val(std::numeric_limits<bool>::max());
-            cast_type = JsonCastType::BOOL;
+            cast_type = JsonCastType::FromString("BOOL");
             wrong_type_val.set_int64_val(123);
         } else if constexpr (std::is_same_v<T, int64_t>) {
             schema_data_type = proto::schema::Int64;
             json_path = "/int";
             lower_bound.set_int64_val(std::numeric_limits<int64_t>::min());
             upper_bound.set_int64_val(std::numeric_limits<int64_t>::max());
-            cast_type = JsonCastType::DOUBLE;
+            cast_type = JsonCastType::FromString("DOUBLE");
             wrong_type_val.set_string_val("123");
         } else if constexpr (std::is_same_v<T, double>) {
             schema_data_type = proto::schema::Double;
             json_path = "/double";
             lower_bound.set_float_val(std::numeric_limits<double>::min());
             upper_bound.set_float_val(std::numeric_limits<double>::max());
-            cast_type = JsonCastType::DOUBLE;
+            cast_type = JsonCastType::FromString("DOUBLE");
             wrong_type_val.set_string_val("123");
         } else if constexpr (std::is_same_v<T, std::string>) {
             schema_data_type = proto::schema::String;
@@ -16320,7 +16320,7 @@ class JsonIndexTestFixture : public testing::Test {
             lower_bound.set_string_val("");
             std::string s(1024, '9');
             upper_bound.set_string_val(s);
-            cast_type = JsonCastType::VARCHAR;
+            cast_type = JsonCastType::FromString("VARCHAR");
             wrong_type_val.set_int64_val(123);
         }
     }
@@ -16328,7 +16328,7 @@ class JsonIndexTestFixture : public testing::Test {
     std::string json_path;
     proto::plan::GenericValue lower_bound;
     proto::plan::GenericValue upper_bound;
-    JsonCastType cast_type;
+    JsonCastType cast_type = JsonCastType::UNKNOWN;
 
     proto::plan::GenericValue wrong_type_val;
 };
@@ -16487,7 +16487,7 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
         index::INVERTED_INDEX_TYPE,
-        JsonCastType::DOUBLE,
+        JsonCastType::FromString("DOUBLE"),
         "/a",
         file_manager_ctx);
 
@@ -16592,7 +16592,7 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
     file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
         index::INVERTED_INDEX_TYPE,
-        JsonCastType::DOUBLE,
+        JsonCastType::FromString("DOUBLE"),
         json_index_path,
         file_manager_ctx);
 
@@ -16658,8 +16658,8 @@ class JsonIndexBinaryExprTest : public testing::TestWithParam<JsonCastType> {};
 
 INSTANTIATE_TEST_SUITE_P(JsonIndexBinaryExprTestParams,
                          JsonIndexBinaryExprTest,
-                         testing::Values(JsonCastType::DOUBLE,
-                                         JsonCastType::VARCHAR));
+                         testing::Values(JsonCastType::FromString("DOUBLE"),
+                                         JsonCastType::FromString("VARCHAR")));
 
 TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
     auto json_strs = std::vector<std::string>{
