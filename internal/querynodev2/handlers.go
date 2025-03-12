@@ -235,12 +235,15 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 		req.GetSegmentIDs(),
 	))
 
-	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
-	if collection == nil {
+	if !node.manager.Collection.Ref(req.Req.GetCollectionID(), 1) {
 		err := merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
 		log.Warn("Query failed, failed to get collection", zap.Error(err))
 		return nil, err
 	}
+	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	defer func() {
+		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
+	}()
 
 	reducer := segments.CreateInternalReducer(req, collection.Schema())
 
@@ -317,10 +320,15 @@ func (node *QueryNode) queryStreamSegments(ctx context.Context, req *querypb.Que
 		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
 	)
 
-	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
-	if collection == nil {
-		return merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
+	if !node.manager.Collection.Ref(req.Req.GetCollectionID(), 1) {
+		err := merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
+		log.Warn("Query stream segments failed, failed to get collection", zap.Error(err))
+		return err
 	}
+	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	defer func() {
+		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
+	}()
 
 	// Send task to scheduler and wait until it finished.
 
