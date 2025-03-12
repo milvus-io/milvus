@@ -26,7 +26,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/cockroachdb/errors"
-	minio "github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
 	"golang.org/x/sync/errgroup"
@@ -34,18 +34,10 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-)
-
-const (
-	CloudProviderGCP       = "gcp"
-	CloudProviderGCPNative = "gcpnative"
-	CloudProviderAWS       = "aws"
-	CloudProviderAliyun    = "aliyun"
-	CloudProviderAzure     = "azure"
-	CloudProviderTencent   = "tencent"
 )
 
 // ChunkObjectWalkFunc is the callback function for walking objects.
@@ -65,7 +57,7 @@ type ObjectStorage interface {
 	RemoveObject(ctx context.Context, bucketName, objectName string) error
 }
 
-// RemoteChunkManager is responsible for read and write data stored in minio.
+// RemoteChunkManager is responsible for read and write data stored in mminio.
 type RemoteChunkManager struct {
 	client ObjectStorage
 
@@ -76,12 +68,12 @@ type RemoteChunkManager struct {
 
 var _ ChunkManager = (*RemoteChunkManager)(nil)
 
-func NewRemoteChunkManager(ctx context.Context, c *config) (*RemoteChunkManager, error) {
+func NewRemoteChunkManager(ctx context.Context, c *objectstorage.Config) (*RemoteChunkManager, error) {
 	var client ObjectStorage
 	var err error
-	if c.cloudProvider == CloudProviderAzure {
+	if c.CloudProvider == objectstorage.CloudProviderAzure {
 		client, err = newAzureObjectStorageWithConfig(ctx, c)
-	} else if c.cloudProvider == CloudProviderGCPNative {
+	} else if c.CloudProvider == objectstorage.CloudProviderGCPNative {
 		client, err = newGcpNativeObjectStorageWithConfig(ctx, c)
 	} else {
 		client, err = newMinioObjectStorageWithConfig(ctx, c)
@@ -91,10 +83,10 @@ func NewRemoteChunkManager(ctx context.Context, c *config) (*RemoteChunkManager,
 	}
 	mcm := &RemoteChunkManager{
 		client:     client,
-		bucketName: c.bucketName,
-		rootPath:   strings.TrimLeft(c.rootPath, "/"),
+		bucketName: c.BucketName,
+		rootPath:   strings.TrimLeft(c.RootPath, "/"),
 	}
-	log.Info("remote chunk manager init success.", zap.String("remote", c.cloudProvider), zap.String("bucketname", c.bucketName), zap.String("root", mcm.RootPath()))
+	log.Info("remote chunk manager init success.", zap.String("remote", c.CloudProvider), zap.String("bucketname", c.BucketName), zap.String("root", mcm.RootPath()))
 	return mcm, nil
 }
 
