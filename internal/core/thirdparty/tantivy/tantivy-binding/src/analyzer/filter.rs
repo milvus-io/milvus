@@ -1,4 +1,3 @@
-use regex;
 use serde_json as json;
 use tantivy::tokenizer::*;
 

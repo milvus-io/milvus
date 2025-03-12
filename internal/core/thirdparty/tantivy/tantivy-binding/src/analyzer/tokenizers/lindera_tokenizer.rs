@@ -1,6 +1,5 @@
 
 use core::result::Result::Err;
-use log::warn;
 
 use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
