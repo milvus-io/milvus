@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
 )
@@ -25,6 +26,9 @@ func (w *walImpl) WALName() string {
 }
 
 func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+	if w.Channel().AccessMode != types.AccessModeRW {
+		panic("write on a wal that is not in read-write mode")
+	}
 	id, err := w.p.Send(ctx, &pulsar.ProducerMessage{
 		Payload:    msg.Payload(),
 		Properties: msg.Properties().ToRawMap(),
@@ -73,5 +77,7 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 }
 
 func (w *walImpl) Close() {
-	w.p.Close() // close all producer
+	if w.p != nil {
+		w.p.Close() // close producer
+	}
 }
