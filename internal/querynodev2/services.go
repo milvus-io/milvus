@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -1317,9 +1318,13 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				return id, action.GetCheckpoint().Timestamp
 			})
 			shardDelegator.AddExcludedSegments(flushedInfo)
-			deleteCP := &msgpb.MsgPosition{}
-			if deleteCP.GetTimestamp() == 0 {
+			deleteCP := action.GetDeleteCP()
+			if deleteCP == nil {
+				// for compatible with 2.4, we use checkpoint as deleteCP when deleteCP is nil
 				deleteCP = action.GetCheckpoint()
+				log.Info("use checkpoint as deleteCP",
+					zap.String("channelName", req.GetChannel()),
+					zap.Time("deleteSeekPos", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())))
 			}
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), req.GetLoadMeta().GetPartitionIDs(), action.GetGrowingInTarget(),
 				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint(), deleteCP)
