@@ -16263,21 +16263,21 @@ class JsonIndexTestFixture : public testing::Test {
             json_path = "/bool";
             lower_bound.set_bool_val(std::numeric_limits<bool>::min());
             upper_bound.set_bool_val(std::numeric_limits<bool>::max());
-            cast_type = milvus::DataType::BOOL;
+            cast_type = JsonCastType::BOOL;
             wrong_type_val.set_int64_val(123);
         } else if constexpr (std::is_same_v<T, int64_t>) {
             schema_data_type = proto::schema::Int64;
             json_path = "/int";
             lower_bound.set_int64_val(std::numeric_limits<int64_t>::min());
             upper_bound.set_int64_val(std::numeric_limits<int64_t>::max());
-            cast_type = milvus::DataType::INT64;
+            cast_type = JsonCastType::DOUBLE;
             wrong_type_val.set_string_val("123");
         } else if constexpr (std::is_same_v<T, double>) {
             schema_data_type = proto::schema::Double;
             json_path = "/double";
             lower_bound.set_float_val(std::numeric_limits<double>::min());
             upper_bound.set_float_val(std::numeric_limits<double>::max());
-            cast_type = milvus::DataType::DOUBLE;
+            cast_type = JsonCastType::DOUBLE;
             wrong_type_val.set_string_val("123");
         } else if constexpr (std::is_same_v<T, std::string>) {
             schema_data_type = proto::schema::String;
@@ -16285,7 +16285,7 @@ class JsonIndexTestFixture : public testing::Test {
             lower_bound.set_string_val("");
             std::string s(1024, '9');
             upper_bound.set_string_val(s);
-            cast_type = milvus::DataType::STRING;
+            cast_type = JsonCastType::VARCHAR;
             wrong_type_val.set_int64_val(123);
         }
     }
@@ -16293,7 +16293,7 @@ class JsonIndexTestFixture : public testing::Test {
     std::string json_path;
     proto::plan::GenericValue lower_bound;
     proto::plan::GenericValue upper_bound;
-    milvus::DataType cast_type;
+    JsonCastType cast_type;
 
     proto::plan::GenericValue wrong_type_val;
 };
