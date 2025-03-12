@@ -81,7 +81,8 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecVisitorImplTemplateJson<bool>(input);
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
-                    result = ExecVisitorImplTemplateJson<int64_t>(input);
+                    // we create double index for json int64 field for now
+                    result = ExecVisitorImplTemplateJson<double>(input);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
                     result = ExecVisitorImplTemplateJson<double>(input);
@@ -631,7 +632,15 @@ PhyTermFilterExpr::ExecVisitorImplForIndex(OffsetVector* input) {
 
     std::vector<IndexInnerType> vals;
     for (auto& val : expr_->vals_) {
-        // Integral overflow process
+        if constexpr (std::is_same_v<T, double>) {
+            if (val.has_int64_val()) {
+                // only json field will cast int to double because other fields are casted in proxy
+                vals.emplace_back(static_cast<double>(val.int64_val()));
+                continue;
+            }
+        }
+
+        // Generic overflow handling for all types
         bool overflowed = false;
         auto converted_val = GetValueFromProtoWithOverflow<T>(val, overflowed);
         if (!overflowed) {

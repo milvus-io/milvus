@@ -201,7 +201,14 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         result = ExecRangeVisitorImplForIndex<bool>();
                         break;
                     case proto::plan::GenericValue::ValCase::kInt64Val:
-                        result = ExecRangeVisitorImplForIndex<int64_t>();
+                        if (expr_->val_.has_int64_val()) {
+                            proto::plan::GenericValue double_val;
+                            double_val.set_float_val(
+                                static_cast<double>(expr_->val_.int64_val()));
+                            value_arg_.SetValue<double>(double_val);
+                            arg_inited_ = true;
+                        }
+                        result = ExecRangeVisitorImplForIndex<double>();
                         break;
                     case proto::plan::GenericValue::ValCase::kFloatVal:
                         result = ExecRangeVisitorImplForIndex<double>();

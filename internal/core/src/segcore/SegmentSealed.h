@@ -16,6 +16,7 @@
 #include <tuple>
 
 #include "common/LoadInfo.h"
+#include "common/Types.h"
 #include "index/JsonInvertedIndex.h"
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentInterface.h"
@@ -84,7 +85,9 @@ class SegmentSealed : public SegmentInternalInterface {
         key.nested_path = path;
         auto index = json_indexings_.find(key);
         return index != json_indexings_.end() &&
-               data_type == index->second->JsonCastType();
+               (data_type == index->second->JsonCastType() ||
+                (data_type == DataType::INT64 &&
+                 index->second->JsonCastType() == DataType::DOUBLE));
     }
 
  protected:
