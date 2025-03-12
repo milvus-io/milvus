@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestNewRowParser_Invalid(t *testing.T) {
@@ -74,6 +75,93 @@ func TestNewRowParser_Invalid(t *testing.T) {
 			_, err := NewRowParser(schema, c.header, nullkey)
 			assert.Error(t, err)
 			assert.True(t, strings.Contains(err.Error(), c.expectErr))
+		})
+	}
+}
+
+func TestRowParser_Parse_SparseVector(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      1,
+				Name:         "id",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:    2,
+				Name:       "sparse_vector",
+				DataType:   schemapb.DataType_SparseFloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+			},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		header     []string
+		row        []string
+		wantMaxIdx uint32
+		wantErr    bool
+	}{
+		{
+			name:       "empty sparse vector",
+			header:     []string{"id", "sparse_vector"},
+			row:        []string{"1", "{}"},
+			wantMaxIdx: 0,
+			wantErr:    false,
+		},
+		{
+			name:       "key-value format",
+			header:     []string{"id", "sparse_vector"},
+			row:        []string{"1", "{\"5\":3.14}"},
+			wantMaxIdx: 6, // max index 5 + 1
+			wantErr:    false,
+		},
+		{
+			name:       "multiple key-value pairs",
+			header:     []string{"id", "sparse_vector"},
+			row:        []string{"1", "{\"1\":0.5,\"10\":1.5,\"100\":2.5}"},
+			wantMaxIdx: 101, // max index 100 + 1
+			wantErr:    false,
+		},
+		{
+			name:    "invalid format",
+			header:  []string{"id", "sparse_vector"},
+			row:     []string{"1", "{275574541:1.5383775}"},
+			wantErr: true,
+		},
+	}
+
+	nullkey := ""
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser, err := NewRowParser(schema, tt.header, nullkey)
+			assert.NoError(t, err)
+
+			row, err := parser.Parse(tt.row)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Contains(t, row, int64(2)) // sparse_vector field ID
+
+			sparseVec := row[int64(2)].([]byte)
+
+			if tt.wantMaxIdx > 0 {
+				elemCount := len(sparseVec) / 8
+				assert.Greater(t, elemCount, 0)
+
+				// Check the last index matches our expectation
+				lastIdx := typeutil.SparseFloatRowIndexAt(sparseVec, elemCount-1)
+				assert.Equal(t, tt.wantMaxIdx-1, lastIdx)
+			} else {
+				assert.Empty(t, sparseVec)
+			}
 		})
 	}
 }
