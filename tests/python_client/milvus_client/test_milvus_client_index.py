@@ -1343,7 +1343,7 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
                                 "index_type": supported_varchar_scalar_index,
                                 "field_name": json_field_name,
                                 "index_name": index_name})
-        index_name = f"{json_field_name}/"
+        index_name = f"{json_field_name}"
         self.describe_index(client, collection_name, index_name,
                             check_task=CheckTasks.check_describe_index_property,
                             check_items={
