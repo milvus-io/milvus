@@ -2291,5 +2291,4 @@ func Test_GetSegmentsInfo(t *testing.T) {
 		assert.ElementsMatch(t, []int64{3, 7}, resp.GetSegmentInfos()[0].GetInsertLogs()[2].GetLogIDs())
 		assert.ElementsMatch(t, []int64{4, 8}, resp.GetSegmentInfos()[0].GetInsertLogs()[3].GetLogIDs())
 	})
-
 }
