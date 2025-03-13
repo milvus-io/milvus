@@ -16,6 +16,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type jobManagerSuite struct {
@@ -94,9 +96,11 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 			},
 		},
 		statsTaskMeta: &statsTaskMeta{
-			ctx:     ctx,
-			catalog: catalog,
-			tasks:   make(map[int64]*indexpb.StatsTask),
+			ctx:             ctx,
+			catalog:         catalog,
+			keyLock:         lock.NewKeyLock[UniqueID](),
+			tasks:           typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
+			segmentID2Tasks: typeutil.NewConcurrentMap[string, *indexpb.StatsTask](),
 		},
 	}
 
@@ -108,7 +112,7 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 		scheduler: &taskScheduler{
 			allocator:    alloc,
 			pendingTasks: newFairQueuePolicy(),
-			runningTasks: make(map[UniqueID]Task),
+			runningTasks: typeutil.NewConcurrentMap[UniqueID, Task](),
 			meta:         mt,
 			taskStats:    expirable.NewLRU[UniqueID, Task](512, nil, time.Minute*5),
 		},
