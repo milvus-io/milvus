@@ -111,6 +111,8 @@ func (node *DataNode) getSystemInfoMetrics(ctx context.Context, _ *milvuspb.GetM
 			ID:            node.GetSession().ServerID,
 		},
 		SystemConfigurations: metricsinfo.DataNodeConfiguration{
+			MinioBucketName:       Params.MinioCfg.BucketName.GetValue(),
+			SimdType:              Params.CommonCfg.SimdType.GetValue(),
 			FlushInsertBufferSize: Params.DataNodeCfg.FlushInsertBufferSize.GetAsInt64(),
 		},
 		QuotaMetrics: quotaMetrics,

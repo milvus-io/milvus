@@ -26,7 +26,6 @@ import (
 	"math/rand"
 	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -40,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/channel"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/datanode/msghandlerimpl"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
+	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -92,7 +93,7 @@ type DataNode struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
 	Role             string
-	stateCode        atomic.Value // commonpb.StateCode_Initializing
+	lifetime         lifetime.Lifetime[commonpb.StateCode]
 	flowgraphManager pipeline.FlowgraphManager
 
 	channelManager channel.ChannelManager
@@ -101,6 +102,11 @@ type DataNode struct {
 	writeBufferManager writebuffer.BufferManager
 	importTaskMgr      importv2.TaskManager
 	importScheduler    importv2.Scheduler
+
+	// indexnode related
+	storageFactory StorageFactory
+	taskScheduler  *index.TaskScheduler
+	taskManager    *index.TaskManager
 
 	segmentCache             *util.Cache
 	compactionExecutor       compactor.Executor
@@ -139,9 +145,10 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 	rand.Seed(time.Now().UnixNano())
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
-		ctx:    ctx2,
-		cancel: cancel2,
-		Role:   typeutil.DataNodeRole,
+		ctx:      ctx2,
+		cancel:   cancel2,
+		Role:     typeutil.DataNodeRole,
+		lifetime: lifetime.NewLifetime(commonpb.StateCode_Abnormal),
 
 		rootCoord:              nil,
 		dataCoord:              nil,
@@ -151,6 +158,10 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		reportImportRetryTimes: 10,
 		metricsRequest:         metricsinfo.NewMetricsRequest(),
 	}
+	sc := index.NewTaskScheduler(ctx2)
+	node.storageFactory = NewChunkMgrFactory()
+	node.taskScheduler = sc
+	node.taskManager = index.NewTaskManager(ctx2)
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("datanode", node)
 	return node
@@ -275,6 +286,8 @@ func (node *DataNode) Init() error {
 		node.channelCheckpointUpdater = util2.NewChannelCheckpointUpdater(node.broker)
 		node.flowgraphManager = pipeline.NewFlowgraphManager()
 
+		index.InitSegcore()
+
 		log.Info("init datanode done", zap.String("Address", node.address))
 	})
 	return initError
@@ -360,6 +373,12 @@ func (node *DataNode) Start() error {
 
 		go node.importScheduler.Start()
 
+		err = node.taskScheduler.Start()
+		if err != nil {
+			startErr = err
+			return
+		}
+
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
 	return startErr
@@ -367,12 +386,12 @@ func (node *DataNode) Start() error {
 
 // UpdateStateCode updates datanode's state code
 func (node *DataNode) UpdateStateCode(code commonpb.StateCode) {
-	node.stateCode.Store(code)
+	node.lifetime.SetState(code)
 }
 
 // GetStateCode return datanode's state code
 func (node *DataNode) GetStateCode() commonpb.StateCode {
-	return node.stateCode.Load().(commonpb.StateCode)
+	return node.lifetime.GetState()
 }
 
 func (node *DataNode) isHealthy() bool {
@@ -392,6 +411,7 @@ func (node *DataNode) Stop() error {
 	node.stopOnce.Do(func() {
 		// https://github.com/milvus-io/milvus/issues/12282
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		node.lifetime.Wait()
 		if node.channelManager != nil {
 			node.channelManager.Close()
 		}
@@ -436,6 +456,15 @@ func (node *DataNode) Stop() error {
 		if node.importScheduler != nil {
 			node.importScheduler.Close()
 		}
+
+		// cleanup all running tasks
+		node.taskManager.DeleteAllTasks()
+
+		if node.taskScheduler != nil {
+			node.taskScheduler.Close()
+		}
+
+		index.CloseSegcore()
 
 		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
 		node.cancel()

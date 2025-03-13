@@ -8,9 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
-	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
-	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -137,9 +135,6 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	// build all components.
 	broker := broker.NewCoordBroker(dc, paramtable.GetNodeID())
 	chunkManager := resource.Resource().ChunkManager()
-	syncMgr := syncmgr.NewSyncManager(chunkManager)
-	wbMgr := writebuffer.NewManager(syncMgr)
-	wbMgr.Start()
 
 	pm, err := recoverPChannelCheckpointManager(ctx, l.WALName(), l.Channel().Name, checkpoints)
 	if err != nil {
@@ -155,8 +150,6 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	fc := &flusherComponents{
 		wal:               l,
 		broker:            broker,
-		syncMgr:           syncMgr,
-		wbMgr:             wbMgr,
 		cpUpdater:         cpUpdater,
 		chunkManager:      chunkManager,
 		dataServices:      make(map[string]*dataSyncServiceWrapper),

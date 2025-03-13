@@ -48,7 +48,6 @@ import (
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord"
 	grpcdatacoordclient2 "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
-	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
 	grpcquerycoordclient "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
@@ -230,45 +229,6 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 	return dn
 }
 
-func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexnode.Server {
-	var in *grpcindexnode.Server
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		factory := dependency.MockDefaultFactory(localMsg, Params)
-		var err error
-		in, err = grpcindexnode.NewServer(ctx, factory)
-		if err != nil {
-			panic(err)
-		}
-		etcd, err := etcd.GetEtcdClient(
-			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-			Params.EtcdCfg.Endpoints.GetAsStrings(),
-			Params.EtcdCfg.EtcdTLSCert.GetValue(),
-			Params.EtcdCfg.EtcdTLSKey.GetValue(),
-			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-		if err != nil {
-			panic(err)
-		}
-		in.SetEtcdClient(etcd)
-		if err = in.Prepare(); err != nil {
-			panic(err)
-		}
-		err = in.Run()
-		if err != nil {
-			panic(err)
-		}
-	}()
-	wg.Wait()
-
-	metrics.RegisterIndexNode(Registry)
-	return in
-}
-
 type proxyTestServer struct {
 	*Proxy
 	grpcServer *grpc.Server
@@ -379,7 +339,6 @@ func TestProxy(t *testing.T) {
 	params.ProxyGrpcServerCfg.IP = "localhost"
 	params.QueryNodeGrpcServerCfg.IP = "localhost"
 	params.DataNodeGrpcServerCfg.IP = "localhost"
-	params.IndexNodeGrpcServerCfg.IP = "localhost"
 	params.StreamingNodeGrpcServerCfg.IP = "localhost"
 
 	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
@@ -408,9 +367,6 @@ func TestProxy(t *testing.T) {
 
 	qn := runQueryNode(ctx, localMsg, alias)
 	log.Info("running QueryNode ...")
-
-	in := runIndexNode(ctx, localMsg, alias)
-	log.Info("running IndexNode ...")
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -479,7 +435,7 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	log.Info("Register proxy done")
 	defer func() {
-		a := []any{rc, dc, qc, qn, in, dn, proxy}
+		a := []any{rc, dc, qc, qn, dn, proxy}
 		fmt.Println(len(a))
 		// HINT: the order of stopping service refers to the `roles.go` file
 		log.Info("start to stop the services")
@@ -505,12 +461,6 @@ func TestProxy(t *testing.T) {
 			err := qn.Stop()
 			assert.NoError(t, err)
 			log.Info("stop query node")
-		}
-
-		{
-			err := in.Stop()
-			assert.NoError(t, err)
-			log.Info("stop IndexNode")
 		}
 
 		{

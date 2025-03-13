@@ -159,8 +159,7 @@ func getMockProxyRequestMetrics() *Proxy {
 				},
 				SystemConfigurations: metricsinfo.DataCoordConfiguration{},
 			},
-			ConnectedDataNodes:  make([]metricsinfo.DataNodeInfos, 0),
-			ConnectedIndexNodes: make([]metricsinfo.IndexNodeInfos, 0),
+			ConnectedDataNodes: make([]metricsinfo.DataNodeInfos, 0),
 		}
 
 		infos := metricsinfo.DataNodeInfos{
@@ -169,11 +168,11 @@ func getMockProxyRequestMetrics() *Proxy {
 		}
 		clusterTopology.ConnectedDataNodes = append(clusterTopology.ConnectedDataNodes, infos)
 
-		indexNodeInfos := metricsinfo.IndexNodeInfos{
+		indexNodeInfos := metricsinfo.DataNodeInfos{
 			BaseComponentInfos:   metricsinfo.BaseComponentInfos{},
-			SystemConfigurations: metricsinfo.IndexNodeConfiguration{},
+			SystemConfigurations: metricsinfo.DataNodeConfiguration{},
 		}
-		clusterTopology.ConnectedIndexNodes = append(clusterTopology.ConnectedIndexNodes, indexNodeInfos)
+		clusterTopology.ConnectedDataNodes = append(clusterTopology.ConnectedDataNodes, indexNodeInfos)
 
 		coordTopology := metricsinfo.DataCoordTopology{
 			Cluster: clusterTopology,

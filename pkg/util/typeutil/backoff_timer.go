@@ -55,13 +55,11 @@ type BackoffTimer struct {
 func (t *BackoffTimer) EnableBackoff() {
 	if t.backoff == nil {
 		cfg := t.configFetcher.BackoffConfig()
-		defaultInterval := t.configFetcher.DefaultInterval()
 		backoff := backoff.NewExponentialBackOff()
 		backoff.InitialInterval = cfg.InitialInterval
 		backoff.Multiplier = cfg.Multiplier
 		backoff.MaxInterval = cfg.MaxInterval
-		backoff.MaxElapsedTime = defaultInterval
-		backoff.Stop = defaultInterval
+		backoff.MaxElapsedTime = 0
 		backoff.Reset()
 		t.backoff = backoff
 	}
@@ -70,14 +68,6 @@ func (t *BackoffTimer) EnableBackoff() {
 // DisableBackoff disables the backoff
 func (t *BackoffTimer) DisableBackoff() {
 	t.backoff = nil
-}
-
-// IsBackoffStopped returns the elapsed time of backoff
-func (t *BackoffTimer) IsBackoffStopped() bool {
-	if t.backoff != nil {
-		return t.backoff.GetElapsedTime() > t.backoff.MaxElapsedTime
-	}
-	return true
 }
 
 // NextTimer returns the next timer and the duration of the timer
@@ -98,13 +88,11 @@ func (t *BackoffTimer) NextInterval() time.Duration {
 // NewBackoffWithInstant creates a new backoff with instant
 func NewBackoffWithInstant(fetcher BackoffTimerConfigFetcher) *BackoffWithInstant {
 	cfg := fetcher.BackoffConfig()
-	defaultInterval := fetcher.DefaultInterval()
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = cfg.InitialInterval
 	backoff.Multiplier = cfg.Multiplier
 	backoff.MaxInterval = cfg.MaxInterval
-	backoff.MaxElapsedTime = defaultInterval
-	backoff.Stop = defaultInterval
+	backoff.MaxElapsedTime = 0
 	backoff.Reset()
 	return &BackoffWithInstant{
 		backoff:     backoff,

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package index
 
 import (
 	"context"
@@ -29,8 +29,8 @@ import (
 type statsTaskInfoSuite struct {
 	suite.Suite
 
-	ctx  context.Context
-	node *IndexNode
+	ctx     context.Context
+	manager *TaskManager
 
 	cluster string
 	taskID  int64
@@ -41,10 +41,7 @@ func Test_statsTaskInfoSuite(t *testing.T) {
 }
 
 func (s *statsTaskInfoSuite) SetupSuite() {
-	s.node = &IndexNode{
-		loopCtx:    context.Background(),
-		statsTasks: make(map[taskKey]*statsTaskInfo),
-	}
+	s.manager = NewTaskManager(context.Background())
 
 	s.cluster = "test"
 	s.taskID = 100
@@ -52,31 +49,31 @@ func (s *statsTaskInfoSuite) SetupSuite() {
 
 func (s *statsTaskInfoSuite) Test_Methods() {
 	s.Run("loadOrStoreStatsTask", func() {
-		_, cancel := context.WithCancel(s.node.loopCtx)
-		info := &statsTaskInfo{
-			cancel: cancel,
-			state:  indexpb.JobState_JobStateInProgress,
+		_, cancel := context.WithCancel(s.manager.ctx)
+		info := &StatsTaskInfo{
+			Cancel: cancel,
+			State:  indexpb.JobState_JobStateInProgress,
 		}
 
-		reInfo := s.node.loadOrStoreStatsTask(s.cluster, s.taskID, info)
+		reInfo := s.manager.LoadOrStoreStatsTask(s.cluster, s.taskID, info)
 		s.Nil(reInfo)
 
-		reInfo = s.node.loadOrStoreStatsTask(s.cluster, s.taskID, info)
-		s.Equal(indexpb.JobState_JobStateInProgress, reInfo.state)
+		reInfo = s.manager.LoadOrStoreStatsTask(s.cluster, s.taskID, info)
+		s.Equal(indexpb.JobState_JobStateInProgress, reInfo.State)
 	})
 
 	s.Run("getStatsTaskState", func() {
-		s.Equal(indexpb.JobState_JobStateInProgress, s.node.getStatsTaskState(s.cluster, s.taskID))
-		s.Equal(indexpb.JobState_JobStateNone, s.node.getStatsTaskState(s.cluster, s.taskID+1))
+		s.Equal(indexpb.JobState_JobStateInProgress, s.manager.GetStatsTaskState(s.cluster, s.taskID))
+		s.Equal(indexpb.JobState_JobStateNone, s.manager.GetStatsTaskState(s.cluster, s.taskID+1))
 	})
 
 	s.Run("storeStatsTaskState", func() {
-		s.node.storeStatsTaskState(s.cluster, s.taskID, indexpb.JobState_JobStateFinished, "finished")
-		s.Equal(indexpb.JobState_JobStateFinished, s.node.getStatsTaskState(s.cluster, s.taskID))
+		s.manager.StoreStatsTaskState(s.cluster, s.taskID, indexpb.JobState_JobStateFinished, "finished")
+		s.Equal(indexpb.JobState_JobStateFinished, s.manager.GetStatsTaskState(s.cluster, s.taskID))
 	})
 
 	s.Run("storeStatsResult", func() {
-		s.node.storePKSortStatsResult(s.cluster, s.taskID, 1, 2, 3, "ch1", 65535,
+		s.manager.StorePKSortStatsResult(s.cluster, s.taskID, 1, 2, 3, "ch1", 65535,
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
 			[]*datapb.FieldBinlog{},
@@ -84,7 +81,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 	})
 
 	s.Run("storeStatsTextIndexResult", func() {
-		s.node.storeStatsTextIndexResult(s.cluster, s.taskID, 1, 2, 3, "ch1",
+		s.manager.StoreStatsTextIndexResult(s.cluster, s.taskID, 1, 2, 3, "ch1",
 			map[int64]*datapb.TextIndexStats{
 				100: {
 					FieldID:    100,
@@ -97,19 +94,19 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 	})
 
 	s.Run("getStatsTaskInfo", func() {
-		taskInfo := s.node.getStatsTaskInfo(s.cluster, s.taskID)
+		taskInfo := s.manager.GetStatsTaskInfo(s.cluster, s.taskID)
 
-		s.Equal(indexpb.JobState_JobStateFinished, taskInfo.state)
-		s.Equal(int64(1), taskInfo.collID)
-		s.Equal(int64(2), taskInfo.partID)
-		s.Equal(int64(3), taskInfo.segID)
-		s.Equal("ch1", taskInfo.insertChannel)
-		s.Equal(int64(65535), taskInfo.numRows)
+		s.Equal(indexpb.JobState_JobStateFinished, taskInfo.State)
+		s.Equal(int64(1), taskInfo.CollID)
+		s.Equal(int64(2), taskInfo.PartID)
+		s.Equal(int64(3), taskInfo.SegID)
+		s.Equal("ch1", taskInfo.InsertChannel)
+		s.Equal(int64(65535), taskInfo.NumRows)
 	})
 
 	s.Run("deleteStatsTaskInfos", func() {
-		s.node.deleteStatsTaskInfos(s.ctx, []taskKey{{ClusterID: s.cluster, TaskID: s.taskID}})
+		s.manager.DeleteStatsTaskInfos(s.ctx, []Key{{ClusterID: s.cluster, TaskID: s.taskID}})
 
-		s.Nil(s.node.getStatsTaskInfo(s.cluster, s.taskID))
+		s.Nil(s.manager.GetStatsTaskInfo(s.cluster, s.taskID))
 	})
 }

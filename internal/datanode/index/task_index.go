@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package index
 
 import (
 	"context"
@@ -57,23 +57,23 @@ type indexBuildTask struct {
 	newIndexParams map[string]string
 	tr             *timerecord.TimeRecorder
 	queueDur       time.Duration
-	node           *IndexNode
+	manager        *TaskManager
 }
 
-func newIndexBuildTask(ctx context.Context,
+func NewIndexBuildTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.CreateJobRequest,
 	cm storage.ChunkManager,
-	node *IndexNode,
+	manager *TaskManager,
 ) *indexBuildTask {
 	t := &indexBuildTask{
-		ident:  fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetBuildID()),
-		cancel: cancel,
-		ctx:    ctx,
-		cm:     cm,
-		req:    req,
-		tr:     timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.GetBuildID(), req.GetClusterID())),
-		node:   node,
+		ident:   fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetBuildID()),
+		cancel:  cancel,
+		ctx:     ctx,
+		cm:      cm,
+		req:     req,
+		tr:      timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.GetBuildID(), req.GetClusterID())),
+		manager: manager,
 	}
 
 	t.parseParams()
@@ -101,7 +101,7 @@ func (it *indexBuildTask) Reset() {
 	it.newTypeParams = nil
 	it.newIndexParams = nil
 	it.tr = nil
-	it.node = nil
+	it.manager = nil
 }
 
 // Ctx is the context of index tasks.
@@ -115,18 +115,22 @@ func (it *indexBuildTask) Name() string {
 }
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
-	it.node.storeIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), commonpb.IndexState(state), failReason)
+	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), commonpb.IndexState(state), failReason)
+	if state == indexpb.JobState_JobStateFinished {
+		metrics.DataNodeBuildIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(it.tr.ElapseSpan().Seconds())
+		metrics.DataNodeIndexTaskLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(it.queueDur.Milliseconds()))
+	}
 }
 
 func (it *indexBuildTask) GetState() indexpb.JobState {
-	return indexpb.JobState(it.node.loadIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID()))
+	return indexpb.JobState(it.manager.LoadIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID()))
 }
 
 // OnEnqueue enqueues indexing tasks.
 func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 	it.queueDur = 0
 	it.tr.RecordSpan()
-	log.Ctx(ctx).Info("IndexNode IndexBuilderTask Enqueue", zap.Int64("buildID", it.req.GetBuildID()),
+	log.Ctx(ctx).Info("IndexBuilderTask Enqueue", zap.Int64("buildID", it.req.GetBuildID()),
 		zap.Int64("segmentID", it.req.GetSegmentID()))
 	return nil
 }
@@ -217,29 +221,29 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	var fieldDataSize uint64
 	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 		// check index node support disk index
-		if !Params.IndexNodeCfg.EnableDisk.GetAsBool() {
-			log.Warn("IndexNode don't support build disk index",
+		if !paramtable.Get().DataNodeCfg.EnableDisk.GetAsBool() {
+			log.Warn("don't support build disk index",
 				zap.String("index type", it.newIndexParams[common.IndexTypeKey]),
-				zap.Bool("enable disk", Params.IndexNodeCfg.EnableDisk.GetAsBool()))
+				zap.Bool("enable disk", paramtable.Get().DataNodeCfg.EnableDisk.GetAsBool()))
 			return errors.New("index node don't support build disk index")
 		}
 
 		// check load size and size of field data
 		localUsedSize, err := indexcgowrapper.GetLocalUsedSize(paramtable.Get().LocalStorageCfg.Path.GetValue())
 		if err != nil {
-			log.Warn("IndexNode get local used size failed")
+			log.Warn("get local used size failed")
 			return err
 		}
 		fieldDataSize, err = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
 		if err != nil {
-			log.Warn("IndexNode get local used size failed")
+			log.Warn("get local used size failed")
 			return err
 		}
-		usedLocalSizeWhenBuild := int64(float64(fieldDataSize)*diskUsageRatio) + localUsedSize
-		maxUsedLocalSize := int64(Params.IndexNodeCfg.DiskCapacityLimit.GetAsFloat() * Params.IndexNodeCfg.MaxDiskUsagePercentage.GetAsFloat())
+		usedLocalSizeWhenBuild := int64(float64(fieldDataSize)*DiskUsageRatio) + localUsedSize
+		maxUsedLocalSize := int64(paramtable.Get().DataNodeCfg.DiskCapacityLimit.GetAsFloat() * paramtable.Get().DataNodeCfg.MaxDiskUsagePercentage.GetAsFloat())
 
 		if usedLocalSizeWhenBuild > maxUsedLocalSize {
-			log.Warn("IndexNode don't has enough disk size to build disk ann index",
+			log.Warn("don't has enough disk size to build disk ann index",
 				zap.Int64("usedLocalSizeWhenBuild", usedLocalSizeWhenBuild),
 				zap.Int64("maxUsedLocalSize", maxUsedLocalSize))
 			return errors.New("index node don't has enough disk size to build disk ann index")
@@ -253,8 +257,8 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	// system resource-related parameters, such as memory limits, CPU limits, and disk limits, are appended here to the parameter list
-	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && Params.KnowhereConfig.Enable.GetAsBool() {
-		it.newIndexParams, _ = Params.KnowhereConfig.MergeResourceParams(fieldDataSize, paramtable.BuildStage, it.newIndexParams)
+	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && paramtable.Get().KnowhereConfig.Enable.GetAsBool() {
+		it.newIndexParams, _ = paramtable.Get().KnowhereConfig.MergeResourceParams(fieldDataSize, paramtable.BuildStage, it.newIndexParams)
 	}
 
 	storageConfig := &indexcgopb.StorageConfig{
@@ -321,7 +325,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	buildIndexLatency := it.tr.RecordSpan()
-	metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
+	metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
 
 	log.Info("Successfully build index")
 	return nil
@@ -334,7 +338,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 
 	gcIndex := func() {
 		if err := it.index.Delete(); err != nil {
-			log.Warn("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
+			log.Warn("indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 		}
 	}
 	indexStats, err := it.index.UpLoad()
@@ -344,7 +348,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 	encodeIndexFileDur := it.tr.Record("index serialize and upload done")
-	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(encodeIndexFileDur.Seconds())
+	metrics.DataNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(encodeIndexFileDur.Seconds())
 
 	// early release index for gc, and we can ensure that Delete is idempotent.
 	gcIndex()
@@ -359,7 +363,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		saveFileKeys = append(saveFileKeys, fileKey)
 	}
 
-	it.node.storeIndexFilesAndStatistic(
+	it.manager.StoreIndexFilesAndStatistic(
 		it.req.GetClusterID(),
 		it.req.GetBuildID(),
 		saveFileKeys,
@@ -369,7 +373,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		it.req.GetCurrentScalarIndexVersion(),
 	)
 	saveIndexFileDur := it.tr.RecordSpan()
-	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
+	metrics.DataNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
 	it.tr.Elapse("index building all done")
 	log.Info("Successfully save index files",
 		zap.Uint64("serializedSize", serializedSize),
@@ -390,7 +394,7 @@ func (it *indexBuildTask) parseFieldMetaFromBinlog(ctx context.Context) error {
 	}
 
 	var insertCodec storage.InsertCodec
-	collectionID, partitionID, segmentID, insertData, err := insertCodec.DeserializeAll([]*Blob{{Key: toLoadDataPaths[0], Value: data}})
+	collectionID, partitionID, segmentID, insertData, err := insertCodec.DeserializeAll([]*storage.Blob{{Key: toLoadDataPaths[0], Value: data}})
 	if err != nil {
 		return err
 	}

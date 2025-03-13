@@ -24,12 +24,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -789,7 +789,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 	// catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
-	in := mocks.NewMockIndexNodeClient(s.T())
+	in := mocks.NewMockDataNodeClient(s.T())
 	in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, request *workerpb.QueryJobsV2Request, option ...grpc.CallOption) (*workerpb.QueryJobsV2Response, error) {
@@ -1052,7 +1052,7 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().DropAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
 
-		in := mocks.NewMockIndexNodeClient(s.T())
+		in := mocks.NewMockDataNodeClient(s.T())
 
 		workerManager := session.NewMockWorkerManager(s.T())
 		workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]int64 {
@@ -1302,7 +1302,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		indexNodeTasks := make(map[int64]int)
 
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
-		in := mocks.NewMockIndexNodeClient(s.T())
+		in := mocks.NewMockDataNodeClient(s.T())
 		workerManager := session.NewMockWorkerManager(s.T())
 		workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]int64 {
 			return map[int64]int64{
@@ -1405,7 +1405,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}).Once()
 
 		// assign failed --> retry
-		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.IndexNodeClient, bool) {
+		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.DataNodeClient, bool) {
 			log.Debug("get client success, but assign failed", zap.Int64("nodeID", nodeID))
 			return in, true
 		}).Once()
@@ -1420,7 +1420,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}).Once()
 
 		// retry --> init
-		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.IndexNodeClient, bool) {
+		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.DataNodeClient, bool) {
 			log.Debug("assign failed, drop task on worker", zap.Int64("nodeID", nodeID))
 			return in, true
 		}).Once()
@@ -1433,7 +1433,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}).Once()
 
 		// init --> inProgress
-		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.IndexNodeClient, bool) {
+		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.DataNodeClient, bool) {
 			log.Debug("assign task success", zap.Int64("nodeID", nodeID))
 			return in, true
 		}).Once()
@@ -1460,7 +1460,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 		}).Once()
 
 		// inProgress --> Finished
-		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.IndexNodeClient, bool) {
+		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.DataNodeClient, bool) {
 			log.Debug("get task result success, task is finished", zap.Int64("nodeID", nodeID))
 			return in, true
 		}).Once()
@@ -1490,7 +1490,7 @@ func (s *taskSchedulerSuite) Test_indexTaskFailCase() {
 			log.Debug("task is finished, alter segment index success", zap.Int64("taskID", indices[0].BuildID))
 			return nil
 		}).Once()
-		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.IndexNodeClient, bool) {
+		workerManager.EXPECT().GetClientByID(mock.Anything).RunAndReturn(func(nodeID int64) (types.DataNodeClient, bool) {
 			log.Debug("task is finished, drop task on worker", zap.Int64("nodeID", nodeID))
 			return in, true
 		}).Once()
@@ -1536,7 +1536,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 	ctx := context.Background()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
-	in := mocks.NewMockIndexNodeClient(s.T())
+	in := mocks.NewMockDataNodeClient(s.T())
 
 	workerManager := session.NewMockWorkerManager(s.T())
 	workerManager.EXPECT().QuerySlots().RunAndReturn(func() map[int64]int64 {
@@ -2264,7 +2264,7 @@ func (s *taskSchedulerSuite) Test_zeroSegmentStats() {
 	cm := mocks.NewChunkManager(s.T())
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
-	in := mocks.NewMockIndexNodeClient(s.T())
+	in := mocks.NewMockDataNodeClient(s.T())
 	in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 	workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true)
 

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package index
 
 import (
 	"context"
@@ -34,7 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
-var _ task = (*analyzeTask)(nil)
+var _ Task = (*analyzeTask)(nil)
 
 type analyzeTask struct {
 	ident  string
@@ -44,22 +44,22 @@ type analyzeTask struct {
 
 	tr       *timerecord.TimeRecorder
 	queueDur time.Duration
-	node     *IndexNode
+	manager  *TaskManager
 	analyze  analyzecgowrapper.CodecAnalyze
 }
 
-func newAnalyzeTask(ctx context.Context,
+func NewAnalyzeTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.AnalyzeRequest,
-	node *IndexNode,
+	manager *TaskManager,
 ) *analyzeTask {
 	return &analyzeTask{
-		ident:  fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
-		ctx:    ctx,
-		cancel: cancel,
-		req:    req,
-		node:   node,
-		tr:     timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
+		ident:   fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
+		ctx:     ctx,
+		cancel:  cancel,
+		req:     req,
+		manager: manager,
+		tr:      timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 	}
 }
 
@@ -169,7 +169,7 @@ func (at *analyzeTask) PostExecute(ctx context.Context) error {
 		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
 	gc := func() {
 		if err := at.analyze.Delete(); err != nil {
-			log.Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
+			log.Error("indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 		}
 	}
 	defer gc()
@@ -181,7 +181,7 @@ func (at *analyzeTask) PostExecute(ctx context.Context) error {
 	}
 	log.Info("analyze result", zap.String("centroidsFile", centroidsFile))
 
-	at.node.storeAnalyzeFilesAndStatistic(at.req.GetClusterID(),
+	at.manager.StoreAnalyzeFilesAndStatistic(at.req.GetClusterID(),
 		at.req.GetTaskID(),
 		centroidsFile)
 	at.tr.Elapse("index building all done")
@@ -193,17 +193,17 @@ func (at *analyzeTask) OnEnqueue(ctx context.Context) error {
 	at.queueDur = 0
 	at.tr.RecordSpan()
 
-	log.Ctx(ctx).Info("IndexNode analyzeTask enqueued", zap.String("clusterID", at.req.GetClusterID()),
+	log.Ctx(ctx).Info("analyzeTask enqueued", zap.String("clusterID", at.req.GetClusterID()),
 		zap.Int64("TaskID", at.req.GetTaskID()))
 	return nil
 }
 
 func (at *analyzeTask) SetState(state indexpb.JobState, failReason string) {
-	at.node.storeAnalyzeTaskState(at.req.GetClusterID(), at.req.GetTaskID(), state, failReason)
+	at.manager.StoreAnalyzeTaskState(at.req.GetClusterID(), at.req.GetTaskID(), state, failReason)
 }
 
 func (at *analyzeTask) GetState() indexpb.JobState {
-	return at.node.loadAnalyzeTaskState(at.req.GetClusterID(), at.req.GetTaskID())
+	return at.manager.LoadAnalyzeTaskState(at.req.GetClusterID(), at.req.GetTaskID())
 }
 
 func (at *analyzeTask) Reset() {
@@ -213,5 +213,5 @@ func (at *analyzeTask) Reset() {
 	at.req = nil
 	at.tr = nil
 	at.queueDur = 0
-	at.node = nil
+	at.manager = nil
 }

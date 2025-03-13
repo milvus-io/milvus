@@ -21,24 +21,14 @@ func TestBackoffTimer(t *testing.T) {
 		assert.Equal(t, time.Second, b.NextInterval())
 		assert.Equal(t, time.Second, b.NextInterval())
 		assert.Equal(t, time.Second, b.NextInterval())
-		assert.True(t, b.IsBackoffStopped())
 
 		b.EnableBackoff()
-		assert.False(t, b.IsBackoffStopped())
 		timer, backoff := b.NextTimer()
 		assert.Less(t, backoff, 200*time.Millisecond)
-		for {
-			<-timer
-			if b.IsBackoffStopped() {
-				break
-			}
-			timer, _ = b.NextTimer()
-		}
-		assert.True(t, b.IsBackoffStopped())
-
-		assert.Equal(t, time.Second, b.NextInterval())
+		<-timer
+		_, backoff = b.NextTimer()
+		assert.NotZero(t, backoff)
 		b.DisableBackoff()
 		assert.Equal(t, time.Second, b.NextInterval())
-		assert.True(t, b.IsBackoffStopped())
 	}
 }

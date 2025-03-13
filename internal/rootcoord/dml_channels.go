@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
@@ -179,19 +180,23 @@ func newDmlChannels(initCtx context.Context, factory msgstream.Factory, chanName
 	}
 
 	for i, name := range names {
-		ms, err := factory.NewMsgStream(initCtx)
-		if err != nil {
-			log.Ctx(initCtx).Error("Failed to add msgstream",
-				zap.String("name", name),
-				zap.Error(err))
-			panic("Failed to add msgstream")
-		}
+		var ms msgstream.MsgStream
+		if !streamingutil.IsStreamingServiceEnabled() {
+			var err error
+			ms, err = factory.NewMsgStream(initCtx)
+			if err != nil {
+				log.Ctx(initCtx).Error("Failed to add msgstream",
+					zap.String("name", name),
+					zap.Error(err))
+				panic("Failed to add msgstream")
+			}
 
-		if params.PreCreatedTopicEnabled.GetAsBool() {
-			d.checkPreCreatedTopic(initCtx, factory, name)
-		}
+			if params.PreCreatedTopicEnabled.GetAsBool() {
+				d.checkPreCreatedTopic(initCtx, factory, name)
+			}
 
-		ms.AsProducer(initCtx, []string{name})
+			ms.AsProducer(initCtx, []string{name})
+		}
 		dms := &dmlMsgStream{
 			ms:     ms,
 			refcnt: 0,

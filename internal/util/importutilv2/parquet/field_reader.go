@@ -668,6 +668,21 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 	return data, nil
 }
 
+func parseSparseFloatRowVector(str string) ([]byte, uint32, error) {
+	rowVec, err := typeutil.CreateSparseFloatRowFromJSON([]byte(str))
+	if err != nil {
+		return nil, 0, merr.WrapErrImportFailed(fmt.Sprintf("Invalid JSON string for SparseFloatVector: '%s', err = %v", str, err))
+	}
+	elemCount := len(rowVec) / 8
+	maxIdx := uint32(0)
+
+	if elemCount > 0 {
+		maxIdx = typeutil.SparseFloatRowIndexAt(rowVec, elemCount-1) + 1
+	}
+
+	return rowVec, maxIdx, nil
+}
+
 func ReadSparseFloatVectorData(pcr *FieldReader, count int64) (any, error) {
 	data, err := ReadStringData(pcr, count)
 	if err != nil {
@@ -676,20 +691,22 @@ func ReadSparseFloatVectorData(pcr *FieldReader, count int64) (any, error) {
 	if data == nil {
 		return nil, nil
 	}
+
 	byteArr := make([][]byte, 0, count)
 	maxDim := uint32(0)
+
 	for _, str := range data.([]string) {
-		rowVec, err := typeutil.CreateSparseFloatRowFromJSON([]byte(str))
+		rowVec, rowMaxIdx, err := parseSparseFloatRowVector(str)
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("Invalid JSON string for SparseFloatVector: '%s', err = %v", str, err))
+			return nil, err
 		}
+
 		byteArr = append(byteArr, rowVec)
-		elemCount := len(rowVec) / 8
-		maxIdx := typeutil.SparseFloatRowIndexAt(rowVec, elemCount-1)
-		if maxIdx+1 > maxDim {
-			maxDim = maxIdx + 1
+		if rowMaxIdx > maxDim {
+			maxDim = rowMaxIdx
 		}
 	}
+
 	return &storage.SparseFloatVectorFieldData{
 		SparseFloatArray: schemapb.SparseFloatArray{
 			Dim:      int64(maxDim),

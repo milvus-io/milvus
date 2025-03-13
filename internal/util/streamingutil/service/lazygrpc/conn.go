@@ -2,6 +2,7 @@ package lazygrpc
 
 import (
 	"context"
+	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
@@ -50,6 +51,11 @@ type connImpl struct {
 func (c *connImpl) initialize() {
 	defer c.initializationNotifier.Finish(struct{}{})
 
+	newBackOff := backoff.NewExponentialBackOff()
+	newBackOff.InitialInterval = 100 * time.Millisecond
+	newBackOff.MaxInterval = 10 * time.Second
+	newBackOff.MaxElapsedTime = 0
+
 	backoff.Retry(func() error {
 		conn, err := c.dialer(c.initializationNotifier.Context())
 		if err != nil {
@@ -62,7 +68,7 @@ func (c *connImpl) initialize() {
 		}
 		c.conn.Set(conn)
 		return nil
-	}, backoff.NewExponentialBackOff())
+	}, newBackOff)
 }
 
 func (c *connImpl) GetConn(ctx context.Context) (*grpc.ClientConn, error) {

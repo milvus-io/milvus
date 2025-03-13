@@ -50,8 +50,8 @@ func TestIndexNodeManager_AddNode(t *testing.T) {
 
 func TestIndexNodeManager_PickClient(t *testing.T) {
 	paramtable.Init()
-	getMockedGetJobStatsClient := func(resp *workerpb.GetJobStatsResponse, err error) types.IndexNodeClient {
-		ic := mocks.NewMockIndexNodeClient(t)
+	getMockedGetJobStatsClient := func(resp *workerpb.GetJobStatsResponse, err error) types.DataNodeClient {
+		ic := mocks.NewMockDataNodeClient(t)
 		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(resp, err)
 		return ic
 	}
@@ -61,7 +61,7 @@ func TestIndexNodeManager_PickClient(t *testing.T) {
 	t.Run("multiple unavailable IndexNode", func(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx: context.TODO(),
-			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
+			nodeClients: map[typeutil.UniqueID]types.DataNodeClient{
 				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status: merr.Status(err),
 				}, err),
@@ -102,8 +102,8 @@ func TestIndexNodeManager_PickClient(t *testing.T) {
 
 func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 	paramtable.Init()
-	getMockedGetJobStatsClient := func(resp *workerpb.GetJobStatsResponse, err error) types.IndexNodeClient {
-		ic := mocks.NewMockIndexNodeClient(t)
+	getMockedGetJobStatsClient := func(resp *workerpb.GetJobStatsResponse, err error) types.DataNodeClient {
+		ic := mocks.NewMockDataNodeClient(t)
 		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(resp, err)
 		return ic
 	}
@@ -114,7 +114,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:  context.Background(),
 			lock: lock.RWMutex{},
-			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
+			nodeClients: map[typeutil.UniqueID]types.DataNodeClient{
 				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status:     merr.Success(),
 					TaskSlots:  1,
@@ -132,7 +132,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:  context.Background(),
 			lock: lock.RWMutex{},
-			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
+			nodeClients: map[typeutil.UniqueID]types.DataNodeClient{
 				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status:     merr.Success(),
 					TaskSlots:  1,
@@ -150,7 +150,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:         context.Background(),
 			lock:        lock.RWMutex{},
-			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{},
+			nodeClients: map[typeutil.UniqueID]types.DataNodeClient{},
 		}
 
 		support := nm.ClientSupportDisk()
@@ -161,7 +161,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:  context.Background(),
 			lock: lock.RWMutex{},
-			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
+			nodeClients: map[typeutil.UniqueID]types.DataNodeClient{
 				1: getMockedGetJobStatsClient(nil, err),
 			},
 		}
@@ -174,7 +174,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 		nm := &IndexNodeManager{
 			ctx:  context.Background(),
 			lock: lock.RWMutex{},
-			nodeClients: map[typeutil.UniqueID]types.IndexNodeClient{
+			nodeClients: map[typeutil.UniqueID]types.DataNodeClient{
 				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
 					Status:     merr.Status(err),
 					TaskSlots:  0,

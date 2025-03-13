@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -74,6 +75,7 @@ func TestWALFlusher(t *testing.T) {
 		resource.OptDataCoordClient(fDatacoord),
 		resource.OptRootCoordClient(fRootCoord),
 		resource.OptStreamingNodeCatalog(snMeta),
+		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
 	)
 	walImpl := mock_walimpls.NewMockWALImpls(t)
 	walImpl.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"})

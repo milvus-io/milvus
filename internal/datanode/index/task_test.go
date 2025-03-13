@@ -14,18 +14,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package index
 
 import (
 	"context"
 	"testing"
+
+	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -112,14 +113,14 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 		FieldType:    schemapb.DataType_FloatVector,
 	}
 
-	cm, err := NewChunkMgrFactory().NewChunkManager(ctx, req.GetStorageConfig())
+	cm, err := dependency.NewDefaultFactory(true).NewPersistentStorageChunkManager(ctx)
 	suite.NoError(err)
 	blobs, err := suite.serializeData()
 	suite.NoError(err)
 	err = cm.Write(ctx, suite.dataPath, blobs[0].Value)
 	suite.NoError(err)
 
-	t := newIndexBuildTask(ctx, cancel, req, cm, NewIndexNode(context.Background(), dependency.NewDefaultFactory(true)))
+	t := NewIndexBuildTask(ctx, cancel, req, cm, NewTaskManager(context.Background()))
 
 	err = t.PreExecute(context.Background())
 	suite.NoError(err)
@@ -208,7 +209,7 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 		Dim: 1,
 	}
 
-	cm, err := NewChunkMgrFactory().NewChunkManager(ctx, req.GetStorageConfig())
+	cm, err := dependency.NewDefaultFactory(true).NewPersistentStorageChunkManager(ctx)
 	suite.NoError(err)
 	blobs, err := suite.serializeData()
 	suite.NoError(err)
@@ -225,7 +226,7 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 		req:      req,
 		tr:       timerecord.NewTimeRecorder("test-indexBuildTask"),
 		queueDur: 0,
-		node:     NewIndexNode(context.Background(), dependency.NewDefaultFactory(true)),
+		manager:  NewTaskManager(context.Background()),
 	}
 
 	err = t.PreExecute(context.Background())

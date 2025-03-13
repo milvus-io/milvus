@@ -373,7 +373,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 	s.Run("AssignTask", func() {
 		s.Run("assign failed", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "mock error",
@@ -397,7 +397,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("assign success", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 				Reason:    "",
@@ -423,7 +423,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 	s.Run("QueryResult", func() {
 		s.Run("query failed", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -435,7 +435,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("state finished", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
@@ -466,7 +466,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("task none", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
@@ -493,7 +493,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("task not exist", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
@@ -512,7 +512,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 	s.Run("DropTaskOnWorker", func() {
 		s.Run("drop failed", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "mock error",
@@ -522,7 +522,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("drop success", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 				Reason:    "",

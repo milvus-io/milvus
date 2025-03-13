@@ -229,6 +229,7 @@ func (s *Server) init() (err error) {
 	if err := s.initSession(); err != nil {
 		return err
 	}
+
 	s.initRootCoord()
 	s.initDataCoord()
 	s.initGRPCServer()
@@ -243,9 +244,6 @@ func (s *Server) init() (err error) {
 		WithSession(s.session).
 		WithMetaKV(s.metaKV).
 		Build()
-	if err := s.streamingnode.Init(s.ctx); err != nil {
-		return errors.Wrap(err, "StreamingNode service init failed")
-	}
 	return nil
 }
 
@@ -258,9 +256,6 @@ func (s *Server) start() (err error) {
 		}
 		log.Info("start StreamingNode server finished")
 	}()
-
-	// Start StreamingNode service.
-	s.streamingnode.Start()
 
 	// Start grpc server.
 	if err := s.startGPRCServer(s.ctx); err != nil {

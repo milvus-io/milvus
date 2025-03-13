@@ -117,6 +117,7 @@ func (m *pchannelCheckpointManager) background(previous message.MessageID) {
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 100 * time.Millisecond
 	backoff.MaxInterval = 10 * time.Second
+	backoff.MaxElapsedTime = 0
 	for {
 		current, err := m.blockUntilCheckpointUpdate(previous)
 		if err != nil {

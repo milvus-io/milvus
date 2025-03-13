@@ -242,6 +242,7 @@ type DescribeRoleOption interface {
 
 type describeRoleOption struct {
 	roleName string
+	dbName   string
 }
 
 func (opt *describeRoleOption) SelectRoleRequest() *milvuspb.SelectRoleRequest {
@@ -255,7 +256,8 @@ func (opt *describeRoleOption) SelectRoleRequest() *milvuspb.SelectRoleRequest {
 func (opt *describeRoleOption) Request() *milvuspb.SelectGrantRequest {
 	return &milvuspb.SelectGrantRequest{
 		Entity: &milvuspb.GrantEntity{
-			Role: &milvuspb.RoleEntity{Name: opt.roleName},
+			Role:   &milvuspb.RoleEntity{Name: opt.roleName},
+			DbName: opt.dbName,
 		},
 	}
 }
@@ -264,6 +266,11 @@ func NewDescribeRoleOption(roleName string) *describeRoleOption {
 	return &describeRoleOption{
 		roleName: roleName,
 	}
+}
+
+func (opt *describeRoleOption) WithDbName(dbName string) *describeRoleOption {
+	opt.dbName = dbName
+	return opt
 }
 
 type GrantPrivilegeOption interface {
@@ -275,6 +282,7 @@ type grantPrivilegeOption struct {
 	privilegeName string
 	objectName    string
 	objectType    string
+	dbName        string
 }
 
 func (opt *grantPrivilegeOption) Request() *milvuspb.OperatePrivilegeRequest {
@@ -288,6 +296,7 @@ func (opt *grantPrivilegeOption) Request() *milvuspb.OperatePrivilegeRequest {
 				Name: opt.objectType,
 			},
 			ObjectName: opt.objectName,
+			DbName:     opt.dbName,
 		},
 
 		Type: milvuspb.OperatePrivilegeType_Grant,
@@ -303,6 +312,11 @@ func NewGrantPrivilegeOption(roleName, objectType, privilegeName, objectName str
 	}
 }
 
+func (opt *grantPrivilegeOption) WithDbName(dbName string) *grantPrivilegeOption {
+	opt.dbName = dbName
+	return opt
+}
+
 type RevokePrivilegeOption interface {
 	Request() *milvuspb.OperatePrivilegeRequest
 }
@@ -312,6 +326,7 @@ type revokePrivilegeOption struct {
 	privilegeName string
 	objectName    string
 	objectType    string
+	dbName        string
 }
 
 func (opt *revokePrivilegeOption) Request() *milvuspb.OperatePrivilegeRequest {
@@ -325,6 +340,7 @@ func (opt *revokePrivilegeOption) Request() *milvuspb.OperatePrivilegeRequest {
 				Name: opt.objectType,
 			},
 			ObjectName: opt.objectName,
+			DbName:     opt.dbName,
 		},
 
 		Type: milvuspb.OperatePrivilegeType_Revoke,
@@ -338,6 +354,11 @@ func NewRevokePrivilegeOption(roleName, objectType, privilegeName, objectName st
 		objectName:    objectName,
 		objectType:    objectType,
 	}
+}
+
+func (opt *revokePrivilegeOption) WithDbName(dbName string) *revokePrivilegeOption {
+	opt.dbName = dbName
+	return opt
 }
 
 type GrantV2Option GrantPrivilegeV2Option
@@ -368,16 +389,25 @@ func (opt *grantPrivilegeV2Option) Request() *milvuspb.OperatePrivilegeV2Request
 
 // Deprecated, use `NewGrantPrivilegeV2Option` instead
 func NewGrantV2Option(roleName, privilegeName, dbName, collectionName string) *grantPrivilegeV2Option {
-	return NewGrantPrivilegeV2Option(roleName, privilegeName, dbName, collectionName)
-}
-
-func NewGrantPrivilegeV2Option(roleName, privilegeName, dbName, collectionName string) *grantPrivilegeV2Option {
 	return &grantPrivilegeV2Option{
 		roleName:       roleName,
 		privilegeName:  privilegeName,
 		dbName:         dbName,
 		collectionName: collectionName,
 	}
+}
+
+func NewGrantPrivilegeV2Option(roleName, privilegeName, collectionName string) *grantPrivilegeV2Option {
+	return &grantPrivilegeV2Option{
+		roleName:       roleName,
+		privilegeName:  privilegeName,
+		collectionName: collectionName,
+	}
+}
+
+func (opt *grantPrivilegeV2Option) WithDbName(dbName string) *grantPrivilegeV2Option {
+	opt.dbName = dbName
+	return opt
 }
 
 type RevokeV2Option RevokePrivilegeV2Option
@@ -406,6 +436,7 @@ func (opt *revokePrivilegeV2Option) Request() *milvuspb.OperatePrivilegeV2Reques
 	}
 }
 
+// Deprecated, use `NewRevokePrivilegeV2Option` instead
 func NewRevokeV2Option(roleName, privilegeName, dbName, collectionName string) *revokePrivilegeV2Option {
 	return &revokePrivilegeV2Option{
 		roleName:       roleName,
@@ -413,6 +444,19 @@ func NewRevokeV2Option(roleName, privilegeName, dbName, collectionName string) *
 		dbName:         dbName,
 		collectionName: collectionName,
 	}
+}
+
+func NewRevokePrivilegeV2Option(roleName, privilegeName, collectionName string) *revokePrivilegeV2Option {
+	return &revokePrivilegeV2Option{
+		roleName:       roleName,
+		privilegeName:  privilegeName,
+		collectionName: collectionName,
+	}
+}
+
+func (opt *revokePrivilegeV2Option) WithDbName(dbName string) *revokePrivilegeV2Option {
+	opt.dbName = dbName
+	return opt
 }
 
 // CreatePrivilegeGroupOption is the interface builds CreatePrivilegeGroupRequest
