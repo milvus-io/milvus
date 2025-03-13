@@ -23,16 +23,17 @@ func (c *INVERTEDChecker) CheckTrain(dataType schemapb.DataType, params map[stri
 	// check json index params
 	isJSONIndex := typeutil.IsJSONType(dataType)
 	if isJSONIndex {
-		if castType, exist := params[common.JSONCastTypeKey]; !exist {
+		castType, exist := params[common.JSONCastTypeKey]
+		if !exist {
 			return merr.WrapErrParameterMissing(common.JSONCastTypeKey, "json index must specify cast type")
-		} else {
-			castTypeInt, err := strconv.Atoi(castType)
-			if err != nil {
-				return merr.WrapErrParameterInvalid(common.JSONCastTypeKey, "json_cast_type must be DataType")
-			}
-			if !lo.Contains(validJSONCastTypes, castTypeInt) {
-				return merr.WrapErrParameterInvalid(common.JSONCastTypeKey, "json_cast_type is not supported")
-			}
+		}
+
+		castTypeInt, err := strconv.Atoi(castType)
+		if err != nil {
+			return merr.WrapErrParameterInvalid(common.JSONCastTypeKey, "json_cast_type must be DataType")
+		}
+		if !lo.Contains(validJSONCastTypes, castTypeInt) {
+			return merr.WrapErrParameterInvalid(common.JSONCastTypeKey, "json_cast_type is not supported")
 		}
 	}
 	return c.scalarIndexChecker.CheckTrain(dataType, params)
