@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/samber/lo"
 )
 
 // INVERTEDChecker checks if a INVERTED index can be built.
@@ -30,7 +31,7 @@ func (c *INVERTEDChecker) CheckTrain(dataType schemapb.DataType, params map[stri
 				return merr.WrapErrParameterInvalid(common.JSONCastTypeKey, "json_cast_type must be DataType")
 			}
 			if !lo.Contains(validJSONCastTypes, castTypeInt) {
-				return merr.WrapErrParameterInvalid(common.JSONCastTypeKey, "json_cast_type must be DataType")
+				return merr.WrapErrParameterInvalid(common.JSONCastTypeKey, "json_cast_type is not supported")
 			}
 		}
 	}
