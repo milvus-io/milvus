@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/samber/lo"
 )
 
 // INVERTEDChecker checks if a INVERTED index can be built.
@@ -22,16 +23,16 @@ func (c *INVERTEDChecker) CheckTrain(dataType schemapb.DataType, params map[stri
 	// check json index params
 	isJSONIndex := typeutil.IsJSONType(dataType)
 	if isJSONIndex {
-		if castType, exist := params[common.JSONCastTypeKey]; !exist {
+		castType, exist := params[common.JSONCastTypeKey]
+		if !exist {
 			return merr.WrapErrParameterMissing(common.JSONCastTypeKey, "json index must specify cast type")
-		} else {
-			castTypeInt, err := strconv.Atoi(castType)
-			if err != nil {
-				return merr.WrapErrParameterInvalid(common.JSONCastTypeKey, "json_cast_type must be DataType")
-			}
-			if !lo.Contains(validJSONCastTypes, castTypeInt) {
-				return merr.WrapErrParameterInvalid(common.JSONCastTypeKey, "json_cast_type must be DataType")
-			}
+		}
+		castTypeInt, err := strconv.Atoi(castType)
+		if err != nil {
+			return merr.WrapErrParameterInvalid(common.JSONCastTypeKey, "json_cast_type must be DataType")
+		}
+		if !lo.Contains(validJSONCastTypes, castTypeInt) {
+			return merr.WrapErrParameterInvalidMsg("json_cast_type %v is not supported", castType)
 		}
 		if _, exist := params[common.JSONPathKey]; !exist {
 			return merr.WrapErrParameterMissing(common.JSONPathKey, "json index must specify json path")
