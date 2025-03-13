@@ -299,7 +299,7 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 			}
 			str, err := decodeUtf32(raw, c.order)
 			if c.field.DataType == schemapb.DataType_VarChar {
-				if err = common.CheckVarcharLength(str, maxLength); err != nil {
+				if err = common.CheckVarcharLength(str, maxLength, c.field); err != nil {
 					return nil, err
 				}
 			}

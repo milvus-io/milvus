@@ -61,20 +61,20 @@ func getInsertDataRowNum(data *storage.InsertData, schema *schemapb.CollectionSc
 	return 0
 }
 
-func CheckVarcharLength(data any, maxLength int64) error {
+func CheckVarcharLength(data any, maxLength int64, field *schemapb.FieldSchema) error {
 	str, ok := data.(string)
 	if !ok {
-		return fmt.Errorf("expected string, got %T", data)
+		return fmt.Errorf("expected string type for field %s, but got %T", field.GetName(), data)
 	}
 	if (int64)(len(str)) > maxLength {
-		return fmt.Errorf("value length %d exceeds max_length %d", len(str), maxLength)
+		return fmt.Errorf("value length(%d) for field %s exceeds max_length(%d)", len(str), field.GetName(), maxLength)
 	}
 	return nil
 }
 
-func CheckArrayCapacity(arrLength int, maxCapacity int64) error {
+func CheckArrayCapacity(arrLength int, maxCapacity int64, field *schemapb.FieldSchema) error {
 	if (int64)(arrLength) > maxCapacity {
-		return fmt.Errorf("array capacity %d exceeds max_capacity %d", arrLength, maxCapacity)
+		return fmt.Errorf("array capacity(%d) for field %s exceeds max_capacity(%d)", arrLength, field.GetName(), maxCapacity)
 	}
 	return nil
 }

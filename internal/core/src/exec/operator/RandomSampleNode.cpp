@@ -101,6 +101,10 @@ PhyRandomSampleNode::GetOutput() {
         return nullptr;
     }
 
+    std::chrono::high_resolution_clock::time_point start =
+        std::chrono::high_resolution_clock::now();
+
+    RowVectorPtr result = nullptr;
     if (!is_source_node_) {
         auto input_col = GetColumnVector(input_);
         TargetBitmapView input_data(input_col->GetRawData(), input_col->size());
@@ -126,8 +130,7 @@ PhyRandomSampleNode::GetOutput() {
             }
         }
 
-        is_finished_ = true;
-        return std::make_shared<RowVector>(std::vector<VectorPtr>{input_col});
+        result = std::make_shared<RowVector>(std::vector<VectorPtr>{input_col});
     } else {
         auto sample_output = std::make_shared<ColumnVector>(
             TargetBitmap(active_count_), TargetBitmap(active_count_));
@@ -152,10 +155,18 @@ PhyRandomSampleNode::GetOutput() {
             data.flip();
         }
 
-        is_finished_ = true;
-        return std::make_shared<RowVector>(
-            std::vector<VectorPtr>{sample_output});
+        result =
+            std::make_shared<RowVector>(std::vector<VectorPtr>{sample_output});
     }
+
+    std::chrono::high_resolution_clock::time_point end =
+        std::chrono::high_resolution_clock::now();
+    double duration =
+        std::chrono::duration<double, std::micro>(end - start).count();
+    monitor::internal_core_search_latency_random_sample.Observe(duration /
+                                                                1000);
+    is_finished_ = true;
+    return result;
 }
 
 bool

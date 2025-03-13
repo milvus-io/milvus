@@ -140,7 +140,7 @@ func (j *reader) Read() (*storage.InsertData, error) {
 		}
 		row, err := j.parser.Parse(value)
 		if err != nil {
-			return nil, err
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to parse row, error: %v", err))
 		}
 		err = insertData.Append(row)
 		if err != nil {
