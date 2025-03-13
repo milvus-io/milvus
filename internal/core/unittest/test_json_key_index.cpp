@@ -195,14 +195,13 @@ TEST_P(JsonKeyIndexTest, TestTermInFunc) {
         };
         std::unordered_set<int64_t> term_set(testcase.term.begin(),
                                              testcase.term.end());
-        auto filter_func = [&term_set, this](uint32_t row_id,
+        auto filter_func = [&term_set, this](bool valid,
+                                             uint8_t type,
+                                             uint32_t row_id,
                                              uint16_t offset,
-                                             uint16_t size) {
-            auto val = this->data_[row_id].template at<int64_t>(offset, size);
-            if (val.error()) {
-                return false;
-            }
-            return term_set.find(int64_t(val.value())) != term_set.end();
+                                             uint16_t size,
+                                             uint32_t value) {
+            return term_set.find(int64_t(value)) != term_set.end();
         };
         auto pointer = milvus::Json::pointer(testcase.nested_path);
         auto bitset =
@@ -274,27 +273,25 @@ TEST_P(JsonKeyIndexTest, TestUnaryRangeInFunc) {
                 }
             }
 
-            auto filter_func = [&op, &testcase, this](uint32_t row_id,
+            auto filter_func = [&op, &testcase, this](bool valid,
+                                                      uint8_t type,
+                                                      uint32_t row_id,
                                                       uint16_t offset,
-                                                      uint16_t size) {
-                auto val =
-                    this->data_[row_id].template at<int64_t>(offset, size);
-                if (val.error()) {
-                    return false;
-                }
+                                                      uint16_t size,
+                                                      uint32_t value) {
                 switch (op) {
                     case OpType::GreaterThan:
-                        return int64_t(val.value()) > testcase.val;
+                        return int64_t(value) > testcase.val;
                     case OpType::GreaterEqual:
-                        return int64_t(val.value()) >= testcase.val;
+                        return int64_t(value) >= testcase.val;
                     case OpType::LessThan:
-                        return int64_t(val.value()) < testcase.val;
+                        return int64_t(value) < testcase.val;
                     case OpType::LessEqual:
-                        return int64_t(val.value()) <= testcase.val;
+                        return int64_t(value) <= testcase.val;
                     case OpType::Equal:
-                        return int64_t(val.value()) == testcase.val;
+                        return int64_t(value) == testcase.val;
                     case OpType::NotEqual:
-                        return int64_t(val.value()) != testcase.val;
+                        return int64_t(value) != testcase.val;
                     default:
                         return false;
                 }
@@ -356,25 +353,49 @@ TEST_P(JsonKeyIndexTest, TestBinaryRangeInFunc) {
             }
         };
 
-        auto filter_func = [&testcase, this](uint32_t row_id,
+        auto filter_func = [&testcase, this](bool valid,
+                                             uint8_t type,
+                                             uint32_t row_id,
                                              uint16_t offset,
-                                             uint16_t size) {
-            auto val = this->data_[row_id].template at<int64_t>(offset, size);
-            if (val.error()) {
-                return false;
-            }
-            if (testcase.lower_inclusive && testcase.upper_inclusive) {
-                return testcase.lower <= int64_t(val.value()) &&
-                       int64_t(val.value()) <= testcase.upper;
-            } else if (testcase.lower_inclusive && !testcase.upper_inclusive) {
-                return testcase.lower <= int64_t(val.value()) &&
-                       int64_t(val.value()) < testcase.upper;
-            } else if (!testcase.lower_inclusive && testcase.upper_inclusive) {
-                return testcase.lower < int64_t(val.value()) &&
-                       int64_t(val.value()) <= testcase.upper;
+                                             uint16_t size,
+                                             uint32_t value) {
+            if (valid) {
+                if (testcase.lower_inclusive && testcase.upper_inclusive) {
+                    return testcase.lower <= int64_t(value) &&
+                           int64_t(value) <= testcase.upper;
+                } else if (testcase.lower_inclusive &&
+                           !testcase.upper_inclusive) {
+                    return testcase.lower <= int64_t(value) &&
+                           int64_t(value) < testcase.upper;
+                } else if (!testcase.lower_inclusive &&
+                           testcase.upper_inclusive) {
+                    return testcase.lower < int64_t(value) &&
+                           int64_t(value) <= testcase.upper;
+                } else {
+                    return testcase.lower < int64_t(value) &&
+                           int64_t(value) < testcase.upper;
+                }
             } else {
-                return testcase.lower < int64_t(val.value()) &&
-                       int64_t(val.value()) < testcase.upper;
+                auto val =
+                    this->data_[row_id].template at<int64_t>(offset, size);
+                if (val.error()) {
+                    return false;
+                }
+                if (testcase.lower_inclusive && testcase.upper_inclusive) {
+                    return testcase.lower <= int64_t(val.value()) &&
+                           int64_t(val.value()) <= testcase.upper;
+                } else if (testcase.lower_inclusive &&
+                           !testcase.upper_inclusive) {
+                    return testcase.lower <= int64_t(val.value()) &&
+                           int64_t(val.value()) < testcase.upper;
+                } else if (!testcase.lower_inclusive &&
+                           testcase.upper_inclusive) {
+                    return testcase.lower < int64_t(val.value()) &&
+                           int64_t(val.value()) <= testcase.upper;
+                } else {
+                    return testcase.lower < int64_t(val.value()) &&
+                           int64_t(val.value()) < testcase.upper;
+                }
             }
         };
         auto pointer = milvus::Json::pointer(testcase.nested_path);
@@ -412,10 +433,14 @@ TEST_P(JsonKeyIndexTest, TestExistInFunc) {
     };
     for (const auto& testcase : testcases) {
         auto pointer = milvus::Json::pointer(testcase.nested_path);
-        auto filter_func =
-            [&pointer, this](uint32_t row_id, uint16_t offset, uint16_t size) {
-                return this->data_[row_id].exist(pointer);
-            };
+        auto filter_func = [&pointer, this](bool valid,
+                                            uint8_t type,
+                                            uint32_t row_id,
+                                            uint16_t offset,
+                                            uint16_t size,
+                                            uint32_t value) {
+            return this->data_[row_id].exist(pointer);
+        };
 
         auto bitset =
             index_->FilterByPath(pointer, size_, false, true, filter_func);
@@ -457,9 +482,12 @@ TEST_P(JsonKeyIndexTest, TestJsonContainsAllFunc) {
             for (auto const& element : testcase.term) {
                 elements.insert(element);
             }
-            auto filter_func = [&elements, this](uint32_t row_id,
+            auto filter_func = [&elements, this](bool valid,
+                                                 uint8_t type,
+                                                 uint32_t row_id,
                                                  uint16_t offset,
-                                                 uint16_t size) {
+                                                 uint16_t size,
+                                                 uint32_t value) {
                 auto array = this->data_[row_id].array_at(offset, size);
                 std::unordered_set<int64_t> tmp_elements(elements);
                 for (auto&& it : array) {
@@ -519,13 +547,13 @@ TEST(GrowingJsonKeyIndexTest, GrowingIndex) {
     index->Commit();
     index->Reload();
     int64_t checkVal = 1;
-    auto filter_func = [jsons, checkVal](
-                           uint32_t row_id, uint16_t offset, uint16_t size) {
-        auto val = jsons[row_id].template at<int64_t>(offset, size);
-        if (val.error()) {
-            return false;
-        }
-        if (val.value() == checkVal) {
+    auto filter_func = [jsons, checkVal](bool valid,
+                                         uint8_t type,
+                                         uint32_t row_id,
+                                         uint16_t offset,
+                                         uint16_t size,
+                                         uint32_t value) {
+        if (value == checkVal) {
             return true;
         }
         return false;

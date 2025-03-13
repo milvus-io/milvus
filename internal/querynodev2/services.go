@@ -492,6 +492,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	if req.GetLoadScope() == querypb.LoadScope_Index {
 		return node.loadIndex(ctx, req), nil
 	}
+	if req.GetLoadScope() == querypb.LoadScope_Stats {
+		return node.loadStats(ctx, req), nil
+	}
 
 	// Actual load segment
 	log.Info("start to load segments...")

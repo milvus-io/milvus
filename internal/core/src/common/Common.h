@@ -29,9 +29,8 @@ extern int64_t MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern int64_t LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern int CPU_NUM;
 extern int64_t EXEC_EVAL_EXPR_BATCH_SIZE;
-extern int64_t JSON_INDEX_MEMORY_BUDGET;
-extern int64_t JSON_INDEX_COMMIT_INTERVAL;
-extern bool JSON_INDEX_ENABLED;
+extern int64_t JSON_KEY_STATS_COMMIT_INTERVAL;
+extern bool JSON_KEY_STATS_ENABLED;
 void
 SetIndexSliceSize(const int64_t size);
 
@@ -51,13 +50,10 @@ void
 SetDefaultExecEvalExprBatchSize(int64_t val);
 
 void
-SetDefaultJSONKeyIndexMemoryBudget(int64_t val);
+SetDefaultJSONKeyStatsCommitInterval(int64_t val);
 
 void
-SetDefaultJSONKeyIndexCommitInterval(int64_t val);
-
-void
-SetDefaultJSONKeyIndexEnable(bool val);
+SetDefaultJSONKeyStatsEnable(bool val);
 
 struct BufferView {
     struct Element {

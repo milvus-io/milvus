@@ -218,6 +218,7 @@ func (job *LoadCollectionJob) Execute() error {
 		},
 		CreatedAt: time.Now(),
 		LoadSpan:  sp,
+		Schema:    collectionInfo.GetSchema(),
 	}
 	job.undo.IsNewCollection = true
 	err = job.meta.CollectionManager.PutCollection(job.ctx, collection, partitions...)
@@ -420,6 +421,7 @@ func (job *LoadPartitionJob) Execute() error {
 			},
 			CreatedAt: time.Now(),
 			LoadSpan:  sp,
+			Schema:    collectionInfo.GetSchema(),
 		}
 		err = job.meta.CollectionManager.PutCollection(job.ctx, collection, partitions...)
 		if err != nil {

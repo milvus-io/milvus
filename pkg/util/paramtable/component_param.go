@@ -2598,9 +2598,8 @@ type queryNodeConfig struct {
 	// worker
 	WorkerPoolingSize ParamItem `refreshable:"false"`
 
-	// Json Key Index
-	JSONIndexMemoryBudgetInTantivy ParamItem `refreshable:"false"`
-	JSONIndexCommitInterval        ParamItem `refreshable:"false"`
+	// Json Key Stats
+	JSONKeyStatsCommitInterval ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -3293,23 +3292,14 @@ user-task-polling:
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
 
-	p.JSONIndexMemoryBudgetInTantivy = ParamItem{
-		Key:          "queryNode.segcore.jsonIndexMemoryBudgetInTantivy",
-		Version:      "2.5.0",
-		DefaultValue: "16",
-		Doc:          "the memory budget for the JSON index In Tantivy",
-		Export:       true,
-	}
-	p.JSONIndexMemoryBudgetInTantivy.Init(base.mgr)
-
-	p.JSONIndexCommitInterval = ParamItem{
-		Key:          "queryNode.segcore.jsonIndexCommitInterval",
+	p.JSONKeyStatsCommitInterval = ParamItem{
+		Key:          "queryNode.segcore.jsonKeyStatsCommitInterval",
 		Version:      "2.5.0",
 		DefaultValue: "200",
-		Doc:          "the commit interval for the JSON index to commit",
+		Doc:          "the commit interval for the JSON key Stats to commit",
 		Export:       true,
 	}
-	p.JSONIndexCommitInterval.Init(base.mgr)
+	p.JSONKeyStatsCommitInterval.Init(base.mgr)
 
 	p.CleanExcludeSegInterval = ParamItem{
 		Key:          "queryCoord.cleanExcludeSegmentInterval",
@@ -3520,11 +3510,14 @@ type dataCoordConfig struct {
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 
-	EnableStatsTask       ParamItem `refreshable:"true"`
-	TaskCheckInterval     ParamItem `refreshable:"true"`
-	StatsTaskTriggerCount ParamItem `refreshable:"true"`
+	EnableStatsTask          ParamItem `refreshable:"true"`
+	TaskCheckInterval        ParamItem `refreshable:"true"`
+	StatsTaskTriggerCount    ParamItem `refreshable:"true"`
+	JSONStatsTriggerCount    ParamItem `refreshable:"true"`
+	JSONStatsTriggerInterval ParamItem `refreshable:"true"`
 
-	RequestTimeoutSeconds ParamItem `refreshable:"true"`
+	RequestTimeoutSeconds             ParamItem `refreshable:"true"`
+	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4418,6 +4411,26 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.StatsTaskTriggerCount.Init(base.mgr)
 
+	p.JSONStatsTriggerCount = ParamItem{
+		Key:          "dataCoord.jsonStatsTriggerCount",
+		Version:      "2.5.5",
+		Doc:          "jsonkey stats task count per trigger",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.JSONStatsTriggerCount.Init(base.mgr)
+
+	p.JSONStatsTriggerInterval = ParamItem{
+		Key:          "dataCoord.jsonStatsTriggerInterval",
+		Version:      "2.5.5",
+		Doc:          "jsonkey task interval per trigger",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.JSONStatsTriggerInterval.Init(base.mgr)
+
 	p.RequestTimeoutSeconds = ParamItem{
 		Key:          "dataCoord.requestTimeoutSeconds",
 		Version:      "2.5.5",
@@ -4427,6 +4440,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.RequestTimeoutSeconds.Init(base.mgr)
+	p.JSONKeyStatsMemoryBudgetInTantivy = ParamItem{
+		Key:          "dataCoord.segcore.jsonKeyStatsMemoryBudgetInTantivy",
+		Version:      "2.5.5",
+		DefaultValue: "16777216",
+		Doc:          "the memory budget for the JSON index In Tantivy, the unit is bytes",
+		Export:       true,
+	}
+	p.JSONKeyStatsMemoryBudgetInTantivy.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

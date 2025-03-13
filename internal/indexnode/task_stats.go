@@ -351,7 +351,12 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			log.Ctx(ctx).Warn("stats wrong, failed to create text index", zap.Error(err))
 			return err
 		}
-	} else if st.req.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob {
+	}
+	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort || st.req.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob {
+		if !st.req.GetEnableJsonKeyStats() {
+			return nil
+		}
+
 		err = st.createJSONKeyIndex(ctx,
 			st.req.GetStorageConfig(),
 			st.req.GetCollectionID(),
@@ -359,6 +364,8 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			st.req.GetTargetSegmentID(),
 			st.req.GetTaskVersion(),
 			st.req.GetTaskID(),
+			st.req.GetJsonKeyStatsTantivyMemory(),
+			st.req.GetJsonKeyStatsDataFormat(),
 			insertLogs)
 		if err != nil {
 			log.Warn("stats wrong, failed to create json index", zap.Error(err))
@@ -755,6 +762,8 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 	segmentID int64,
 	version int64,
 	taskID int64,
+	tantivyMemory int64,
+	jsonKeyStatsDataFormat int64,
 	insertBinlogs []*datapb.FieldBinlog,
 ) error {
 	log := log.Ctx(ctx).With(
@@ -802,14 +811,16 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 		}
 
 		buildIndexParams := &indexcgopb.BuildIndexInfo{
-			BuildID:       taskID,
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			SegmentID:     segmentID,
-			IndexVersion:  version,
-			InsertFiles:   files,
-			FieldSchema:   field,
-			StorageConfig: newStorageConfig,
+			BuildID:                   taskID,
+			CollectionID:              collectionID,
+			PartitionID:               partitionID,
+			SegmentID:                 segmentID,
+			IndexVersion:              version,
+			InsertFiles:               files,
+			FieldSchema:               field,
+			StorageConfig:             newStorageConfig,
+			JsonKeyStatsTantivyMemory: tantivyMemory,
+			JsonKeyStatsDataFormat:    jsonKeyStatsDataFormat,
 		}
 
 		uploaded, err := indexcgowrapper.CreateJSONKeyIndex(ctx, buildIndexParams)
@@ -817,10 +828,11 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 			return err
 		}
 		jsonKeyIndexStats[field.GetFieldID()] = &datapb.JsonKeyStats{
-			FieldID: field.GetFieldID(),
-			Version: version,
-			BuildID: taskID,
-			Files:   lo.Keys(uploaded),
+			FieldID:                field.GetFieldID(),
+			Version:                version,
+			BuildID:                taskID,
+			Files:                  lo.Keys(uploaded),
+			JsonKeyStatsDataFormat: jsonKeyStatsDataFormat,
 		}
 		log.Info("field enable json key index, create json key index done",
 			zap.Int64("field id", field.GetFieldID()),

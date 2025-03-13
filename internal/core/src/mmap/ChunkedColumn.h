@@ -335,7 +335,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
     StringViews(int64_t chunk_id) const override {
-        return std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
+        return std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
             ->StringViews();
     }
 
@@ -347,7 +347,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
     ViewsByOffsets(int64_t chunk_id,
                    const FixedVector<int32_t>& offsets) const override {
-        return std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
+        return std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
             ->ViewsByOffsets(offsets);
     }
 
@@ -359,7 +359,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         std::vector<BufferView::Element> elements;
         elements.push_back(
             {chunks_[chunk_id]->Data(),
-             std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
+             std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
                  ->Offsets(),
              static_cast<int>(start_offset),
              static_cast<int>(start_offset + length)});
@@ -375,12 +375,11 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         }
 
         auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
-        auto data = chunks_[chunk_id]->Data();
-        auto offsets = std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
-                           ->Offsets();
-        auto len = offsets[offset_in_chunk + 1] - offsets[offset_in_chunk];
+        auto data = std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
+                        ->
+                        operator[](offset_in_chunk);
 
-        return ViewType(data + offsets[offset_in_chunk], len);
+        return ViewType(data.data(), data.length());
     }
 
     std::string_view
