@@ -125,9 +125,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			collectionIDLabelName,
-			partitionIDLabelName,
 			segmentStateLabelName,
-			indexCountLabelName,
 			segmentLevelLabelName,
 		})
 
@@ -455,7 +453,6 @@ var (
 			collectionName,
 			nodeIDLabelName,
 			collectionIDLabelName,
-			partitionIDLabelName,
 			segmentStateLabelName,
 		})
 
