@@ -285,6 +285,18 @@ func getBinLogIDs(segment *SegmentInfo, fieldID int64) []int64 {
 	return binlogIDs
 }
 
+func getTotalBinlogRows(segment *SegmentInfo, fieldID int64) int64 {
+	var total int64
+	for _, fieldBinLog := range segment.GetBinlogs() {
+		if fieldBinLog.GetFieldID() == fieldID {
+			for _, binLog := range fieldBinLog.GetBinlogs() {
+				total += binLog.EntriesNum
+			}
+		}
+	}
+	return total
+}
+
 func CheckCheckPointsHealth(meta *meta) error {
 	for channel, cp := range meta.GetChannelCheckpoints() {
 		collectionID := funcutil.GetCollectionIDFromVChannel(channel)
