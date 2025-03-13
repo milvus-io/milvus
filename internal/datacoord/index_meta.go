@@ -210,6 +210,12 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 	defer m.RUnlock()
 
 	taskMetrics := make(map[indexpb.JobState]int)
+	taskMetrics[indexpb.JobState_JobStateNone] = 0
+	taskMetrics[indexpb.JobState_JobStateInit] = 0
+	taskMetrics[indexpb.JobState_JobStateInProgress] = 0
+	taskMetrics[indexpb.JobState_JobStateFinished] = 0
+	taskMetrics[indexpb.JobState_JobStateFailed] = 0
+	taskMetrics[indexpb.JobState_JobStateRetry] = 0
 	for _, segIdx := range m.segmentBuildInfo.List() {
 		if segIdx.IsDeleted || !m.isIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			continue
