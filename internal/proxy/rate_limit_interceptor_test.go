@@ -542,4 +542,37 @@ func TestGetInfo(t *testing.T) {
 			assert.Equal(t, int64(100), col2par[10][0])
 		}
 	})
+
+	t.Run("get db request info", func(t *testing.T) {
+		{
+			dbID, collectionInfos, rateType, cost, err := GetRequestInfo(ctx, &milvuspb.CreateDatabaseRequest{
+				DbName: "foo",
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, util.InvalidDBID, dbID)
+			assert.Equal(t, 0, len(collectionInfos))
+			assert.Equal(t, internalpb.RateType_DDLDB, rateType)
+			assert.Equal(t, 1, cost)
+		}
+		{
+			dbID, collectionInfos, rateType, cost, err := GetRequestInfo(ctx, &milvuspb.DropDatabaseRequest{
+				DbName: "foo",
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, util.InvalidDBID, dbID)
+			assert.Equal(t, 0, len(collectionInfos))
+			assert.Equal(t, internalpb.RateType_DDLDB, rateType)
+			assert.Equal(t, 1, cost)
+		}
+		{
+			dbID, collectionInfos, rateType, cost, err := GetRequestInfo(ctx, &milvuspb.AlterDatabaseRequest{
+				DbName: "foo",
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, util.InvalidDBID, dbID)
+			assert.Equal(t, 0, len(collectionInfos))
+			assert.Equal(t, internalpb.RateType_DDLDB, rateType)
+			assert.Equal(t, 1, cost)
+		}
+	})
 }

@@ -292,6 +292,7 @@ enum RateType {
   DQLSearch = 8;
   DQLQuery = 9;
   DMLUpsert = 10;
+  DDLDB = 11;
 }
 
 message Rate {
