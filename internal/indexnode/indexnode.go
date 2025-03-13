@@ -116,6 +116,8 @@ type IndexNode struct {
 
 	binlogIO io.BinlogIO
 
+	totalSlot int64
+
 	initOnce     sync.Once
 	stateLock    sync.Mutex
 	indexTasks   map[taskKey]*indexTaskInfo
@@ -141,6 +143,7 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) *IndexNode {
 	sc := NewTaskScheduler(b.loopCtx)
 
 	b.sched = sc
+	b.totalSlot = calculateNodeSlots()
 	expr.Register("indexnode", b)
 	return b
 }

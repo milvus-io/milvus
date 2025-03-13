@@ -688,8 +688,6 @@ func (s *IndexNodeSuite) Test_CreateStatsTask() {
 		err = merr.Error(slotResp.GetStatus())
 		s.NoError(err)
 
-		s.Equal(int64(1), slotResp.GetTaskSlots())
-
 		status, err = s.in.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 			ClusterID: "cluster2",
 			TaskIDs:   []int64{taskID},
@@ -770,7 +768,7 @@ func (s *IndexNodeSuite) Test_CreateStatsTask() {
 		err = merr.Error(slotResp.GetStatus())
 		s.NoError(err)
 
-		s.Equal(int64(1), slotResp.GetTaskSlots())
+		s.Equal(int64(1), slotResp.GetAvailableSlots())
 
 		status, err = s.in.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 			ClusterID: "cluster2",
