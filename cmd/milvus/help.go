@@ -29,8 +29,6 @@ milvus run [server type] [flags]
 		Start the rootcoord server.
 	-querycoord 'true'
 		Start the querycoord server.
-	-indexcoord 'true'
-		Start the indexcoord server.
 	-datacoord 'true'
 		Start the datacoord server.
 	-alias ''

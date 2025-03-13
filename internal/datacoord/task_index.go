@@ -267,7 +267,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	return true
 }
 
-func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNodeClient, meta *meta) bool {
+func (it *indexBuildTask) AssignTask(ctx context.Context, client types.DataNodeClient, meta *meta) bool {
 	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
@@ -296,7 +296,7 @@ func (it *indexBuildTask) setResult(info *workerpb.IndexTaskInfo) {
 	it.taskInfo = info
 }
 
-func (it *indexBuildTask) QueryResult(ctx context.Context, node types.IndexNodeClient) {
+func (it *indexBuildTask) QueryResult(ctx context.Context, node types.DataNodeClient) {
 	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := node.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
@@ -334,7 +334,7 @@ func (it *indexBuildTask) QueryResult(ctx context.Context, node types.IndexNodeC
 	it.SetState(indexpb.JobState_JobStateRetry, "index is not in info response")
 }
 
-func (it *indexBuildTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
+func (it *indexBuildTask) DropTaskOnWorker(ctx context.Context, client types.DataNodeClient) bool {
 	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{

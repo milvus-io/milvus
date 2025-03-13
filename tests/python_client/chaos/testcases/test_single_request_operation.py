@@ -66,7 +66,7 @@ class TestOperations(TestBase):
         self.enable_import = enable_import
         self.minio_endpoint = f"{minio_host}:9000"
         self.ms = MilvusSys()
-        self.bucket_name = self.ms.index_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
+        self.bucket_name = self.ms.data_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
 
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name

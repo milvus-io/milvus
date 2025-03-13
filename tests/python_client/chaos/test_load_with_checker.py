@@ -82,7 +82,7 @@ class TestChaos(TestChaosBase):
         minio_ip = list(minio_ip_pod_pair.keys())[0]
         minio_port = "9000"
         minio_endpoint = f"{minio_ip}:{minio_port}"
-        bucket_name = ms.index_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
+        bucket_name = ms.data_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
         schema = cf.gen_default_collection_schema()
         data = cf.gen_default_list_data_for_bulk_insert(nb=nb)
         fields_name = [field.name for field in schema.fields]

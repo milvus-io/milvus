@@ -217,7 +217,7 @@ func TestServer_CreateIndex(t *testing.T) {
 				Value: "DISKANN",
 			},
 		}
-		s.indexNodeManager = session.NewNodeManager(ctx, defaultIndexNodeCreatorFunc)
+		s.indexNodeManager = session.NewNodeManager(ctx, defaultDataNodeCreatorFunc)
 		resp, err := s.CreateIndex(ctx, req)
 		assert.Error(t, merr.CheckRPCCall(resp, err))
 	})
@@ -235,9 +235,9 @@ func TestServer_CreateIndex(t *testing.T) {
 				Value: "true",
 			},
 		}
-		nodeManager := session.NewNodeManager(ctx, defaultIndexNodeCreatorFunc)
+		nodeManager := session.NewNodeManager(ctx, defaultDataNodeCreatorFunc)
 		s.indexNodeManager = nodeManager
-		mockNode := mocks.NewMockIndexNodeClient(t)
+		mockNode := mocks.NewMockDataNodeClient(t)
 		nodeManager.SetClient(1001, mockNode)
 		mockNode.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&workerpb.GetJobStatsResponse{
 			Status:     merr.Success(),
