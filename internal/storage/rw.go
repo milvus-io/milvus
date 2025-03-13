@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	sio "io"
+	"sort"
 
 	"github.com/samber/lo"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 )
 
 const (
@@ -36,11 +38,16 @@ const (
 	StorageV2 int64 = 2
 )
 
+type (
+	downloaderFn func(ctx context.Context, paths []string) ([][]byte, error)
+	uploaderFn   func(ctx context.Context, kvs map[string][]byte) error
+)
+
 type rwOptions struct {
 	version             int64
 	bufferSize          int64
-	downloader          func(ctx context.Context, paths []string) ([][]byte, error)
-	uploader            func(ctx context.Context, kvs map[string][]byte) error
+	downloader          downloaderFn
+	uploader            uploaderFn
 	multiPartUploadSize int64
 	columnGroups        []storagecommon.ColumnGroup
 }
@@ -90,6 +97,69 @@ func WithColumnGroups(columnGroups []storagecommon.ColumnGroup) RwOption {
 	}
 }
 
+func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloader downloaderFn) (ChunkedBlobsReader, error) {
+	for _, binlog := range binlogs {
+		sort.Slice(binlog.Binlogs, func(i, j int) bool {
+			return binlog.Binlogs[i].LogID < binlog.Binlogs[j].LogID
+		})
+	}
+	nChunks := len(binlogs[0].Binlogs)
+	chunks := make([][]string, nChunks) // i is chunkid, j is fieldid
+	missingChunks := lo.Map(binlogs, func(binlog *datapb.FieldBinlog, _ int) int {
+		return nChunks - len(binlog.Binlogs)
+	})
+	for i := range nChunks {
+		chunks[i] = make([]string, 0, len(binlogs))
+		for j, binlog := range binlogs {
+			if i >= missingChunks[j] {
+				idx := i - missingChunks[j]
+				chunks[i] = append(chunks[i], binlog.Binlogs[idx].LogPath)
+			}
+		}
+	}
+	// verify if the chunks order is correct.
+	// the zig-zag order should have a (strict) increasing order on logids.
+	lastLogID := int64(-1)
+	for _, paths := range chunks {
+		lastFieldID := int64(-1)
+		for _, path := range paths {
+			_, _, _, fieldID, logID, ok := metautil.ParseInsertLogPath(path)
+			if !ok {
+				return nil, merr.WrapErrIoFailedReason(fmt.Sprintf("malformed log path %s", path))
+			}
+			if fieldID < lastFieldID {
+				return nil, merr.WrapErrIoFailedReason(fmt.Sprintf("unaligned log path %s, fieldID %d < lastFieldID %d", path, fieldID, lastFieldID))
+			}
+			if logID < lastLogID {
+				return nil, merr.WrapErrIoFailedReason(fmt.Sprintf("unaligned log path %s, logID %d < lastLogID %d", path, logID, lastLogID))
+			}
+			lastLogID = logID
+			lastFieldID = fieldID
+		}
+	}
+
+	chunkPos := 0
+	return func() ([]*Blob, error) {
+		if chunkPos >= nChunks {
+			return nil, sio.EOF
+		}
+
+		vals, err := downloader(ctx, chunks[chunkPos])
+		if err != nil {
+			return nil, err
+		}
+		blobs := make([]*Blob, 0, len(vals))
+		for i := range vals {
+			blobs = append(blobs, &Blob{
+				Key:   chunks[chunkPos][i],
+				Value: vals[i],
+			})
+		}
+		chunkPos++
+		return blobs, nil
+	}, nil
+}
+
 func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, schema *schemapb.CollectionSchema, option ...RwOption) (RecordReader, error) {
 	rwOptions := DefaultRwOptions()
 	for _, opt := range option {
@@ -97,28 +167,11 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 	}
 	switch rwOptions.version {
 	case StorageV1:
-		itr := 0
-		return newCompositeBinlogRecordReader(schema, func() ([]*Blob, error) {
-			if len(binlogs) <= 0 {
-				return nil, sio.EOF
-			}
-			paths := make([]string, len(binlogs))
-			for i, fieldBinlog := range binlogs {
-				if itr >= len(fieldBinlog.GetBinlogs()) {
-					return nil, sio.EOF
-				}
-				paths[i] = fieldBinlog.GetBinlogs()[itr].GetLogPath()
-			}
-			itr++
-			values, err := rwOptions.downloader(ctx, paths)
-			if err != nil {
-				return nil, err
-			}
-			blobs := lo.Map(values, func(v []byte, i int) *Blob {
-				return &Blob{Key: paths[i], Value: v}
-			})
-			return blobs, nil
-		})
+		blobsReader, err := makeBlobsReader(ctx, binlogs, rwOptions.downloader)
+		if err != nil {
+			return nil, err
+		}
+		return newCompositeBinlogRecordReader(schema, blobsReader)
 	case StorageV2:
 		if len(binlogs) <= 0 {
 			return nil, sio.EOF
