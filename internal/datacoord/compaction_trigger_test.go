@@ -166,6 +166,7 @@ func Test_compactionTrigger_force_without_index(t *testing.T) {
 	m := &meta{
 		catalog:    catalog,
 		channelCPs: newChannelCps(),
+		segMu:      NewSegmentKeyLock(),
 		segments: &SegmentsInfo{
 			segments: segments,
 			secondaryIndexes: segmentInfoIndexes{
@@ -416,6 +417,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 		},
 	})
 
+	segments :=
+
 	tests := []struct {
 		name         string
 		fields       fields
@@ -430,6 +433,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				&meta{
 					catalog:    catalog,
 					channelCPs: newChannelCps(),
+					segMu:      NewSegmentKeyLock(),
 					segments: &SegmentsInfo{
 						segments: map[int64]*SegmentInfo{
 							1: seg1,
@@ -881,6 +885,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			"test many segments",
 			fields{
 				&meta{
+					segMu:       NewSegmentKeyLock(),
 					segments:    segmentInfos,
 					channelCPs:  newChannelCps(),
 					collections: collections,
@@ -1038,7 +1043,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 					indexMeta: im,
 					// 4 segment
 					channelCPs: newChannelCps(),
-
+					segMu:      NewSegmentKeyLock(),
 					segments: &SegmentsInfo{
 						segments: map[int64]*SegmentInfo{
 							1: {
@@ -1250,8 +1255,8 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 				&meta{
 					// 8 small segments
 					channelCPs: newChannelCps(),
-
-					segments: mockSegmentsInfo(20, 20, 20, 20, 20, 20),
+					segMu:      NewSegmentKeyLock(),
+					segments:   mockSegmentsInfo(20, 20, 20, 20, 20, 20),
 					indexMeta: &indexMeta{
 						segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
 							1: genSegIndex(1, indexID, 20),
@@ -1389,6 +1394,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 					channelCPs: newChannelCps(),
 					// 7 segments with 200MB each, the compaction is expected to be triggered
 					//  as the first 5 being merged, and 1 plus being squeezed.
+					segMu:    NewSegmentKeyLock(),
 					segments: mockSegmentsInfo(200, 200, 200, 200, 200, 200, 200),
 					indexMeta: &indexMeta{
 						segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
@@ -1533,8 +1539,8 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 			fields{
 				&meta{
 					channelCPs: newChannelCps(),
-
-					segments: mockSegmentsInfo(600, 600, 600, 600, 260, 260),
+					segMu:      NewSegmentKeyLock(),
+					segments:   mockSegmentsInfo(600, 600, 600, 600, 260, 260),
 					indexMeta: &indexMeta{
 						segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
 							1: genSegIndex(1, indexID, 20),
@@ -1750,8 +1756,8 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 			"test rand size segment",
 			fields{
 				&meta{
-					channelCPs: newChannelCps(),
-
+					channelCPs:  newChannelCps(),
+					segMu:       NewSegmentKeyLock(),
 					segments:    segmentInfos,
 					collections: collections,
 					indexMeta:   indexMeta,
@@ -2091,6 +2097,7 @@ func Test_triggerSingleCompaction(t *testing.T) {
 	}()
 	m := &meta{
 		channelCPs: newChannelCps(),
+		segMu:      NewSegmentKeyLock(),
 		segments:   NewSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	got := newCompactionTrigger(m, &compactionPlanHandler{}, newMockAllocator(t),
@@ -2267,6 +2274,7 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	s.meta = &meta{
 		channelCPs: newChannelCps(),
 		catalog:    catalog,
+		segMu:      NewSegmentKeyLock(),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				1: seg1,
@@ -2764,6 +2772,7 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 				&meta{
 					catalog:    catalog,
 					channelCPs: newChannelCps(),
+					segMu:      NewSegmentKeyLock(),
 					segments: &SegmentsInfo{
 						segments: map[int64]*SegmentInfo{
 							1: seg1,

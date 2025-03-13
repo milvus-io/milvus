@@ -52,7 +52,10 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 		Channel:      "ch-1",
 	}
 	segments := genSegmentsForMeta(s.testLabel)
-	s.meta = &meta{segments: NewSegmentsInfo()}
+	s.meta = &meta{
+		segMu:    NewSegmentKeyLock(),
+		segments: NewSegmentsInfo(),
+	}
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
 	}
@@ -339,6 +342,7 @@ func TestCompactionAndImport(t *testing.T) {
 	catelog := mocks.NewDataCoordCatalog(t)
 	catelog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	meta := &meta{
+		segMu:    NewSegmentKeyLock(),
 		segments: NewSegmentsInfo(),
 		catalog:  catelog,
 	}

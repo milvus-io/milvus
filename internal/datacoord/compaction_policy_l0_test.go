@@ -54,7 +54,10 @@ func (s *L0CompactionPolicySuite) SetupTest() {
 	}
 
 	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{segments: NewSegmentsInfo()}
+	meta := &meta{
+		segMu:    NewSegmentKeyLock(),
+		segments: NewSegmentsInfo(),
+	}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
@@ -161,7 +164,10 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 		info.DmlPosition = &msgpb.MsgPosition{Timestamp: arg.PosT}
 		segments[arg.ID] = info
 	}
-	meta := &meta{segments: NewSegmentsInfo()}
+	meta := &meta{
+		segMu:    NewSegmentKeyLock(),
+		segments: NewSegmentsInfo(),
+	}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}

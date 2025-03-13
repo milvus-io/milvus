@@ -56,6 +56,7 @@ func (s *statsTaskSuite) SetupSuite() {
 	s.targetID = 1180
 
 	s.mt = &meta{
+		segMu: NewSegmentKeyLock(),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -379,6 +380,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			}, nil)
 
 			mt := &meta{
+				segMu: NewSegmentKeyLock(),
 				segments: &SegmentsInfo{
 					segments: map[int64]*SegmentInfo{
 						st.segmentID: {
@@ -402,6 +404,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			}, nil)
 
 			mt := &meta{
+				segMu: NewSegmentKeyLock(),
 				segments: &SegmentsInfo{
 					segments: map[int64]*SegmentInfo{
 						st.segmentID: {

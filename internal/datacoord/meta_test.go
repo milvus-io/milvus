@@ -309,6 +309,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		}
 		m := &meta{
 			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segMu:        NewSegmentKeyLock(),
 			segments:     latestSegments,
 			chunkManager: mockChMgr,
 		}
@@ -370,6 +371,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		}
 		m := &meta{
 			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segMu:        NewSegmentKeyLock(),
 			segments:     latestSegments,
 			chunkManager: mockChMgr,
 		}
@@ -1057,6 +1059,7 @@ func Test_meta_SetSegmentsCompacting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &meta{
 				catalog:  &datacoord.Catalog{MetaKv: tt.fields.client},
+				segMu:    NewSegmentKeyLock(),
 				segments: tt.fields.segments,
 			}
 			m.SetSegmentsCompacting(context.TODO(), []UniqueID{tt.args.segmentID}, tt.args.compacting)
@@ -1095,7 +1098,10 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 		storedSegments.SetSegment(segID, segment)
 	}
 	expectedSeg := map[int64]commonpb.SegmentState{1: commonpb.SegmentState_Flushed, 2: commonpb.SegmentState_Growing}
-	m := &meta{segments: storedSegments}
+	m := &meta{
+		segMu:    NewSegmentKeyLock(),
+		segments: storedSegments,
+	}
 	got := m.GetSegmentsOfCollection(context.TODO(), 1)
 	assert.Equal(t, len(expectedSeg), len(got))
 	for _, gotInfo := range got {
@@ -1141,7 +1147,10 @@ func Test_meta_GetSegmentsWithChannel(t *testing.T) {
 	} {
 		storedSegments.SetSegment(segID, segment)
 	}
-	m := &meta{segments: storedSegments}
+	m := &meta{
+		segMu:    NewSegmentKeyLock(),
+		segments: storedSegments,
+	}
 	got := m.GetSegmentsByChannel("h1")
 	assert.Equal(t, 2, len(got))
 	assert.ElementsMatch(t, []int64{1, 3}, lo.Map(
@@ -1198,6 +1207,7 @@ func Test_meta_GetSegmentsWithChannel(t *testing.T) {
 
 func TestMeta_HasSegments(t *testing.T) {
 	m := &meta{
+		segMu: NewSegmentKeyLock(),
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
 				1: {
@@ -1221,6 +1231,7 @@ func TestMeta_HasSegments(t *testing.T) {
 
 func TestMeta_GetAllSegments(t *testing.T) {
 	m := &meta{
+		segMu: NewSegmentKeyLock(),
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
 				1: {
@@ -1433,6 +1444,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 func TestMeta_GetSegmentsJSON(t *testing.T) {
 	// Create a mock meta object
 	m := &meta{
+		segMu: NewSegmentKeyLock(),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				1: {

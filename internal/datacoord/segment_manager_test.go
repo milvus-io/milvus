@@ -831,6 +831,7 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 			"test drop segments",
 			fields{
 				meta: &meta{
+					segMu: NewSegmentKeyLock(),
 					segments: &SegmentsInfo{
 						segments: map[int64]*SegmentInfo{
 							1: {
@@ -863,6 +864,7 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 			"test drop segments with dropped segment",
 			fields{
 				meta: &meta{
+					segMu: NewSegmentKeyLock(),
 					segments: &SegmentsInfo{
 						segments: map[int64]*SegmentInfo{
 							1: {
@@ -985,6 +987,7 @@ func TestSegmentManager_CleanZeroSealedSegmentsOfChannel(t *testing.T) {
 	newMetaFunc := func() *meta {
 		return &meta{
 			catalog: mockCatalog,
+			segMu:   NewSegmentKeyLock(),
 			segments: &SegmentsInfo{
 				segments: map[int64]*SegmentInfo{
 					1: seg1,

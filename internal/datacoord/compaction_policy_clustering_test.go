@@ -67,6 +67,7 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	indexMeta, _ := newIndexMeta(context.TODO(), s.catalog)
 
 	meta := &meta{
+		segMu:              NewSegmentKeyLock(),
 		segments:           NewSegmentsInfo(),
 		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		compactionTaskMeta: compactionTaskMeta,

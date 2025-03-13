@@ -574,6 +574,7 @@ func TestServer_AlterIndex(t *testing.T) {
 		meta: &meta{
 			catalog:   catalog,
 			indexMeta: indexMeta,
+			segMu:     NewSegmentKeyLock(),
 			segments: &SegmentsInfo{
 				compactionTo: make(map[int64][]int64),
 				segments: map[UniqueID]*SegmentInfo{
@@ -807,7 +808,7 @@ func TestServer_GetIndexState(t *testing.T) {
 			},
 			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
 		},
-
+		segMu:    NewSegmentKeyLock(),
 		segments: NewSegmentsInfo(),
 	}
 	for id, segment := range segments {
@@ -884,7 +885,7 @@ func TestServer_GetIndexState(t *testing.T) {
 				},
 			},
 		},
-
+		segMu:    NewSegmentKeyLock(),
 		segments: NewSegmentsInfo(),
 	}
 	for id, segment := range segments {
@@ -953,6 +954,7 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 		meta: &meta{
 			catalog:   indexMeta.catalog,
 			indexMeta: indexMeta,
+			segMu:     NewSegmentKeyLock(),
 			segments:  NewSegmentsInfo(),
 		},
 		allocator:       mock0Allocator,
@@ -1082,6 +1084,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 		meta: &meta{
 			catalog:   &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
 			indexMeta: newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
+			segMu:     NewSegmentKeyLock(),
 			segments:  NewSegmentsInfo(),
 		},
 		allocator:       mock0Allocator,
@@ -1558,7 +1561,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 					},
 				},
 			},
-
+			segMu:    NewSegmentKeyLock(),
 			segments: NewSegmentsInfo(),
 		},
 		allocator:       mock0Allocator,
@@ -1723,7 +1726,7 @@ func TestServer_ListIndexes(t *testing.T) {
 				},
 				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
 			},
-
+			segMu:    NewSegmentKeyLock(),
 			segments: NewSegmentsInfo(),
 		},
 		allocator:       mock0Allocator,
@@ -2000,7 +2003,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 					},
 				},
 			},
-
+			segMu:    NewSegmentKeyLock(),
 			segments: NewSegmentsInfo(),
 		},
 		allocator:       mock0Allocator,
@@ -2159,7 +2162,7 @@ func TestServer_DropIndex(t *testing.T) {
 				},
 				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
 			},
-
+			segMu:    NewSegmentKeyLock(),
 			segments: NewSegmentsInfo(),
 		},
 		allocator:       mock0Allocator,
@@ -2324,7 +2327,7 @@ func TestServer_GetIndexInfos(t *testing.T) {
 					},
 				},
 			},
-
+			segMu:        NewSegmentKeyLock(),
 			segments:     NewSegmentsInfo(),
 			chunkManager: cli,
 		},
@@ -2393,6 +2396,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 		},
 	}
 	m := &meta{
+		segMu:    NewSegmentKeyLock(),
 		segments: NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			segmentBuildInfo: newSegmentIndexBuildInfo(),

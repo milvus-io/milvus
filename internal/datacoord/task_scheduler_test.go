@@ -509,6 +509,7 @@ func withStatsTaskMeta(stm *statsTaskMeta) testMetaOption {
 func createMeta(catalog metastore.DataCoordCatalog, opts ...testMetaOption) *meta {
 	mt := &meta{
 		catalog: catalog,
+		segMu:   NewSegmentKeyLock(),
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
 				1000: {
@@ -1647,6 +1648,7 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 			},
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
 		},
+		segMu: NewSegmentKeyLock(),
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
 				segID: {
@@ -2223,6 +2225,7 @@ func (s *taskSchedulerSuite) Test_zeroSegmentStats() {
 	mt := &meta{
 		ctx:      ctx,
 		catalog:  catalog,
+		segMu:    NewSegmentKeyLock(),
 		segments: NewSegmentsInfo(),
 		statsTaskMeta: &statsTaskMeta{
 			ctx:     ctx,

@@ -52,6 +52,7 @@ func (s *segmentKeyLock) getKeys(segmentIDs []int64) []int64 {
 func (s *segmentKeyLock) Lock(segmentIDs ...int64) {
 	if len(segmentIDs) == 1 {
 		s.keyLock.Lock(segmentIDs[0] % segmentLockPartitions)
+		return
 	}
 
 	keys := s.getKeys(segmentIDs)
@@ -63,6 +64,7 @@ func (s *segmentKeyLock) Lock(segmentIDs ...int64) {
 func (s *segmentKeyLock) Unlock(segmentIDs ...int64) {
 	if len(segmentIDs) == 1 {
 		s.keyLock.Unlock(segmentIDs[0] % segmentLockPartitions)
+		return
 	}
 
 	keys := s.getKeys(segmentIDs)
@@ -74,6 +76,7 @@ func (s *segmentKeyLock) Unlock(segmentIDs ...int64) {
 func (s *segmentKeyLock) RLock(segmentIDs ...int64) {
 	if len(segmentIDs) == 1 {
 		s.keyLock.RLock(segmentIDs[0] % segmentLockPartitions)
+		return
 	}
 
 	keys := s.getKeys(segmentIDs)
@@ -85,6 +88,7 @@ func (s *segmentKeyLock) RLock(segmentIDs ...int64) {
 func (s *segmentKeyLock) RUnlock(segmentIDs ...int64) {
 	if len(segmentIDs) == 1 {
 		s.keyLock.RUnlock(segmentIDs[0] % segmentLockPartitions)
+		return
 	}
 
 	keys := s.getKeys(segmentIDs)

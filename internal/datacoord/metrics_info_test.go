@@ -612,6 +612,7 @@ func TestGetDistJSON(t *testing.T) {
 		ctx := context.Background()
 
 		svr.meta = &meta{
+			segMu: NewSegmentKeyLock(),
 			segments: &SegmentsInfo{
 				segments: map[int64]*SegmentInfo{
 					1: {
@@ -676,7 +677,10 @@ func TestGetDistJSON(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{}
 		ctx := context.Background()
 
-		svr.meta = &meta{segments: &SegmentsInfo{segments: map[int64]*SegmentInfo{}}}
+		svr.meta = &meta{
+			segMu:    NewSegmentKeyLock(),
+			segments: &SegmentsInfo{segments: map[int64]*SegmentInfo{}},
+		}
 		cm := NewMockChannelManager(t)
 		cm.EXPECT().GetChannelWatchInfos().Return(map[int64]map[string]*datapb.ChannelWatchInfo{})
 
@@ -690,6 +694,7 @@ func TestGetDistJSON(t *testing.T) {
 func TestServer_getSegmentsJSON(t *testing.T) {
 	s := &Server{
 		meta: &meta{
+			segMu: NewSegmentKeyLock(),
 			segments: &SegmentsInfo{
 				segments: map[int64]*SegmentInfo{
 					1: {

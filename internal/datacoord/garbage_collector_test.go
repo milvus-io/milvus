@@ -479,6 +479,7 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 		ctx:         ctx,
 		catalog:     catalog,
 		collections: nil,
+		segMu:       NewSegmentKeyLock(),
 		segments:    NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			catalog: catalog,
@@ -643,6 +644,7 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 		ctx:         ctx,
 		catalog:     catalog,
 		collections: nil,
+		segMu:       NewSegmentKeyLock(),
 		segments:    NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			catalog: catalog,
@@ -1070,6 +1072,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	m := &meta{
 		catalog:    catalog,
 		channelCPs: channelCPs,
+		segMu:      NewSegmentKeyLock(),
 		segments:   NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			catalog: catalog,

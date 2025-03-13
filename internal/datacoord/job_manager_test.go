@@ -68,6 +68,7 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 
 	mt := &meta{
 		collections: collections,
+		segMu:       NewSegmentKeyLock(),
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
 				10: {

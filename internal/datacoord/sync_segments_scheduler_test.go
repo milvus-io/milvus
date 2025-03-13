@@ -73,6 +73,7 @@ func (s *SyncSegmentsSchedulerSuite) initParams() {
 	collections.Insert(2, nil)
 	s.m = &meta{
 		collections: collections,
+		segMu:       NewSegmentKeyLock(),
 		segments: &SegmentsInfo{
 			secondaryIndexes: segmentInfoIndexes{
 				channel2Segments: map[string]map[UniqueID]*SegmentInfo{

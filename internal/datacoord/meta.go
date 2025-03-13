@@ -57,8 +57,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-const SegmentKeyLockNum = 128
-
 type CompactionMeta interface {
 	GetSegment(ctx context.Context, segID UniqueID) *SegmentInfo
 	SelectSegments(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo
@@ -185,6 +183,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		ctx:                ctx,
 		catalog:            catalog,
 		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segMu:              NewSegmentKeyLock(),
 		segments:           NewSegmentsInfo(),
 		channelCPs:         newChannelCps(),
 		indexMeta:          im,
@@ -778,10 +777,13 @@ func (p *updateSegmentPack) Get(segmentID int64) *SegmentInfo {
 	return p.segments[segmentID]
 }
 
-type UpdateOperator func(*updateSegmentPack) bool
+type UpdateOperator struct {
+	op         func(*updateSegmentPack) bool
+	segmentIDs []int64
+}
 
 func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.meta.segments.GetSegment(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Info("meta update: add new l0 segment",
@@ -801,10 +803,14 @@ func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string
 		}
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 func UpdateStorageVersionOperator(segmentID int64, version int64) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Info("meta update: update storage version - segment not found",
@@ -815,12 +821,16 @@ func UpdateStorageVersionOperator(segmentID int64, version int64) UpdateOperator
 		segment.StorageVersion = version
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 // Set status of segment
 // and record dropped time when change segment status to dropped
 func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: update status failed - segment not found",
@@ -841,10 +851,14 @@ func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateO
 		}
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 func UpdateCompactedOperator(segmentID int64) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: update binlog failed - segment not found",
@@ -854,10 +868,14 @@ func UpdateCompactedOperator(segmentID int64) UpdateOperator {
 		segment.Compacted = true
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 func SetSegmentIsInvisible(segmentID int64, isInvisible bool) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: update segment visible fail - segment not found",
@@ -867,10 +885,14 @@ func SetSegmentIsInvisible(segmentID int64, isInvisible bool) UpdateOperator {
 		segment.IsInvisible = isInvisible
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 func UpdateSegmentLevelOperator(segmentID int64, level datapb.SegmentLevel) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: update level fail - segment not found",
@@ -885,10 +907,14 @@ func UpdateSegmentLevelOperator(segmentID int64, level datapb.SegmentLevel) Upda
 		segment.Level = level
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 func UpdateSegmentPartitionStatsVersionOperator(segmentID int64, version int64) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: update partition stats version fail - segment not found",
@@ -900,10 +926,14 @@ func UpdateSegmentPartitionStatsVersionOperator(segmentID int64, version int64) 
 		log.Ctx(context.TODO()).Debug("update segment version", zap.Int64("segmentID", segmentID), zap.Int64("PartitionStatsVersion", version), zap.Int64("LastPartitionStatsVersion", segment.LastPartitionStatsVersion))
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 func RevertSegmentLevelOperator(segmentID int64) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: revert level fail - segment not found",
@@ -918,10 +948,14 @@ func RevertSegmentLevelOperator(segmentID int64) UpdateOperator {
 		}
 		return false
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 func RevertSegmentPartitionStatsVersionOperator(segmentID int64) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: revert level fail - segment not found",
@@ -932,11 +966,15 @@ func RevertSegmentPartitionStatsVersionOperator(segmentID int64) UpdateOperator 
 		log.Ctx(context.TODO()).Debug("revert segment partition stats version", zap.Int64("segmentID", segmentID), zap.Int64("LastPartitionStatsVersion", segment.LastPartitionStatsVersion))
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 // Add binlogs in segmentInfo
 func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: add binlog failed - segment not found",
@@ -957,10 +995,14 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 		}
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: update binlog failed - segment not found",
@@ -977,11 +1019,15 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25l
 		}
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 // update startPosition
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		for _, pos := range startPositions {
 			if len(pos.GetStartPosition().GetMsgID()) == 0 {
 				continue
@@ -995,10 +1041,16 @@ func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOp
 		}
 		return true
 	}
+	return UpdateOperator{
+		op: op,
+		segmentIDs: lo.FilterMap(startPositions, func(pos *datapb.SegmentStartPosition, _ int) (int64, bool) {
+			return pos.GetSegmentID(), len(pos.GetStartPosition().GetMsgID()) != 0
+		}),
+	}
 }
 
 func UpdateDmlPosition(segmentID int64, dmlPosition *msgpb.MsgPosition) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		if len(dmlPosition.GetMsgID()) == 0 {
 			log.Ctx(context.TODO()).Warn("meta update: update dml position failed - nil position msg id",
 				zap.Int64("segmentID", segmentID))
@@ -1015,11 +1067,15 @@ func UpdateDmlPosition(segmentID int64, dmlPosition *msgpb.MsgPosition) UpdateOp
 		segment.DmlPosition = dmlPosition
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 // UpdateCheckPointOperator updates segment checkpoint and num rows
 func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: update checkpoint failed - segment not found",
@@ -1061,10 +1117,14 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint)
 
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: update NumOfRows failed - segment not found",
@@ -1075,10 +1135,14 @@ func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 		segment.MaxRowNum = rows
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: update isImporting failed - segment not found",
@@ -1088,12 +1152,16 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 		segment.IsImporting = isImporting
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 // UpdateAsDroppedIfEmptyWhenFlushing updates segment state to Dropped if segment is empty and in Flushing state
 // It's used to make a empty flushing segment to be dropped directly.
 func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
+	op := func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			log.Ctx(context.TODO()).Warn("meta update: update as dropped if empty when flusing failed - segment not found",
@@ -1106,11 +1174,23 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 		}
 		return true
 	}
+	return UpdateOperator{
+		op:         op,
+		segmentIDs: []int64{segmentID},
+	}
 }
 
 // updateSegmentsInfo update segment infos
 // will exec all operators, and update all changed segments
 func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
+	segmentIDs := make([]int64, 0)
+	for _, operator := range operators {
+		segmentIDs = append(segmentIDs, operator.segmentIDs...)
+	}
+
+	m.segMu.Lock(segmentIDs...)
+	defer m.segMu.Unlock(segmentIDs...)
+
 	updatePack := &updateSegmentPack{
 		meta:       m,
 		segments:   make(map[int64]*SegmentInfo),
@@ -1120,14 +1200,9 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 		},
 	}
 
-	segmentIDs := make([]int64, 0)
 	for _, operator := range operators {
-		operator(updatePack)
-		segmentIDs = append(segmentIDs, lo.Keys(updatePack.segments)...)
+		operator.op(updatePack)
 	}
-
-	m.segMu.Lock(segmentIDs...)
-	defer m.segMu.Unlock(segmentIDs...)
 
 	// skip if all segment not exist
 	if len(updatePack.segments) == 0 {
@@ -1389,14 +1464,14 @@ func (m *meta) GetFlushingSegments() []*SegmentInfo {
 
 // SelectSegments select segments with selector
 func (m *meta) SelectSegments(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
+	segmentIDs := m.segments.GetSegmentIDsBySelector(filters...)
+	m.segMu.RLock(segmentIDs...)
+	defer m.segMu.RUnlock(segmentIDs...)
+
 	criterion := &segmentCriterion{}
 	for _, filter := range filters {
 		filter.AddFilter(criterion)
 	}
-
-	segmentIDs := m.segments.GetSegmentIDsBySelector(filters...)
-	m.segMu.RLock(segmentIDs...)
-	defer m.segMu.RUnlock(segmentIDs...)
 
 	result := make([]*SegmentInfo, 0, len(segmentIDs))
 	for _, segmentID := range segmentIDs {
@@ -2197,7 +2272,7 @@ func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
 	if collectionID <= 0 {
 		segmentIDs = m.segments.GetSegmentIDs()
 	} else {
-		segmentIDs = m.segments.GetCollectionSegmentIDs(collectionID)
+		segmentIDs = m.segments.GetSegmentIDsForCollection(collectionID)
 	}
 
 	m.segMu.RLock(segmentIDs...)

@@ -54,7 +54,10 @@ func (s *SingleCompactionPolicySuite) SetupTest() {
 	}
 
 	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{segments: NewSegmentsInfo()}
+	meta := &meta{
+		segMu:    NewSegmentKeyLock(),
+		segments: NewSegmentsInfo(),
+	}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
@@ -146,6 +149,7 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
 	s.singlePolicy.meta = &meta{
 		compactionTaskMeta: compactionTaskMeta,
+		segMu:              NewSegmentKeyLock(),
 		segments:           segmentsInfo,
 	}
 	compactionTaskMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{

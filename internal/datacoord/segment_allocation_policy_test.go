@@ -401,6 +401,7 @@ func Test_sealByBlockingL0(t *testing.T) {
 			}
 
 			meta := &meta{
+				segMu:    NewSegmentKeyLock(),
 				segments: segments,
 			}
 

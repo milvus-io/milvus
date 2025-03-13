@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -43,8 +44,19 @@ type SegmentsInfo struct {
 }
 
 type segmentInfoIndexes struct {
+	collKeyLock      *lock.KeyLock[UniqueID]
 	coll2Segments    *typeutil.ConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *SegmentInfo]]
+	channelKeyLock   *lock.KeyLock[string]
 	channel2Segments *typeutil.ConcurrentMap[string, *typeutil.ConcurrentMap[UniqueID, *SegmentInfo]]
+}
+
+func newSecondaryIndexes() segmentInfoIndexes {
+	return segmentInfoIndexes{
+		collKeyLock:      lock.NewKeyLock[int64](),
+		coll2Segments:    typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *SegmentInfo]](),
+		channelKeyLock:   lock.NewKeyLock[string](),
+		channel2Segments: typeutil.NewConcurrentMap[string, *typeutil.ConcurrentMap[UniqueID, *SegmentInfo]](),
+	}
 }
 
 // SegmentInfo wraps datapb.SegmentInfo and patches some extra info on it
@@ -86,12 +98,9 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 // note that no mutex is wrapped so external concurrent control is needed
 func NewSegmentsInfo() *SegmentsInfo {
 	return &SegmentsInfo{
-		segments: typeutil.NewConcurrentMap[UniqueID, *SegmentInfo](),
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments:    typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *SegmentInfo]](),
-			channel2Segments: typeutil.NewConcurrentMap[string, *typeutil.ConcurrentMap[UniqueID, *SegmentInfo]](),
-		},
-		compactionTo: typeutil.NewConcurrentMap[UniqueID, []UniqueID](),
+		segments:         typeutil.NewConcurrentMap[UniqueID, *SegmentInfo](),
+		secondaryIndexes: newSecondaryIndexes(),
+		compactionTo:     typeutil.NewConcurrentMap[UniqueID, []UniqueID](),
 	}
 }
 
@@ -163,7 +172,7 @@ func (s *SegmentsInfo) GetSegmentIDsForChannel(channel string) []int64 {
 	return channelSegments.Keys()
 }
 
-func (s *SegmentsInfo) GetCollectionSegmentIDs(collectionID int64) []int64 {
+func (s *SegmentsInfo) GetSegmentIDsForCollection(collectionID int64) []int64 {
 	segments, ok := s.secondaryIndexes.coll2Segments.Get(collectionID)
 	if !ok {
 		return nil
@@ -212,10 +221,9 @@ func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 		s.deleteCompactTo(segment)
 		s.removeSecondaryIndex(segment)
 	}
-	if _, ok := s.segments.GetOrInsert(segmentID, segment); ok {
-		s.addSecondaryIndex(segment)
-		s.addCompactTo(segment)
-	}
+	s.segments.Insert(segmentID, segment)
+	s.addSecondaryIndex(segment)
+	s.addCompactTo(segment)
 }
 
 // SetRowCount sets rowCount info for SegmentInfo with provided segmentID
@@ -370,41 +378,45 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 
 func (s *SegmentsInfo) addSecondaryIndex(segment *SegmentInfo) {
 	collID := segment.GetCollectionID()
+	s.secondaryIndexes.collKeyLock.Lock(collID)
+	collSegments, _ := s.secondaryIndexes.coll2Segments.GetOrInsert(collID, typeutil.NewConcurrentMap[UniqueID, *SegmentInfo]())
+	collSegments.Insert(segment.ID, segment)
+	s.secondaryIndexes.collKeyLock.Unlock(collID)
+
 	channel := segment.GetInsertChannel()
-	if segments, ok := s.secondaryIndexes.coll2Segments.GetOrInsert(collID, typeutil.NewConcurrentMap[UniqueID, *SegmentInfo]()); !ok {
-		segments.Insert(segment.ID, segment)
-	}
-	if segments, ok := s.secondaryIndexes.channel2Segments.GetOrInsert(channel, typeutil.NewConcurrentMap[UniqueID, *SegmentInfo]()); !ok {
-		segments.Insert(segment.ID, segment)
-	}
+	s.secondaryIndexes.channelKeyLock.Lock(channel)
+	chanSegments, _ := s.secondaryIndexes.channel2Segments.GetOrInsert(channel, typeutil.NewConcurrentMap[UniqueID, *SegmentInfo]())
+	chanSegments.Insert(segment.ID, segment)
+	s.secondaryIndexes.channelKeyLock.Unlock(channel)
 }
 
 func (s *SegmentsInfo) removeSecondaryIndex(segment *SegmentInfo) {
 	collID := segment.GetCollectionID()
-	channel := segment.GetInsertChannel()
+	s.secondaryIndexes.collKeyLock.Lock(collID)
 	if segments, ok := s.secondaryIndexes.coll2Segments.Get(collID); ok {
 		segments.Remove(segment.ID)
-		// TODO: add collectionID key log and perform remove
-		//if segments.Len() == 0 {
-		//	s.secondaryIndexes.coll2Segments.Remove(collID)
-		//}
+		if segments.Len() == 0 {
+			s.secondaryIndexes.coll2Segments.Remove(collID)
+		}
 	}
+	s.secondaryIndexes.collKeyLock.Unlock(collID)
 
+	channel := segment.GetInsertChannel()
+	s.secondaryIndexes.channelKeyLock.Lock(channel)
 	if segments, ok := s.secondaryIndexes.channel2Segments.Get(channel); ok {
 		segments.Remove(segment.ID)
-		// TODO: add channel key log and perform remove
-		//if segments.Len() == 0 {
-		//	s.secondaryIndexes.channel2Segments.Remove(channel)
-		//}
+		if segments.Len() == 0 {
+			s.secondaryIndexes.channel2Segments.Remove(channel)
+		}
 	}
+	s.secondaryIndexes.channelKeyLock.Unlock(channel)
 }
 
 // addCompactTo adds the compact relation to the segment
 func (s *SegmentsInfo) addCompactTo(segment *SegmentInfo) {
 	for _, from := range segment.GetCompactionFrom() {
-		if compatTo, ok := s.compactionTo.Get(from); ok {
-			compatTo = append(compatTo, segment.GetID())
-		}
+		compatTo, _ := s.compactionTo.GetOrInsert(from, make([]UniqueID, 0))
+		compatTo = append(compatTo, segment.GetID())
 	}
 }
 
