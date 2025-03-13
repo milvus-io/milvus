@@ -44,6 +44,7 @@ const (
 type quotaConfig struct {
 	QuotaAndLimitsEnabled      ParamItem `refreshable:"false"`
 	QuotaCenterCollectInterval ParamItem `refreshable:"false"`
+	ForceDenyAllDDL            ParamItem `refreshable:"true"`
 	AllocRetryTimes            ParamItem `refreshable:"false"`
 	AllocWaitInterval          ParamItem `refreshable:"false"`
 	ComplexDeleteLimitEnable   ParamItem `refreshable:"false"`
@@ -68,6 +69,9 @@ type quotaConfig struct {
 	MaxIndexRatePerDB      ParamItem `refreshable:"true"`
 	MaxFlushRatePerDB      ParamItem `refreshable:"true"`
 	MaxCompactionRatePerDB ParamItem `refreshable:"true"`
+
+	DBLimitEnabled ParamItem `refreshable:"true"`
+	MaxDBRate      ParamItem `refreshable:"true"`
 
 	// dml
 	DMLLimitEnabled                 ParamItem `refreshable:"true"`
@@ -195,6 +199,15 @@ seconds, (0 ~ 65536)`,
 	}
 	p.QuotaCenterCollectInterval.Init(base.mgr)
 
+	p.ForceDenyAllDDL = ParamItem{
+		Key:          "quotaAndLimits.forceDenyAllDDL",
+		Version:      "2.5.8",
+		DefaultValue: "false",
+		Doc:          `true to force deny all DDL requests, false to allow.`,
+		Export:       true,
+	}
+	p.ForceDenyAllDDL.Init(base.mgr)
+
 	// ddl
 	max := fmt.Sprintf("%f", defaultMax)
 	min := fmt.Sprintf("%f", defaultMin)
@@ -207,13 +220,24 @@ seconds, (0 ~ 65536)`,
 	}
 	p.DDLLimitEnabled.Init(base.mgr)
 
+	getLimitSwicher := func() (string, bool) {
+		if p.ForceDenyAllDDL.GetAsBool() {
+			return min, true
+		}
+		if !p.DDLLimitEnabled.GetAsBool() {
+			return max, true
+		}
+		return "", false
+	}
+
 	p.DDLCollectionRate = ParamItem{
 		Key:          "quotaAndLimits.ddl.collectionRate",
 		Version:      "2.2.0",
 		DefaultValue: max,
 		Formatter: func(v string) string {
-			if !p.DDLLimitEnabled.GetAsBool() {
-				return max
+			switcher, ok := getLimitSwicher()
+			if ok {
+				return switcher
 			}
 			// [0 ~ Inf)
 			if getAsInt(v) < 0 {
@@ -233,8 +257,9 @@ To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.`,
 		Version:      "2.4.1",
 		DefaultValue: max,
 		Formatter: func(v string) string {
-			if !p.DDLLimitEnabled.GetAsBool() {
-				return max
+			switcher, ok := getLimitSwicher()
+			if ok {
+				return switcher
 			}
 			// [0 ~ Inf)
 			if getAsInt(v) < 0 {
@@ -252,8 +277,9 @@ To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.`,
 		Version:      "2.2.0",
 		DefaultValue: max,
 		Formatter: func(v string) string {
-			if !p.DDLLimitEnabled.GetAsBool() {
-				return max
+			switcher, ok := getLimitSwicher()
+			if ok {
+				return switcher
 			}
 			// [0 ~ Inf)
 			if getAsInt(v) < 0 {
@@ -273,8 +299,9 @@ To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.`,
 		Version:      "2.4.1",
 		DefaultValue: max,
 		Formatter: func(v string) string {
-			if !p.DDLLimitEnabled.GetAsBool() {
-				return max
+			switcher, ok := getLimitSwicher()
+			if ok {
+				return switcher
 			}
 			// [0 ~ Inf)
 			if getAsInt(v) < 0 {
@@ -301,6 +328,9 @@ To use this setting, set quotaAndLimits.ddl.enabled to true at the same time.`,
 		Version:      "2.2.0",
 		DefaultValue: max,
 		Formatter: func(v string) string {
+			if p.ForceDenyAllDDL.GetAsBool() {
+				return min
+			}
 			if !p.IndexLimitEnabled.GetAsBool() {
 				return max
 			}
@@ -322,6 +352,9 @@ To use this setting, set quotaAndLimits.indexRate.enabled to true at the same ti
 		Version:      "2.4.1",
 		DefaultValue: max,
 		Formatter: func(v string) string {
+			if p.ForceDenyAllDDL.GetAsBool() {
+				return min
+			}
 			if !p.IndexLimitEnabled.GetAsBool() {
 				return max
 			}
@@ -418,6 +451,9 @@ To use this setting, set quotaAndLimits.flushRate.enabled to true at the same ti
 		Version:      "2.2.0",
 		DefaultValue: max,
 		Formatter: func(v string) string {
+			if p.ForceDenyAllDDL.GetAsBool() {
+				return min
+			}
 			if !p.CompactionLimitEnabled.GetAsBool() {
 				return max
 			}
@@ -439,6 +475,9 @@ To use this setting, set quotaAndLimits.compaction.enabled to true at the same t
 		Version:      "2.4.1",
 		DefaultValue: max,
 		Formatter: func(v string) string {
+			if p.ForceDenyAllDDL.GetAsBool() {
+				return min
+			}
 			if !p.CompactionLimitEnabled.GetAsBool() {
 				return max
 			}
@@ -452,6 +491,39 @@ To use this setting, set quotaAndLimits.compaction.enabled to true at the same t
 		Export: true,
 	}
 	p.MaxCompactionRatePerDB.Init(base.mgr)
+
+	p.DBLimitEnabled = ParamItem{
+		Key:          "quotaAndLimits.dbRate.enabled",
+		Version:      "2.5.8",
+		DefaultValue: "false",
+		Doc:          "Whether DB request throttling is enabled",
+		Export:       true,
+	}
+	p.DBLimitEnabled.Init(base.mgr)
+	p.MaxDBRate = ParamItem{
+		Key:          "quotaAndLimits.dbRate.max",
+		Version:      "2.5.8",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if p.ForceDenyAllDDL.GetAsBool() {
+				return min
+			}
+			if !p.DBLimitEnabled.GetAsBool() {
+				return max
+			}
+			// [0 ~ Inf)
+			if getAsInt(v) < 0 {
+				return max
+			}
+			return v
+		},
+		Doc: `Maximum number of db-related requests per second.
+Setting this item to 10 indicates that Milvus processes no more than 10 db-related requests per second, including db creation/drop/alter requests.
+To use this setting, set quotaAndLimits.dbRate.enabled to true at the same time.
+		`,
+		Export: true,
+	}
+	p.MaxDBRate.Init(base.mgr)
 
 	// dml
 	p.DMLLimitEnabled = ParamItem{

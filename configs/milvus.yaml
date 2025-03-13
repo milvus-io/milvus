@@ -921,6 +921,7 @@ quotaAndLimits:
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)
   quotaCenterCollectInterval: 3
+  forceDenyAllDDL: false # true to force deny all DDL requests, false to allow.
   limits:
     allocRetryTimes: 15 # retry times when delete alloc forward data from rate limit failed
     allocWaitInterval: 1000 # retry wait duration when delete alloc forward data rate failed, in millisecond
@@ -969,6 +970,13 @@ quotaAndLimits:
     max: -1
     db:
       max: -1 # qps of db level, default no limit, rate for manualCompaction
+  dbRate:
+    enabled: false # Whether DB request throttling is enabled
+    # Maximum number of db-related requests per second.
+    # Setting this item to 10 indicates that Milvus processes no more than 10 db-related requests per second, including db creation/drop/alter requests.
+    # To use this setting, set quotaAndLimits.dbRate.enabled to true at the same time.
+    # 		
+    max: -1
   dml:
     enabled: false # Whether DML request throttling is enabled.
     insertRate:
