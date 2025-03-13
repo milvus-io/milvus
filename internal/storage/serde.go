@@ -21,14 +21,12 @@ import (
 	"io"
 	"math"
 	"strconv"
-	"sync"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/compress"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -519,7 +517,12 @@ func getFieldWriterProps(field *schemapb.FieldSchema) *parquet.WriterProperties 
 	)
 }
 
-type DeserializeReader[T any] struct {
+type DeserializeReader[T any] interface {
+	NextValue() (*T, error)
+	Close() error
+}
+
+type DeserializeReaderImpl[T any] struct {
 	rr           RecordReader
 	deserializer Deserializer[T]
 	rec          Record
@@ -528,11 +531,11 @@ type DeserializeReader[T any] struct {
 }
 
 // Iterate to next value, return error or EOF if no more value.
-func (deser *DeserializeReader[T]) Next() error {
+func (deser *DeserializeReaderImpl[T]) NextValue() (*T, error) {
 	if deser.rec == nil || deser.pos >= deser.rec.Len()-1 {
 		r, err := deser.rr.Next()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		deser.pos = 0
 		deser.rec = r
@@ -540,33 +543,21 @@ func (deser *DeserializeReader[T]) Next() error {
 		deser.values = make([]T, deser.rec.Len())
 
 		if err := deser.deserializer(deser.rec, deser.values); err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		deser.pos++
 	}
 
-	return nil
+	return &deser.values[deser.pos], nil
 }
 
-func (deser *DeserializeReader[T]) Value() T {
-	return deser.values[deser.pos]
+func (deser *DeserializeReaderImpl[T]) Close() error {
+	return deser.rr.Close()
 }
 
-func (deser *DeserializeReader[T]) Close() error {
-	if deser.rec != nil {
-		deser.rec.Release()
-	}
-	if deser.rr != nil {
-		if err := deser.rr.Close(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func NewDeserializeReader[T any](rr RecordReader, deserializer Deserializer[T]) *DeserializeReader[T] {
-	return &DeserializeReader[T]{
+func NewDeserializeReader[T any](rr RecordReader, deserializer Deserializer[T]) *DeserializeReaderImpl[T] {
+	return &DeserializeReaderImpl[T]{
 		rr:           rr,
 		deserializer: deserializer,
 	}
@@ -828,19 +819,22 @@ func newMultiFieldRecordWriter(fieldIds []FieldID, fields []arrow.Field, writer 
 	}, nil
 }
 
-type SerializeWriter[T any] struct {
+type SerializeWriter[T any] interface {
+	WriteValue(value T) error
+	Flush() error
+	Close() error
+}
+
+type SerializeWriterImpl[T any] struct {
 	rw         RecordWriter
 	serializer Serializer[T]
 	batchSize  int
-	mu         sync.Mutex
 
 	buffer []T
 	pos    int
 }
 
-func (sw *SerializeWriter[T]) Flush() error {
-	sw.mu.Lock()
-	defer sw.mu.Unlock()
+func (sw *SerializeWriterImpl[T]) Flush() error {
 	if sw.pos == 0 {
 		return nil
 	}
@@ -857,7 +851,7 @@ func (sw *SerializeWriter[T]) Flush() error {
 	return nil
 }
 
-func (sw *SerializeWriter[T]) Write(value T) error {
+func (sw *SerializeWriterImpl[T]) WriteValue(value T) error {
 	if sw.buffer == nil {
 		sw.buffer = make([]T, sw.batchSize)
 	}
@@ -871,36 +865,15 @@ func (sw *SerializeWriter[T]) Write(value T) error {
 	return nil
 }
 
-func (sw *SerializeWriter[T]) WriteRecord(r Record) error {
-	sw.mu.Lock()
-	defer sw.mu.Unlock()
-	if len(sw.buffer) != 0 {
-		return errors.New("serialize buffer is not empty")
-	}
-
-	if err := sw.rw.Write(r); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (sw *SerializeWriter[T]) WrittenMemorySize() uint64 {
-	sw.mu.Lock()
-	defer sw.mu.Unlock()
-	return sw.rw.GetWrittenUncompressed()
-}
-
-func (sw *SerializeWriter[T]) Close() error {
+func (sw *SerializeWriterImpl[T]) Close() error {
 	if err := sw.Flush(); err != nil {
 		return err
 	}
-	sw.rw.Close()
-	return nil
+	return sw.rw.Close()
 }
 
-func NewSerializeRecordWriter[T any](rw RecordWriter, serializer Serializer[T], batchSize int) *SerializeWriter[T] {
-	return &SerializeWriter[T]{
+func NewSerializeRecordWriter[T any](rw RecordWriter, serializer Serializer[T], batchSize int) *SerializeWriterImpl[T] {
+	return &SerializeWriterImpl[T]{
 		rw:         rw,
 		serializer: serializer,
 		batchSize:  batchSize,

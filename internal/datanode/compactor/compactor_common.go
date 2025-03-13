@@ -18,7 +18,9 @@ package compactor
 
 import (
 	"context"
+	sio "io"
 	"strconv"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -29,10 +31,141 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const compactionBatchSize = 100
+
+type EntityFilter struct {
+	deletedPkTs map[interface{}]typeutil.Timestamp // pk2ts
+	ttl         int64                              // nanoseconds
+	currentTime time.Time
+
+	expiredCount int
+	deletedCount int
+}
+
+func newEntityFilter(deletedPkTs map[interface{}]typeutil.Timestamp, ttl int64, currTime time.Time) *EntityFilter {
+	if deletedPkTs == nil {
+		deletedPkTs = make(map[interface{}]typeutil.Timestamp)
+	}
+	return &EntityFilter{
+		deletedPkTs: deletedPkTs,
+		ttl:         ttl,
+		currentTime: currTime,
+	}
+}
+
+func (filter *EntityFilter) Filtered(pk any, ts typeutil.Timestamp) bool {
+	if filter.isEntityDeleted(pk, ts) {
+		filter.deletedCount++
+		return true
+	}
+
+	// Filtering expired entity
+	if filter.isEntityExpired(ts) {
+		filter.expiredCount++
+		return true
+	}
+	return false
+}
+
+func (filter *EntityFilter) GetExpiredCount() int {
+	return filter.expiredCount
+}
+
+func (filter *EntityFilter) GetDeletedCount() int {
+	return filter.deletedCount
+}
+
+func (filter *EntityFilter) GetDeltalogDeleteCount() int {
+	return len(filter.deletedPkTs)
+}
+
+func (filter *EntityFilter) GetMissingDeleteCount() int {
+	diff := filter.GetDeltalogDeleteCount() - filter.GetDeletedCount()
+	if diff <= 0 {
+		diff = 0
+	}
+	return diff
+}
+
+func (filter *EntityFilter) isEntityDeleted(pk interface{}, pkTs typeutil.Timestamp) bool {
+	if deleteTs, ok := filter.deletedPkTs[pk]; ok {
+		// insert task and delete task has the same ts when upsert
+		// here should be < instead of <=
+		// to avoid the upsert data to be deleted after compact
+		if pkTs < deleteTs {
+			return true
+		}
+	}
+	return false
+}
+
+func (filter *EntityFilter) isEntityExpired(entityTs typeutil.Timestamp) bool {
+	// entity expire is not enabled if duration <= 0
+	if filter.ttl <= 0 {
+		return false
+	}
+	entityTime, _ := tsoutil.ParseTS(entityTs)
+
+	// this dur can represents 292 million years before or after 1970, enough for milvus
+	// ttl calculation
+	dur := filter.currentTime.UnixMilli() - entityTime.UnixMilli()
+
+	// filter.ttl is nanoseconds
+	return filter.ttl/int64(time.Millisecond) <= dur
+}
+
+func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[interface{}]typeutil.Timestamp, error) {
+	pk2Ts := make(map[interface{}]typeutil.Timestamp)
+
+	log := log.Ctx(ctx)
+	if len(paths) == 0 {
+		log.Debug("compact with no deltalogs, skip merge deltalogs")
+		return pk2Ts, nil
+	}
+
+	blobs := make([]*storage.Blob, 0)
+	binaries, err := io.Download(ctx, paths)
+	if err != nil {
+		log.Warn("compact wrong, fail to download deltalogs",
+			zap.Strings("path", paths),
+			zap.Error(err))
+		return nil, err
+	}
+
+	for i := range binaries {
+		blobs = append(blobs, &storage.Blob{Value: binaries[i]})
+	}
+	reader, err := storage.CreateDeltalogReader(blobs)
+	if err != nil {
+		log.Error("malformed delta file", zap.Error(err))
+		return nil, err
+	}
+	defer reader.Close()
+
+	for {
+		dl, err := reader.NextValue()
+		if err != nil {
+			if err == sio.EOF {
+				break
+			}
+			log.Error("compact wrong, fail to read deltalogs", zap.Error(err))
+			return nil, err
+		}
+
+		if ts, ok := pk2Ts[(*dl).Pk.GetValue()]; ok && ts > (*dl).Ts {
+			continue
+		}
+		pk2Ts[(*dl).Pk.GetValue()] = (*dl).Ts
+	}
+
+	log.Info("compact mergeDeltalogs end", zap.Int("delete entries counts", len(pk2Ts)))
+
+	return pk2Ts, nil
+}
 
 func serializeWrite(ctx context.Context, allocator allocator.Interface, writer *SegmentWriter) (kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "serializeWrite")
