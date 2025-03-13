@@ -81,8 +81,7 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecVisitorImplTemplateJson<bool>(input);
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
-                    // we create double index for json int64 field for now
-                    result = ExecVisitorImplTemplateJson<double>(input);
+                    result = ExecVisitorImplTemplateJson<int64_t>(input);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
                     result = ExecVisitorImplTemplateJson<double>(input);
@@ -239,7 +238,12 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(OffsetVector* input) {
         return ExecTermJsonVariableInField<ValueType>(input);
     } else {
         if (is_index_mode_) {
-            return ExecVisitorImplForIndex<ValueType>(input);
+            // we create double index for json int64 field for now
+            using GetType =
+                std::conditional_t<std::is_same_v<ValueType, int64_t>,
+                                   double,
+                                   ValueType>;
+            return ExecVisitorImplForIndex<GetType>(input);
         } else {
             return ExecTermJsonFieldInVariable<ValueType>(input);
         }
