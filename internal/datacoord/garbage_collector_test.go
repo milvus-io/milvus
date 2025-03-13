@@ -31,6 +31,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -63,8 +64,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 	cli, _, _, _, _, err := initUtOSSEnv(bucketName, rootPath, 0)
 	require.NoError(t, err)
 
-	meta, err := newMemoryMeta(t)
-	assert.NoError(t, err)
+	meta := newMemoryMeta(t)
 
 	t.Run("normal gc", func(t *testing.T) {
 		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
@@ -118,8 +118,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	cli, inserts, stats, delta, others, err := initUtOSSEnv(bucketName, rootPath, 4)
 	require.NoError(t, err)
 
-	meta, err := newMemoryMeta(t)
-	assert.NoError(t, err)
+	meta := newMemoryMeta(t)
 
 	t.Run("key is reference", func(t *testing.T) {
 		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
@@ -353,71 +352,65 @@ func cleanupOSS(chunkManager *storage.RemoteChunkManager, bucket, root string) {
 	cli.RemoveBucket(context.TODO(), bucket)
 }
 
-func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta {
+func createMetaForRecycleUnusedIndexes(t *testing.T, catalog metastore.DataCoordCatalog) *meta {
 	var (
-		ctx    = context.Background()
 		collID = UniqueID(100)
 		// partID = UniqueID(200)
 		fieldID = UniqueID(300)
 		indexID = UniqueID(400)
 	)
-	return &meta{
-		ctx:          ctx,
-		catalog:      catalog,
-		collections:  nil,
-		segments:     nil,
-		channelCPs:   newChannelCps(),
-		chunkManager: nil,
-		indexMeta: &indexMeta{
-			catalog: catalog,
-			indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {
-					indexID: {
-						TenantID:        "",
-						CollectionID:    collID,
-						FieldID:         fieldID,
-						IndexID:         indexID,
-						IndexName:       "_default_idx",
-						IsDeleted:       false,
-						CreateTime:      10,
-						TypeParams:      nil,
-						IndexParams:     nil,
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
-					},
-					indexID + 1: {
-						TenantID:        "",
-						CollectionID:    collID,
-						FieldID:         fieldID + 1,
-						IndexID:         indexID + 1,
-						IndexName:       "_default_idx_101",
-						IsDeleted:       true,
-						CreateTime:      0,
-						TypeParams:      nil,
-						IndexParams:     nil,
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
-					},
+	meta := newMemoryMeta(t)
+	meta.catalog = catalog
+	meta.indexMeta = &indexMeta{
+		catalog: catalog,
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       "_default_idx",
+					IsDeleted:       false,
+					CreateTime:      10,
+					TypeParams:      nil,
+					IndexParams:     nil,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
-				collID + 1: {
-					indexID + 10: {
-						TenantID:        "",
-						CollectionID:    collID + 1,
-						FieldID:         fieldID + 10,
-						IndexID:         indexID + 10,
-						IndexName:       "index",
-						IsDeleted:       true,
-						CreateTime:      10,
-						TypeParams:      nil,
-						IndexParams:     nil,
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
-					},
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       "_default_idx_101",
+					IsDeleted:       true,
+					CreateTime:      0,
+					TypeParams:      nil,
+					IndexParams:     nil,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
 			},
-			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			collID + 1: {
+				indexID + 10: {
+					TenantID:        "",
+					CollectionID:    collID + 1,
+					FieldID:         fieldID + 10,
+					IndexID:         indexID + 10,
+					IndexName:       "index",
+					IsDeleted:       true,
+					CreateTime:      10,
+					TypeParams:      nil,
+					IndexParams:     nil,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			},
 		},
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
 	}
+	return meta
 }
 
 func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
@@ -428,7 +421,7 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
+		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(t, catalog), nil, GcOption{})
 		gc.recycleUnusedIndexes(context.TODO())
 	})
 
@@ -439,14 +432,13 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("fail"))
-		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
+		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(t, catalog), nil, GcOption{})
 		gc.recycleUnusedIndexes(context.TODO())
 	})
 }
 
-func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *meta {
+func createMetaForRecycleUnusedSegIndexes(t *testing.T, catalog metastore.DataCoordCatalog) *meta {
 	var (
-		ctx    = context.Background()
 		collID = UniqueID(100)
 		partID = UniqueID(200)
 		// fieldID = UniqueID(300)
@@ -475,59 +467,53 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 			},
 		},
 	}
-	meta := &meta{
-		ctx:         ctx,
-		catalog:     catalog,
-		collections: nil,
-		segMu:       NewSegmentKeyLock(),
-		segments:    NewSegmentsInfo(),
-		indexMeta: &indexMeta{
-			catalog: catalog,
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-				segID: {
-					indexID: {
-						SegmentID:           segID,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             1026,
-						IndexID:             indexID,
-						BuildID:             buildID,
-						NodeID:              1,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_Finished,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      10,
-						IndexFileKeys:       []string{"file1", "file2"},
-						IndexSerializedSize: 0,
-						WriteHandoff:        false,
-					},
-				},
-				segID + 1: {
-					indexID: {
-						SegmentID:           segID + 1,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             1026,
-						IndexID:             indexID,
-						BuildID:             buildID + 1,
-						NodeID:              1,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_Finished,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      10,
-						IndexFileKeys:       []string{"file1", "file2"},
-						IndexSerializedSize: 0,
-						WriteHandoff:        false,
-					},
+	meta := newMemoryMeta(t)
+	meta.catalog = catalog
+	AddTestSegmentInfos(meta, lo.Values(segments)...)
+	meta.indexMeta = &indexMeta{
+		catalog: catalog,
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+			segID: {
+				indexID: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             1026,
+					IndexID:             indexID,
+					BuildID:             buildID,
+					NodeID:              1,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Finished,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      10,
+					IndexFileKeys:       []string{"file1", "file2"},
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
 				},
 			},
-			indexes:          map[UniqueID]map[UniqueID]*model.Index{},
-			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			segID + 1: {
+				indexID: {
+					SegmentID:           segID + 1,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             1026,
+					IndexID:             indexID,
+					BuildID:             buildID + 1,
+					NodeID:              1,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Finished,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      10,
+					IndexFileKeys:       []string{"file1", "file2"},
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+			},
 		},
-		channelCPs:   nil,
-		chunkManager: nil,
+		indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
 	}
 
 	meta.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
@@ -563,10 +549,6 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 		IndexFileKeys:       []string{"file1", "file2"},
 		IndexSerializedSize: 0,
 	})
-
-	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
-	}
 	return meta
 }
 
@@ -583,7 +565,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
+		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(t, catalog), nil, GcOption{
 			cli: mockChunkManager,
 		})
 		gc.recycleUnusedSegIndexes(context.TODO())
@@ -601,16 +583,15 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("fail"))
-		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
+		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(t, catalog), nil, GcOption{
 			cli: mockChunkManager,
 		})
 		gc.recycleUnusedSegIndexes(context.TODO())
 	})
 }
 
-func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta {
+func createMetaTableForRecycleUnusedIndexFiles(t *testing.T, catalog *datacoord.Catalog) *meta {
 	var (
-		ctx    = context.Background()
 		collID = UniqueID(100)
 		partID = UniqueID(200)
 		// fieldID = UniqueID(300)
@@ -640,73 +621,69 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 			},
 		},
 	}
-	meta := &meta{
-		ctx:         ctx,
-		catalog:     catalog,
-		collections: nil,
-		segMu:       NewSegmentKeyLock(),
-		segments:    NewSegmentsInfo(),
-		indexMeta: &indexMeta{
-			catalog: catalog,
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-				segID: {
-					indexID: {
-						SegmentID:           segID,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             1026,
-						IndexID:             indexID,
-						BuildID:             buildID,
-						NodeID:              1,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_Finished,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      10,
-						IndexFileKeys:       []string{"file1", "file2"},
-						IndexSerializedSize: 0,
-						WriteHandoff:        false,
-					},
-				},
-				segID + 1: {
-					indexID: {
-						SegmentID:           segID + 1,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             1026,
-						IndexID:             indexID,
-						BuildID:             buildID + 1,
-						NodeID:              1,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_InProgress,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      10,
-						IndexFileKeys:       nil,
-						IndexSerializedSize: 0,
-						WriteHandoff:        false,
-					},
+	meta := newMemoryMeta(t)
+	meta.catalog = catalog
+	AddTestSegmentInfos(meta, lo.Values(segments)...)
+	meta.indexMeta = &indexMeta{
+		catalog: catalog,
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+			segID: {
+				indexID: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             1026,
+					IndexID:             indexID,
+					BuildID:             buildID,
+					NodeID:              1,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Finished,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      10,
+					IndexFileKeys:       []string{"file1", "file2"},
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
 				},
 			},
-			indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {
-					indexID: {
-						TenantID:        "",
-						CollectionID:    collID,
-						FieldID:         fieldID,
-						IndexID:         indexID,
-						IndexName:       "_default_idx",
-						IsDeleted:       false,
-						CreateTime:      10,
-						TypeParams:      nil,
-						IndexParams:     nil,
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
-					},
+			segID + 1: {
+				indexID: {
+					SegmentID:           segID + 1,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             1026,
+					IndexID:             indexID,
+					BuildID:             buildID + 1,
+					NodeID:              1,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_InProgress,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      10,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
 				},
 			},
-			segmentBuildInfo: newSegmentIndexBuildInfo(),
 		},
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       "_default_idx",
+					IsDeleted:       false,
+					CreateTime:      10,
+					TypeParams:      nil,
+					IndexParams:     nil,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			},
+		},
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
 	}
 	meta.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
 		SegmentID:           segID,
@@ -742,10 +719,6 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 		IndexSerializedSize: 0,
 		WriteHandoff:        false,
 	})
-	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
-	}
-
 	return meta
 }
 
@@ -764,7 +737,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(nil)
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		gc := newGarbageCollector(
-			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
+			createMetaTableForRecycleUnusedIndexFiles(t, &datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			nil,
 			GcOption{
 				cli: cm,
@@ -781,7 +754,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 				return errors.New("error")
 			})
 		gc := newGarbageCollector(
-			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
+			createMetaTableForRecycleUnusedIndexFiles(t, &datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			nil,
 			GcOption{
 				cli: cm,
@@ -802,7 +775,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 			})
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(nil)
 		gc := newGarbageCollector(
-			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
+			createMetaTableForRecycleUnusedIndexFiles(t, &datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			nil,
 			GcOption{
 				cli: cm,
@@ -823,7 +796,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 			})
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(errors.New("error"))
 		gc := newGarbageCollector(
-			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
+			createMetaTableForRecycleUnusedIndexFiles(t, &datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			nil,
 			GcOption{
 				cli: cm,
@@ -1069,74 +1042,71 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		Properties:     nil,
 	})
 
-	m := &meta{
-		catalog:    catalog,
-		channelCPs: channelCPs,
-		segMu:      NewSegmentKeyLock(),
-		segments:   NewSegmentsInfo(),
-		indexMeta: &indexMeta{
-			catalog: catalog,
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-				segID: {
-					indexID: {
-						SegmentID:           segID,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             5000,
-						IndexID:             indexID,
-						BuildID:             buildID,
-						NodeID:              0,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_Finished,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      0,
-						IndexFileKeys:       []string{"file1", "file2"},
-						IndexSerializedSize: 1024,
-						WriteHandoff:        false,
-					},
-				},
-				segID + 1: {
-					indexID: {
-						SegmentID:           segID + 1,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             5000,
-						IndexID:             indexID,
-						BuildID:             buildID + 1,
-						NodeID:              0,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_Finished,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      0,
-						IndexFileKeys:       []string{"file3", "file4"},
-						IndexSerializedSize: 1024,
-						WriteHandoff:        false,
-					},
+	m := newMemoryMeta(t)
+	m.catalog = catalog
+	m.channelCPs = channelCPs
+	m.collections = collections
+	AddTestSegmentInfos(m, lo.Values(segments)...)
+	m.indexMeta = &indexMeta{
+		catalog: catalog,
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+			segID: {
+				indexID: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             5000,
+					IndexID:             indexID,
+					BuildID:             buildID,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Finished,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      0,
+					IndexFileKeys:       []string{"file1", "file2"},
+					IndexSerializedSize: 1024,
+					WriteHandoff:        false,
 				},
 			},
-			segmentBuildInfo: newSegmentIndexBuildInfo(),
-			indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {
-					indexID: {
-						TenantID:        "",
-						CollectionID:    collID,
-						FieldID:         fieldID,
-						IndexID:         indexID,
-						IndexName:       indexName,
-						IsDeleted:       false,
-						CreateTime:      0,
-						TypeParams:      nil,
-						IndexParams:     nil,
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
-					},
+			segID + 1: {
+				indexID: {
+					SegmentID:           segID + 1,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             5000,
+					IndexID:             indexID,
+					BuildID:             buildID + 1,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Finished,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      0,
+					IndexFileKeys:       []string{"file3", "file4"},
+					IndexSerializedSize: 1024,
+					WriteHandoff:        false,
 				},
 			},
 		},
-
-		collections: collections,
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					CreateTime:      0,
+					TypeParams:      nil,
+					IndexParams:     nil,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			},
+		},
 	}
 
 	m.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
@@ -1174,10 +1144,6 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		IndexSerializedSize: 1024,
 		WriteHandoff:        false,
 	})
-
-	for id, segment := range segments {
-		m.segments.SetSegment(id, segment)
-	}
 
 	for segID, segment := range map[UniqueID]*SegmentInfo{
 		segID: {
@@ -1480,10 +1446,8 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 
-	m := &meta{
-		catalog:    catalog,
-		channelCPs: newChannelCps(),
-	}
+	m := newMemoryMeta(t)
+	m.catalog = catalog
 
 	m.channelCPs.checkpoints = map[string]*msgpb.MsgPosition{
 		"cluster-id-rootcoord-dm_0_123v0": nil,
@@ -1604,8 +1568,7 @@ func (s *GarbageCollectorSuite) SetupTest() {
 	s.cli, s.inserts, s.stats, s.delta, s.others, err = initUtOSSEnv(s.bucketName, s.rootPath, 4)
 	s.Require().NoError(err)
 
-	s.meta, err = newMemoryMeta(s.T())
-	s.Require().NoError(err)
+	s.meta = newMemoryMeta(s.T())
 }
 
 func (s *GarbageCollectorSuite) TearDownTest() {

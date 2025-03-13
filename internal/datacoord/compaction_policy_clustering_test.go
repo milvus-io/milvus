@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestClusteringCompactionPolicySuite(t *testing.T) {
@@ -66,15 +65,10 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	partitionStatsMeta, _ := newPartitionStatsMeta(context.TODO(), s.catalog)
 	indexMeta, _ := newIndexMeta(context.TODO(), s.catalog)
 
-	meta := &meta{
-		segMu:              NewSegmentKeyLock(),
-		segments:           NewSegmentsInfo(),
-		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		compactionTaskMeta: compactionTaskMeta,
-		partitionStatsMeta: partitionStatsMeta,
-		indexMeta:          indexMeta,
-	}
-	s.meta = meta
+	s.meta = newMemoryMeta(s.T())
+	s.meta.compactionTaskMeta = compactionTaskMeta
+	s.meta.partitionStatsMeta = partitionStatsMeta
+	s.meta.indexMeta = indexMeta
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
@@ -282,9 +276,8 @@ func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting()
 			s.Run(test.state.String(), func() {
 				collID := int64(19530)
 				compactionTaskMeta := newTestCompactionTaskMeta(s.T())
-				s.clusteringCompactionPolicy.meta = &meta{
-					compactionTaskMeta: compactionTaskMeta,
-				}
+				s.clusteringCompactionPolicy.meta = newMemoryMeta(s.T())
+				s.clusteringCompactionPolicy.meta.compactionTaskMeta = compactionTaskMeta
 				compactionTaskMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{
 					TriggerID:    1,
 					PlanID:       10,
@@ -450,9 +443,8 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 				partitionStatsMeta.partitionStatsInfos[channel][partitionID].currentVersion = test.currentVersion
 			}
 
-			meta := &meta{
-				partitionStatsMeta: partitionStatsMeta,
-			}
+			meta := newMemoryMeta(s.T())
+			meta.partitionStatsMeta = partitionStatsMeta
 
 			succeed, err := triggerClusteringCompactionPolicy(ctx, meta, collectionID, partitionID, channel, test.segments)
 			s.NoError(err)

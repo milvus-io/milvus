@@ -40,7 +40,7 @@ type SegmentsInfo struct {
 	secondaryIndexes segmentInfoIndexes
 	// map the compact relation, value is the segment which `CompactFrom` contains key.
 	// now segment could be compacted to multiple segments
-	compactionTo *typeutil.ConcurrentMap[UniqueID, []UniqueID]
+	compactionTo *typeutil.ConcurrentMap[UniqueID, typeutil.UniqueSet]
 }
 
 type segmentInfoIndexes struct {
@@ -100,7 +100,7 @@ func NewSegmentsInfo() *SegmentsInfo {
 	return &SegmentsInfo{
 		segments:         typeutil.NewConcurrentMap[UniqueID, *SegmentInfo](),
 		secondaryIndexes: newSecondaryIndexes(),
-		compactionTo:     typeutil.NewConcurrentMap[UniqueID, []UniqueID](),
+		compactionTo:     typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
 	}
 }
 
@@ -190,7 +190,7 @@ func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInfo, boo
 	}
 	if compactTos, ok := s.compactionTo.Get(fromSegmentID); ok {
 		result := []*SegmentInfo{}
-		for _, compactTo := range compactTos {
+		for _, compactTo := range compactTos.Collect() {
 			to, ok := s.segments.Get(compactTo)
 			if !ok {
 				log.Warn("compactionTo relation is broken", zap.Int64("from", fromSegmentID), zap.Int64("to", compactTo))
@@ -415,8 +415,8 @@ func (s *SegmentsInfo) removeSecondaryIndex(segment *SegmentInfo) {
 // addCompactTo adds the compact relation to the segment
 func (s *SegmentsInfo) addCompactTo(segment *SegmentInfo) {
 	for _, from := range segment.GetCompactionFrom() {
-		compatTo, _ := s.compactionTo.GetOrInsert(from, make([]UniqueID, 0))
-		compatTo = append(compatTo, segment.GetID())
+		compatTo, _ := s.compactionTo.GetOrInsert(from, typeutil.NewUniqueSet())
+		compatTo.Insert(segment.GetID())
 	}
 }
 

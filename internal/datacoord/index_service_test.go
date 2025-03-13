@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -100,12 +101,12 @@ func TestServer_CreateIndex(t *testing.T) {
 	})
 
 	indexMeta := newSegmentIndexMeta(catalog)
+	meta := newMemoryMeta(t)
+	meta.catalog = catalog
+	meta.collections = collections
+	meta.indexMeta = indexMeta
 	s := &Server{
-		meta: &meta{
-			catalog:     catalog,
-			collections: collections,
-			indexMeta:   indexMeta,
-		},
+		meta:            meta,
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
@@ -570,62 +571,58 @@ func TestServer_AlterIndex(t *testing.T) {
 		}, nil).Once()
 	}
 
-	s := &Server{
-		meta: &meta{
-			catalog:   catalog,
-			indexMeta: indexMeta,
-			segMu:     NewSegmentKeyLock(),
-			segments: &SegmentsInfo{
-				compactionTo: make(map[int64][]int64),
-				segments: map[UniqueID]*SegmentInfo{
-					invalidSegID: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:             invalidSegID,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumOfRows:      10000,
-							State:          commonpb.SegmentState_Flushed,
-							MaxRowNum:      65536,
-							LastExpireTime: createTS,
-							StartPosition: &msgpb.MsgPosition{
-								// timesamp > index start time, will be filtered out
-								Timestamp: createTS + 1,
-							},
-						},
-					},
-					segID: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:             segID,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumOfRows:      10000,
-							State:          commonpb.SegmentState_Flushed,
-							MaxRowNum:      65536,
-							LastExpireTime: createTS,
-							StartPosition: &msgpb.MsgPosition{
-								Timestamp: createTS,
-							},
-							CreatedByCompaction: true,
-							CompactionFrom:      []int64{segID - 1},
-						},
-					},
-					segID - 1: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:             segID,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumOfRows:      10000,
-							State:          commonpb.SegmentState_Dropped,
-							MaxRowNum:      65536,
-							LastExpireTime: createTS,
-							StartPosition: &msgpb.MsgPosition{
-								Timestamp: createTS,
-							},
-						},
-					},
-				},
+	meta := newMemoryMeta(t)
+	meta.indexMeta = indexMeta
+
+	s1 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             invalidSegID,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			NumOfRows:      10000,
+			State:          commonpb.SegmentState_Flushed,
+			MaxRowNum:      65536,
+			LastExpireTime: createTS,
+			StartPosition: &msgpb.MsgPosition{
+				// timesamp > index start time, will be filtered out
+				Timestamp: createTS + 1,
 			},
 		},
+	}
+	s2 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             segID,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			NumOfRows:      10000,
+			State:          commonpb.SegmentState_Flushed,
+			MaxRowNum:      65536,
+			LastExpireTime: createTS,
+			StartPosition: &msgpb.MsgPosition{
+				Timestamp: createTS,
+			},
+			CreatedByCompaction: true,
+			CompactionFrom:      []int64{segID - 1},
+		},
+	}
+	s3 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             segID - 1,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			NumOfRows:      10000,
+			State:          commonpb.SegmentState_Dropped,
+			MaxRowNum:      65536,
+			LastExpireTime: createTS,
+			StartPosition: &msgpb.MsgPosition{
+				Timestamp: createTS,
+			},
+		},
+	}
+	AddTestSegmentInfos(meta, s1, s2, s3)
+
+	s := &Server{
+		meta:            meta,
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 		handler:         mockHandler,
@@ -741,11 +738,11 @@ func TestServer_GetIndexState(t *testing.T) {
 		}
 	)
 	mock0Allocator := newMockAllocator(t)
+	meta := newMemoryMeta(t)
+	meta.catalog = &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
+	meta.indexMeta = newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
 	s := &Server{
-		meta: &meta{
-			catalog:   &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
-			indexMeta: newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
-		},
+		meta:            meta,
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
@@ -785,35 +782,32 @@ func TestServer_GetIndexState(t *testing.T) {
 			lastWrittenTime: time.Time{},
 		},
 	}
-	s.meta = &meta{
+	im := &indexMeta{
 		catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
-		indexMeta: &indexMeta{
-			catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
-			indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {
-					indexID: {
-						TenantID:        "",
-						CollectionID:    collID,
-						FieldID:         fieldID,
-						IndexID:         indexID,
-						IndexName:       indexName,
-						IsDeleted:       false,
-						CreateTime:      createTS,
-						TypeParams:      typeParams,
-						IndexParams:     indexParams,
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
-					},
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
 			},
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
 		},
-		segMu:    NewSegmentKeyLock(),
-		segments: NewSegmentsInfo(),
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
 	}
-	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
-	}
+	meta = newMemoryMeta(t)
+	meta.catalog = &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
+	meta.indexMeta = im
+	AddTestSegmentInfos(meta, lo.Values(segments)...)
+	s.meta = meta
 
 	t.Run("index state is unissued", func(t *testing.T) {
 		resp, err := s.GetIndexState(ctx, req)
@@ -843,54 +837,51 @@ func TestServer_GetIndexState(t *testing.T) {
 			lastWrittenTime: time.Time{},
 		},
 	}
-	s.meta = &meta{
-		catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
-		indexMeta: &indexMeta{
-			indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {
-					indexID: {
-						TenantID:        "",
-						CollectionID:    collID,
-						FieldID:         fieldID,
-						IndexID:         indexID,
-						IndexName:       indexName,
-						IsDeleted:       false,
-						CreateTime:      createTS,
-						TypeParams:      typeParams,
-						IndexParams:     indexParams,
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
-					},
-				},
-			},
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-				segID: {
-					indexID: {
-						SegmentID:           segID,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             3000,
-						IndexID:             indexID,
-						BuildID:             buildID,
-						NodeID:              0,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_IndexStateNone,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      0,
-						IndexFileKeys:       nil,
-						IndexSerializedSize: 0,
-						WriteHandoff:        false,
-					},
+	im = &indexMeta{
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
 			},
 		},
-		segMu:    NewSegmentKeyLock(),
-		segments: NewSegmentsInfo(),
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+			segID: {
+				indexID: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             3000,
+					IndexID:             indexID,
+					BuildID:             buildID,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_IndexStateNone,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      0,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+			},
+		},
 	}
-	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
-	}
+	meta = newMemoryMeta(t)
+	meta.catalog = &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
+	meta.indexMeta = im
+	AddTestSegmentInfos(meta, lo.Values(segments)...)
+	s.meta = meta
 
 	t.Run("index state is none", func(t *testing.T) {
 		resp, err := s.GetIndexState(ctx, req)
@@ -950,13 +941,12 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 	mock0Allocator := newMockAllocator(t)
 	indexMeta := newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
 
+	meta := newMemoryMeta(t)
+	meta.catalog = indexMeta.catalog
+	meta.indexMeta = indexMeta
+
 	s := &Server{
-		meta: &meta{
-			catalog:   indexMeta.catalog,
-			indexMeta: indexMeta,
-			segMu:     NewSegmentKeyLock(),
-			segments:  NewSegmentsInfo(),
-		},
+		meta:            meta,
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
@@ -1079,14 +1069,12 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 	)
 
 	mock0Allocator := newMockAllocator(t)
+	meta := newMemoryMeta(t)
+	meta.catalog = &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
+	meta.indexMeta = newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
 
 	s := &Server{
-		meta: &meta{
-			catalog:   &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
-			indexMeta: newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
-			segMu:     NewSegmentKeyLock(),
-			segments:  NewSegmentsInfo(),
-		},
+		meta:            meta,
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
@@ -1315,260 +1303,259 @@ func TestServer_DescribeIndex(t *testing.T) {
 			},
 		},
 	}
-	s := &Server{
-		meta: &meta{
-			catalog: catalog,
-			indexMeta: &indexMeta{
-				catalog: catalog,
-				indexes: map[UniqueID]map[UniqueID]*model.Index{
-					collID: {
-						// finished
-						indexID: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID,
-							IndexID:         indexID,
-							IndexName:       indexName,
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// deleted
-						indexID + 1: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 1,
-							IndexID:         indexID + 1,
-							IndexName:       indexName + "_1",
-							IsDeleted:       true,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// unissued
-						indexID + 2: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 2,
-							IndexID:         indexID + 2,
-							IndexName:       indexName + "_2",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// inProgress
-						indexID + 3: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 3,
-							IndexID:         indexID + 3,
-							IndexName:       indexName + "_3",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// failed
-						indexID + 4: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 4,
-							IndexID:         indexID + 4,
-							IndexName:       indexName + "_4",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// unissued
-						indexID + 5: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 5,
-							IndexID:         indexID + 5,
-							IndexName:       indexName + "_5",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-					},
+
+	indexMeta := &indexMeta{
+		catalog: catalog,
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				// finished
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
-				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-					segID: {
-						indexID: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID,
-							BuildID:             buildID,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Finished,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 1: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 1,
-							BuildID:             buildID + 1,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Finished,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 3: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 3,
-							BuildID:             buildID + 3,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_InProgress,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 4: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 4,
-							BuildID:             buildID + 4,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Failed,
-							FailReason:          "mock failed",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 5: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 5,
-							BuildID:             buildID + 5,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Unissued,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-					},
-					segID - 1: {
-						indexID: {
-							SegmentID:      segID - 1,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumRows:        10000,
-							IndexID:        indexID,
-							BuildID:        buildID,
-							NodeID:         0,
-							IndexVersion:   1,
-							IndexState:     commonpb.IndexState_Finished,
-							CreatedUTCTime: createTS,
-						},
-						indexID + 1: {
-							SegmentID:      segID - 1,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumRows:        10000,
-							IndexID:        indexID + 1,
-							BuildID:        buildID + 1,
-							NodeID:         0,
-							IndexVersion:   1,
-							IndexState:     commonpb.IndexState_Finished,
-							CreatedUTCTime: createTS,
-						},
-						indexID + 3: {
-							SegmentID:      segID - 1,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumRows:        10000,
-							IndexID:        indexID + 3,
-							BuildID:        buildID + 3,
-							NodeID:         0,
-							IndexVersion:   1,
-							IndexState:     commonpb.IndexState_InProgress,
-							CreatedUTCTime: createTS,
-						},
-						indexID + 4: {
-							SegmentID:      segID - 1,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumRows:        10000,
-							IndexID:        indexID + 4,
-							BuildID:        buildID + 4,
-							NodeID:         0,
-							IndexVersion:   1,
-							IndexState:     commonpb.IndexState_Failed,
-							FailReason:     "mock failed",
-							CreatedUTCTime: createTS,
-						},
-						indexID + 5: {
-							SegmentID:      segID - 1,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumRows:        10000,
-							IndexID:        indexID + 5,
-							BuildID:        buildID + 5,
-							NodeID:         0,
-							IndexVersion:   1,
-							IndexState:     commonpb.IndexState_Finished,
-							CreatedUTCTime: createTS,
-						},
-					},
+				// deleted
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       indexName + "_1",
+					IsDeleted:       true,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 2: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 2,
+					IndexID:         indexID + 2,
+					IndexName:       indexName + "_2",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// inProgress
+				indexID + 3: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 3,
+					IndexID:         indexID + 3,
+					IndexName:       indexName + "_3",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// failed
+				indexID + 4: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 4,
+					IndexID:         indexID + 4,
+					IndexName:       indexName + "_4",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 5: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 5,
+					IndexID:         indexID + 5,
+					IndexName:       indexName + "_5",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
 			},
-			segMu:    NewSegmentKeyLock(),
-			segments: NewSegmentsInfo(),
 		},
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+			segID: {
+				indexID: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             10000,
+					IndexID:             indexID,
+					BuildID:             buildID,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Finished,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      createTS,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+				indexID + 1: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             10000,
+					IndexID:             indexID + 1,
+					BuildID:             buildID + 1,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Finished,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      createTS,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+				indexID + 3: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             10000,
+					IndexID:             indexID + 3,
+					BuildID:             buildID + 3,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_InProgress,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      createTS,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+				indexID + 4: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             10000,
+					IndexID:             indexID + 4,
+					BuildID:             buildID + 4,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Failed,
+					FailReason:          "mock failed",
+					IsDeleted:           false,
+					CreatedUTCTime:      createTS,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+				indexID + 5: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             10000,
+					IndexID:             indexID + 5,
+					BuildID:             buildID + 5,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Unissued,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      createTS,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+			},
+			segID - 1: {
+				indexID: {
+					SegmentID:      segID - 1,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        10000,
+					IndexID:        indexID,
+					BuildID:        buildID,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_Finished,
+					CreatedUTCTime: createTS,
+				},
+				indexID + 1: {
+					SegmentID:      segID - 1,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        10000,
+					IndexID:        indexID + 1,
+					BuildID:        buildID + 1,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_Finished,
+					CreatedUTCTime: createTS,
+				},
+				indexID + 3: {
+					SegmentID:      segID - 1,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        10000,
+					IndexID:        indexID + 3,
+					BuildID:        buildID + 3,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_InProgress,
+					CreatedUTCTime: createTS,
+				},
+				indexID + 4: {
+					SegmentID:      segID - 1,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        10000,
+					IndexID:        indexID + 4,
+					BuildID:        buildID + 4,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_Failed,
+					FailReason:     "mock failed",
+					CreatedUTCTime: createTS,
+				},
+				indexID + 5: {
+					SegmentID:      segID - 1,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        10000,
+					IndexID:        indexID + 5,
+					BuildID:        buildID + 5,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_Finished,
+					CreatedUTCTime: createTS,
+				},
+			},
+		},
+	}
+
+	meta := newMemoryMeta(t)
+	meta.catalog = catalog
+	meta.indexMeta = indexMeta
+	AddTestSegmentInfos(meta, lo.Values(segments)...)
+	s := &Server{
+		meta:            meta,
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
-	}
-	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
 	}
 
 	t.Run("server not available", func(t *testing.T) {
@@ -1631,104 +1618,106 @@ func TestServer_ListIndexes(t *testing.T) {
 	mock0Allocator := newMockAllocator(t)
 
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	s := &Server{
-		meta: &meta{
-			catalog: catalog,
-			indexMeta: &indexMeta{
-				catalog: catalog,
-				indexes: map[UniqueID]map[UniqueID]*model.Index{
-					collID: {
-						// finished
-						indexID: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID,
-							IndexID:         indexID,
-							IndexName:       indexName,
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// deleted
-						indexID + 1: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 1,
-							IndexID:         indexID + 1,
-							IndexName:       indexName + "_1",
-							IsDeleted:       true,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// unissued
-						indexID + 2: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 2,
-							IndexID:         indexID + 2,
-							IndexName:       indexName + "_2",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// inProgress
-						indexID + 3: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 3,
-							IndexID:         indexID + 3,
-							IndexName:       indexName + "_3",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// failed
-						indexID + 4: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 4,
-							IndexID:         indexID + 4,
-							IndexName:       indexName + "_4",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// unissued
-						indexID + 5: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 5,
-							IndexID:         indexID + 5,
-							IndexName:       indexName + "_5",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-					},
+
+	indexMeta := &indexMeta{
+		catalog: catalog,
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				// finished
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
-				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+				// deleted
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       indexName + "_1",
+					IsDeleted:       true,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 2: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 2,
+					IndexID:         indexID + 2,
+					IndexName:       indexName + "_2",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// inProgress
+				indexID + 3: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 3,
+					IndexID:         indexID + 3,
+					IndexName:       indexName + "_3",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// failed
+				indexID + 4: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 4,
+					IndexID:         indexID + 4,
+					IndexName:       indexName + "_4",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 5: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 5,
+					IndexID:         indexID + 5,
+					IndexName:       indexName + "_5",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
 			},
-			segMu:    NewSegmentKeyLock(),
-			segments: NewSegmentsInfo(),
 		},
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+	}
+
+	meta := newMemoryMeta(t)
+	meta.catalog = catalog
+	meta.indexMeta = indexMeta
+
+	s := &Server{
+		meta:            meta,
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
@@ -1820,197 +1809,196 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 			},
 		},
 	}
-	s := &Server{
-		meta: &meta{
-			catalog: catalog,
-			indexMeta: &indexMeta{
-				catalog: catalog,
-				indexes: map[UniqueID]map[UniqueID]*model.Index{
-					collID: {
-						// finished
-						indexID: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID,
-							IndexID:         indexID,
-							IndexName:       indexName,
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// deleted
-						indexID + 1: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 1,
-							IndexID:         indexID + 1,
-							IndexName:       indexName + "_1",
-							IsDeleted:       true,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// unissued
-						indexID + 2: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 2,
-							IndexID:         indexID + 2,
-							IndexName:       indexName + "_2",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// inProgress
-						indexID + 3: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 3,
-							IndexID:         indexID + 3,
-							IndexName:       indexName + "_3",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// failed
-						indexID + 4: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 4,
-							IndexID:         indexID + 4,
-							IndexName:       indexName + "_4",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// unissued
-						indexID + 5: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 5,
-							IndexID:         indexID + 5,
-							IndexName:       indexName + "_5",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-					},
+
+	indexMeta := &indexMeta{
+		catalog: catalog,
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				// finished
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
-				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-					segID: {
-						indexID: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID,
-							BuildID:             buildID,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Finished,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 1: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 1,
-							BuildID:             buildID + 1,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Finished,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 3: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 3,
-							BuildID:             buildID + 3,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_InProgress,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 4: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 4,
-							BuildID:             buildID + 4,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Failed,
-							FailReason:          "mock failed",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 5: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 5,
-							BuildID:             buildID + 5,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Unissued,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-					},
+				// deleted
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       indexName + "_1",
+					IsDeleted:       true,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 2: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 2,
+					IndexID:         indexID + 2,
+					IndexName:       indexName + "_2",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// inProgress
+				indexID + 3: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 3,
+					IndexID:         indexID + 3,
+					IndexName:       indexName + "_3",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// failed
+				indexID + 4: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 4,
+					IndexID:         indexID + 4,
+					IndexName:       indexName + "_4",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 5: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 5,
+					IndexID:         indexID + 5,
+					IndexName:       indexName + "_5",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
 			},
-			segMu:    NewSegmentKeyLock(),
-			segments: NewSegmentsInfo(),
 		},
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+			segID: {
+				indexID: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             10000,
+					IndexID:             indexID,
+					BuildID:             buildID,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Finished,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      createTS,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+				indexID + 1: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             10000,
+					IndexID:             indexID + 1,
+					BuildID:             buildID + 1,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Finished,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      createTS,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+				indexID + 3: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             10000,
+					IndexID:             indexID + 3,
+					BuildID:             buildID + 3,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_InProgress,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      createTS,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+				indexID + 4: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             10000,
+					IndexID:             indexID + 4,
+					BuildID:             buildID + 4,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Failed,
+					FailReason:          "mock failed",
+					IsDeleted:           false,
+					CreatedUTCTime:      createTS,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+				indexID + 5: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             10000,
+					IndexID:             indexID + 5,
+					BuildID:             buildID + 5,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Unissued,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      createTS,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+			},
+		},
+	}
+
+	meta := newMemoryMeta(t)
+	meta.catalog = catalog
+	meta.indexMeta = indexMeta
+	AddTestSegmentInfos(meta, lo.Values(segments)...)
+	s := &Server{
+		meta:            meta,
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
-	}
-	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
 	}
 
 	t.Run("server not available", func(t *testing.T) {
@@ -2081,90 +2069,90 @@ func TestServer_DropIndex(t *testing.T) {
 
 	mock0Allocator := newMockAllocator(t)
 
-	s := &Server{
-		meta: &meta{
-			catalog: catalog,
-			indexMeta: &indexMeta{
-				catalog: catalog,
-				indexes: map[UniqueID]map[UniqueID]*model.Index{
-					collID: {
-						// finished
-						indexID: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID,
-							IndexID:         indexID,
-							IndexName:       indexName,
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// deleted
-						indexID + 1: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 1,
-							IndexID:         indexID + 1,
-							IndexName:       indexName + "_1",
-							IsDeleted:       true,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// unissued
-						indexID + 2: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID + 2,
-							IndexID:         indexID + 2,
-							IndexName:       indexName + "_2",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// inProgress
-						indexID + 3: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID,
-							IndexID:         indexID + 3,
-							IndexName:       indexName + "_3",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-						// failed
-						indexID + 4: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID,
-							IndexID:         indexID + 4,
-							IndexName:       indexName + "_4",
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-					},
+	indexMeta := &indexMeta{
+		catalog: catalog,
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				// finished
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
-				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+				// deleted
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       indexName + "_1",
+					IsDeleted:       true,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 2: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 2,
+					IndexID:         indexID + 2,
+					IndexName:       indexName + "_2",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// inProgress
+				indexID + 3: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID + 3,
+					IndexName:       indexName + "_3",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// failed
+				indexID + 4: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID + 4,
+					IndexName:       indexName + "_4",
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
 			},
-			segMu:    NewSegmentKeyLock(),
-			segments: NewSegmentsInfo(),
 		},
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+	}
+
+	meta := newMemoryMeta(t)
+	meta.catalog = catalog
+	meta.indexMeta = indexMeta
+	s := &Server{
+		meta:            meta,
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
@@ -2281,56 +2269,56 @@ func TestServer_GetIndexInfos(t *testing.T) {
 	assert.NoError(t, err)
 
 	mock0Allocator := newMockAllocator(t)
-
-	s := &Server{
-		meta: &meta{
-			catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
-			indexMeta: &indexMeta{
-				catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
-				indexes: map[UniqueID]map[UniqueID]*model.Index{
-					collID: {
-						// finished
-						indexID: {
-							TenantID:        "",
-							CollectionID:    collID,
-							FieldID:         fieldID,
-							IndexID:         indexID,
-							IndexName:       indexName,
-							IsDeleted:       false,
-							CreateTime:      createTS,
-							TypeParams:      typeParams,
-							IndexParams:     indexParams,
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
-						},
-					},
-				},
-				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-					segID: {
-						indexID: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID,
-							BuildID:             buildID,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Finished,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-					},
+	indexMeta := &indexMeta{
+		catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				// finished
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
 			},
-			segMu:        NewSegmentKeyLock(),
-			segments:     NewSegmentsInfo(),
-			chunkManager: cli,
 		},
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+			segID: {
+				indexID: {
+					SegmentID:           segID,
+					CollectionID:        collID,
+					PartitionID:         partID,
+					NumRows:             10000,
+					IndexID:             indexID,
+					BuildID:             buildID,
+					NodeID:              0,
+					IndexVersion:        1,
+					IndexState:          commonpb.IndexState_Finished,
+					FailReason:          "",
+					IsDeleted:           false,
+					CreatedUTCTime:      createTS,
+					IndexFileKeys:       nil,
+					IndexSerializedSize: 0,
+					WriteHandoff:        false,
+				},
+			},
+		},
+	}
+
+	meta := newMemoryMeta(t)
+	meta.catalog = &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
+	meta.indexMeta = indexMeta
+	meta.chunkManager = cli
+
+	s := &Server{
+		meta:            meta,
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
@@ -2395,46 +2383,41 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			},
 		},
 	}
-	m := &meta{
-		segMu:    NewSegmentKeyLock(),
-		segments: NewSegmentsInfo(),
-		indexMeta: &indexMeta{
-			segmentBuildInfo: newSegmentIndexBuildInfo(),
-			segmentIndexes:   map[UniqueID]map[UniqueID]*model.SegmentIndex{},
-			indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {
-					indexID: {
-						TenantID:        "",
-						CollectionID:    collID,
-						FieldID:         fieldID,
-						IndexID:         indexID,
-						IndexName:       indexName,
-						IsDeleted:       false,
-						CreateTime:      0,
-						TypeParams:      nil,
-						IndexParams:     nil,
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
-					},
-					indexID + 1: {
-						TenantID:        "",
-						CollectionID:    collID,
-						FieldID:         fieldID + 1,
-						IndexID:         indexID + 1,
-						IndexName:       indexName + "_1",
-						IsDeleted:       false,
-						CreateTime:      0,
-						TypeParams:      nil,
-						IndexParams:     nil,
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
-					},
+	m := newMemoryMeta(t)
+	AddTestSegmentInfos(m, lo.Values(segments)...)
+	m.indexMeta = &indexMeta{
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
+		segmentIndexes:   map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					CreateTime:      0,
+					TypeParams:      nil,
+					IndexParams:     nil,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       indexName + "_1",
+					IsDeleted:       false,
+					CreateTime:      0,
+					TypeParams:      nil,
+					IndexParams:     nil,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
 			},
 		},
-	}
-	for id, segment := range segments {
-		m.segments.SetSegment(id, segment)
 	}
 	s := &Server{meta: m}
 
@@ -2625,12 +2608,12 @@ func TestJsonIndex(t *testing.T) {
 		ID: collID,
 	})
 
+	meta := newMemoryMeta(t)
+	meta.catalog = catalog
+	meta.collections = collections
+	meta.indexMeta = indexMeta
 	s := &Server{
-		meta: &meta{
-			catalog:     catalog,
-			collections: collections,
-			indexMeta:   indexMeta,
-		},
+		meta:            meta,
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 		broker:          broker.NewCoordinatorBroker(b),

@@ -18,9 +18,9 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -54,13 +54,8 @@ func (s *SingleCompactionPolicySuite) SetupTest() {
 	}
 
 	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{
-		segMu:    NewSegmentKeyLock(),
-		segments: NewSegmentsInfo(),
-	}
-	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
-	}
+	meta := newMemoryMeta(s.T())
+	AddTestSegmentInfos(meta, lo.Values(segments)...)
 
 	s.mockAlloc = newMockAllocator(s.T())
 	mockHandler := NewNMockHandler(s.T())
@@ -126,32 +121,15 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
 
-	segments := typeutil.NewConcurrentMap[UniqueID, *SegmentInfo]()
+	s.singlePolicy.meta = newMemoryMeta(s.T())
 	s1 := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 0, 10000, 201)
-	s2 := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 500, 10000, 10)
-	s3 := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 100, 10000, 1)
-	segments.Insert(101, s1)
-	segments.Insert(102, s2)
-	segments.Insert(103, s3)
-	coll2Segments := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *SegmentInfo]]()
-	collectionSegments := typeutil.NewConcurrentMap[UniqueID, *SegmentInfo]()
-	collectionSegments.Insert(101, s1)
-	collectionSegments.Insert(102, s2)
-	collectionSegments.Insert(103, s3)
-	coll2Segments.Insert(collID, collectionSegments)
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: coll2Segments,
-		},
-	}
+	s2 := buildTestSegment(102, collID, datapb.SegmentLevel_L2, 500, 10000, 10)
+	s3 := buildTestSegment(103, collID, datapb.SegmentLevel_L2, 100, 10000, 1)
+	AddTestSegmentInfos(s.singlePolicy.meta, s1, s2, s3)
 
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
-	s.singlePolicy.meta = &meta{
-		compactionTaskMeta: compactionTaskMeta,
-		segMu:              NewSegmentKeyLock(),
-		segments:           segmentsInfo,
-	}
+	s.singlePolicy.meta.compactionTaskMeta = compactionTaskMeta
+
 	compactionTaskMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{
 		TriggerID:    1,
 		PlanID:       10,

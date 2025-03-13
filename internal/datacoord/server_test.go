@@ -2054,7 +2054,7 @@ func TestGetFlushAllState(t *testing.T) {
 				svr.stateCode.Store(commonpb.StateCode_Healthy)
 			}
 			var err error
-			svr.meta = &meta{}
+			svr.meta = newMemoryMeta(t)
 			svr.rootCoordClient = mocks.NewMockRootCoordClient(t)
 			svr.broker = broker.NewCoordinatorBroker(svr.rootCoordClient)
 			if test.ListDatabaseFailed {
@@ -2140,7 +2140,7 @@ func TestGetFlushAllStateWithDB(t *testing.T) {
 			svr := &Server{}
 			svr.stateCode.Store(commonpb.StateCode_Healthy)
 			var err error
-			svr.meta = &meta{}
+			svr.meta = newMemoryMeta(t)
 			svr.rootCoordClient = mocks.NewMockRootCoordClient(t)
 			svr.broker = broker.NewCoordinatorBroker(svr.rootCoordClient)
 
@@ -2237,8 +2237,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	})
 
 	t.Run("dataCoord meta set state not exists", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
+		meta := newMemoryMeta(t)
 		svr := newTestServer(t, WithMeta(meta))
 		defer closeTestServer(t, svr)
 		// Set segment state.
@@ -2521,7 +2520,8 @@ func Test_CheckHealth(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.sessionManager = getSessionManager(true)
 		svr.channelManager = getChannelManager(t, false)
-		svr.meta = &meta{collections: collections}
+		svr.meta = newMemoryMeta(t)
+		svr.meta.collections = collections
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -2534,14 +2534,13 @@ func Test_CheckHealth(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.sessionManager = getSessionManager(true)
 		svr.channelManager = getChannelManager(t, true)
-		svr.meta = &meta{
-			collections: collections,
-			channelCPs: &channelCPs{
-				checkpoints: map[string]*msgpb.MsgPosition{
-					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000*time.Hour), 0),
-						MsgID:     []byte{1, 2, 3, 4},
-					},
+		svr.meta = newMemoryMeta(t)
+		svr.meta.collections = collections
+		svr.meta.channelCPs = &channelCPs{
+			checkpoints: map[string]*msgpb.MsgPosition{
+				"cluster-id-rootcoord-dm_3_449684528748778322v0": {
+					Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000*time.Hour), 0),
+					MsgID:     []byte{1, 2, 3, 4},
 				},
 			},
 		}
@@ -2558,25 +2557,26 @@ func Test_CheckHealth(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.sessionManager = getSessionManager(true)
 		svr.channelManager = getChannelManager(t, true)
-		svr.meta = &meta{
-			collections: collections,
-			channelCPs: &channelCPs{
-				checkpoints: map[string]*msgpb.MsgPosition{
-					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
-						MsgID:     []byte{1, 2, 3, 4},
-					},
-					"cluster-id-rootcoord-dm_3_449684528748778323v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
-						MsgID:     []byte{1, 2, 3, 4},
-					},
-					"invalid-vchannel-name": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
-						MsgID:     []byte{1, 2, 3, 4},
-					},
+
+		svr.meta = newMemoryMeta(t)
+		svr.meta.collections = collections
+		svr.meta.channelCPs = &channelCPs{
+			checkpoints: map[string]*msgpb.MsgPosition{
+				"cluster-id-rootcoord-dm_3_449684528748778322v0": {
+					Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+					MsgID:     []byte{1, 2, 3, 4},
+				},
+				"cluster-id-rootcoord-dm_3_449684528748778323v0": {
+					Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+					MsgID:     []byte{1, 2, 3, 4},
+				},
+				"invalid-vchannel-name": {
+					Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+					MsgID:     []byte{1, 2, 3, 4},
 				},
 			},
 		}
+
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -2656,7 +2656,7 @@ func TestLoadCollectionFromRootCoord(t *testing.T) {
 	broker := broker.NewMockBroker(t)
 	s := &Server{
 		broker: broker,
-		meta:   &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+		meta:   newMemoryMeta(t),
 	}
 
 	t.Run("has collection fail with error", func(t *testing.T) {

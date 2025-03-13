@@ -55,80 +55,43 @@ func (s *statsTaskSuite) SetupSuite() {
 	s.segID = 1179
 	s.targetID = 1180
 
-	s.mt = &meta{
-		segMu: NewSegmentKeyLock(),
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            s.segID,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						InsertChannel: "ch1",
-						NumOfRows:     65535,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     65535,
-						Level:         datapb.SegmentLevel_L2,
-					},
-				},
-			},
-			secondaryIndexes: segmentInfoIndexes{
-				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-					collID: {
-						s.segID: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            s.segID,
-								CollectionID:  collID,
-								PartitionID:   partID,
-								InsertChannel: "ch1",
-								NumOfRows:     65535,
-								State:         commonpb.SegmentState_Flushed,
-								MaxRowNum:     65535,
-								Level:         datapb.SegmentLevel_L2,
-							},
-						},
-					},
-				},
-				channel2Segments: map[string]map[UniqueID]*SegmentInfo{
-					"ch1": {
-						s.segID: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            s.segID,
-								CollectionID:  collID,
-								PartitionID:   partID,
-								InsertChannel: "ch1",
-								NumOfRows:     65535,
-								State:         commonpb.SegmentState_Flushed,
-								MaxRowNum:     65535,
-								Level:         datapb.SegmentLevel_L2,
-							},
-						},
-					},
-				},
-			},
-			compactionTo: map[UniqueID][]UniqueID{},
+	seg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            s.segID,
+			CollectionID:  collID,
+			PartitionID:   partID,
+			InsertChannel: "ch1",
+			NumOfRows:     65535,
+			State:         commonpb.SegmentState_Flushed,
+			MaxRowNum:     65535,
+			Level:         datapb.SegmentLevel_L2,
 		},
+	}
 
-		statsTaskMeta: &statsTaskMeta{
-			RWMutex: sync.RWMutex{},
-			ctx:     context.Background(),
-			catalog: nil,
-			tasks: map[int64]*indexpb.StatsTask{
-				s.taskID: {
-					CollectionID:  1,
-					PartitionID:   2,
-					SegmentID:     s.segID,
-					InsertChannel: "ch1",
-					TaskID:        s.taskID,
-					SubJobType:    indexpb.StatsSubJob_Sort,
-					Version:       0,
-					NodeID:        0,
-					State:         indexpb.JobState_JobStateInit,
-					FailReason:    "",
-				},
+	statsMeta := &statsTaskMeta{
+		RWMutex: sync.RWMutex{},
+		ctx:     context.Background(),
+		catalog: nil,
+		tasks: map[int64]*indexpb.StatsTask{
+			s.taskID: {
+				CollectionID:  1,
+				PartitionID:   2,
+				SegmentID:     s.segID,
+				InsertChannel: "ch1",
+				TaskID:        s.taskID,
+				SubJobType:    indexpb.StatsSubJob_Sort,
+				Version:       0,
+				NodeID:        0,
+				State:         indexpb.JobState_JobStateInit,
+				FailReason:    "",
 			},
 		},
 	}
+
+	meta := newMemoryMeta(s.T())
+	AddTestSegmentInfos(meta, seg)
+	meta.statsTaskMeta = statsMeta
+	s.mt = meta
 }
 
 func (s *statsTaskSuite) TestTaskStats_PreCheck() {
@@ -157,7 +120,8 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 	s.Run("CheckTaskHealthy", func() {
 		s.True(st.CheckTaskHealthy(s.mt))
 
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		seg, _ := s.mt.segments.segments.Get(s.segID)
+		seg.State = commonpb.SegmentState_Dropped
 		s.False(st.CheckTaskHealthy(s.mt))
 	})
 
@@ -166,21 +130,25 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		s.mt.statsTaskMeta.catalog = catalog
 
 		s.Run("segment is compacting", func() {
-			s.mt.segments.segments[s.segID].isCompacting = true
+			seg, _ := s.mt.segments.segments.Get(s.segID)
+			seg.isCompacting = true
 
 			s.Error(st.UpdateVersion(context.Background(), 1, s.mt, nil))
 		})
 
 		s.Run("segment is in l0 compaction", func() {
-			s.mt.segments.segments[s.segID].isCompacting = false
+			seg, _ := s.mt.segments.segments.Get(s.segID)
+			seg.isCompacting = false
 			compactionHandler := NewMockCompactionPlanContext(s.T())
 			compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(false)
 			s.Error(st.UpdateVersion(context.Background(), 1, s.mt, compactionHandler))
-			s.False(s.mt.segments.segments[s.segID].isCompacting)
+			seg, _ = s.mt.segments.segments.Get(s.segID)
+			s.False(seg.isCompacting)
 		})
 
 		s.Run("normal case", func() {
-			s.mt.segments.segments[s.segID].isCompacting = false
+			seg, _ := s.mt.segments.segments.Get(s.segID)
+			seg.isCompacting = false
 			compactionHandler := NewMockCompactionPlanContext(s.T())
 			compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
 
@@ -189,7 +157,8 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("failed case", func() {
-			s.mt.segments.segments[s.segID].isCompacting = false
+			seg, _ := s.mt.segments.segments.Get(s.segID)
+			seg.isCompacting = false
 			compactionHandler := NewMockCompactionPlanContext(s.T())
 			compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
 
@@ -218,7 +187,8 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		s.mt.statsTaskMeta.catalog = catalog
 
 		s.Run("segment not healthy", func() {
-			s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+			seg, _ := s.mt.segments.segments.Get(s.segID)
+			seg.State = commonpb.SegmentState_Dropped
 
 			checkPass := st.PreCheck(context.Background(), &taskScheduler{
 				meta: s.mt,
@@ -228,8 +198,9 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("segment is sorted", func() {
-			s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
-			s.mt.segments.segments[s.segID].IsSorted = true
+			seg, _ := s.mt.segments.segments.Get(s.segID)
+			seg.State = commonpb.SegmentState_Flushed
+			seg.IsSorted = true
 
 			checkPass := st.PreCheck(context.Background(), &taskScheduler{
 				meta: s.mt,
@@ -239,7 +210,8 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("get collection failed", func() {
-			s.mt.segments.segments[s.segID].IsSorted = false
+			seg, _ := s.mt.segments.segments.Get(s.segID)
+			seg.IsSorted = false
 
 			handler := NewNMockHandler(s.T())
 			handler.EXPECT().GetCollection(context.Background(), collID).Return(nil, fmt.Errorf("mock error")).Once()
@@ -379,20 +351,14 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 				Reason:    "mock error",
 			}, nil)
 
-			mt := &meta{
-				segMu: NewSegmentKeyLock(),
-				segments: &SegmentsInfo{
-					segments: map[int64]*SegmentInfo{
-						st.segmentID: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:    st.segmentID,
-								State: commonpb.SegmentState_Flushed,
-							},
-						},
-					},
+			seg := &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:    st.segmentID,
+					State: commonpb.SegmentState_Flushed,
 				},
 			}
-
+			mt := newMemoryMeta(s.T())
+			AddTestSegmentInfos(mt, seg)
 			s.False(st.AssignTask(context.Background(), in, mt))
 		})
 
@@ -403,20 +369,14 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 				Reason:    "",
 			}, nil)
 
-			mt := &meta{
-				segMu: NewSegmentKeyLock(),
-				segments: &SegmentsInfo{
-					segments: map[int64]*SegmentInfo{
-						st.segmentID: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:    st.segmentID,
-								State: commonpb.SegmentState_Flushed,
-							},
-						},
-					},
+			seg := &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:    st.segmentID,
+					State: commonpb.SegmentState_Flushed,
 				},
 			}
-
+			mt := newMemoryMeta(s.T())
+			AddTestSegmentInfos(mt, seg)
 			s.True(st.AssignTask(context.Background(), in, mt))
 		})
 	})

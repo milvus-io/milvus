@@ -842,7 +842,9 @@ func (s *CompactionPlanHandlerSuite) TestCompactionGC() {
 	catalog := &datacoord.Catalog{MetaKv: NewMetaMemoryKV()}
 	compactionTaskMeta, err := newCompactionTaskMeta(context.TODO(), catalog)
 	s.NoError(err)
-	s.handler.meta = &meta{compactionTaskMeta: compactionTaskMeta}
+	meta := newMemoryMeta(s.T())
+	meta.compactionTaskMeta = compactionTaskMeta
+	s.handler.meta = meta
 	for _, t := range inTasks {
 		s.handler.meta.SaveCompactionTask(context.TODO(), t)
 	}

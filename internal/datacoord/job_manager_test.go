@@ -66,37 +66,33 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 		},
 	})
 
-	mt := &meta{
-		collections: collections,
-		segMu:       NewSegmentKeyLock(),
-		segments: &SegmentsInfo{
-			segments: map[UniqueID]*SegmentInfo{
-				10: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:           10,
-						CollectionID: 1,
-						PartitionID:  2,
-						IsSorted:     false,
-						State:        commonpb.SegmentState_Flushed,
-					},
-				},
-				20: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:           20,
-						CollectionID: 1,
-						PartitionID:  2,
-						IsSorted:     true,
-						State:        commonpb.SegmentState_Flushed,
-					},
-				},
-			},
-		},
-		statsTaskMeta: &statsTaskMeta{
-			ctx:     ctx,
-			catalog: catalog,
-			tasks:   make(map[int64]*indexpb.StatsTask),
+	s1 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           10,
+			CollectionID: 1,
+			PartitionID:  2,
+			IsSorted:     false,
+			State:        commonpb.SegmentState_Flushed,
 		},
 	}
+	s2 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           20,
+			CollectionID: 1,
+			PartitionID:  2,
+			IsSorted:     true,
+			State:        commonpb.SegmentState_Flushed,
+		},
+	}
+
+	mt := newMemoryMeta(s.T())
+	mt.collections = collections
+	mt.statsTaskMeta = &statsTaskMeta{
+		ctx:     ctx,
+		catalog: catalog,
+		tasks:   make(map[int64]*indexpb.StatsTask),
+	}
+	AddTestSegmentInfos(mt, s1, s2)
 
 	jm := &statsJobManager{
 		ctx:    ctx,

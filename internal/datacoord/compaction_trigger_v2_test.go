@@ -52,13 +52,8 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 		Channel:      "ch-1",
 	}
 	segments := genSegmentsForMeta(s.testLabel)
-	s.meta = &meta{
-		segMu:    NewSegmentKeyLock(),
-		segments: NewSegmentsInfo(),
-	}
-	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
-	}
+	s.meta = newMemoryMeta(s.T())
+	AddTestSegmentInfos(s.meta, lo.Values(segments)...)
 	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{}, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{}, nil)
@@ -170,38 +165,38 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.DiskSegmentMaxSize.Key, strconv.Itoa(200))
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.DiskSegmentMaxSize.Key)
 
-	s.triggerManager.meta = &meta{
-		indexMeta: &indexMeta{
-			indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collectionID: {
-					indexID + 1: &model.Index{
-						CollectionID: collectionID,
-						FieldID:      fieldID + 1,
-						IndexID:      indexID + 1,
-						IndexName:    "",
-						IsDeleted:    false,
-						CreateTime:   0,
-						TypeParams:   nil,
-						IndexParams: []*commonpb.KeyValuePair{
-							{Key: common.IndexTypeKey, Value: "DISKANN"},
-						},
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
+	meta := newMemoryMeta(s.T())
+	s.triggerManager.meta = meta
+	s.triggerManager.meta.indexMeta = &indexMeta{
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collectionID: {
+				indexID + 1: &model.Index{
+					CollectionID: collectionID,
+					FieldID:      fieldID + 1,
+					IndexID:      indexID + 1,
+					IndexName:    "",
+					IsDeleted:    false,
+					CreateTime:   0,
+					TypeParams:   nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{Key: common.IndexTypeKey, Value: "DISKANN"},
 					},
-					indexID + 2: &model.Index{
-						CollectionID: collectionID,
-						FieldID:      fieldID + 2,
-						IndexID:      indexID + 2,
-						IndexName:    "",
-						IsDeleted:    false,
-						CreateTime:   0,
-						TypeParams:   nil,
-						IndexParams: []*commonpb.KeyValuePair{
-							{Key: common.IndexTypeKey, Value: "DISKANN"},
-						},
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				indexID + 2: &model.Index{
+					CollectionID: collectionID,
+					FieldID:      fieldID + 2,
+					IndexID:      indexID + 2,
+					IndexName:    "",
+					IsDeleted:    false,
+					CreateTime:   0,
+					TypeParams:   nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{Key: common.IndexTypeKey, Value: "DISKANN"},
 					},
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
 				},
 			},
 		},
@@ -227,42 +222,43 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 	})
 
 	s.Run("HNSW & DISKANN", func() {
-		s.triggerManager.meta = &meta{
-			indexMeta: &indexMeta{
-				indexes: map[UniqueID]map[UniqueID]*model.Index{
-					collectionID: {
-						indexID + 1: &model.Index{
-							CollectionID: collectionID,
-							FieldID:      fieldID + 1,
-							IndexID:      indexID + 1,
-							IndexName:    "",
-							IsDeleted:    false,
-							CreateTime:   0,
-							TypeParams:   nil,
-							IndexParams: []*commonpb.KeyValuePair{
-								{Key: common.IndexTypeKey, Value: "HNSW"},
-							},
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
+		meta := newMemoryMeta(s.T())
+		s.triggerManager.meta = meta
+		s.triggerManager.meta.indexMeta = &indexMeta{
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collectionID: {
+					indexID + 1: &model.Index{
+						CollectionID: collectionID,
+						FieldID:      fieldID + 1,
+						IndexID:      indexID + 1,
+						IndexName:    "",
+						IsDeleted:    false,
+						CreateTime:   0,
+						TypeParams:   nil,
+						IndexParams: []*commonpb.KeyValuePair{
+							{Key: common.IndexTypeKey, Value: "HNSW"},
 						},
-						indexID + 2: &model.Index{
-							CollectionID: collectionID,
-							FieldID:      fieldID + 2,
-							IndexID:      indexID + 2,
-							IndexName:    "",
-							IsDeleted:    false,
-							CreateTime:   0,
-							TypeParams:   nil,
-							IndexParams: []*commonpb.KeyValuePair{
-								{Key: common.IndexTypeKey, Value: "DISKANN"},
-							},
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+					indexID + 2: &model.Index{
+						CollectionID: collectionID,
+						FieldID:      fieldID + 2,
+						IndexID:      indexID + 2,
+						IndexName:    "",
+						IsDeleted:    false,
+						CreateTime:   0,
+						TypeParams:   nil,
+						IndexParams: []*commonpb.KeyValuePair{
+							{Key: common.IndexTypeKey, Value: "DISKANN"},
 						},
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
 					},
 				},
 			},
 		}
+
 		collection := &collectionInfo{
 			ID: collectionID,
 			Schema: &schemapb.CollectionSchema{
@@ -282,28 +278,29 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 	})
 
 	s.Run("some vector has no index", func() {
-		s.triggerManager.meta = &meta{
-			indexMeta: &indexMeta{
-				indexes: map[UniqueID]map[UniqueID]*model.Index{
-					collectionID: {
-						indexID + 1: &model.Index{
-							CollectionID: collectionID,
-							FieldID:      fieldID + 1,
-							IndexID:      indexID + 1,
-							IndexName:    "",
-							IsDeleted:    false,
-							CreateTime:   0,
-							TypeParams:   nil,
-							IndexParams: []*commonpb.KeyValuePair{
-								{Key: common.IndexTypeKey, Value: "HNSW"},
-							},
-							IsAutoIndex:     false,
-							UserIndexParams: nil,
+		meta := newMemoryMeta(s.T())
+		s.triggerManager.meta = meta
+		s.triggerManager.meta.indexMeta = &indexMeta{
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collectionID: {
+					indexID + 1: &model.Index{
+						CollectionID: collectionID,
+						FieldID:      fieldID + 1,
+						IndexID:      indexID + 1,
+						IndexName:    "",
+						IsDeleted:    false,
+						CreateTime:   0,
+						TypeParams:   nil,
+						IndexParams: []*commonpb.KeyValuePair{
+							{Key: common.IndexTypeKey, Value: "HNSW"},
 						},
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
 					},
 				},
 			},
 		}
+
 		collection := &collectionInfo{
 			ID: collectionID,
 			Schema: &schemapb.CollectionSchema{
@@ -341,14 +338,9 @@ func TestCompactionAndImport(t *testing.T) {
 	segments := genSegmentsForMeta(testLabel)
 	catelog := mocks.NewDataCoordCatalog(t)
 	catelog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	meta := &meta{
-		segMu:    NewSegmentKeyLock(),
-		segments: NewSegmentsInfo(),
-		catalog:  catelog,
-	}
-	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
-	}
+	meta := newMemoryMeta(t)
+	meta.catalog = catelog
+	AddTestSegmentInfos(meta, lo.Values(segments)...)
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{}, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{}, nil)

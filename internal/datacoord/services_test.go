@@ -728,7 +728,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 	})
 
 	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}}
+		s := &Server{meta: newMemoryMeta(t)}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -745,7 +745,9 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 	t.Run("test update meta", func(t *testing.T) {
 		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 		collections.Insert(1, &collectionInfo{ID: 1})
-		s := &Server{meta: &meta{collections: collections}}
+		meta := newMemoryMeta(t)
+		meta.collections = collections
+		s := &Server{meta: meta}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -779,7 +781,7 @@ func TestServer_GcConfirm(t *testing.T) {
 		s := &Server{}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 
-		m := &meta{}
+		m := newMemoryMeta(t)
 		catalog := mocks.NewDataCoordCatalog(t)
 		m.catalog = catalog
 
@@ -1343,7 +1345,8 @@ func TestImportV2(t *testing.T) {
 		// list binlog failed
 		cm := mocks2.NewChunkManager(t)
 		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
-		s.meta = &meta{chunkManager: cm}
+		s.meta = newMemoryMeta(t)
+		s.meta.chunkManager = cm
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
 			Files: []*internalpb.ImportFile{
 				{
