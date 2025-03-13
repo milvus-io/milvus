@@ -238,7 +238,12 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(OffsetVector* input) {
         return ExecTermJsonVariableInField<ValueType>(input);
     } else {
         if (is_index_mode_) {
-            return ExecVisitorImplForIndex<ValueType>(input);
+            // we create double index for json int64 field for now
+            using GetType =
+                std::conditional_t<std::is_same_v<ValueType, int64_t>,
+                                   double,
+                                   ValueType>;
+            return ExecVisitorImplForIndex<GetType>(input);
         } else {
             return ExecTermJsonFieldInVariable<ValueType>(input);
         }
@@ -777,7 +782,15 @@ PhyTermFilterExpr::ExecVisitorImplForIndex(OffsetVector* input) {
 
     std::vector<IndexInnerType> vals;
     for (auto& val : expr_->vals_) {
-        // Integral overflow process
+        if constexpr (std::is_same_v<T, double>) {
+            if (val.has_int64_val()) {
+                // only json field will cast int to double because other fields are casted in proxy
+                vals.emplace_back(static_cast<double>(val.int64_val()));
+                continue;
+            }
+        }
+
+        // Generic overflow handling for all types
         bool overflowed = false;
         auto converted_val = GetValueFromProtoWithOverflow<T>(val, overflowed);
         if (!overflowed) {
