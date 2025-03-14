@@ -137,6 +137,21 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
     void
     CreateReader();
 
+    bool
+    has_escape_sequence(const std::string& str) {
+        for (size_t i = 0; i < str.size(); ++i) {
+            if (str[i] == '\\' && i + 1 < str.size()) {
+                char next = str[i + 1];
+                if (next == 'n' || next == 't' || next == 'r' || next == 'b' ||
+                    next == 'f' || next == 'v' || next == '\\' ||
+                    next == '\"' || next == '\'') {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
  private:
     void
     AddJson(const char* json,
@@ -250,21 +265,6 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
         } catch (...) {
             return false;
         }
-    }
-
-    bool
-    has_escape_sequence(const std::string& str) {
-        for (size_t i = 0; i < str.size(); ++i) {
-            if (str[i] == '\\' && i + 1 < str.size()) {
-                char next = str[i + 1];
-                if (next == 'n' || next == 't' || next == 'r' || next == 'b' ||
-                    next == 'f' || next == 'v' || next == '\\' ||
-                    next == '\"' || next == '\'') {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     JSONType

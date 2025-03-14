@@ -79,9 +79,9 @@ SetDefaultJSONKeyStatsCommitInterval(int64_t val) {
 }
 
 void
-SetDefaultJSONKeyStatsEnable(bool val) {
+SetDefaultGrowingJSONKeyStatsEnable(bool val) {
     GROWING_JSON_KEY_STATS_ENABLED = val;
-    LOG_INFO("set default json key index enable: {}",
+    LOG_INFO("set default growing json key index enable: {}",
              GROWING_JSON_KEY_STATS_ENABLED);
 }
 
