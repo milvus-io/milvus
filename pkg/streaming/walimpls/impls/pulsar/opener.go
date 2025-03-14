@@ -5,6 +5,7 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
 )
@@ -18,12 +19,20 @@ type openerImpl struct {
 
 // Open opens a wal instance.
 func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimpls.WALImpls, error) {
-	p, err := o.c.CreateProducer(pulsar.ProducerOptions{
-		// TODO: configurations.
-		Topic: opt.Channel.Name,
-	})
-	if err != nil {
+	if err := opt.Validate(); err != nil {
 		return nil, err
+	}
+	var p pulsar.Producer
+	if opt.Channel.AccessMode == types.AccessModeRW {
+		var err error
+		p, err = o.c.CreateProducer(pulsar.ProducerOptions{
+			Topic: opt.Channel.Name,
+			// TODO: current go pulsar client does not support fencing, we should enable it after go pulsar client supports it.
+			// ProducerAccessMode: pulsar.ProducerAccessModeExclusiveWithFencing,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &walImpl{
 		WALHelper: helper.NewWALHelper(opt),

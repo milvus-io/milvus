@@ -11,7 +11,7 @@ import (
 // NewWALHelper creates a new WALHelper.
 func NewWALHelper(opt *walimpls.OpenOption) *WALHelper {
 	return &WALHelper{
-		logger:  log.With(zap.Any("channel", opt.Channel)),
+		logger:  log.With(zap.String("channel", opt.Channel.String())),
 		channel: opt.Channel,
 	}
 }

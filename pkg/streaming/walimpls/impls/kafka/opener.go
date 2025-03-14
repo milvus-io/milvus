@@ -34,6 +34,9 @@ type openerImpl struct {
 }
 
 func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimpls.WALImpls, error) {
+	if err := opt.Validate(); err != nil {
+		return nil, err
+	}
 	return &walImpl{
 		WALHelper:      helper.NewWALHelper(opt),
 		p:              o.p,
