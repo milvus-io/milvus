@@ -871,7 +871,7 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 
 func TestMeta_GetSegmentIndexes(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
-	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))
+	m := createMeta(t, catalog, withIndexMeta(createIndexMeta(catalog)))
 
 	t.Run("success", func(t *testing.T) {
 		segIndexes := m.indexMeta.GetSegmentIndexes(collID, segID)
@@ -1507,7 +1507,7 @@ func TestRemoveSegmentIndex(t *testing.T) {
 
 func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
-	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))
+	m := createMeta(t, catalog, withIndexMeta(createIndexMeta(catalog)))
 
 	// normal case
 	segmentIDs := make([]int64, 0, 11)

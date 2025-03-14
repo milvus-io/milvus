@@ -65,14 +65,10 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	partitionStatsMeta, _ := newPartitionStatsMeta(context.TODO(), s.catalog)
 	indexMeta, _ := newIndexMeta(context.TODO(), s.catalog)
 
-	meta := &meta{
-		segments:           NewSegmentsInfo(),
-		collections:        make(map[UniqueID]*collectionInfo, 0),
-		compactionTaskMeta: compactionTaskMeta,
-		partitionStatsMeta: partitionStatsMeta,
-		indexMeta:          indexMeta,
-	}
-	s.meta = meta
+	s.meta = newMemoryMeta(s.T())
+	s.meta.compactionTaskMeta = compactionTaskMeta
+	s.meta.partitionStatsMeta = partitionStatsMeta
+	s.meta.indexMeta = indexMeta
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
@@ -109,22 +105,22 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerWithNoCollecitons() {
 
 func (s *ClusteringCompactionPolicySuite) TestTriggerWithCollections() {
 	// valid collection
-	s.meta.collections[1] = &collectionInfo{
+	s.meta.collections.Insert(1, &collectionInfo{
 		ID:     1,
 		Schema: newTestScalarClusteringKeySchema(),
-	}
+	})
 	// deleted collection
-	s.meta.collections[2] = &collectionInfo{
+	s.meta.collections.Insert(2, &collectionInfo{
 		ID:     2,
 		Schema: newTestScalarClusteringKeySchema(),
-	}
+	})
 	s.clusteringCompactionPolicy.meta = s.meta
 
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
 		if collectionID == 2 {
 			return nil, errors.New("mock get collection fail error")
 		}
-		coll, exist := s.meta.collections[collectionID]
+		coll, exist := s.meta.collections.Get(collectionID)
 		if exist {
 			return coll, nil
 		}
@@ -280,9 +276,8 @@ func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting()
 			s.Run(test.state.String(), func() {
 				collID := int64(19530)
 				compactionTaskMeta := newTestCompactionTaskMeta(s.T())
-				s.clusteringCompactionPolicy.meta = &meta{
-					compactionTaskMeta: compactionTaskMeta,
-				}
+				s.clusteringCompactionPolicy.meta = newMemoryMeta(s.T())
+				s.clusteringCompactionPolicy.meta.compactionTaskMeta = compactionTaskMeta
 				compactionTaskMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{
 					TriggerID:    1,
 					PlanID:       10,
@@ -308,10 +303,10 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 		Channel:      "ch-1",
 	}
 
-	s.meta.collections[testLabel.CollectionID] = &collectionInfo{
+	s.meta.collections.Insert(testLabel.CollectionID, &collectionInfo{
 		ID:     testLabel.CollectionID,
 		Schema: newTestScalarClusteringKeySchema(),
-	}
+	})
 
 	segments := genSegmentsForMeta(testLabel)
 	for id, segment := range segments {
@@ -319,7 +314,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 	}
 
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
-		coll, exist := s.meta.collections[collectionID]
+		coll, exist := s.meta.collections.Get(collectionID)
 		if exist {
 			return coll, nil
 		}
@@ -448,9 +443,8 @@ func (s *ClusteringCompactionPolicySuite) TestTimeIntervalLogic() {
 				partitionStatsMeta.partitionStatsInfos[channel][partitionID].currentVersion = test.currentVersion
 			}
 
-			meta := &meta{
-				partitionStatsMeta: partitionStatsMeta,
-			}
+			meta := newMemoryMeta(s.T())
+			meta.partitionStatsMeta = partitionStatsMeta
 
 			succeed, err := triggerClusteringCompactionPolicy(ctx, meta, collectionID, partitionID, channel, test.segments)
 			s.NoError(err)

@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ServerSuite struct {
@@ -727,7 +728,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 	})
 
 	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: &meta{collections: make(map[UniqueID]*collectionInfo, 1)}}
+		s := &Server{meta: newMemoryMeta(t)}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -738,13 +739,15 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		resp, err := s.BroadcastAlteredCollection(ctx, req)
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
-		assert.Equal(t, 1, len(s.meta.collections))
+		assert.Equal(t, 1, s.meta.collections.Len())
 	})
 
 	t.Run("test update meta", func(t *testing.T) {
-		s := &Server{meta: &meta{collections: map[UniqueID]*collectionInfo{
-			1: {ID: 1},
-		}}}
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(1, &collectionInfo{ID: 1})
+		meta := newMemoryMeta(t)
+		meta.collections = collections
+		s := &Server{meta: meta}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -753,11 +756,15 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
 		}
 
-		assert.Nil(t, s.meta.collections[1].Properties)
+		coll, ok := s.meta.collections.Get(1)
+		assert.True(t, ok)
+		assert.Nil(t, coll.Properties)
 		resp, err := s.BroadcastAlteredCollection(ctx, req)
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
-		assert.NotNil(t, s.meta.collections[1].Properties)
+		coll, ok = s.meta.collections.Get(1)
+		assert.True(t, ok)
+		assert.NotNil(t, coll.Properties)
 	})
 }
 
@@ -774,7 +781,7 @@ func TestServer_GcConfirm(t *testing.T) {
 		s := &Server{}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 
-		m := &meta{}
+		m := newMemoryMeta(t)
 		catalog := mocks.NewDataCoordCatalog(t)
 		m.catalog = catalog
 
@@ -1338,7 +1345,8 @@ func TestImportV2(t *testing.T) {
 		// list binlog failed
 		cm := mocks2.NewChunkManager(t)
 		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
-		s.meta = &meta{chunkManager: cm}
+		s.meta = newMemoryMeta(t)
+		s.meta.chunkManager = cm
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
 			Files: []*internalpb.ImportFile{
 				{

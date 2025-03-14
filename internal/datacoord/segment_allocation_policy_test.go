@@ -395,14 +395,8 @@ func Test_sealByBlockingL0(t *testing.T) {
 			pt.Save(pt.DataCoordCfg.BlockingL0EntryNum.Key, strconv.FormatInt(tc.entryNumLimit, 10))
 			defer pt.Reset(pt.DataCoordCfg.BlockingL0EntryNum.Key)
 
-			segments := NewSegmentsInfo()
-			for _, l0segment := range tc.l0Segments {
-				segments.SetSegment(l0segment.GetID(), l0segment)
-			}
-
-			meta := &meta{
-				segments: segments,
-			}
+			meta := newMemoryMeta(t)
+			AddTestSegmentInfos(meta, tc.l0Segments...)
 
 			result, _ := sealByBlockingL0(meta)(tc.channel, tc.growingSegments, 0)
 			sealedIDs := lo.Map(result, func(segment *SegmentInfo, _ int) int64 {

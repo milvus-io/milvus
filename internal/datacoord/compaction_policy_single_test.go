@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -53,10 +54,8 @@ func (s *SingleCompactionPolicySuite) SetupTest() {
 	}
 
 	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{segments: NewSegmentsInfo()}
-	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
-	}
+	meta := newMemoryMeta(s.T())
+	AddTestSegmentInfos(meta, lo.Values(segments)...)
 
 	s.mockAlloc = newMockAllocator(s.T())
 	mockHandler := NewNMockHandler(s.T())
@@ -122,28 +121,15 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 	}
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
 
-	segments := make(map[UniqueID]*SegmentInfo, 0)
-	segments[101] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 0, 10000, 201)
-	segments[102] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 500, 10000, 10)
-	segments[103] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 100, 10000, 1)
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: {
-					101: segments[101],
-					102: segments[102],
-					103: segments[103],
-				},
-			},
-		},
-	}
+	s.singlePolicy.meta = newMemoryMeta(s.T())
+	s1 := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 0, 10000, 201)
+	s2 := buildTestSegment(102, collID, datapb.SegmentLevel_L2, 500, 10000, 10)
+	s3 := buildTestSegment(103, collID, datapb.SegmentLevel_L2, 100, 10000, 1)
+	AddTestSegmentInfos(s.singlePolicy.meta, s1, s2, s3)
 
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
-	s.singlePolicy.meta = &meta{
-		compactionTaskMeta: compactionTaskMeta,
-		segments:           segmentsInfo,
-	}
+	s.singlePolicy.meta.compactionTaskMeta = compactionTaskMeta
+
 	compactionTaskMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{
 		TriggerID:    1,
 		PlanID:       10,

@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
@@ -54,10 +55,8 @@ func (s *L0CompactionPolicySuite) SetupTest() {
 	}
 
 	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{segments: NewSegmentsInfo()}
-	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
-	}
+	meta := newMemoryMeta(s.T())
+	AddTestSegmentInfos(meta, lo.Values(segments)...)
 
 	s.l0_policy = newL0CompactionPolicy(meta)
 }
@@ -161,10 +160,8 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 		info.DmlPosition = &msgpb.MsgPosition{Timestamp: arg.PosT}
 		segments[arg.ID] = info
 	}
-	meta := &meta{segments: NewSegmentsInfo()}
-	for id, segment := range segments {
-		meta.segments.SetSegment(id, segment)
-	}
+	meta := newMemoryMeta(s.T())
+	AddTestSegmentInfos(meta, lo.Values(segments)...)
 	s.l0_policy.meta = meta
 
 	s.l0_policy.OnCollectionUpdate(s.testLabel.CollectionID)

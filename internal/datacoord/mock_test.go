@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
@@ -89,11 +90,13 @@ func (mm *metaMemoryKV) CompareVersionAndSwap(ctx context.Context, key string, v
 	panic("implement me")
 }
 
-func newMemoryMeta(t *testing.T) (*meta, error) {
+func newMemoryMeta(t *testing.T) *meta {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	return newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	assert.NoError(t, err)
+	return meta
 }
 
 func newMockAllocator(t *testing.T) *allocator.MockAllocator {
@@ -599,5 +602,11 @@ func (h *mockHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChan
 func newMockHandlerWithMeta(meta *meta) *mockHandler {
 	return &mockHandler{
 		meta: meta,
+	}
+}
+
+func AddTestSegmentInfos(meta *meta, segmentInfos ...*SegmentInfo) {
+	for _, s := range segmentInfos {
+		meta.segments.SetSegment(s.GetID(), s)
 	}
 }

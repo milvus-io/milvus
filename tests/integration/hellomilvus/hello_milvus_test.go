@@ -95,7 +95,7 @@ func (s *HelloMilvusSuite) run() {
 		for {
 			select {
 			case <-timeoutCtx.Done():
-				s.Fail("insert check timeout")
+				s.FailNow("insert check timeout")
 			case report := <-c.Extension.GetReportChan():
 				reportInfo := report.(map[string]any)
 				log.Info("insert report info", zap.Any("reportInfo", reportInfo))
