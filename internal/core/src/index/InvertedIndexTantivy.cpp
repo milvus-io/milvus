@@ -26,6 +26,8 @@
 #include <vector>
 #include "InvertedIndexTantivy.h"
 
+const std::string INDEX_NULL_OFFSET_FILE_NAME = "index_null_offset";
+
 namespace milvus::index {
 constexpr const char* TMP_INVERTED_INDEX_PREFIX = "/tmp/milvus/inverted-index/";
 
@@ -102,8 +104,9 @@ InvertedIndexTantivy<T>::Serialize(const Config& config) {
     lock.unlock();
     BinarySet res_set;
     if (index_valid_data_length > 0) {
-        res_set.Append(
-            "index_null_offset", index_valid_data, index_valid_data_length);
+        res_set.Append(INDEX_NULL_OFFSET_FILE_NAME,
+                       index_valid_data,
+                       index_valid_data_length);
     }
     milvus::Disassemble(res_set);
     return res_set;
@@ -170,45 +173,78 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load disk ann index data");
+
     auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
-    auto files_value = index_files.value();
+    auto inverted_index_files = index_files.value();
+
     // need erase the index type file that has been readed
     auto index_type_file =
         disk_file_manager_->GetRemoteIndexPrefix() + std::string("/index_type");
-    files_value.erase(std::remove_if(files_value.begin(),
-                                     files_value.end(),
-                                     [&](const std::string& file) {
-                                         return file == index_type_file;
-                                     }),
-                      files_value.end());
+    inverted_index_files.erase(
+        std::remove_if(
+            inverted_index_files.begin(),
+            inverted_index_files.end(),
+            [&](const std::string& file) { return file == index_type_file; }),
+        inverted_index_files.end());
 
-    auto it = std::find_if(
-        files_value.begin(), files_value.end(), [](const std::string& file) {
-            return file.substr(file.find_last_of('/') + 1) ==
-                   "index_null_offset";
-        });
-    if (it != files_value.end()) {
-        std::vector<std::string> file;
-        file.push_back(*it);
-        files_value.erase(it);
-        auto index_datas = mem_file_manager_->LoadIndexToMemory(file);
-        AssembleIndexDatas(index_datas);
-        BinarySet binary_set;
-        for (auto& [key, data] : index_datas) {
-            auto size = data->DataSize();
-            auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-            auto buf = std::shared_ptr<uint8_t[]>(
-                (uint8_t*)const_cast<void*>(data->Data()), deleter);
-            binary_set.Append(key, buf, size);
+    std::vector<std::string> null_offset_files;
+    std::shared_ptr<FieldDataBase> null_offset_data;
+
+    auto find_file = [&](const std::string& file) -> auto {
+        return std::find_if(inverted_index_files.begin(),
+                            inverted_index_files.end(),
+                            [&](const std::string& f) {
+                                return f.substr(f.find_last_of('/') + 1) ==
+                                       file;
+                            });
+    };
+
+    if (auto it = find_file(INDEX_FILE_SLICE_META);
+        it != inverted_index_files.end()) {
+        // SLICE_META only exist if null_offset_files are sliced
+        null_offset_files.push_back(*it);
+
+        // find all null_offset_files
+        for (auto& file : inverted_index_files) {
+            auto filename = file.substr(file.find_last_of('/') + 1);
+            if (filename.length() >= INDEX_NULL_OFFSET_FILE_NAME.length() &&
+                filename.substr(0, INDEX_NULL_OFFSET_FILE_NAME.length()) ==
+                    INDEX_NULL_OFFSET_FILE_NAME) {
+                null_offset_files.push_back(file);
+            }
         }
-        auto index_valid_data = binary_set.GetByName("index_null_offset");
-        folly::SharedMutex::WriteHolder lock(mutex_);
-        null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
-        memcpy(null_offset_.data(),
-               index_valid_data->data.get(),
-               (size_t)index_valid_data->size);
+
+        auto index_datas =
+            mem_file_manager_->LoadIndexToMemory(null_offset_files);
+        AssembleIndexDatas(index_datas);
+        null_offset_data = index_datas.at(INDEX_NULL_OFFSET_FILE_NAME);
+    } else if (auto it = find_file(INDEX_NULL_OFFSET_FILE_NAME);
+               it != inverted_index_files.end()) {
+        // null offset file is not sliced
+        null_offset_files.push_back(*it);
+        auto index_datas = mem_file_manager_->LoadIndexToMemory({*it});
+        null_offset_data = index_datas.at(INDEX_NULL_OFFSET_FILE_NAME);
     }
-    disk_file_manager_->CacheIndexToDisk(files_value);
+
+    if (null_offset_data) {
+        auto data = null_offset_data->Data();
+        auto size = null_offset_data->DataSize();
+        folly::SharedMutex::WriteHolder lock(mutex_);
+        null_offset_.resize((size_t)size / sizeof(size_t));
+        memcpy(null_offset_.data(), data, (size_t)size);
+    }
+
+    // remove from inverted_index_files
+    inverted_index_files.erase(
+        std::remove_if(inverted_index_files.begin(),
+                       inverted_index_files.end(),
+                       [&](const std::string& file) {
+                           return std::find(null_offset_files.begin(),
+                                            null_offset_files.end(),
+                                            file) != null_offset_files.end();
+                       }),
+        inverted_index_files.end());
+    disk_file_manager_->CacheIndexToDisk(inverted_index_files);
     path_ = prefix;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
 }
