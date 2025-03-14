@@ -124,65 +124,7 @@ func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSch
 	}
 
 	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		pkField := func() *schemapb.FieldSchema {
-			for _, field := range schema.Fields {
-				if field.GetIsPrimaryKey() {
-					return field
-				}
-			}
-			return nil
-		}()
-		if pkField == nil {
-			return merr.WrapErrServiceInternal("no primary key field found")
-		}
-
-		rec, ok := r.(*simpleArrowRecord)
-		if !ok {
-			return merr.WrapErrServiceInternal("can not cast to simple arrow record")
-		}
-
-		numFields := len(schema.Fields)
-		for i := 0; i < rec.Len(); i++ {
-			if v[i] == nil {
-				v[i] = &Value{
-					Value: make(map[FieldID]interface{}, numFields),
-				}
-			}
-			value := v[i]
-			m := value.Value.(map[FieldID]interface{})
-			for _, field := range schema.Fields {
-				fieldID := field.FieldID
-				column := r.Column(fieldID)
-				if column.IsNull(i) {
-					m[fieldID] = nil
-				} else {
-					d, ok := serdeMap[field.DataType].deserialize(column, i)
-					if ok {
-						m[fieldID] = d
-					} else {
-						return merr.WrapErrServiceInternal(fmt.Sprintf("can not deserialize field [%s]", field.Name))
-					}
-				}
-			}
-
-			rowID, ok := m[common.RowIDField].(int64)
-			if !ok {
-				return merr.WrapErrIoKeyNotFound("no row id column found")
-			}
-			value.ID = rowID
-			value.Timestamp = m[common.TimeStampField].(int64)
-
-			pkCol := rec.field2Col[pkField.FieldID]
-			pk, err := GenPrimaryKeyByRawData(m[pkField.FieldID], schema.Fields[pkCol].DataType)
-			if err != nil {
-				return err
-			}
-
-			value.PK = pk
-			value.IsDeleted = false
-			value.Value = m
-		}
-		return nil
+		return ValueDeserializer(r, v, schema.Fields)
 	}), nil
 }
 
@@ -194,20 +136,28 @@ type packedRecordWriter struct {
 	multiPartUploadSize     int64
 	columnGroups            []storagecommon.ColumnGroup
 	paths                   []string
-	schema                  *arrow.Schema
+	schema                  *schemapb.CollectionSchema
+	arrowSchema             *arrow.Schema
 	rowNum                  int64
 	writtenUncompressed     uint64
 	columnGroupUncompressed []uint64
 }
 
 func (pw *packedRecordWriter) Write(r Record) error {
-	rec, ok := r.(*simpleArrowRecord)
+	var rec arrow.Record
+	sar, ok := r.(*simpleArrowRecord)
 	if !ok {
-		return merr.WrapErrServiceInternal("can not cast to simple arrow record")
+		arrays := make([]arrow.Array, len(pw.schema.Fields))
+		for i, field := range pw.schema.Fields {
+			arrays[i] = r.Column(field.FieldID)
+		}
+		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
+	} else {
+		rec = sar.r
 	}
 	pw.rowNum += int64(r.Len())
-	for col, arr := range rec.r.Columns() {
-		size := uint64(calculateArraySize(arr))
+	for col, arr := range rec.Columns() {
+		size := uint64(CalculateArraySize(arr))
 		pw.writtenUncompressed += size
 		for columnGroup, group := range pw.columnGroups {
 			if lo.Contains(group.Columns, col) {
@@ -217,7 +167,7 @@ func (pw *packedRecordWriter) Write(r Record) error {
 		}
 	}
 	defer rec.Release()
-	return pw.writer.WriteRecordBatch(rec.r)
+	return pw.writer.WriteRecordBatch(rec)
 }
 
 func (pw *packedRecordWriter) GetWrittenUncompressed() uint64 {
@@ -243,8 +193,13 @@ func (pw *packedRecordWriter) Close() error {
 	return nil
 }
 
-func NewPackedRecordWriter(paths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup) (*packedRecordWriter, error) {
-	writer, err := packed.NewPackedWriter(paths, schema, bufferSize, multiPartUploadSize, columnGroups)
+func NewPackedRecordWriter(paths []string, schema *schemapb.CollectionSchema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup) (*packedRecordWriter, error) {
+	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
+	if err != nil {
+		return nil, merr.WrapErrServiceInternal(
+			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
+	}
+	writer, err := packed.NewPackedWriter(paths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not new packed record writer %s", err.Error()))
@@ -253,6 +208,7 @@ func NewPackedRecordWriter(paths []string, schema *arrow.Schema, bufferSize int6
 	return &packedRecordWriter{
 		writer:                  writer,
 		schema:                  schema,
+		arrowSchema:             arrowSchema,
 		bufferSize:              bufferSize,
 		paths:                   paths,
 		columnGroups:            columnGroups,
@@ -263,12 +219,7 @@ func NewPackedRecordWriter(paths []string, schema *arrow.Schema, bufferSize int6
 func NewPackedSerializeWriter(paths []string, schema *schemapb.CollectionSchema, bufferSize int64,
 	multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, batchSize int,
 ) (*SerializeWriterImpl[*Value], error) {
-	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
-	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
-	}
-	PackedBinlogRecordWriter, err := NewPackedRecordWriter(paths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups)
+	PackedBinlogRecordWriter, err := NewPackedRecordWriter(paths, schema, bufferSize, multiPartUploadSize, columnGroups)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not new packed record writer %s", err.Error()))
@@ -372,7 +323,7 @@ func (pw *PackedBinlogRecordWriter) initWriters() error {
 			paths = append(paths, path)
 			logIdStart++
 		}
-		pw.writer, err = NewPackedRecordWriter(paths, pw.arrowSchema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups)
+		pw.writer, err = NewPackedRecordWriter(paths, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups)
 		if err != nil {
 			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
 		}

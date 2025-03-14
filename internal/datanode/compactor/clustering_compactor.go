@@ -326,7 +326,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100)
+		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
 
 		buffer := newClusterBuffer(id, writer, fieldStats)
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
@@ -342,7 +342,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100)
+		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
 
 		nullBuffer = newClusterBuffer(len(buckets), writer, fieldStats)
 		t.clusterBuffers = append(t.clusterBuffers, nullBuffer)
@@ -395,7 +395,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		fieldStats.SetVectorCentroids(centroidValues...)
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100)
+		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
 
 		buffer := newClusterBuffer(id, writer, fieldStats)
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
@@ -459,8 +459,9 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 		segmentClone := &datapb.CompactionSegmentBinlogs{
 			SegmentID: segment.SegmentID,
 			// only FieldBinlogs and deltalogs needed
-			Deltalogs:    segment.Deltalogs,
-			FieldBinlogs: segment.FieldBinlogs,
+			Deltalogs:      segment.Deltalogs,
+			FieldBinlogs:   segment.FieldBinlogs,
+			StorageVersion: segment.StorageVersion,
 		}
 		future := t.mappingPool.Submit(func() (any, error) {
 			err := t.mappingSegment(ctx, segmentClone)
@@ -571,7 +572,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 	rr, err := storage.NewBinlogRecordReader(ctx, segment.GetFieldBinlogs(), t.plan.Schema, storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 		return t.binlogIO.Download(ctx, paths)
-	}))
+	}), storage.WithVersion(segment.StorageVersion), storage.WithBufferSize(t.memoryBufferSize))
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return err
@@ -805,17 +806,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("scalarAnalyzeSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
 	defer span.End()
 	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.Int64("segmentID", segment.GetSegmentID()))
-
-	// vars
 	processStart := time.Now()
-	fieldBinlogPaths := make([][]string, 0)
-	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
-	var (
-		timestampTo   int64                 = -1
-		timestampFrom int64                 = -1
-		remained      int64                 = 0
-		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
-	)
 
 	// Get the number of field binlog files from non-empty segment
 	var binlogNum int
@@ -831,6 +822,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		return nil, merr.WrapErrIllegalCompactionPlan("all segments' binlogs are empty")
 	}
 	log.Debug("binlogNum", zap.Int("binlogNum", binlogNum))
+	fieldBinlogPaths := make([][]string, 0)
 	for idx := 0; idx < binlogNum; idx++ {
 		var ps []string
 		for _, f := range segment.GetFieldBinlogs() {
@@ -840,67 +832,76 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 
 	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
-	for _, paths := range fieldBinlogPaths {
-		allValues, err := t.binlogIO.Download(ctx, paths)
-		if err != nil {
-			log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
-			return nil, err
-		}
-		blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
-			return &storage.Blob{Key: paths[i], Value: v}
-		})
 
-		pkIter, err := storage.NewBinlogDeserializeReader(t.plan.Schema, storage.MakeBlobsReader(blobs))
-		if err != nil {
-			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", paths), zap.Error(err))
-			return nil, err
-		}
-
-		for {
-			v, err := pkIter.NextValue()
-			if err != nil {
-				if err == sio.EOF {
-					pkIter.Close()
-					break
-				} else {
-					log.Warn("compact wrong, failed to iter through data", zap.Error(err))
-					return nil, err
-				}
-			}
-
-			// Filtering expired entity
-			if expiredFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp)) {
-				continue
-			}
-
-			// Update timestampFrom, timestampTo
-			if (*v).Timestamp < timestampFrom || timestampFrom == -1 {
-				timestampFrom = (*v).Timestamp
-			}
-			if (*v).Timestamp > timestampTo || timestampFrom == -1 {
-				timestampTo = (*v).Timestamp
-			}
-			// rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
-			row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
-			if !ok {
-				log.Warn("transfer interface to map wrong", zap.Strings("path", paths))
-				return nil, errors.New("unexpected error")
-			}
-			key := row[t.clusteringKeyField.GetFieldID()]
-			if _, exist := analyzeResult[key]; exist {
-				analyzeResult[key] = analyzeResult[key] + 1
-			} else {
-				analyzeResult[key] = 1
-			}
-			remained++
-		}
+	rr, err := storage.NewBinlogRecordReader(ctx, segment.GetFieldBinlogs(), t.plan.Schema, storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+		return t.binlogIO.Download(ctx, paths)
+	}), storage.WithVersion(segment.StorageVersion), storage.WithBufferSize(t.memoryBufferSize))
+	if err != nil {
+		log.Warn("new binlog record reader wrong", zap.Error(err))
+		return make(map[interface{}]int64), err
 	}
 
+	pkIter := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
+		return storage.ValueDeserializer(r, v, t.plan.Schema.Fields)
+	})
+	defer pkIter.Close()
+	analyzeResult, remained, err := t.iterAndGetScalarAnalyzeResult(pkIter, expiredFilter)
+	if err != nil {
+		return nil, err
+	}
 	log.Info("analyze segment end",
 		zap.Int64("remained entities", remained),
 		zap.Int("expired entities", expiredFilter.GetExpiredCount()),
 		zap.Duration("map elapse", time.Since(processStart)))
 	return analyzeResult, nil
+}
+
+func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage.DeserializeReaderImpl[*storage.Value], expiredFilter compaction.EntityFilter) (map[interface{}]int64, int64, error) {
+	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
+	var (
+		timestampTo   int64                 = -1
+		timestampFrom int64                 = -1
+		remained      int64                 = 0
+		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
+	)
+	for {
+		v, err := pkIter.NextValue()
+		if err != nil {
+			if err == sio.EOF {
+				pkIter.Close()
+				break
+			} else {
+				log.Warn("compact wrong, failed to iter through data", zap.Error(err))
+				return nil, 0, err
+			}
+		}
+
+		// Filtering expired entity
+		if expiredFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp)) {
+			continue
+		}
+
+		// Update timestampFrom, timestampTo
+		if (*v).Timestamp < timestampFrom || timestampFrom == -1 {
+			timestampFrom = (*v).Timestamp
+		}
+		if (*v).Timestamp > timestampTo || timestampFrom == -1 {
+			timestampTo = (*v).Timestamp
+		}
+		// rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
+		row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
+		if !ok {
+			return nil, 0, errors.New("unexpected error")
+		}
+		key := row[t.clusteringKeyField.GetFieldID()]
+		if _, exist := analyzeResult[key]; exist {
+			analyzeResult[key] = analyzeResult[key] + 1
+		} else {
+			analyzeResult[key] = 1
+		}
+		remained++
+	}
+	return analyzeResult, remained, nil
 }
 
 func (t *clusteringCompactionTask) generatedScalarPlan(maxRows, preferRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {

@@ -285,12 +285,9 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 
 		for c, builder := range builders {
 			arrays[c] = builder.NewArray()
+			builder.Release()
 			fid := schema.Fields[c].FieldID
-			fields[c] = arrow.Field{
-				Name:     strconv.Itoa(int(fid)),
-				Type:     arrays[c].DataType(),
-				Nullable: true, // No nullable check here.
-			}
+			fields[c] = ConvertToArrowField(schema.Fields[c], arrays[c].DataType())
 			field2Col[fid] = c
 		}
 
