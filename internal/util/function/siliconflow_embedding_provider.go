@@ -55,12 +55,12 @@ func createSiliconflowEmbeddingClient(apiKey string, url string) (*siliconflow.S
 	return c, nil
 }
 
-func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema) (*SiliconflowEmbeddingProvider, error) {
+func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*SiliconflowEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	apiKey, url := parseAKAndURL(functionSchema.Params)
+	apiKey, url := parseAKAndURL(functionSchema.Params, params)
 	var modelName string
 
 	for _, param := range functionSchema.Params {

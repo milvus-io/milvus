@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const (
@@ -44,6 +45,15 @@ const (
 	siliconflowProvider  string = "siliconflow"
 	teiProvider          string = "tei"
 )
+
+func hasEmptyString(texts []string) bool {
+	for _, text := range texts {
+		if text == "" {
+			return true
+		}
+	}
+	return false
+}
 
 func TextEmbeddingOutputsCheck(fields []*schemapb.FieldSchema) error {
 	if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_FloatVector && fields[0].DataType != schemapb.DataType_Int8Vector) {
@@ -85,25 +95,26 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 
 	var embP textEmbeddingProvider
 	var newProviderErr error
+	conf := paramtable.Get().FunctionCfg.GetTextEmbeddingProviderConfig(base.provider)
 	switch base.provider {
 	case openAIProvider:
-		embP, newProviderErr = NewOpenAIEmbeddingProvider(base.outputFields[0], functionSchema)
+		embP, newProviderErr = NewOpenAIEmbeddingProvider(base.outputFields[0], functionSchema, conf)
 	case azureOpenAIProvider:
-		embP, newProviderErr = NewAzureOpenAIEmbeddingProvider(base.outputFields[0], functionSchema)
+		embP, newProviderErr = NewAzureOpenAIEmbeddingProvider(base.outputFields[0], functionSchema, conf)
 	case bedrockProvider:
-		embP, newProviderErr = NewBedrockEmbeddingProvider(base.outputFields[0], functionSchema, nil)
+		embP, newProviderErr = NewBedrockEmbeddingProvider(base.outputFields[0], functionSchema, nil, conf)
 	case aliDashScopeProvider:
-		embP, newProviderErr = NewAliDashScopeEmbeddingProvider(base.outputFields[0], functionSchema)
+		embP, newProviderErr = NewAliDashScopeEmbeddingProvider(base.outputFields[0], functionSchema, conf)
 	case vertexAIProvider:
-		embP, newProviderErr = NewVertexAIEmbeddingProvider(base.outputFields[0], functionSchema, nil)
+		embP, newProviderErr = NewVertexAIEmbeddingProvider(base.outputFields[0], functionSchema, nil, conf)
 	case voyageAIProvider:
-		embP, newProviderErr = NewVoyageAIEmbeddingProvider(base.outputFields[0], functionSchema)
+		embP, newProviderErr = NewVoyageAIEmbeddingProvider(base.outputFields[0], functionSchema, conf)
 	case cohereProvider:
-		embP, newProviderErr = NewCohereEmbeddingProvider(base.outputFields[0], functionSchema)
+		embP, newProviderErr = NewCohereEmbeddingProvider(base.outputFields[0], functionSchema, conf)
 	case siliconflowProvider:
-		embP, newProviderErr = NewSiliconflowEmbeddingProvider(base.outputFields[0], functionSchema)
+		embP, newProviderErr = NewSiliconflowEmbeddingProvider(base.outputFields[0], functionSchema, conf)
 	case teiProvider:
-		embP, newProviderErr = NewTEIEmbeddingProvider(base.outputFields[0], functionSchema)
+		embP, newProviderErr = NewTEIEmbeddingProvider(base.outputFields[0], functionSchema, conf)
 	default:
 		return nil, fmt.Errorf("Unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider)
 	}
@@ -213,10 +224,16 @@ func (runner *TextEmbeddingFunction) ProcessInsert(ctx context.Context, inputs [
 	if texts == nil {
 		return nil, fmt.Errorf("Input texts is empty")
 	}
+
+	// make sure all texts are not empty
+	if hasEmptyString(texts) {
+		return nil, fmt.Errorf("There is an empty string in the input data, TextEmbedding function does not support empty text")
+	}
 	numRows := len(texts)
 	if numRows > runner.MaxBatch() {
 		return nil, fmt.Errorf("Embedding supports up to [%d] pieces of data at a time, got [%d]", runner.MaxBatch(), numRows)
 	}
+
 	embds, err := runner.embProvider.CallEmbedding(texts, InsertMode)
 	if err != nil {
 		return nil, err
@@ -230,6 +247,10 @@ func (runner *TextEmbeddingFunction) ProcessSearch(ctx context.Context, placehol
 	numRows := len(texts)
 	if numRows > runner.MaxBatch() {
 		return nil, fmt.Errorf("Embedding supports up to [%d] pieces of data at a time, got [%d]", runner.MaxBatch(), numRows)
+	}
+	// make sure all texts are not empty
+	if hasEmptyString(texts) {
+		return nil, fmt.Errorf("There is an empty string in the queries, TextEmbedding function does not support empty text")
 	}
 	embds, err := runner.embProvider.CallEmbedding(texts, SearchMode)
 	if err != nil {
@@ -257,6 +278,11 @@ func (runner *TextEmbeddingFunction) ProcessBulkInsert(inputs []storage.FieldDat
 		return nil, fmt.Errorf("Input texts is empty")
 	}
 
+	// make sure all texts are not empty
+	// In storage.FieldData, null is also stored as an empty string
+	if hasEmptyString(texts) {
+		return nil, fmt.Errorf("There is an empty string in the input data, TextEmbedding function does not support empty text")
+	}
 	embds, err := runner.embProvider.CallEmbedding(texts, InsertMode)
 	if err != nil {
 		return nil, err

@@ -59,12 +59,12 @@ func createVoyageAIEmbeddingClient(apiKey string, url string) (*voyageai.VoyageA
 	return c, nil
 }
 
-func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema) (*VoyageAIEmbeddingProvider, error) {
+func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*VoyageAIEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	apiKey, url := parseAKAndURL(functionSchema.Params)
+	apiKey, url := parseAKAndURL(functionSchema.Params, params)
 	var modelName string
 	dim := int64(0)
 	truncate := false

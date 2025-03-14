@@ -76,7 +76,7 @@ func createSiliconflowProvider(url string, schema *schemapb.FieldSchema, provide
 	}
 	switch providerName {
 	case siliconflowProvider:
-		return NewSiliconflowEmbeddingProvider(schema, functionSchema)
+		return NewSiliconflowEmbeddingProvider(schema, functionSchema, map[string]string{})
 	default:
 		return nil, fmt.Errorf("Unknow provider")
 	}
@@ -192,7 +192,7 @@ func (s *SiliconflowTextEmbeddingProviderSuite) TestNewSiliconflowEmbeddingProvi
 			{Key: embeddingURLParamKey, Value: "mock"},
 		},
 	}
-	provider, err := NewSiliconflowEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	provider, err := NewSiliconflowEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
 	s.True(provider.MaxBatch() > 0)
