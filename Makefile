@@ -81,6 +81,13 @@ ifeq (${ENABLE_AZURE}, false)
 	AZURE_OPTION := -Z
 endif
 
+QUIETMODE ?= OFF
+ifeq ($(QUIETMODE), ON)
+	export CFLAGS+=-w
+	export CXXFLAGS+=-w
+endif
+
+
 milvus: build-cpp print-build-info build-go
 
 build-go:
