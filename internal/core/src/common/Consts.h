@@ -80,3 +80,4 @@ const size_t MARISA_NULL_KEY_ID = -1;
 
 const std::string JSON_CAST_TYPE = "json_cast_type";
 const std::string JSON_PATH = "json_path";
+const bool DEFAULT_OPTIMIZE_EXPR_ENABLED = true;

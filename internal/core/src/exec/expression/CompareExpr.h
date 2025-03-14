@@ -40,6 +40,8 @@ struct CompareElementFunc {
                const U* right,
                size_t size,
                TargetBitmapView res,
+               const TargetBitmap& bitmap_input,
+               size_t start_cursor,
                const int32_t* offsets = nullptr) {
         // This is the original code, kept here for the documentation purposes
         // also, used for iterative filter
@@ -58,6 +60,34 @@ struct CompareElementFunc {
                     res[i] = left[offset] >= right[offset];
                 } else if constexpr (op == proto::plan::OpType::LessEqual) {
                     res[i] = left[offset] <= right[offset];
+                } else {
+                    PanicInfo(
+                        OpTypeInvalid,
+                        fmt::format(
+                            "unsupported op_type:{} for CompareElementFunc",
+                            op));
+                }
+            }
+            return;
+        }
+
+        if (!bitmap_input.empty()) {
+            for (int i = 0; i < size; ++i) {
+                if (!bitmap_input[start_cursor + i]) {
+                    continue;
+                }
+                if constexpr (op == proto::plan::OpType::Equal) {
+                    res[i] = left[i] == right[i];
+                } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                    res[i] = left[i] != right[i];
+                } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+                    res[i] = left[i] > right[i];
+                } else if constexpr (op == proto::plan::OpType::LessThan) {
+                    res[i] = left[i] < right[i];
+                } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+                    res[i] = left[i] >= right[i];
+                } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                    res[i] = left[i] <= right[i];
                 } else {
                     PanicInfo(
                         OpTypeInvalid,
@@ -168,6 +198,21 @@ class PhyCompareFilterExpr : public Expr {
                     batch_size_);
             }
         }
+    }
+
+    std::string
+    ToString() const {
+        return fmt::format("{}", expr_->ToString());
+    }
+
+    bool
+    IsSource() const override {
+        return true;
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return std::nullopt;
     }
 
  private:
@@ -451,21 +496,21 @@ class PhyCompareFilterExpr : public Expr {
 
     template <typename OpType>
     VectorPtr
-    ExecCompareExprDispatcher(OpType op, OffsetVector* input = nullptr);
+    ExecCompareExprDispatcher(OpType op, EvalCtx& context);
 
     VectorPtr
-    ExecCompareExprDispatcherForHybridSegment(OffsetVector* input = nullptr);
+    ExecCompareExprDispatcherForHybridSegment(EvalCtx& context);
 
     VectorPtr
-    ExecCompareExprDispatcherForBothDataSegment(OffsetVector* input = nullptr);
+    ExecCompareExprDispatcherForBothDataSegment(EvalCtx& context);
 
     template <typename T>
     VectorPtr
-    ExecCompareLeftType(OffsetVector* input = nullptr);
+    ExecCompareLeftType(EvalCtx& context);
 
     template <typename T, typename U>
     VectorPtr
-    ExecCompareRightType(OffsetVector* input = nullptr);
+    ExecCompareRightType(EvalCtx& context);
 
  private:
     const FieldId left_field_;

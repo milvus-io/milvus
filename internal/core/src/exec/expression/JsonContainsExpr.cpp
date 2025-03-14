@@ -30,17 +30,17 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             if (is_index_mode_ && !has_offset_input_) {
                 result = EvalArrayContainsForIndexSegment();
             } else {
-                result = EvalJsonContainsForDataSegment(input);
+                result = EvalJsonContainsForDataSegment(context);
             }
             break;
         }
         case DataType::JSON: {
-            if (is_index_mode_ && !has_offset_input_) {
-                PanicInfo(
-                    ExprInvalid,
-                    "exists expr for json or array index mode not supported");
+            if (is_index_mode_ && !context.get_offset_input()) {
+                PanicInfo(ExprInvalid,
+                          "exists expr for json or array index mode not "
+                          "supported");
             }
-            result = EvalJsonContainsForDataSegment(input);
+            result = EvalJsonContainsForDataSegment(context);
             break;
         }
         default:
@@ -51,7 +51,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 }
 
 VectorPtr
-PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(OffsetVector* input) {
+PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
     auto data_type = expr_->column_.data_type_;
     switch (expr_->op_) {
         case proto::plan::JSONContainsExpr_JSONOp_Contains:
@@ -60,16 +60,16 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(OffsetVector* input) {
                 auto val_type = expr_->vals_[0].val_case();
                 switch (val_type) {
                     case proto::plan::GenericValue::kBoolVal: {
-                        return ExecArrayContains<bool>(input);
+                        return ExecArrayContains<bool>(context);
                     }
                     case proto::plan::GenericValue::kInt64Val: {
-                        return ExecArrayContains<int64_t>(input);
+                        return ExecArrayContains<int64_t>(context);
                     }
                     case proto::plan::GenericValue::kFloatVal: {
-                        return ExecArrayContains<double>(input);
+                        return ExecArrayContains<double>(context);
                     }
                     case proto::plan::GenericValue::kStringVal: {
-                        return ExecArrayContains<std::string>(input);
+                        return ExecArrayContains<std::string>(context);
                     }
                     default:
                         PanicInfo(
@@ -81,19 +81,19 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(OffsetVector* input) {
                     auto val_type = expr_->vals_[0].val_case();
                     switch (val_type) {
                         case proto::plan::GenericValue::kBoolVal: {
-                            return ExecJsonContains<bool>(input);
+                            return ExecJsonContains<bool>(context);
                         }
                         case proto::plan::GenericValue::kInt64Val: {
-                            return ExecJsonContains<int64_t>(input);
+                            return ExecJsonContains<int64_t>(context);
                         }
                         case proto::plan::GenericValue::kFloatVal: {
-                            return ExecJsonContains<double>(input);
+                            return ExecJsonContains<double>(context);
                         }
                         case proto::plan::GenericValue::kStringVal: {
-                            return ExecJsonContains<std::string>(input);
+                            return ExecJsonContains<std::string>(context);
                         }
                         case proto::plan::GenericValue::kArrayVal: {
-                            return ExecJsonContainsArray(input);
+                            return ExecJsonContainsArray(context);
                         }
                         default:
                             PanicInfo(DataTypeInvalid,
@@ -101,7 +101,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(OffsetVector* input) {
                                       val_type);
                     }
                 } else {
-                    return ExecJsonContainsWithDiffType(input);
+                    return ExecJsonContainsWithDiffType(context);
                 }
             }
         }
@@ -110,16 +110,16 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(OffsetVector* input) {
                 auto val_type = expr_->vals_[0].val_case();
                 switch (val_type) {
                     case proto::plan::GenericValue::kBoolVal: {
-                        return ExecArrayContainsAll<bool>(input);
+                        return ExecArrayContainsAll<bool>(context);
                     }
                     case proto::plan::GenericValue::kInt64Val: {
-                        return ExecArrayContainsAll<int64_t>(input);
+                        return ExecArrayContainsAll<int64_t>(context);
                     }
                     case proto::plan::GenericValue::kFloatVal: {
-                        return ExecArrayContainsAll<double>(input);
+                        return ExecArrayContainsAll<double>(context);
                     }
                     case proto::plan::GenericValue::kStringVal: {
-                        return ExecArrayContainsAll<std::string>(input);
+                        return ExecArrayContainsAll<std::string>(context);
                     }
                     default:
                         PanicInfo(
@@ -131,19 +131,19 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(OffsetVector* input) {
                     auto val_type = expr_->vals_[0].val_case();
                     switch (val_type) {
                         case proto::plan::GenericValue::kBoolVal: {
-                            return ExecJsonContainsAll<bool>(input);
+                            return ExecJsonContainsAll<bool>(context);
                         }
                         case proto::plan::GenericValue::kInt64Val: {
-                            return ExecJsonContainsAll<int64_t>(input);
+                            return ExecJsonContainsAll<int64_t>(context);
                         }
                         case proto::plan::GenericValue::kFloatVal: {
-                            return ExecJsonContainsAll<double>(input);
+                            return ExecJsonContainsAll<double>(context);
                         }
                         case proto::plan::GenericValue::kStringVal: {
-                            return ExecJsonContainsAll<std::string>(input);
+                            return ExecJsonContainsAll<std::string>(context);
                         }
                         case proto::plan::GenericValue::kArrayVal: {
-                            return ExecJsonContainsAllArray(input);
+                            return ExecJsonContainsAllArray(context);
                         }
                         default:
                             PanicInfo(DataTypeInvalid,
@@ -151,7 +151,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(OffsetVector* input) {
                                       val_type);
                     }
                 } else {
-                    return ExecJsonContainsAllWithDiffType(input);
+                    return ExecJsonContainsAllWithDiffType(context);
                 }
             }
         }
@@ -164,11 +164,13 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(OffsetVector* input) {
 
 template <typename ExprValueType>
 VectorPtr
-PhyJsonContainsFilterExpr::ExecArrayContains(OffsetVector* input) {
+PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -177,18 +179,21 @@ PhyJsonContainsFilterExpr::ExecArrayContains(OffsetVector* input) {
     AssertInfo(expr_->column_.nested_path_.size() == 0,
                "[ExecArrayContains]nested path must be null");
 
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SortVectorElement<GetType>>(expr_->vals_);
         arg_inited_ = true;
     }
+
+    int processed_cursor = 0;
     auto execute_sub_batch =
-        []<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::ArrayView* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -205,6 +210,7 @@ PhyJsonContainsFilterExpr::ExecArrayContains(OffsetVector* input) {
             }
             return false;
         };
+        bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -214,8 +220,12 @@ PhyJsonContainsFilterExpr::ExecArrayContains(OffsetVector* input) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
             res[i] = executor(offset);
         }
+        processed_cursor += size;
     };
 
     int64_t processed_size;
@@ -241,30 +251,36 @@ PhyJsonContainsFilterExpr::ExecArrayContains(OffsetVector* input) {
 
 template <typename ExprValueType>
 VectorPtr
-PhyJsonContainsFilterExpr::ExecJsonContains(OffsetVector* input) {
+PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
 
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SortVectorElement<GetType>>(expr_->vals_);
         arg_inited_ = true;
     }
+
+    size_t processed_cursor = 0;
     auto execute_sub_batch =
-        []<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -290,6 +306,7 @@ PhyJsonContainsFilterExpr::ExecJsonContains(OffsetVector* input) {
             }
             return false;
         };
+        bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -299,8 +316,12 @@ PhyJsonContainsFilterExpr::ExecJsonContains(OffsetVector* input) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
             res[i] = executor(offset);
         }
+        processed_cursor += size;
     };
 
     int64_t processed_size;
@@ -329,26 +350,31 @@ PhyJsonContainsFilterExpr::ExecJsonContains(OffsetVector* input) {
 }
 
 VectorPtr
-PhyJsonContainsFilterExpr::ExecJsonContainsArray(OffsetVector* input) {
+PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
 
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     std::vector<proto::plan::Array> elements;
     for (auto const& element : expr_->vals_) {
         elements.emplace_back(GetValueFromProto<proto::plan::Array>(element));
     }
+
+    size_t processed_cursor = 0;
     auto execute_sub_batch =
-        []<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -383,6 +409,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(OffsetVector* input) {
             }
             return false;
         };
+        bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -392,8 +419,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(OffsetVector* input) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
             res[i] = executor(offset);
         }
+        processed_cursor += size;
     };
 
     int64_t processed_size;
@@ -423,11 +454,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(OffsetVector* input) {
 
 template <typename ExprValueType>
 VectorPtr
-PhyJsonContainsFilterExpr::ExecArrayContainsAll(OffsetVector* input) {
+PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
     AssertInfo(expr_->column_.nested_path_.size() == 0,
                "[ExecArrayContainsAll]nested path must be null");
     auto real_batch_size =
@@ -436,19 +469,21 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(OffsetVector* input) {
         return nullptr;
     }
 
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     std::set<GetType> elements;
     for (auto const& element : expr_->vals_) {
         elements.insert(GetValueFromProto<GetType>(element));
     }
 
+    int processed_cursor = 0;
     auto execute_sub_batch =
-        []<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::ArrayView* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -467,6 +502,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(OffsetVector* input) {
             }
             return tmp_elements.size() == 0;
         };
+        bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -476,8 +512,12 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(OffsetVector* input) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
             res[i] = executor(offset);
         }
+        processed_cursor += size;
     };
 
     int64_t processed_size;
@@ -503,22 +543,24 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(OffsetVector* input) {
 
 template <typename ExprValueType>
 VectorPtr
-PhyJsonContainsFilterExpr::ExecJsonContainsAll(OffsetVector* input) {
+PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
 
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     std::set<GetType> elements;
@@ -526,8 +568,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(OffsetVector* input) {
         elements.insert(GetValueFromProto<GetType>(element));
     }
 
+    int processed_cursor = 0;
     auto execute_sub_batch =
-        []<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -556,6 +600,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(OffsetVector* input) {
             }
             return tmp_elements.size() == 0;
         };
+        bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -565,8 +610,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(OffsetVector* input) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
             res[i] = executor(offset);
         }
+        processed_cursor += size;
     };
 
     int64_t processed_size;
@@ -595,18 +644,19 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(OffsetVector* input) {
 }
 
 VectorPtr
-PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(
-    OffsetVector* input) {
+PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
@@ -618,8 +668,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(
         i++;
     }
 
+    int processed_cursor = 0;
     auto execute_sub_batch =
-        []<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -707,6 +759,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(
             }
             return tmp_elements_index.size() == 0;
         };
+        bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -716,8 +769,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(
                 res[i] = valid_res[i] = false;
                 continue;
             }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+
             res[i] = executor(offset);
         }
+        processed_cursor += size;
     };
 
     int64_t processed_size;
@@ -748,18 +806,20 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(
 }
 
 VectorPtr
-PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(OffsetVector* input) {
+PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
 
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
@@ -767,8 +827,11 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(OffsetVector* input) {
     for (auto const& element : expr_->vals_) {
         elements.emplace_back(GetValueFromProto<proto::plan::Array>(element));
     }
+
+    size_t processed_cursor = 0;
     auto execute_sub_batch =
-        []<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -807,6 +870,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(OffsetVector* input) {
             }
             return exist_elements_index.size() == elements.size();
         };
+        bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -816,8 +880,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(OffsetVector* input) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+
             res[i] = executor(offset);
         }
+        processed_cursor += size;
     };
 
     int64_t processed_size;
@@ -846,18 +915,20 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(OffsetVector* input) {
 }
 
 VectorPtr
-PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(OffsetVector* input) {
+PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
 
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
@@ -869,8 +940,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(OffsetVector* input) {
         i++;
     }
 
+    size_t processed_cursor = 0;
     auto execute_sub_batch =
-        []<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -949,6 +1022,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(OffsetVector* input) {
             }
             return false;
         };
+        bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -958,8 +1032,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(OffsetVector* input) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+
             res[i] = executor(offset);
         }
+        processed_cursor += size;
     };
 
     int64_t processed_size;

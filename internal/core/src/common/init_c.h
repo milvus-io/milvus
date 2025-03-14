@@ -48,6 +48,9 @@ InitTrace(CTraceConfig* config);
 void
 SetTrace(CTraceConfig* config);
 
+void
+InitDefaultOptimizeExprEnable(bool val);
+
 #ifdef __cplusplus
 };
 #endif
