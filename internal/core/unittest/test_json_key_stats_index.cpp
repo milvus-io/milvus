@@ -177,6 +177,22 @@ INSTANTIATE_TEST_SUITE_P(JsonKeyStatsIndexTestSuite,
                          JsonKeyStatsIndexTest,
                          ::testing::Values(true, false));
 
+TEST_P(JsonKeyStatsIndexTest, HasEscapeSequence) {
+    EXPECT_TRUE(index_->has_escape_sequence("Hello\\nWorld"));
+    EXPECT_TRUE(index_->has_escape_sequence("Tab\\tCharacter"));
+    EXPECT_TRUE(index_->has_escape_sequence("Carriage\\rReturn"));
+    EXPECT_TRUE(index_->has_escape_sequence("Backspace\\bTest"));
+    EXPECT_TRUE(index_->has_escape_sequence("FormFeed\\fTest"));
+    EXPECT_TRUE(index_->has_escape_sequence("Vertical\\vTab"));
+    EXPECT_TRUE(index_->has_escape_sequence("Backslash\\\\Test"));
+    EXPECT_TRUE(index_->has_escape_sequence("Quote\\\"Test"));
+    EXPECT_TRUE(index_->has_escape_sequence("SingleQuote\\'Test"));
+
+    EXPECT_FALSE(index_->has_escape_sequence("No escape sequence here"));
+    EXPECT_FALSE(index_->has_escape_sequence("Just a backslash \\"));
+    EXPECT_FALSE(index_->has_escape_sequence(""));
+}
+
 TEST_P(JsonKeyStatsIndexTest, TestTermInFunc) {
     struct Testcase {
         std::vector<int64_t> term;

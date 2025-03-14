@@ -52,7 +52,7 @@ void
 InitDefaultJSONKeyStatsCommitInterval(int64_t val);
 
 void
-InitDefaultJSONKeyStatsEnable(bool val);
+InitDefaultGrowingJSONKeyStatsEnable(bool val);
 
 void
 InitDefaultOptimizeExprEnable(bool val);

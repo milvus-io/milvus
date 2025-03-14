@@ -803,7 +803,7 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 	jsonKeyIndexStats := make(map[int64]*datapb.JsonKeyStats)
 	for _, field := range st.req.GetSchema().GetFields() {
 		h := typeutil.CreateFieldSchemaHelper(field)
-		if !h.EnableJSONKeyIndex() {
+		if !h.EnableJSONKeyStatsIndex() {
 			continue
 		}
 		log.Info("field enable json key index, ready to create json key index", zap.Int64("field id", field.GetFieldID()))
@@ -852,7 +852,7 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 		st.req.GetInsertChannel(),
 		jsonKeyIndexStats)
 
-	metrics.IndexNodeBuildJsonStatsLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(totalElapse.Seconds())
+	metrics.IndexNodeBuildJSONStatsLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(totalElapse.Seconds())
 	log.Info("create json key index done",
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
 		zap.Duration("total elapse", totalElapse))
