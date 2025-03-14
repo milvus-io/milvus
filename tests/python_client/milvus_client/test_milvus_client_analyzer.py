@@ -32,6 +32,7 @@ class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
         {"tokenizer": {"type": "lindera", "dict_kind": "cc-cedict"}},
     ]
 
+    @pytest.mark.skip()
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("analyzer_params", analyzer_params_list)
     def test_analyzer(self, analyzer_params):

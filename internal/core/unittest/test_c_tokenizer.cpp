@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <cstdint>
 
 #include "common/EasyAssert.h"
 #include "pb/schema.pb.h"
@@ -59,6 +60,7 @@ TEST(CTokenizer, Default) {
         create_token_stream(tokenizer, text.c_str(), text.length());
 
     std::vector<std::string> refs{"football", "basketball", "swimming"};
+    std::vector<std::int64_t> offsets{0, 10, 22};
     for (int i = 0; i < 3; i++) {
         ASSERT_TRUE(token_stream_advance(token_stream));
         auto token = token_stream_get_token(token_stream);
@@ -68,5 +70,20 @@ TEST(CTokenizer, Default) {
     ASSERT_FALSE(token_stream_advance(token_stream));
 
     free_token_stream(token_stream);
+  
+    token_stream =
+        create_token_stream(tokenizer, text.c_str(), text.length());
+
+    for (int i = 0; i < 3; i++) {
+        ASSERT_TRUE(token_stream_advance(token_stream));
+        auto token = token_stream_get_detailed_token(token_stream);
+        ASSERT_EQ(refs[i], std::string(token.token));
+        ASSERT_EQ(offsets[i], token.start_offset);
+        
+        free_token(const_cast<char*>(token.token));
+    }
+    ASSERT_FALSE(token_stream_advance(token_stream));
+    free_token_stream(token_stream);
+
     free_tokenizer(tokenizer);
 }
