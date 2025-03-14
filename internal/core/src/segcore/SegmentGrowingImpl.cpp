@@ -152,7 +152,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         }
 
         // index json.
-        if (field_meta.enable_jsonIndex()) {
+        if (field_meta.enable_growing_jsonStats()) {
             std::vector<std::string> jsonDatas(
                 insert_record_proto->fields_data(data_offset)
                     .scalars()
@@ -307,7 +307,7 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         }
 
         // build json match index
-        if (field_meta.enable_jsonIndex()) {
+        if (field_meta.enable_growing_jsonStats()) {
             auto index = GetJsonKeyIndex(field_id);
             index->BuildWithFieldData(field_data, field_meta.is_nullable());
             index->Commit();
@@ -924,7 +924,7 @@ SegmentGrowingImpl::AddJSONDatas(FieldId field_id,
 void
 SegmentGrowingImpl::CreateJSONIndexes() {
     for (auto [field_id, field_meta] : schema_->get_fields()) {
-        if (field_meta.enable_jsonIndex()) {
+        if (field_meta.enable_growing_jsonStats()) {
             CreateJSONIndex(FieldId(field_id));
         }
     }

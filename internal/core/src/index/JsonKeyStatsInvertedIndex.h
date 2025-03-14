@@ -72,7 +72,7 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
             LOG_INFO("json key filter size:{}", array.array_.len);
             for (size_t j = 0; j < array.array_.len; j++) {
                 auto the_offset = array.array_.array[j];
-                if (json_key_data_format_ == 0) {
+                if (json_key_data_format_ == 1) {
                     if (DecodeValid(the_offset)) {
                         auto tuple = DecodeValue(the_offset);
                         auto row_id = std::get<1>(tuple);
