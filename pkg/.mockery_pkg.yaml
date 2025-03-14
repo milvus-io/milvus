@@ -42,3 +42,7 @@ packages:
       StreamingCoordBroadcastService_WatchServer:
       StreamingCoordBroadcastServiceClient:
       StreamingCoordBroadcastService_WatchClient:
+  github.com/milvus-io/milvus/pkg/v2/proto/viewpb:
+    interfaces:
+      QueryViewSyncServiceClient:
+      QueryViewSyncService_SyncClient:
