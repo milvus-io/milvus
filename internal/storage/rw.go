@@ -45,14 +45,6 @@ type rwOptions struct {
 	columnGroups        []storagecommon.ColumnGroup
 }
 
-func GetColumnGroups(opt *rwOptions) []storagecommon.ColumnGroup {
-	return opt.columnGroups
-}
-
-func GetVersion(opt *rwOptions) int64 {
-	return opt.version
-}
-
 type RwOption func(*rwOptions)
 
 func DefaultRwOptions() *rwOptions {

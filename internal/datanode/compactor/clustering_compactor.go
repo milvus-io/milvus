@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -101,7 +100,6 @@ type clusteringCompactionTask struct {
 	// bm25
 	bm25FieldIds []int64
 
-	rwOption       []storage.RwOption
 	storageVersion int64
 }
 
@@ -168,7 +166,7 @@ func NewClusteringCompactionTask(
 		clusterBuffers: make([]*ClusterBuffer, 0),
 		flushCount:     atomic.NewInt64(0),
 		writtenRowNum:  atomic.NewInt64(0),
-		rwOption:       make([]storage.RwOption, 0),
+		storageVersion: storage.StorageV1,
 	}
 }
 
@@ -206,15 +204,6 @@ func (t *clusteringCompactionTask) init() error {
 	}
 	t.collectionID = t.GetCollection()
 	t.partitionID = t.plan.GetSegmentBinlogs()[0].GetPartitionID()
-	t.storageVersion = getCompactStorageVersion(t.plan.GetSegmentBinlogs())
-	v1Segments := lo.Filter(t.plan.GetSegmentBinlogs(), func(seg *datapb.CompactionSegmentBinlogs, _ int) bool {
-		return seg.GetStorageVersion() == storage.StorageV1
-	})
-	if len(v1Segments) > 0 {
-		t.rwOption = append(t.rwOption,
-			storage.WithColumnGroups(splitColumnByStats(v1Segments, packed.ColumnGroupSizeThreshold, t.plan.GetSchema())),
-		)
-	}
 
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
@@ -340,7 +329,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, t.storageVersion, t.rwOption...)
+		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, t.storageVersion)
 
 		buffer := newClusterBuffer(id, writer, fieldStats)
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
@@ -356,7 +345,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, t.storageVersion, t.rwOption...)
+		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, t.storageVersion)
 
 		nullBuffer = newClusterBuffer(len(buckets), writer, fieldStats)
 		t.clusterBuffers = append(t.clusterBuffers, nullBuffer)
@@ -409,7 +398,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		fieldStats.SetVectorCentroids(centroidValues...)
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, t.storageVersion, t.rwOption...)
+		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, t.storageVersion)
 
 		buffer := newClusterBuffer(id, writer, fieldStats)
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
@@ -658,7 +647,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 		zap.Int("deltalog deletes", entityFilter.GetDeltalogDeleteCount()),
 		zap.Int("missing deletes", missing),
 		zap.Int64("written_row_num", t.writtenRowNum.Load()),
-		zap.Int64("storageVersion", t.storageVersion),
 		zap.Duration("elapse", time.Since(processStart)))
 
 	metrics.DataNodeCompactionDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(entityFilter.GetDeltalogDeleteCount()))

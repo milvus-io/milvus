@@ -133,7 +133,6 @@ func (s *MixCompactionTaskSuite) storageV2Setup() {
 	paramtable.Get().Save("common.storageType", "local")
 	paramtable.Get().Save("common.stroage.enableV2", "true")
 	initcore.InitStorageV2FileSystem(paramtable.Get())
-	s.task.rwOption = []storage.RwOption{storage.WithMultiPartUploadSize(0)}
 }
 
 func (s *MixCompactionTaskSuite) storageV2Cleanup() {

@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -65,7 +64,6 @@ type mixCompactionTask struct {
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
 
-	rwOption       []storage.RwOption
 	storageVersion int64
 }
 
@@ -78,14 +76,14 @@ func NewMixCompactionTask(
 ) *mixCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &mixCompactionTask{
-		ctx:         ctx1,
-		cancel:      cancel,
-		binlogIO:    binlogIO,
-		plan:        plan,
-		tr:          timerecord.NewTimeRecorder("mergeSplit compaction"),
-		currentTime: time.Now(),
-		done:        make(chan struct{}, 1),
-		rwOption:    make([]storage.RwOption, 0),
+		ctx:            ctx1,
+		cancel:         cancel,
+		binlogIO:       binlogIO,
+		plan:           plan,
+		tr:             timerecord.NewTimeRecorder("mergeSplit compaction"),
+		currentTime:    time.Now(),
+		done:           make(chan struct{}, 1),
+		storageVersion: storage.StorageV1,
 	}
 }
 
@@ -123,15 +121,8 @@ func (t *mixCompactionTask) preCompact() error {
 		}
 	}
 
-	t.storageVersion = getCompactStorageVersion(t.plan.GetSegmentBinlogs())
-
-	v1Segments := lo.Filter(t.plan.GetSegmentBinlogs(), func(seg *datapb.CompactionSegmentBinlogs, _ int) bool {
-		return seg.GetStorageVersion() == storage.StorageV1
-	})
-	if len(v1Segments) > 0 {
-		t.rwOption = append(t.rwOption,
-			storage.WithColumnGroups(splitColumnByStats(v1Segments, packed.ColumnGroupSizeThreshold, t.plan.GetSchema())),
-		)
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+		t.storageVersion = storage.StorageV2
 	}
 
 	outputSegmentCount := int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
@@ -159,7 +150,7 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096, t.storageVersion, t.rwOption...)
+	mWriter := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096, t.storageVersion)
 
 	deletedRowCount := int64(0)
 	expiredRowCount := int64(0)
