@@ -1,3 +1,4 @@
+use lindera::token;
 use tantivy::tokenizer::{TextAnalyzer, TextAnalyzerBuilder};
 use lindera::segmenter::Segmenter;
 use tantivy::tokenizer::*;
@@ -7,6 +8,8 @@ use log::warn;
 
 use crate::analyzer::tokenizers::{JiebaTokenizer, LinderaTokenizer};
 use crate::error::{Result,TantivyBindingError};
+
+use super::custom_delimiter_tokenizer::CustomDelimiterTokenizer;
 
 
 pub fn standard_builder() -> TextAnalyzerBuilder {
@@ -28,6 +31,31 @@ pub fn lindera_builder(params: Option<&json::Map<String, json::Value>>) -> Resul
         )))
     }
     let tokenizer = LinderaTokenizer::from_json(params.unwrap())?;
+    Ok(TextAnalyzer::builder(tokenizer).dynamic())
+}
+
+
+pub fn custom_delimiter_builder(params: Option<&json::Map<String, json::Value>>) -> Result<TextAnalyzerBuilder> {
+    let delimiter = if let Some(map) = params {
+        match map.get("delimiter") {
+            Some(val) => val.as_str().ok_or_else(|| {
+                TantivyBindingError::InvalidArgument("delimiter must be a string".into())
+            })?,
+            None => " ", // Default to whitespace if no delimiter is provided
+        }
+    } else {
+        " " // Default to whitespace if no params are provided
+    };
+
+    let chars: Vec<char> = delimiter.chars().collect();
+    if chars.len() != 1 {
+        return Err(TantivyBindingError::InvalidArgument(format!(
+            "delimiter must be a single character, got: {}",
+            delimiter
+        )));
+    }
+
+    let tokenizer = CustomDelimiterTokenizer::new(chars[0]);
     Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
@@ -62,6 +90,7 @@ pub fn get_builder_with_tokenizer(params: &json::Value) -> Result<TextAnalyzerBu
         "whitespace" => Ok(whitespace_builder()),
         "jieba" => Ok(jieba_builder()),
         "lindera" => lindera_builder(params_map),
+        "custom" => custom_delimiter_builder(params_map),
         other => {
             warn!("unsupported tokenizer: {}", other);
             Err(TantivyBindingError::InvalidArgument(format!(

@@ -62,13 +62,15 @@ impl IndexReaderWrapper {
 
 #[cfg(test)]
 mod tests {
+    use tantivy::tokenizer::TextAnalyzer;
     use tempfile::TempDir;
 
-    use crate::{index_writer::IndexWriterWrapper, tokenizer::create_tokenizer};
+    use crate::{index_writer::IndexWriterWrapper, analyzer::create_analyzer};
+    
     #[test]
     fn test_jeba() {
         let params = "{\"tokenizer\": \"jieba\"}".to_string();
-        let tokenizer = create_tokenizer(&params).unwrap();
+        let tokenizer = create_analyzer(&params).unwrap();
         let dir = TempDir::new().unwrap();
 
         let mut writer = IndexWriterWrapper::create_text_writer(
@@ -95,5 +97,37 @@ mod tests {
         let reader = writer.create_reader().unwrap();
         let res = reader.phrase_match_query("网球滑雪", slop).unwrap();
         assert_eq!(res, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_custom_delimiter() {
+        let params = "{\"tokenizer\": {\"type\": \"custom\", \"delimiter\": \";\"}}".to_string();
+        let tokenizer:TextAnalyzer = create_analyzer(&params).unwrap();
+        let dir = TempDir::new().unwrap();
+
+        let mut writer = IndexWriterWrapper::create_text_writer(
+            "text".to_string(),
+            dir.path().to_str().unwrap().to_string(),
+            "custom".to_string(),
+            tokenizer,
+            1,
+            50_000_000,
+            false,
+        );
+
+        writer.add_string("Python Hello;World", 1).unwrap();
+        writer.add_string("Hello;World;Python;", 0).unwrap();
+
+        writer.commit().unwrap();
+
+        let slop = 0;
+        let reader = writer.create_reader().unwrap();
+        let res = reader.phrase_match_query("Python", slop).unwrap();
+        assert_eq!(res, vec![0]);
+
+        let slop = 0;
+        let reader = writer.create_reader().unwrap();
+        let res = reader.phrase_match_query("World", slop).unwrap();
+        assert_eq!(res, vec![1, 0]);
     }
 }
