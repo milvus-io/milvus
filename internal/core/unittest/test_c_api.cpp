@@ -46,6 +46,7 @@
 #include "segcore/load_index_c.h"
 #include "test_utils/c_api_test_utils.h"
 #include "segcore/vector_index_c.h"
+#include "exec/operator/query-agg/RegisterAggregateFunctions.h"
 
 namespace chrono = std::chrono;
 
@@ -54,6 +55,7 @@ using namespace milvus::test;
 using namespace milvus::index;
 using namespace milvus::segcore;
 using namespace milvus::tracer;
+using namespace milvus::exec;
 using namespace knowhere;
 using milvus::index::VectorIndex;
 using milvus::segcore::LoadIndexInfo;
@@ -1352,6 +1354,7 @@ TEST(CApiTest, GetRowCountTest) {
 }
 
 TEST(CApiTest, GetRealCount) {
+    registerAllAggregateFunctions();
     auto collection = NewCollection(get_default_schema_config().c_str());
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment, false);
@@ -4120,6 +4123,7 @@ TEST(CApiTest, SealedSegment_Update_Field_Size) {
 }
 
 TEST(CApiTest, GrowingSegment_Load_Field_Data) {
+    registerAllAggregateFunctions();
     auto schema = std::make_shared<Schema>();
     schema->AddField(FieldName("RowID"), FieldId(0), DataType::INT64, false);
     schema->AddField(

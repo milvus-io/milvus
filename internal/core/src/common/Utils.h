@@ -303,4 +303,91 @@ class Defer {
 
 #define DeferLambda(fn) Defer Defer_##__COUNTER__(fn);
 
+template <typename T>
+FOLLY_ALWAYS_INLINE int
+comparePrimitiveAsc(const T& left, const T& right) {
+    if constexpr (std::is_floating_point<T>::value) {
+        bool leftNan = std::isnan(left);
+        bool rightNan = std::isnan(right);
+        if (leftNan) {
+            return rightNan ? 0 : 1;
+        }
+        if (rightNan) {
+            return -1;
+        }
+    }
+    return left < right ? -1 : left == right ? 0 : 1;
+}
+
+inline std::string
+lowerString(const std::string& str) {
+    std::string ret;
+    ret.resize(str.size());
+    std::transform(str.begin(), str.end(), ret.begin(), [](unsigned char c) {
+        return std::tolower(c);
+    });
+    return ret;
+}
+
+template <typename T>
+T
+checkPlus(const T& a, const T& b, const char* typeName = "integer") {
+    T result;
+    bool overflow = __builtin_add_overflow(a, b, &result);
+    if (UNLIKELY(overflow)) {
+        PanicInfo(DataTypeInvalid, "{} overflow: {} + {}", typeName, a, b);
+    }
+    return result;
+}
+
+template <typename T>
+T
+checkedMultiply(const T& a, const T& b, const char* typeName = "integer") {
+    T result;
+    bool overflow = __builtin_mul_overflow(a, b, &result);
+    if (UNLIKELY(overflow)) {
+        PanicInfo(DataTypeInvalid, "{} overflow: {} * {}", typeName, a, b);
+    }
+    return result;
+}
+
+const char* const kSum = "sum";
+const char* const KMin = "min";
+const char* const KMax = "max";
+const char* const KCount = "count";
+
+inline DataType
+GetAggResultType(std::string func_name, DataType input_type) {
+    if (func_name == kSum) {
+        switch (input_type) {
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
+            case DataType::INT64: {
+                return DataType::INT64;
+            }
+            case DataType::FLOAT: {
+                return DataType::DOUBLE;
+            }
+            case DataType::DOUBLE: {
+                return DataType::DOUBLE;
+            }
+            default: {
+                PanicInfo(DataTypeInvalid,
+                          "Unsupported data type for type:{}",
+                          input_type);
+            }
+        }
+    }
+    if (func_name == KCount) {
+        return DataType::INT64;
+    }
+    PanicInfo(OpTypeInvalid, "Unsupported func type:{}", func_name);
+}
+
+inline int32_t
+Align(int32_t number, int32_t alignment) {
+    return (number + alignment - 1) & ~(alignment - 1);
+}
+
 }  // namespace milvus

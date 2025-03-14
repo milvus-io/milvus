@@ -176,4 +176,9 @@ using ArrowReaderChannel = Channel<std::shared_ptr<milvus::ArrowDataWrapper>>;
 FieldDataPtr
 InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows);
 
+void
+ResizeScalarFieldData(const DataType& type,
+                      int64_t new_size,
+                      FieldDataPtr& field_data);
+
 }  // namespace milvus

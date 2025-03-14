@@ -61,6 +61,8 @@ using bin1 = knowhere::bin1;
 using int8 = knowhere::int8;
 
 // See also: https://github.com/milvus-io/milvus-proto/blob/master/proto/schema.proto
+using vector_size_t = int32_t;
+
 enum class DataType {
     NONE = 0,
     BOOL = 1,
@@ -103,6 +105,54 @@ using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertRecordProto = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
+
+inline milvus::proto::schema::DataType
+GetProtoDataType(DataType internal_data_type) {
+    switch (internal_data_type) {
+        case DataType::BOOL:
+            return milvus::proto::schema::Bool;
+        case DataType::INT8:
+            return milvus::proto::schema::Int8;
+        case DataType::INT16:
+            return milvus::proto::schema::Int16;
+        case DataType::INT32:
+            return milvus::proto::schema::Int32;
+        case DataType::INT64:
+            return milvus::proto::schema::Int64;
+        case DataType::FLOAT:
+            return milvus::proto::schema::Float;
+        case DataType::DOUBLE:
+            return milvus::proto::schema::Double;
+        case DataType::STRING:
+            return milvus::proto::schema::String;
+        case DataType::VARCHAR:
+            return milvus::proto::schema::VarChar;
+        case DataType::ARRAY:
+            return milvus::proto::schema::Array;
+        case DataType::JSON:
+            return milvus::proto::schema::JSON;
+        case DataType::VECTOR_FLOAT:
+            return milvus::proto::schema::FloatVector;
+        case DataType::VECTOR_BINARY: {
+            return milvus::proto::schema::BinaryVector;
+        }
+        case DataType::VECTOR_FLOAT16: {
+            return milvus::proto::schema::Float16Vector;
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            return milvus::proto::schema::BFloat16Vector;
+        }
+        case DataType::VECTOR_SPARSE_FLOAT: {
+            return milvus::proto::schema::SparseFloatVector;
+        }
+        default: {
+            PanicInfo(
+                DataTypeInvalid,
+                fmt::format("failed to get data type size, invalid type {}",
+                            internal_data_type));
+        }
+    }
+}
 
 inline size_t
 GetDataTypeSize(DataType data_type, int dim = 1) {
@@ -616,6 +666,9 @@ FromValCase(milvus::proto::plan::GenericValue::ValCase val_case) {
             return DataType::NONE;
     }
 }
+bool
+IsFixedSizeType(DataType type);
+
 }  // namespace milvus
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {
@@ -749,3 +802,88 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
         return formatter<string_view>::format(name, ctx);
     }
 };
+
+using column_index_t = uint32_t;
+class RowType final {
+ public:
+    RowType(std::vector<std::string>&& names,
+            std::vector<milvus::DataType>&& types)
+        : names_(std::move(names)), columns_types_(std::move(types)) {
+        AssertInfo(names_.size() == columns_types_.size(),
+                   "Name count:{} and column count:{} must be the same",
+                   names_.size(),
+                   columns_types_.size());
+    };
+
+    static const std::shared_ptr<const RowType> None;
+
+    column_index_t
+    GetChildIndex(std::string name) const {
+        std::optional<column_index_t> idx;
+        for (auto i = 0; i < names_.size(); i++) {
+            if (names_[i] == name) {
+                idx = i;
+                break;
+            }
+        }
+        AssertInfo(idx.has_value(),
+                   "Cannot find target column in the rowType list");
+        return idx.value();
+    }
+
+    milvus::DataType
+    column_type(uint32_t idx) const {
+        AssertInfo(idx >= 0 && idx < names_.size(),
+                   "try to get column type from row type with wrong index:{}",
+                   idx);
+        return columns_types_.at(idx);
+    }
+
+    size_t
+    column_count() const {
+        return names_.size();
+    }
+
+ private:
+    const std::vector<std::string> names_;
+    const std::vector<milvus::DataType> columns_types_;
+};
+
+using RowTypePtr = std::shared_ptr<const RowType>;
+
+#define MILVUS_DYNAMIC_TYPE_DISPATCH(TEMPLATE_FUNC, DATETYPE, ...) \
+    MILVUS_DYNAMIC_TYPE_DISPATCH_IMPL(TEMPLATE_FUNC, , DATETYPE, __VA_ARGS__)
+
+#define MILVUS_DYNAMIC_TYPE_DISPATCH_IMPL(PREFIX, SUFFIX, DATATYPE, ...)      \
+    [&]() {                                                                   \
+        switch (DATATYPE) {                                                   \
+            case milvus::DataType::BOOL:                                      \
+                return PREFIX<milvus::DataType::BOOL> SUFFIX(__VA_ARGS__);    \
+            case milvus::DataType::INT8:                                      \
+                return PREFIX<milvus::DataType::INT8> SUFFIX(__VA_ARGS__);    \
+            case milvus::DataType::INT16:                                     \
+                return PREFIX<milvus::DataType::INT16> SUFFIX(__VA_ARGS__);   \
+            case milvus::DataType::INT32:                                     \
+                return PREFIX<milvus::DataType::INT32> SUFFIX(__VA_ARGS__);   \
+            case milvus::DataType::INT64:                                     \
+                return PREFIX<milvus::DataType::INT64> SUFFIX(__VA_ARGS__);   \
+            case milvus::DataType::FLOAT:                                     \
+                return PREFIX<milvus::DataType::FLOAT> SUFFIX(__VA_ARGS__);   \
+            case milvus::DataType::DOUBLE:                                    \
+                return PREFIX<milvus::DataType::DOUBLE> SUFFIX(__VA_ARGS__);  \
+            case milvus::DataType::VARCHAR:                                   \
+                return PREFIX<milvus::DataType::VARCHAR> SUFFIX(__VA_ARGS__); \
+            case milvus::DataType::STRING:                                    \
+                return PREFIX<milvus::DataType::STRING> SUFFIX(__VA_ARGS__);  \
+            case milvus::DataType::JSON:                                      \
+                return PREFIX<milvus::DataType::JSON> SUFFIX(__VA_ARGS__);    \
+            case milvus::DataType::ARRAY:                                     \
+                return PREFIX<milvus::DataType::ARRAY> SUFFIX(__VA_ARGS__);   \
+            case milvus::DataType::ROW:                                       \
+                return PREFIX<milvus::DataType::ROW> SUFFIX(__VA_ARGS__);     \
+            default:                                                          \
+                PanicInfo(milvus::DataTypeInvalid,                            \
+                          "UnsupportedDataType for "                          \
+                          "MILVUS_DYNAMIC_TYPE_DISPATCH_IMPL");               \
+        }                                                                     \
+    }()

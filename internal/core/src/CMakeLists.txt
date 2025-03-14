@@ -49,6 +49,7 @@ add_subdirectory( clustering )
 add_subdirectory( exec )
 add_subdirectory( bitset )
 add_subdirectory( futures )
+add_subdirectory( plan )
 
 milvus_add_pkg_config("milvus_core")
 
@@ -67,7 +68,7 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_exec>
     $<TARGET_OBJECTS:milvus_bitset>
     $<TARGET_OBJECTS:milvus_futures>
-)
+    $<TARGET_OBJECTS:milvus_plan>)
 
 set(LINK_TARGETS 
     boost_bitset_ext
