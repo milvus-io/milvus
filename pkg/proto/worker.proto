@@ -146,6 +146,7 @@ message CreateStatsRequest {
   bool enable_json_key_stats = 20;
   int64 json_key_stats_tantivy_memory = 21;
   int64 json_key_stats_data_format = 22;
+  bool enable_json_key_stats_in_sort = 23;
 }
 
 message CreateJobV2Request {

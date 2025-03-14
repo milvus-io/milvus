@@ -34,7 +34,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "storage/Util.h"
 #include "index/Meta.h"
-#include "index/JsonKeyInvertedIndex.h"
+#include "index/JsonKeyStatsInvertedIndex.h"
 
 using namespace milvus;
 CStatus
@@ -269,7 +269,7 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
 
         auto field_schema =
             FieldMeta::ParseFrom(build_index_info->field_schema());
-        auto index = std::make_unique<index::JsonKeyInvertedIndex>(
+        auto index = std::make_unique<index::JsonKeyStatsInvertedIndex>(
             fileManagerContext,
             false,
             build_index_info->json_key_stats_data_format(),

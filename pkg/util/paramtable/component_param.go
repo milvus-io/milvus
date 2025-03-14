@@ -297,9 +297,9 @@ type commonConfig struct {
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 
-	EnabledJSONKeyStats ParamItem `refreshable:"true"`
-
-	EnabledOptimizeExpr ParamItem `refreshable:"true"`
+	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
+	EnabledJSONKeyStats               ParamItem `refreshable:"true"`
+	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1004,10 +1004,10 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.SyncTaskPoolReleaseTimeoutSeconds.Init(base.mgr)
 
 	p.EnabledJSONKeyStats = ParamItem{
-		Key:          "common.enabledJsonKeyStats",
+		Key:          "common.enabledJSONKeyStats",
 		Version:      "2.5.5",
 		DefaultValue: "false",
-		Doc:          "Indicates whether to enable JSON key stats",
+		Doc:          "Indicates sealedsegment whether to enable JSON key stats",
 		Export:       true,
 	}
 	p.EnabledJSONKeyStats.Init(base.mgr)
@@ -1020,6 +1020,14 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnabledOptimizeExpr.Init(base.mgr)
+	p.EnabledGrowingSegmentJSONKeyStats = ParamItem{
+		Key:          "common.enabledGrowingSegmentJSONKeyStats",
+		Version:      "2.5.5",
+		DefaultValue: "false",
+		Doc:          "Indicates growingsegment whether to enable JSON key stats",
+		Export:       true,
+	}
+	p.EnabledGrowingSegmentJSONKeyStats.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -2612,7 +2620,8 @@ type queryNodeConfig struct {
 	WorkerPoolingSize ParamItem `refreshable:"false"`
 
 	// Json Key Stats
-	JSONKeyStatsCommitInterval ParamItem `refreshable:"false"`
+	JSONKeyStatsCommitInterval        ParamItem `refreshable:"false"`
+	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -3543,14 +3552,15 @@ type dataCoordConfig struct {
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 
-	EnableStatsTask          ParamItem `refreshable:"true"`
-	TaskCheckInterval        ParamItem `refreshable:"true"`
-	StatsTaskTriggerCount    ParamItem `refreshable:"true"`
-	JSONStatsTriggerCount    ParamItem `refreshable:"true"`
-	JSONStatsTriggerInterval ParamItem `refreshable:"true"`
-
-	RequestTimeoutSeconds             ParamItem `refreshable:"true"`
+	EnableStatsTask                   ParamItem `refreshable:"true"`
+	TaskCheckInterval                 ParamItem `refreshable:"true"`
+	StatsTaskTriggerCount             ParamItem `refreshable:"true"`
+	JSONStatsTriggerCount             ParamItem `refreshable:"true"`
+	JSONStatsTriggerInterval          ParamItem `refreshable:"true"`
+	EnabledJSONKeyStatsInSort         ParamItem `refreshable:"true"`
 	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
+
+	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4494,13 +4504,22 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.RequestTimeoutSeconds.Init(base.mgr)
 	p.JSONKeyStatsMemoryBudgetInTantivy = ParamItem{
-		Key:          "dataCoord.segcore.jsonKeyStatsMemoryBudgetInTantivy",
+		Key:          "dataCoord.jsonKeyStatsMemoryBudgetInTantivy",
 		Version:      "2.5.5",
 		DefaultValue: "16777216",
 		Doc:          "the memory budget for the JSON index In Tantivy, the unit is bytes",
 		Export:       true,
 	}
 	p.JSONKeyStatsMemoryBudgetInTantivy.Init(base.mgr)
+
+	p.EnabledJSONKeyStatsInSort = ParamItem{
+		Key:          "dataCoord.enabledJSONKeyStatsInSort",
+		Version:      "2.5.5",
+		DefaultValue: "false",
+		Doc:          "Indicates whether to enable JSON key stats task with sort",
+		Export:       true,
+	}
+	p.EnabledJSONKeyStatsInSort.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

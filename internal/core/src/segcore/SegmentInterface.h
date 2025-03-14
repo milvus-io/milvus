@@ -38,7 +38,7 @@
 #include "index/SkipIndex.h"
 #include "mmap/Column.h"
 #include "index/TextMatchIndex.h"
-#include "index/JsonKeyInvertedIndex.h"
+#include "index/JsonKeyStatsInvertedIndex.h"
 
 namespace milvus::segcore {
 
@@ -138,7 +138,7 @@ class SegmentInterface {
     virtual index::TextMatchIndex*
     GetTextIndex(FieldId field_id) const = 0;
 
-    virtual index::JsonKeyInvertedIndex*
+    virtual index::JsonKeyStatsInvertedIndex*
     GetJsonKeyIndex(FieldId field_id) const = 0;
 
     virtual std::pair<std::string_view, bool>
@@ -344,7 +344,7 @@ class SegmentInternalInterface : public SegmentInterface {
     index::TextMatchIndex*
     GetTextIndex(FieldId field_id) const override;
 
-    virtual index::JsonKeyInvertedIndex*
+    virtual index::JsonKeyStatsInvertedIndex*
     GetJsonKeyIndex(FieldId field_id) const override;
 
  public:
@@ -527,7 +527,8 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId, std::unique_ptr<index::TextMatchIndex>>
         text_indexes_;
 
-    std::unordered_map<FieldId, std::unique_ptr<index::JsonKeyInvertedIndex>>
+    std::unordered_map<FieldId,
+                       std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
         json_indexes_;
 };
 

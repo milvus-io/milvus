@@ -532,7 +532,7 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         milvus::storage::FileManagerContext file_ctx(
             field_meta, index_meta, remote_chunk_manager);
 
-        auto index = std::make_unique<milvus::index::JsonKeyInvertedIndex>(
+        auto index = std::make_unique<milvus::index::JsonKeyStatsInvertedIndex>(
             file_ctx, true, info_proto->json_key_stats_data_format());
         index->Load(ctx, config);
 

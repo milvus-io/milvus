@@ -648,8 +648,8 @@ dataCoord:
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction job.
   jsonStatsTriggerCount: 10 # jsonkey stats task count per trigger
   jsonStatsTriggerInterval: 10 # jsonkey task interval per trigger
-  segcore:
-    jsonKeyStatsMemoryBudgetInTantivy: 16777216 # the memory budget for the JSON index In Tantivy, the unit is bytes
+  enabledJSONKeyStatsInSort: false # Indicates whether to enable JSON key stats task with sort
+  jsonKeyStatsMemoryBudgetInTantivy: 16777216 # the memory budget for the JSON index In Tantivy, the unit is bytes
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
@@ -904,8 +904,9 @@ common:
   localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
-  enabledJsonKeyStats: false # Indicates whether to enable JSON key stats
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
+  enabledJSONKeyStats: false # Indicates sealedsegment whether to enable JSON key stats
+  enabledGrowingSegmentJSONKeyStats: false # Indicates growingsegment whether to enable JSON key stats
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
