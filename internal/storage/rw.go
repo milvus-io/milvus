@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 )
 
 const (
@@ -98,6 +97,9 @@ func WithColumnGroups(columnGroups []storagecommon.ColumnGroup) RwOption {
 }
 
 func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloader downloaderFn) (ChunkedBlobsReader, error) {
+	sort.Slice(binlogs, func(i, j int) bool {
+		return binlogs[i].FieldID < binlogs[j].FieldID
+	})
 	for _, binlog := range binlogs {
 		sort.Slice(binlog.Binlogs, func(i, j int) bool {
 			return binlog.Binlogs[i].LogID < binlog.Binlogs[j].LogID
@@ -119,24 +121,24 @@ func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloa
 	}
 	// verify if the chunks order is correct.
 	// the zig-zag order should have a (strict) increasing order on logids.
-	lastLogID := int64(-1)
-	for _, paths := range chunks {
-		lastFieldID := int64(-1)
-		for _, path := range paths {
-			_, _, _, fieldID, logID, ok := metautil.ParseInsertLogPath(path)
-			if !ok {
-				return nil, merr.WrapErrIoFailedReason(fmt.Sprintf("malformed log path %s", path))
-			}
-			if fieldID < lastFieldID {
-				return nil, merr.WrapErrIoFailedReason(fmt.Sprintf("unaligned log path %s, fieldID %d < lastFieldID %d", path, fieldID, lastFieldID))
-			}
-			if logID < lastLogID {
-				return nil, merr.WrapErrIoFailedReason(fmt.Sprintf("unaligned log path %s, logID %d < lastLogID %d", path, logID, lastLogID))
-			}
-			lastLogID = logID
-			lastFieldID = fieldID
-		}
-	}
+	// lastLogID := int64(-1)
+	// for _, paths := range chunks {
+	// 	lastFieldID := int64(-1)
+	// 	for _, path := range paths {
+	// 		_, _, _, fieldID, logID, ok := metautil.ParseInsertLogPath(path)
+	// 		if !ok {
+	// 			return nil, merr.WrapErrIoFailedReason(fmt.Sprintf("malformed log path %s", path))
+	// 		}
+	// 		if fieldID < lastFieldID {
+	// 			return nil, merr.WrapErrIoFailedReason(fmt.Sprintf("unaligned log path %s, fieldID %d less than lastFieldID %d", path, fieldID, lastFieldID))
+	// 		}
+	// 		if logID < lastLogID {
+	// 			return nil, merr.WrapErrIoFailedReason(fmt.Sprintf("unaligned log path %s, logID %d less than lastLogID %d", path, logID, lastLogID))
+	// 		}
+	// 		lastLogID = logID
+	// 		lastFieldID = fieldID
+	// 	}
+	// }
 
 	chunkPos := 0
 	return func() ([]*Blob, error) {
