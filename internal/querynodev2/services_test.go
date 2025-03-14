@@ -536,10 +536,8 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
 	l0Segment := segments.NewMockSegment(suite.T())
 	l0Segment.EXPECT().ID().Return(10000)
 	l0Segment.EXPECT().Collection().Return(suite.collectionID)
-	l0Segment.EXPECT().Partition().Return(common.AllPartitionsID)
 	l0Segment.EXPECT().Level().Return(datapb.SegmentLevel_L0)
 	l0Segment.EXPECT().Type().Return(commonpb.SegmentState_Sealed)
-	l0Segment.EXPECT().Indexes().Return(nil)
 	l0Segment.EXPECT().Shard().Return(suite.channel)
 	l0Segment.EXPECT().Release(ctx).Return()
 

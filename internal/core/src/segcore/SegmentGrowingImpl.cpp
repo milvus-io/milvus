@@ -938,7 +938,7 @@ SegmentGrowingImpl::CreateJSONIndex(FieldId field_id) {
                "cannot create json index on non-json type");
     std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
     auto index = std::make_unique<index::JsonKeyInvertedIndex>(
-        JSON_INDEX_COMMIT_INTERVAL, unique_id.c_str());
+        JSON_KEY_STATS_COMMIT_INTERVAL, unique_id.c_str());
 
     index->Commit();
     index->CreateReader();

@@ -525,23 +525,32 @@ GenTextIndexPathPrefix(ChunkManagerPtr cm,
 std::string
 GenJsonKeyIndexPathIdentifier(int64_t build_id,
                               int64_t index_version,
+                              int64_t collection_id,
+                              int64_t partition_id,
                               int64_t segment_id,
                               int64_t field_id) {
     return std::to_string(build_id) + "/" + std::to_string(index_version) +
-           "/" + std::to_string(segment_id) + "/" + std::to_string(field_id) +
-           "/";
+           "/" + std::to_string(collection_id) + "/" +
+           std::to_string(partition_id) + "/" + std::to_string(segment_id) +
+           "/" + std::to_string(field_id) + "/";
 }
 
 std::string
 GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
                           int64_t build_id,
                           int64_t index_version,
+                          int64_t collection_id,
+                          int64_t partition_id,
                           int64_t segment_id,
                           int64_t field_id) {
     return cm->GetRootPath() + "/" + std::string(JSON_KEY_INDEX_LOG_ROOT_PATH) +
            "/" +
-           GenJsonKeyIndexPathIdentifier(
-               build_id, index_version, segment_id, field_id);
+           GenJsonKeyIndexPathIdentifier(build_id,
+                                         index_version,
+                                         collection_id,
+                                         partition_id,
+                                         segment_id,
+                                         field_id);
 }
 
 std::string

@@ -112,7 +112,7 @@ func (t *clusteringCompactionTask) Process() bool {
 		lastStateDuration := ts - t.GetTaskProto().GetLastStateStartTime()
 		log.Info("clustering compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState), zap.Int64("elapse seconds", lastStateDuration))
 		metrics.DataCoordCompactionLatency.
-			WithLabelValues(fmt.Sprint(typeutil.IsVectorType(t.GetTaskProto().GetClusteringKeyField().DataType)), fmt.Sprint(t.GetTaskProto().CollectionID), t.GetTaskProto().Channel, datapb.CompactionType_ClusteringCompaction.String(), lastState).
+			WithLabelValues(fmt.Sprint(typeutil.IsVectorType(t.GetTaskProto().GetClusteringKeyField().DataType)), t.GetTaskProto().Channel, datapb.CompactionType_ClusteringCompaction.String(), lastState).
 			Observe(float64(lastStateDuration * 1000))
 		updateOps := []compactionTaskOpt{setRetryTimes(0), setLastStateStartTime(ts)}
 
@@ -121,7 +121,7 @@ func (t *clusteringCompactionTask) Process() bool {
 			elapse := ts - t.GetTaskProto().StartTime
 			log.Info("clustering compaction task total elapse", zap.Duration("costs", time.Duration(elapse)*time.Second))
 			metrics.DataCoordCompactionLatency.
-				WithLabelValues(fmt.Sprint(typeutil.IsVectorType(t.GetTaskProto().GetClusteringKeyField().DataType)), fmt.Sprint(t.GetTaskProto().CollectionID), t.GetTaskProto().Channel, datapb.CompactionType_ClusteringCompaction.String(), "total").
+				WithLabelValues(fmt.Sprint(typeutil.IsVectorType(t.GetTaskProto().GetClusteringKeyField().DataType)), t.GetTaskProto().Channel, datapb.CompactionType_ClusteringCompaction.String(), "total").
 				Observe(float64(elapse * 1000))
 		}
 		err = t.updateAndSaveTaskMeta(updateOps...)

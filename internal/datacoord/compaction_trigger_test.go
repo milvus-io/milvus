@@ -164,7 +164,7 @@ func Test_compactionTrigger_force_without_index(t *testing.T) {
 			},
 		},
 		indexMeta: &indexMeta{
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			indexes:        map[UniqueID]map[UniqueID]*model.Index{},
 		},
 		collections: map[int64]*collectionInfo{
@@ -303,6 +303,109 @@ func Test_compactionTrigger_force(t *testing.T) {
 		},
 	}
 
+	im := &indexMeta{
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			2: {
+				indexID: {
+					TenantID:     "",
+					CollectionID: 2,
+					FieldID:      vecFieldID,
+					IndexID:      indexID,
+					IndexName:    "_default_idx",
+					IsDeleted:    false,
+					CreateTime:   0,
+					TypeParams:   nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.IndexTypeKey,
+							Value: "HNSW",
+						},
+					},
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			},
+			1000: {
+				indexID: {
+					TenantID:     "",
+					CollectionID: 1000,
+					FieldID:      vecFieldID,
+					IndexID:      indexID,
+					IndexName:    "_default_idx",
+					IsDeleted:    false,
+					CreateTime:   0,
+					TypeParams:   nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.IndexTypeKey,
+							Value: "DISKANN",
+						},
+					},
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			},
+		},
+	}
+	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx1.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           1,
+		CollectionID:        2,
+		PartitionID:         1,
+		NumRows:             100,
+		IndexID:             indexID,
+		BuildID:             1,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx2 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx2.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           2,
+		CollectionID:        2,
+		PartitionID:         1,
+		NumRows:             100,
+		IndexID:             indexID,
+		BuildID:             2,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx3 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx3.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           3,
+		CollectionID:        1111,
+		PartitionID:         1,
+		NumRows:             100,
+		IndexID:             indexID,
+		BuildID:             3,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	im.segmentIndexes.Insert(1, segIdx1)
+	im.segmentIndexes.Insert(2, segIdx2)
+	im.segmentIndexes.Insert(3, segIdx3)
+
 	tests := []struct {
 		name         string
 		fields       fields
@@ -335,109 +438,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 							},
 						},
 					},
-					indexMeta: &indexMeta{
-						segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-							1: {
-								indexID: {
-									SegmentID:           1,
-									CollectionID:        2,
-									PartitionID:         1,
-									NumRows:             100,
-									IndexID:             indexID,
-									BuildID:             1,
-									NodeID:              0,
-									IndexVersion:        1,
-									IndexState:          commonpb.IndexState_Finished,
-									FailReason:          "",
-									IsDeleted:           false,
-									CreatedUTCTime:      0,
-									IndexFileKeys:       nil,
-									IndexSerializedSize: 0,
-									WriteHandoff:        false,
-								},
-							},
-							2: {
-								indexID: {
-									SegmentID:           2,
-									CollectionID:        2,
-									PartitionID:         1,
-									NumRows:             100,
-									IndexID:             indexID,
-									BuildID:             2,
-									NodeID:              0,
-									IndexVersion:        1,
-									IndexState:          commonpb.IndexState_Finished,
-									FailReason:          "",
-									IsDeleted:           false,
-									CreatedUTCTime:      0,
-									IndexFileKeys:       nil,
-									IndexSerializedSize: 0,
-									WriteHandoff:        false,
-								},
-							},
-							3: {
-								indexID: {
-									SegmentID:           3,
-									CollectionID:        1111,
-									PartitionID:         1,
-									NumRows:             100,
-									IndexID:             indexID,
-									BuildID:             3,
-									NodeID:              0,
-									IndexVersion:        1,
-									IndexState:          commonpb.IndexState_Finished,
-									FailReason:          "",
-									IsDeleted:           false,
-									CreatedUTCTime:      0,
-									IndexFileKeys:       nil,
-									IndexSerializedSize: 0,
-									WriteHandoff:        false,
-								},
-							},
-						},
-						indexes: map[UniqueID]map[UniqueID]*model.Index{
-							2: {
-								indexID: {
-									TenantID:     "",
-									CollectionID: 2,
-									FieldID:      vecFieldID,
-									IndexID:      indexID,
-									IndexName:    "_default_idx",
-									IsDeleted:    false,
-									CreateTime:   0,
-									TypeParams:   nil,
-									IndexParams: []*commonpb.KeyValuePair{
-										{
-											Key:   common.IndexTypeKey,
-											Value: "HNSW",
-										},
-									},
-									IsAutoIndex:     false,
-									UserIndexParams: nil,
-								},
-							},
-							1000: {
-								indexID: {
-									TenantID:     "",
-									CollectionID: 1000,
-									FieldID:      vecFieldID,
-									IndexID:      indexID,
-									IndexName:    "_default_idx",
-									IsDeleted:    false,
-									CreateTime:   0,
-									TypeParams:   nil,
-									IndexParams: []*commonpb.KeyValuePair{
-										{
-											Key:   common.IndexTypeKey,
-											Value: "DISKANN",
-										},
-									},
-									IsAutoIndex:     false,
-									UserIndexParams: nil,
-								},
-							},
-						},
-					},
+					indexMeta: im,
 					collections: map[int64]*collectionInfo{
 						2: {
 							ID:     2,
@@ -1195,21 +1196,53 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 
 	mock0Allocator := newMockAllocator(t)
 
-	genSegIndex := func(segID, indexID UniqueID, numRows int64) map[UniqueID]*model.SegmentIndex {
-		return map[UniqueID]*model.SegmentIndex{
-			indexID: {
-				SegmentID:    segID,
-				CollectionID: 2,
-				PartitionID:  1,
-				NumRows:      numRows,
-				IndexID:      indexID,
-				BuildID:      segID,
-				NodeID:       0,
-				IndexVersion: 1,
-				IndexState:   commonpb.IndexState_Finished,
-			},
-		}
+	genSegIndex := func(segID, indexID UniqueID, numRows int64) *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex] {
+		segIdx := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+		segIdx.Insert(indexID, &model.SegmentIndex{
+			SegmentID:    segID,
+			CollectionID: 2,
+			PartitionID:  1,
+			NumRows:      numRows,
+			IndexID:      indexID,
+			BuildID:      segID,
+			NodeID:       0,
+			IndexVersion: 1,
+			IndexState:   commonpb.IndexState_Finished,
+		})
+		return segIdx
 	}
+
+	im := &indexMeta{
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			2: {
+				indexID: {
+					TenantID:     "",
+					CollectionID: 2,
+					FieldID:      vecFieldID,
+					IndexID:      indexID,
+					IndexName:    "_default_idx",
+					IsDeleted:    false,
+					CreateTime:   0,
+					TypeParams:   nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.IndexTypeKey,
+							Value: "HNSW",
+						},
+					},
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			},
+		},
+	}
+	im.segmentIndexes.Insert(1, genSegIndex(1, indexID, 20))
+	im.segmentIndexes.Insert(2, genSegIndex(2, indexID, 20))
+	im.segmentIndexes.Insert(3, genSegIndex(3, indexID, 20))
+	im.segmentIndexes.Insert(4, genSegIndex(4, indexID, 20))
+	im.segmentIndexes.Insert(5, genSegIndex(5, indexID, 20))
+	im.segmentIndexes.Insert(6, genSegIndex(6, indexID, 20))
 	tests := []struct {
 		name      string
 		fields    fields
@@ -1223,39 +1256,8 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 					// 8 small segments
 					channelCPs: newChannelCps(),
 
-					segments: mockSegmentsInfo(20, 20, 20, 20, 20, 20),
-					indexMeta: &indexMeta{
-						segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-							1: genSegIndex(1, indexID, 20),
-							2: genSegIndex(2, indexID, 20),
-							3: genSegIndex(3, indexID, 20),
-							4: genSegIndex(4, indexID, 20),
-							5: genSegIndex(5, indexID, 20),
-							6: genSegIndex(6, indexID, 20),
-						},
-						indexes: map[UniqueID]map[UniqueID]*model.Index{
-							2: {
-								indexID: {
-									TenantID:     "",
-									CollectionID: 2,
-									FieldID:      vecFieldID,
-									IndexID:      indexID,
-									IndexName:    "_default_idx",
-									IsDeleted:    false,
-									CreateTime:   0,
-									TypeParams:   nil,
-									IndexParams: []*commonpb.KeyValuePair{
-										{
-											Key:   common.IndexTypeKey,
-											Value: "HNSW",
-										},
-									},
-									IsAutoIndex:     false,
-									UserIndexParams: nil,
-								},
-							},
-						},
-					},
+					segments:  mockSegmentsInfo(20, 20, 20, 20, 20, 20),
+					indexMeta: im,
 					collections: map[int64]*collectionInfo{
 						2: {
 							ID: 2,
@@ -1336,21 +1338,53 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 	vecFieldID := int64(201)
 	mock0Allocator := newMockAllocator(t)
 
-	genSegIndex := func(segID, indexID UniqueID, numRows int64) map[UniqueID]*model.SegmentIndex {
-		return map[UniqueID]*model.SegmentIndex{
-			indexID: {
-				SegmentID:    segID,
-				CollectionID: 2,
-				PartitionID:  1,
-				NumRows:      numRows,
-				IndexID:      indexID,
-				BuildID:      segID,
-				NodeID:       0,
-				IndexVersion: 1,
-				IndexState:   commonpb.IndexState_Finished,
-			},
-		}
+	genSegIndex := func(segID, indexID UniqueID, numRows int64) *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex] {
+		segIdx := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+		segIdx.Insert(indexID, &model.SegmentIndex{
+			SegmentID:    segID,
+			CollectionID: 2,
+			PartitionID:  1,
+			NumRows:      numRows,
+			IndexID:      indexID,
+			BuildID:      segID,
+			NodeID:       0,
+			IndexVersion: 1,
+			IndexState:   commonpb.IndexState_Finished,
+		})
+		return segIdx
 	}
+	im := &indexMeta{
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			2: {
+				indexID: {
+					TenantID:     "",
+					CollectionID: 2,
+					FieldID:      vecFieldID,
+					IndexID:      indexID,
+					IndexName:    "_default_idx",
+					IsDeleted:    false,
+					CreateTime:   0,
+					TypeParams:   nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.IndexTypeKey,
+							Value: "HNSW",
+						},
+					},
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			},
+		},
+	}
+	im.segmentIndexes.Insert(1, genSegIndex(1, indexID, 20))
+	im.segmentIndexes.Insert(2, genSegIndex(2, indexID, 20))
+	im.segmentIndexes.Insert(3, genSegIndex(3, indexID, 20))
+	im.segmentIndexes.Insert(4, genSegIndex(4, indexID, 20))
+	im.segmentIndexes.Insert(5, genSegIndex(5, indexID, 20))
+	im.segmentIndexes.Insert(6, genSegIndex(6, indexID, 20))
+	im.segmentIndexes.Insert(7, genSegIndex(7, indexID, 20))
 	tests := []struct {
 		name      string
 		fields    fields
@@ -1365,40 +1399,8 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 					channelCPs: newChannelCps(),
 					// 7 segments with 200MB each, the compaction is expected to be triggered
 					//  as the first 5 being merged, and 1 plus being squeezed.
-					segments: mockSegmentsInfo(200, 200, 200, 200, 200, 200, 200),
-					indexMeta: &indexMeta{
-						segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-							1: genSegIndex(1, indexID, 20),
-							2: genSegIndex(2, indexID, 20),
-							3: genSegIndex(3, indexID, 20),
-							4: genSegIndex(4, indexID, 20),
-							5: genSegIndex(5, indexID, 20),
-							6: genSegIndex(6, indexID, 20),
-							7: genSegIndex(7, indexID, 20),
-						},
-						indexes: map[UniqueID]map[UniqueID]*model.Index{
-							2: {
-								indexID: {
-									TenantID:     "",
-									CollectionID: 2,
-									FieldID:      vecFieldID,
-									IndexID:      indexID,
-									IndexName:    "_default_idx",
-									IsDeleted:    false,
-									CreateTime:   0,
-									TypeParams:   nil,
-									IndexParams: []*commonpb.KeyValuePair{
-										{
-											Key:   common.IndexTypeKey,
-											Value: "HNSW",
-										},
-									},
-									IsAutoIndex:     false,
-									UserIndexParams: nil,
-								},
-							},
-						},
-					},
+					segments:  mockSegmentsInfo(200, 200, 200, 200, 200, 200, 200),
+					indexMeta: im,
 					collections: map[int64]*collectionInfo{
 						2: {
 							ID: 2,
@@ -1479,21 +1481,52 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 	}
 	vecFieldID := int64(201)
 
-	genSegIndex := func(segID, indexID UniqueID, numRows int64) map[UniqueID]*model.SegmentIndex {
-		return map[UniqueID]*model.SegmentIndex{
-			indexID: {
-				SegmentID:    segID,
-				CollectionID: 2,
-				PartitionID:  1,
-				NumRows:      numRows,
-				IndexID:      indexID,
-				BuildID:      segID,
-				NodeID:       0,
-				IndexVersion: 1,
-				IndexState:   commonpb.IndexState_Finished,
-			},
-		}
+	genSegIndex := func(segID, indexID UniqueID, numRows int64) *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex] {
+		segIdx := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+		segIdx.Insert(indexID, &model.SegmentIndex{
+			SegmentID:    segID,
+			CollectionID: 2,
+			PartitionID:  1,
+			NumRows:      numRows,
+			IndexID:      indexID,
+			BuildID:      segID,
+			NodeID:       0,
+			IndexVersion: 1,
+			IndexState:   commonpb.IndexState_Finished,
+		})
+		return segIdx
 	}
+	im := &indexMeta{
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			2: {
+				indexID: {
+					TenantID:     "",
+					CollectionID: 2,
+					FieldID:      vecFieldID,
+					IndexID:      indexID,
+					IndexName:    "_default_idx",
+					IsDeleted:    false,
+					CreateTime:   0,
+					TypeParams:   nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.IndexTypeKey,
+							Value: "HNSW",
+						},
+					},
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			},
+		},
+	}
+	im.segmentIndexes.Insert(1, genSegIndex(1, indexID, 20))
+	im.segmentIndexes.Insert(2, genSegIndex(2, indexID, 20))
+	im.segmentIndexes.Insert(3, genSegIndex(3, indexID, 20))
+	im.segmentIndexes.Insert(4, genSegIndex(4, indexID, 20))
+	im.segmentIndexes.Insert(5, genSegIndex(5, indexID, 20))
+	im.segmentIndexes.Insert(6, genSegIndex(6, indexID, 20))
 	mock0Allocator := newMockAllocator(t)
 	tests := []struct {
 		name      string
@@ -1508,39 +1541,8 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 				&meta{
 					channelCPs: newChannelCps(),
 
-					segments: mockSegmentsInfo(600, 600, 600, 600, 260, 260),
-					indexMeta: &indexMeta{
-						segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-							1: genSegIndex(1, indexID, 20),
-							2: genSegIndex(2, indexID, 20),
-							3: genSegIndex(3, indexID, 20),
-							4: genSegIndex(4, indexID, 20),
-							5: genSegIndex(5, indexID, 20),
-							6: genSegIndex(6, indexID, 20),
-						},
-						indexes: map[UniqueID]map[UniqueID]*model.Index{
-							2: {
-								indexID: {
-									TenantID:     "",
-									CollectionID: 2,
-									FieldID:      vecFieldID,
-									IndexID:      indexID,
-									IndexName:    "_default_idx",
-									IsDeleted:    false,
-									CreateTime:   0,
-									TypeParams:   nil,
-									IndexParams: []*commonpb.KeyValuePair{
-										{
-											Key:   common.IndexTypeKey,
-											Value: "HNSW",
-										},
-									},
-									IsAutoIndex:     false,
-									UserIndexParams: nil,
-								},
-							},
-						},
-					},
+					segments:  mockSegmentsInfo(600, 600, 600, 600, 260, 260),
+					indexMeta: im,
 					collections: map[int64]*collectionInfo{
 						2: {
 							ID: 2,
@@ -2186,20 +2188,20 @@ func (s *CompactionTriggerSuite) genSeg(segID, numRows int64) *datapb.SegmentInf
 	}
 }
 
-func (s *CompactionTriggerSuite) genSegIndex(segID, indexID UniqueID, numRows int64) map[UniqueID]*model.SegmentIndex {
-	return map[UniqueID]*model.SegmentIndex{
-		indexID: {
-			SegmentID:    segID,
-			CollectionID: s.collectionID,
-			PartitionID:  s.partitionID,
-			NumRows:      numRows,
-			IndexID:      indexID,
-			BuildID:      segID,
-			NodeID:       0,
-			IndexVersion: 1,
-			IndexState:   commonpb.IndexState_Finished,
-		},
-	}
+func (s *CompactionTriggerSuite) genSegIndex(segID, indexID UniqueID, numRows int64) *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex] {
+	segIdx := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx.Insert(indexID, &model.SegmentIndex{
+		SegmentID:    segID,
+		CollectionID: s.collectionID,
+		PartitionID:  s.partitionID,
+		NumRows:      numRows,
+		IndexID:      indexID,
+		BuildID:      segID,
+		NodeID:       0,
+		IndexVersion: 1,
+		IndexState:   commonpb.IndexState_Finished,
+	})
+	return segIdx
 }
 
 func (s *CompactionTriggerSuite) SetupTest() {
@@ -2236,6 +2238,37 @@ func (s *CompactionTriggerSuite) SetupTest() {
 		lastFlushTime: time.Now(),
 	}
 
+	im := &indexMeta{
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			s.collectionID: {
+				s.indexID: {
+					TenantID:     "",
+					CollectionID: s.collectionID,
+					FieldID:      s.vecFieldID,
+					IndexID:      s.indexID,
+					IndexName:    "_default_idx",
+					IsDeleted:    false,
+					CreateTime:   0,
+					TypeParams:   nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.IndexTypeKey,
+							Value: "HNSW",
+						},
+					},
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			},
+		},
+	}
+	im.segmentIndexes.Insert(1, s.genSegIndex(1, indexID, 60))
+	im.segmentIndexes.Insert(2, s.genSegIndex(2, indexID, 60))
+	im.segmentIndexes.Insert(3, s.genSegIndex(3, indexID, 60))
+	im.segmentIndexes.Insert(4, s.genSegIndex(4, indexID, 60))
+	im.segmentIndexes.Insert(5, s.genSegIndex(5, indexID, 60))
+	im.segmentIndexes.Insert(6, s.genSegIndex(6, indexID, 60))
 	s.meta = &meta{
 		channelCPs: newChannelCps(),
 		catalog:    catalog,
@@ -2271,38 +2304,7 @@ func (s *CompactionTriggerSuite) SetupTest() {
 				},
 			},
 		},
-		indexMeta: &indexMeta{
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-				1: s.genSegIndex(1, indexID, 60),
-				2: s.genSegIndex(2, indexID, 60),
-				3: s.genSegIndex(3, indexID, 60),
-				4: s.genSegIndex(4, indexID, 60),
-				5: s.genSegIndex(5, indexID, 26),
-				6: s.genSegIndex(6, indexID, 26),
-			},
-			indexes: map[UniqueID]map[UniqueID]*model.Index{
-				s.collectionID: {
-					s.indexID: {
-						TenantID:     "",
-						CollectionID: s.collectionID,
-						FieldID:      s.vecFieldID,
-						IndexID:      s.indexID,
-						IndexName:    "_default_idx",
-						IsDeleted:    false,
-						CreateTime:   0,
-						TypeParams:   nil,
-						IndexParams: []*commonpb.KeyValuePair{
-							{
-								Key:   common.IndexTypeKey,
-								Value: "HNSW",
-							},
-						},
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
-					},
-				},
-			},
-		},
+		indexMeta: im,
 		collections: map[int64]*collectionInfo{
 			s.collectionID: {
 				ID: s.collectionID,
@@ -2726,6 +2728,45 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 		compactTime  *compactTime
 		expectedSize int64
 	}
+	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	segIdx0 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx0.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           1,
+		CollectionID:        2,
+		PartitionID:         1,
+		NumRows:             100,
+		IndexID:             indexID,
+		BuildID:             1,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIndexes.Insert(1, segIdx0)
+	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx1.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           2,
+		CollectionID:        2,
+		PartitionID:         1,
+		NumRows:             100,
+		IndexID:             indexID,
+		BuildID:             2,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIndexes.Insert(2, segIdx1)
 	tests := []struct {
 		name   string
 		fields fields
@@ -2753,46 +2794,7 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 						},
 					},
 					indexMeta: &indexMeta{
-						segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-							1: {
-								indexID: {
-									SegmentID:           1,
-									CollectionID:        2,
-									PartitionID:         1,
-									NumRows:             100,
-									IndexID:             indexID,
-									BuildID:             1,
-									NodeID:              0,
-									IndexVersion:        1,
-									IndexState:          commonpb.IndexState_Finished,
-									FailReason:          "",
-									IsDeleted:           false,
-									CreatedUTCTime:      0,
-									IndexFileKeys:       nil,
-									IndexSerializedSize: 0,
-									WriteHandoff:        false,
-								},
-							},
-							2: {
-								indexID: {
-									SegmentID:           2,
-									CollectionID:        2,
-									PartitionID:         1,
-									NumRows:             100,
-									IndexID:             indexID,
-									BuildID:             2,
-									NodeID:              0,
-									IndexVersion:        1,
-									IndexState:          commonpb.IndexState_Finished,
-									FailReason:          "",
-									IsDeleted:           false,
-									CreatedUTCTime:      0,
-									IndexFileKeys:       nil,
-									IndexSerializedSize: 0,
-									WriteHandoff:        false,
-								},
-							},
-						},
+						segmentIndexes: segIndexes,
 						indexes: map[UniqueID]map[UniqueID]*model.Index{
 							2: {
 								indexID: {

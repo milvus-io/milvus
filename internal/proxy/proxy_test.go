@@ -1920,6 +1920,18 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("get segment info", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.GetSegmentsInfo(ctx, &internalpb.GetSegmentsInfoRequest{
+			DbName:       dbName,
+			CollectionID: 1,
+			SegmentIDs:   segmentIDs,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
 	t.Run("get query segment info", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{

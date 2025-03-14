@@ -492,6 +492,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	if req.GetLoadScope() == querypb.LoadScope_Index {
 		return node.loadIndex(ctx, req), nil
 	}
+	if req.GetLoadScope() == querypb.LoadScope_Stats {
+		return node.loadStats(ctx, req), nil
+	}
 
 	// Actual load segment
 	log.Info("start to load segments...")
@@ -704,13 +707,16 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	tr := timerecord.NewTimeRecorder("searchSegments")
 	log.Debug("search segments...")
 
-	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
-	if collection == nil {
+	if !node.manager.Collection.Ref(req.Req.GetCollectionID(), 1) {
 		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
 		log.Warn("failed to search segments", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	defer func() {
+		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
+	}()
 
 	var task scheduler.Task
 	if paramtable.Get().QueryNodeCfg.UseStreamComputing.GetAsBool() {
@@ -853,11 +859,16 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	defer cancel()
 
 	tr := timerecord.NewTimeRecorder("querySegments")
-	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
-	if collection == nil {
-		resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.Req.GetCollectionID()))
+	if !node.manager.Collection.Ref(req.Req.GetCollectionID(), 1) {
+		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
+		log.Warn("failed to query segments", zap.Error(err))
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	defer func() {
+		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
+	}()
 
 	// Send task to scheduler and wait until it finished.
 	task := tasks.NewQueryTask(queryCtx, collection, node.manager, req)

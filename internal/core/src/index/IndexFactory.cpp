@@ -385,14 +385,10 @@ IndexFactory::CreateJsonIndex(
                 proto::schema::DataType::Bool,
                 nested_path,
                 file_manager_context);
-        case milvus::DataType::INT8:
-        case milvus::DataType::INT16:
-        case milvus::DataType::INT32:
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
         case DataType::INT64:
-            return std::make_unique<index::JsonInvertedIndex<int64_t>>(
-                proto::schema::DataType::Int64,
-                nested_path,
-                file_manager_context);
         case DataType::FLOAT:
         case DataType::DOUBLE:
             return std::make_unique<index::JsonInvertedIndex<double>>(

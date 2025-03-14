@@ -499,7 +499,7 @@ func ReadVarcharData(pcr *FieldReader, count int64) (any, error) {
 			return nil, WrapTypeErr("string", chunk.DataType().Name(), pcr.field)
 		}
 		for i := 0; i < dataNums; i++ {
-			if err = common.CheckVarcharLength(stringReader.Value(i), maxLength); err != nil {
+			if err = common.CheckVarcharLength(stringReader.Value(i), maxLength, pcr.field); err != nil {
 				return nil, err
 			}
 			data = append(data, stringReader.Value(i))
@@ -540,7 +540,7 @@ func ReadNullableVarcharData(pcr *FieldReader, count int64) (any, []bool, error)
 					data = append(data, "")
 					continue
 				}
-				if err = common.CheckVarcharLength(stringReader.Value(i), maxLength); err != nil {
+				if err = common.CheckVarcharLength(stringReader.Value(i), maxLength, pcr.field); err != nil {
 					return nil, nil, err
 				}
 				data = append(data, stringReader.ValueStr(i))
@@ -655,6 +655,21 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 	return data, nil
 }
 
+func parseSparseFloatRowVector(str string) ([]byte, uint32, error) {
+	rowVec, err := typeutil.CreateSparseFloatRowFromJSON([]byte(str))
+	if err != nil {
+		return nil, 0, merr.WrapErrImportFailed(fmt.Sprintf("Invalid JSON string for SparseFloatVector: '%s', err = %v", str, err))
+	}
+	elemCount := len(rowVec) / 8
+	maxIdx := uint32(0)
+
+	if elemCount > 0 {
+		maxIdx = typeutil.SparseFloatRowIndexAt(rowVec, elemCount-1) + 1
+	}
+
+	return rowVec, maxIdx, nil
+}
+
 func ReadSparseFloatVectorData(pcr *FieldReader, count int64) (any, error) {
 	data, err := ReadStringData(pcr, count)
 	if err != nil {
@@ -663,20 +678,22 @@ func ReadSparseFloatVectorData(pcr *FieldReader, count int64) (any, error) {
 	if data == nil {
 		return nil, nil
 	}
+
 	byteArr := make([][]byte, 0, count)
 	maxDim := uint32(0)
+
 	for _, str := range data.([]string) {
-		rowVec, err := typeutil.CreateSparseFloatRowFromJSON([]byte(str))
+		rowVec, rowMaxIdx, err := parseSparseFloatRowVector(str)
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("Invalid JSON string for SparseFloatVector: '%s', err = %v", str, err))
+			return nil, err
 		}
+
 		byteArr = append(byteArr, rowVec)
-		elemCount := len(rowVec) / 8
-		maxIdx := typeutil.SparseFloatRowIndexAt(rowVec, elemCount-1)
-		if maxIdx+1 > maxDim {
-			maxDim = maxIdx + 1
+		if rowMaxIdx > maxDim {
+			maxDim = rowMaxIdx
 		}
 	}
+
 	return &storage.SparseFloatVectorFieldData{
 		SparseFloatArray: schemapb.SparseFloatArray{
 			Dim:      int64(maxDim),
@@ -1047,7 +1064,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range boolArray.([][]bool) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1067,7 +1084,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range int8Array.([][]int32) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1087,7 +1104,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range int16Array.([][]int32) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1107,7 +1124,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range int32Array.([][]int32) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1127,7 +1144,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range int64Array.([][]int64) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1147,7 +1164,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range float32Array.([][]float32) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1167,7 +1184,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range float64Array.([][]float64) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1187,7 +1204,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range stringArray.([][]string) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1222,7 +1239,7 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 			return nil, nil, nil
 		}
 		for _, elementArray := range boolArray.([][]bool) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1243,7 +1260,7 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 			return nil, nil, nil
 		}
 		for _, elementArray := range int8Array.([][]int32) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1264,7 +1281,7 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 			return nil, nil, nil
 		}
 		for _, elementArray := range int16Array.([][]int32) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1285,7 +1302,7 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 			return nil, nil, nil
 		}
 		for _, elementArray := range int32Array.([][]int32) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1306,7 +1323,7 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 			return nil, nil, nil
 		}
 		for _, elementArray := range int64Array.([][]int64) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1327,7 +1344,7 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 			return nil, nil, nil
 		}
 		for _, elementArray := range float32Array.([][]float32) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1348,7 +1365,7 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 			return nil, nil, nil
 		}
 		for _, elementArray := range float64Array.([][]float64) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, nil, err
 			}
 			data = append(data, &schemapb.ScalarField{
@@ -1369,7 +1386,7 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 			return nil, nil, nil
 		}
 		for _, elementArray := range stringArray.([][]string) {
-			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity); err != nil {
+			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, nil, err
 			}
 			data = append(data, &schemapb.ScalarField{

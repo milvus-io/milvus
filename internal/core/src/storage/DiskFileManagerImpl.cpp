@@ -634,6 +634,8 @@ std::string
 DiskFileManagerImpl::GetJsonKeyIndexIdentifier() {
     return GenJsonKeyIndexPathIdentifier(index_meta_.build_id,
                                          index_meta_.index_version,
+                                         field_meta_.collection_id,
+                                         field_meta_.partition_id,
                                          field_meta_.segment_id,
                                          field_meta_.field_id);
 }
@@ -645,6 +647,8 @@ DiskFileManagerImpl::GetLocalJsonKeyIndexPrefix() {
     return GenJsonKeyIndexPathPrefix(local_chunk_manager,
                                      index_meta_.build_id,
                                      index_meta_.index_version,
+                                     field_meta_.collection_id,
+                                     field_meta_.partition_id,
                                      field_meta_.segment_id,
                                      field_meta_.field_id);
 }
@@ -654,6 +658,8 @@ DiskFileManagerImpl::GetRemoteJsonKeyLogPrefix() {
     return GenJsonKeyIndexPathPrefix(rcm_,
                                      index_meta_.build_id,
                                      index_meta_.index_version,
+                                     field_meta_.collection_id,
+                                     field_meta_.partition_id,
                                      field_meta_.segment_id,
                                      field_meta_.field_id);
 }

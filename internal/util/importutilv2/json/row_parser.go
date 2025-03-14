@@ -85,29 +85,28 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 
 func (r *rowParser) wrapTypeError(v any, fieldID int64) error {
 	field := r.id2Field[fieldID]
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected type '%s' for field '%s', got type '%T' with value '%v'",
-		field.GetDataType().String(), field.GetName(), v, v))
+	return fmt.Errorf("expected type '%s' for field '%s', got type '%T' with value '%v'",
+		field.GetDataType().String(), field.GetName(), v, v)
 }
 
 func (r *rowParser) wrapDimError(actualDim int, fieldID int64) error {
 	field := r.id2Field[fieldID]
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected dim '%d' for field '%s' with type '%s', got dim '%d'",
-		r.id2Dim[fieldID], field.GetName(), field.GetDataType().String(), actualDim))
+	return fmt.Errorf("expected dim '%d' for field '%s' with type '%s', got dim '%d'",
+		r.id2Dim[fieldID], field.GetName(), field.GetDataType().String(), actualDim)
 }
 
 func (r *rowParser) wrapArrayValueTypeError(v any, eleType schemapb.DataType) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected element type '%s' in array field, got type '%T' with value '%v'",
-		eleType.String(), v, v))
+	return fmt.Errorf("expected element type '%s' in array field, got type '%T' with value '%v'",
+		eleType.String(), v, v)
 }
 
 func (r *rowParser) Parse(raw any) (Row, error) {
 	stringMap, ok := raw.(map[string]any)
 	if !ok {
-		return nil, merr.WrapErrImportFailed("invalid JSON format, each row should be a key-value map")
+		return nil, fmt.Errorf("invalid JSON format, each row should be a key-value map, but got type %T", raw)
 	}
 	if _, ok = stringMap[r.pkField.GetName()]; ok && r.pkField.GetAutoID() {
-		return nil, merr.WrapErrImportFailed(
-			fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", r.pkField.GetName()))
+		return nil, fmt.Errorf("the primary key '%s' is auto-generated, no need to provide", r.pkField.GetName())
 	}
 	dynamicValues := make(map[string]any)
 	row := make(Row)
@@ -122,7 +121,7 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 			// has dynamic field, put redundant pair to dynamicValues
 			dynamicValues[key] = value
 		} else {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field '%s' is not defined in schema", key))
+			return nil, fmt.Errorf("the field '%s' is not defined in schema", key)
 		}
 	}
 	for fieldName, fieldID := range r.name2FieldID {
@@ -139,7 +138,7 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 			}
 		}
 		if _, ok = row[fieldID]; !ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("value of field '%s' is missed", fieldName))
+			return nil, fmt.Errorf("value of field '%s' is missed", fieldName)
 		}
 	}
 	if r.dynamicField == nil {
@@ -180,20 +179,20 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]any, row Row) err
 			// case 1, 3
 			err := json.Unmarshal([]byte(value), &mp)
 			if err != nil {
-				return merr.WrapErrImportFailed("illegal value for dynamic field, not a JSON format string")
+				return fmt.Errorf("illegal value for dynamic field, not a JSON format string")
 			}
 		case map[string]interface{}:
 			// case 2, 4, 5
 			mp = value
 		default:
 			// invalid input
-			return merr.WrapErrImportFailed("illegal value for dynamic field, not a JSON object")
+			return fmt.Errorf("illegal value for dynamic field, not a JSON object")
 		}
 		delete(dynamicValues, r.dynamicField.GetName())
 		for k, v := range mp {
 			if _, ok = dynamicValues[k]; ok {
 				// case 8, 9
-				return merr.WrapErrImportFailed(fmt.Sprintf("duplicated key is not allowed, key=%s", k))
+				return fmt.Errorf("duplicated key is not allowed, key=%s", k)
 			}
 			dynamicValues[k] = v
 		}
@@ -386,7 +385,7 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err = common.CheckVarcharLength(value, maxLength); err != nil {
+		if err = common.CheckVarcharLength(value, maxLength, r.id2Field[fieldID]); err != nil {
 			return nil, err
 		}
 		return value, nil
@@ -418,7 +417,7 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err = common.CheckArrayCapacity(len(arr), maxCapacity); err != nil {
+		if err = common.CheckArrayCapacity(len(arr), maxCapacity, r.id2Field[fieldID]); err != nil {
 			return nil, err
 		}
 		scalarFieldData, err := r.arrayToFieldData(arr, r.id2Field[fieldID].GetElementType())
@@ -427,8 +426,8 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		}
 		return scalarFieldData, nil
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("parse json failed, unsupport data type: %s",
-			r.id2Field[fieldID].GetDataType().String()))
+		return nil, fmt.Errorf("parse json failed, unsupport data type: %s",
+			r.id2Field[fieldID].GetDataType().String())
 	}
 }
 
@@ -568,8 +567,8 @@ func (r *rowParser) parseNullableEntity(fieldID int64, obj any) (any, error) {
 		}
 		return scalarFieldData, nil
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("parse json failed, unsupport data type: %s",
-			r.id2Field[fieldID].GetDataType().String()))
+		return nil, fmt.Errorf("parse json failed, unsupport data type: %s",
+			r.id2Field[fieldID].GetDataType().String())
 	}
 }
 

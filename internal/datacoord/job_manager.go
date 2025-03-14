@@ -73,6 +73,9 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 
 	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
+
+	lastJSONStatsLastTrigger := time.Now().Unix()
+	maxJSONStatsTaskCount := 0
 	for {
 		select {
 		case <-jm.ctx.Done():
@@ -82,7 +85,7 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 			jm.triggerSortStatsTask()
 			jm.triggerTextStatsTask()
 			jm.triggerBM25StatsTask()
-			jm.triggerJsonKeyIndexStatsTask()
+			lastJSONStatsLastTrigger, maxJSONStatsTaskCount = jm.triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger, maxJSONStatsTaskCount)
 
 		case segID := <-getStatsTaskChSingleton():
 			log.Info("receive new segment to trigger stats task", zap.Int64("segmentID", segID))
@@ -194,7 +197,7 @@ func (jm *statsJobManager) triggerTextStatsTask() {
 	}
 }
 
-func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
+func (jm *statsJobManager) triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger int64, maxJSONStatsTaskCount int) (int64, int) {
 	collections := jm.mt.GetCollections()
 	for _, collection := range collections {
 		needTriggerFieldIDs := make([]UniqueID, 0)
@@ -207,14 +210,23 @@ func (jm *statsJobManager) triggerJsonKeyIndexStatsTask() {
 		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
 			return seg.GetIsSorted() && needDoJsonKeyIndex(seg, needTriggerFieldIDs)
 		}))
+		if time.Now().Unix()-lastJSONStatsLastTrigger > int64(Params.DataCoordCfg.JSONStatsTriggerInterval.GetAsDuration(time.Minute).Seconds()) {
+			lastJSONStatsLastTrigger = time.Now().Unix()
+			maxJSONStatsTaskCount = 0
+		}
 		for _, segment := range segments {
+			if maxJSONStatsTaskCount >= Params.DataCoordCfg.JSONStatsTriggerCount.GetAsInt() {
+				break
+			}
 			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true); err != nil {
 				log.Warn("create stats task with json key index for segment failed, wait for retry:",
 					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 				continue
 			}
+			maxJSONStatsTaskCount++
 		}
 	}
+	return lastJSONStatsLastTrigger, maxJSONStatsTaskCount
 }
 
 func (jm *statsJobManager) triggerBM25StatsTask() {
