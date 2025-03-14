@@ -114,7 +114,7 @@ class JsonKeyStatsIndexTest : public ::testing::TestWithParam<bool> {
         config["insert_files"] = std::vector<std::string>{log_path};
 
         auto build_index =
-            std::make_shared<JsonKeyStatsInvertedIndex>(ctx, false);
+            std::make_shared<JsonKeyStatsInvertedIndex>(ctx, false, 1);
         build_index->Build(config);
 
         auto create_index_result = build_index->Upload(config);
@@ -127,7 +127,7 @@ class JsonKeyStatsIndexTest : public ::testing::TestWithParam<bool> {
         index::CreateIndexInfo index_info{};
         config["index_files"] = index_files;
 
-        index_ = std::make_shared<JsonKeyStatsInvertedIndex>(ctx, true);
+        index_ = std::make_shared<JsonKeyStatsInvertedIndex>(ctx, true, 1);
         index_->Load(milvus::tracer::TraceContext{}, config);
     }
 
@@ -158,7 +158,7 @@ class JsonKeyStatsIndexTest : public ::testing::TestWithParam<bool> {
              size_);
     }
 
-    virtual ~JsonKeyIndexTest() override {
+    virtual ~JsonKeyStatsIndexTest() override {
         boost::filesystem::remove_all(chunk_manager_->GetRootPath());
     }
 
@@ -173,7 +173,7 @@ class JsonKeyStatsIndexTest : public ::testing::TestWithParam<bool> {
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
 };
 
-INSTANTIATE_TEST_SUITE_P(JsonKeyIndexTestSuite,
+INSTANTIATE_TEST_SUITE_P(JsonKeyStatsIndexTestSuite,
                          JsonKeyStatsIndexTest,
                          ::testing::Values(true, false));
 

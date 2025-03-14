@@ -45,7 +45,7 @@ JsonKeyStatsInvertedIndex::AddJSONEncodeValue(
         length,
         value);
     int64_t combine_id = 0;
-    if (json_key_data_format_ == 0) {
+    if (json_key_data_format_ == 1) {
         if (flag) {
             combine_id = EncodeValue(flag, type, row_id, value);
         } else {
@@ -287,6 +287,7 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
     int64_t commit_interval_in_ms, const char* unique_id)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
+    json_key_data_format_ = 1;
     d_type_ = TantivyDataType::Keyword;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id, d_type_, "", false, true);
@@ -298,6 +299,7 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
     const std::string& path)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
+    json_key_data_format_ = 1;
     boost::filesystem::path prefix = path;
     boost::filesystem::path sub_path = unique_id;
     path_ = (prefix / sub_path).string();
