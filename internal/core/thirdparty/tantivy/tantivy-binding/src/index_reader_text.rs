@@ -64,11 +64,11 @@ impl IndexReaderWrapper {
 mod tests {
     use tempfile::TempDir;
 
-    use crate::{index_writer::IndexWriterWrapper, tokenizer::create_tokenizer};
+    use crate::{index_writer::IndexWriterWrapper, analyzer::create_analyzer};
     #[test]
     fn test_jeba() {
         let params = "{\"tokenizer\": \"jieba\"}".to_string();
-        let tokenizer = create_tokenizer(&params).unwrap();
+        let tokenizer = create_analyzer(&params).unwrap();
         let dir = TempDir::new().unwrap();
 
         let mut writer = IndexWriterWrapper::create_text_writer(
