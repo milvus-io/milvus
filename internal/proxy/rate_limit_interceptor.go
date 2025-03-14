@@ -64,6 +64,8 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 			if rsp != nil {
 				return rsp, nil
 			}
+			log.Warn("failed to get failed response, please check it!", zap.Error(err))
+			return nil, err
 		}
 		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()
 		return handler(ctx, req)
