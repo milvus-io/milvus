@@ -28,17 +28,28 @@ namespace milvus {
 namespace storage {
 
 template <typename... Args>
+static std::string
+AzureErrorMessage(const std::string& func,
+                  const std::exception& err,
+                  const std::string& fmtString,
+                  Args&&... args) {
+    std::ostringstream oss;
+    const auto& message = fmt::format(fmtString, std::forward<Args>(args)...);
+    oss << "Error in " << func << "[exception:" << err.what()
+        << ", params:" << message << "]";
+    return oss.str();
+}
 
+template <typename... Args>
 static SegcoreError
 ThrowAzureError(const std::string& func,
                 const std::exception& err,
                 const std::string& fmtString,
                 Args&&... args) {
-    std::ostringstream oss;
-    const auto& message = fmt::format(fmtString, std::forward<Args>(args)...);
-    oss << "Error in " << func << "[exception:" << err.what()
-        << ", params:" << message << "]";
-    throw SegcoreError(S3Error, oss.str());
+    std::string error_message =
+        AzureErrorMessage(func, err, fmtString, args...);
+    LOG_WARN(error_message);
+    throw SegcoreError(S3Error, error_message);
 }
 
 void
