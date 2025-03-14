@@ -135,6 +135,8 @@ type serdeEntry struct {
 	// serialize serializes the value to the builder, returns ok.
 	// 	nil is serialized to null without checking the type nullability.
 	serialize func(array.Builder, any) bool
+	// size in bytes of value
+	size func(any) (int64, bool)
 }
 
 var serdeMap = func() map[schemapb.DataType]serdeEntry {
@@ -165,6 +167,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return false
 		},
+		func(v any) (int64, bool) {
+			return 1, true
+		},
 	}
 	m[schemapb.DataType_Int8] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -191,6 +196,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				}
 			}
 			return false
+		},
+		func(v any) (int64, bool) {
+			return 1, true
 		},
 	}
 	m[schemapb.DataType_Int16] = serdeEntry{
@@ -219,6 +227,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return false
 		},
+		func(v any) (int64, bool) {
+			return 2, true
+		},
 	}
 	m[schemapb.DataType_Int32] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -245,6 +256,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				}
 			}
 			return false
+		},
+		func(v any) (int64, bool) {
+			return 4, true
 		},
 	}
 	m[schemapb.DataType_Int64] = serdeEntry{
@@ -273,6 +287,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return false
 		},
+		func(v any) (int64, bool) {
+			return 8, true
+		},
 	}
 	m[schemapb.DataType_Float] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -299,6 +316,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				}
 			}
 			return false
+		},
+		func(v any) (int64, bool) {
+			return 4, true
 		},
 	}
 	m[schemapb.DataType_Double] = serdeEntry{
@@ -327,6 +347,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return false
 		},
+		func(v any) (int64, bool) {
+			return 8, true
+		},
 	}
 	stringEntry := serdeEntry{
 		func(i int) arrow.DataType {
@@ -353,6 +376,12 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				}
 			}
 			return false
+		},
+		func(v any) (int64, bool) {
+			if v, ok := v.(string); ok {
+				return int64(len(v)), true
+			}
+			return 0, false
 		},
 	}
 
@@ -393,6 +422,17 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return false
 		},
+		func(v any) (int64, bool) {
+			if v == nil {
+				return 0, true
+			}
+			if vv, ok := v.(*schemapb.ScalarField); ok {
+				if bytes, err := proto.Marshal(vv); err == nil {
+					return int64(len(bytes)), true
+				}
+			}
+			return 0, false
+		},
 	}
 	_ = eagerArrayEntry
 
@@ -428,6 +468,20 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return false
 		},
+		func(v any) (int64, bool) {
+			if v == nil {
+				return 0, true
+			}
+			if vv, ok := v.([]byte); ok {
+				return int64(len(vv)), true
+			}
+			if vv, ok := v.(*schemapb.ScalarField); ok {
+				if bytes, err := proto.Marshal(vv); err == nil {
+					return int64(len(bytes)), true
+				}
+			}
+			return 0, false
+		},
 	}
 
 	m[schemapb.DataType_Array] = byteEntry
@@ -455,6 +509,15 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		}
 		return false
 	}
+	fixedSizeSize := func(v any) (int64, bool) {
+		if v == nil {
+			return 0, true
+		}
+		if v, ok := v.([]byte); ok {
+			return int64(len(v)), true
+		}
+		return 0, false
+	}
 
 	m[schemapb.DataType_BinaryVector] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -462,6 +525,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 		fixedSizeDeserializer,
 		fixedSizeSerializer,
+		fixedSizeSize,
 	}
 	m[schemapb.DataType_Float16Vector] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -469,6 +533,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 		fixedSizeDeserializer,
 		fixedSizeSerializer,
+		fixedSizeSize,
 	}
 	m[schemapb.DataType_BFloat16Vector] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -476,6 +541,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 		fixedSizeDeserializer,
 		fixedSizeSerializer,
+		fixedSizeSize,
 	}
 	m[schemapb.DataType_Int8Vector] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -483,6 +549,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 		fixedSizeDeserializer,
 		fixedSizeSerializer,
+		fixedSizeSize,
 	}
 	m[schemapb.DataType_FloatVector] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -516,6 +583,16 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				}
 			}
 			return false
+		},
+		func(v any) (int64, bool) {
+			if v == nil {
+				return 0, true
+			}
+			if vv, ok := v.([]float32); ok {
+				dim := len(vv)
+				return int64(dim * 4), true
+			}
+			return 0, false
 		},
 	}
 	m[schemapb.DataType_SparseFloatVector] = byteEntry
@@ -964,4 +1041,12 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, fields []*schemapb.Fi
 		}
 	}
 	return nil
+}
+
+func GetValueSize(v any, dt schemapb.DataType) (int64, bool) {
+	typeEntry, ok := serdeMap[dt]
+	if !ok {
+		panic("unknown type")
+	}
+	return typeEntry.size(v)
 }

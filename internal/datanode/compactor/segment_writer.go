@@ -91,8 +91,12 @@ func (alloc *compactionAlloactor) allocSegmentID() (typeutil.UniqueID, error) {
 
 func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator *compactionAlloactor, segmentSize int64,
 	schema *schemapb.CollectionSchema,
-	maxRows int64, partitionID, collectionID int64, channel string, batchSize int, storageVersion int64,
+	maxRows int64, partitionID, collectionID int64, channel string, batchSize int,
 ) *MultiSegmentWriter {
+	storageVersion := storage.StorageV1
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+		storageVersion = storage.StorageV2
+	}
 	return &MultiSegmentWriter{
 		ctx:            ctx,
 		binlogIO:       binlogIO,
@@ -127,6 +131,7 @@ func (w *MultiSegmentWriter) closeWriter() error {
 			Bm25Logs:            lo.Values(bm25Logs),
 			StorageVersion:      w.storageVersion,
 		}
+		fmt.Println("fieldBinlogs: ", fieldBinlogs)
 
 		w.res = append(w.res, result)
 
@@ -175,8 +180,8 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 func (w *MultiSegmentWriter) splitColumnByRecord(r storage.Record, splitThresHold int64) []storagecommon.ColumnGroup {
 	groups := make([]storagecommon.ColumnGroup, 0)
 	shortColumnGroup := storagecommon.ColumnGroup{Columns: make([]int, 0)}
-	for i, fieldID := range w.schema.Fields {
-		arr := r.Column(fieldID.FieldID)
+	for i, field := range w.schema.Fields {
+		arr := r.Column(field.FieldID)
 		size := storage.CalculateArraySize(arr)
 		rows := arr.Len()
 		if rows != 0 && int64(size/rows) >= splitThresHold {
@@ -189,6 +194,30 @@ func (w *MultiSegmentWriter) splitColumnByRecord(r storage.Record, splitThresHol
 		groups = append(groups, shortColumnGroup)
 	}
 	return groups
+}
+
+func (w *MultiSegmentWriter) splitColumnByValue(v *storage.Value, splitThresHold int64) ([]storagecommon.ColumnGroup, error) {
+	groups := make([]storagecommon.ColumnGroup, 0)
+	shortColumnGroup := storagecommon.ColumnGroup{Columns: make([]int, 0)}
+	for i, field := range w.schema.Fields {
+		data, ok := v.Value.(map[storage.FieldID]interface{})[field.FieldID]
+		if !ok {
+			return nil, fmt.Errorf("field %d value not found", field.FieldID)
+		}
+		size, ok := storage.GetValueSize(data, field.DataType)
+		if !ok {
+			return nil, fmt.Errorf("can not get data size of field %d with data type %s", field.FieldID, field.DataType)
+		}
+		if size >= splitThresHold {
+			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}})
+		} else {
+			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
+		}
+	}
+	if len(shortColumnGroup.Columns) > 0 {
+		groups = append(groups, shortColumnGroup)
+	}
+	return groups, nil
 }
 
 func (w *MultiSegmentWriter) GetWrittenUncompressed() uint64 {
@@ -225,6 +254,13 @@ func (w *MultiSegmentWriter) Write(r storage.Record) error {
 
 func (w *MultiSegmentWriter) WriteValue(v *storage.Value) error {
 	if w.writer == nil || w.writer.GetWrittenUncompressed() >= uint64(w.segmentSize) {
+		if w.storageVersion == storage.StorageV2 {
+			columnGroups, err := w.splitColumnByValue(v, packed.ColumnGroupSizeThreshold)
+			if err != nil {
+				return err
+			}
+			w.rwOption = append(w.rwOption, storage.WithColumnGroups(columnGroups))
+		}
 		if err := w.rotateWriter(); err != nil {
 			return err
 		}

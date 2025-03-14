@@ -63,8 +63,6 @@ type mixCompactionTask struct {
 
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
-
-	storageVersion int64
 }
 
 var _ Compactor = (*mixCompactionTask)(nil)
@@ -76,14 +74,13 @@ func NewMixCompactionTask(
 ) *mixCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &mixCompactionTask{
-		ctx:            ctx1,
-		cancel:         cancel,
-		binlogIO:       binlogIO,
-		plan:           plan,
-		tr:             timerecord.NewTimeRecorder("mergeSplit compaction"),
-		currentTime:    time.Now(),
-		done:           make(chan struct{}, 1),
-		storageVersion: storage.StorageV1,
+		ctx:         ctx1,
+		cancel:      cancel,
+		binlogIO:    binlogIO,
+		plan:        plan,
+		tr:          timerecord.NewTimeRecorder("mergeSplit compaction"),
+		currentTime: time.Now(),
+		done:        make(chan struct{}, 1),
 	}
 }
 
@@ -121,10 +118,6 @@ func (t *mixCompactionTask) preCompact() error {
 		}
 	}
 
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		t.storageVersion = storage.StorageV2
-	}
-
 	outputSegmentCount := int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
 	log.Info("preCompaction analyze",
 		zap.Int64("planID", t.GetPlanID()),
@@ -150,7 +143,7 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096, t.storageVersion)
+	mWriter := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096)
 
 	deletedRowCount := int64(0)
 	expiredRowCount := int64(0)
@@ -224,7 +217,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		sliced := r.Slice(start, end)
 		defer sliced.Release()
 		// should turn composite record to simple record when reading with v1 format and writing with v2 format
-		if seg.GetStorageVersion() == storage.StorageV1 && t.storageVersion == storage.StorageV2 {
+		if seg.GetStorageVersion() == storage.StorageV1 && paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
 			sar, err := storage.CompositeToSimpleArrowRecord(sliced, t.plan.GetSchema().GetFields())
 			if err != nil {
 				log.Warn("compact wrong, failed to convert composite record to simple record", zap.Error(err))
@@ -359,7 +352,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	if sortMergeAppicable {
 		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
-			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.storageVersion)
+			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl())
 		if err != nil {
 			log.Warn("compact wrong, fail to merge sort segments", zap.Error(err))
 			return nil, err
