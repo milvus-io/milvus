@@ -106,7 +106,7 @@ ChunkCache::Read(const std::string& filepath,
                        data_type);
         } else {
             std::vector<std::shared_ptr<Chunk>> chunks{chunk};
-            column = std::make_shared<ChunkedColumn>(chunks);
+            column = std::make_shared<ChunkedColumn>(field_meta, chunks);
         }
         if (mmap_enabled && mmap_rss_not_need) {
             auto ok = madvise(reinterpret_cast<void*>(
