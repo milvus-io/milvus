@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -356,18 +355,19 @@ func getRandomSeekPositions(t *testing.T, ctx context.Context, factory msgstream
 			return
 		case pack := <-stream.Chan():
 			for _, msg := range pack.Msgs {
-				switch msg.GetType() {
+				switch msg.Type() {
 				case commonpb.MsgType_Insert:
-					if vchannels[msg.GetVChannel()].seekPos == nil {
-						vchannels[msg.GetVChannel()].skippedInsMsgNum++
+					vchannel := msg.(*msgstream.InsertMsg).GetShardName()
+					if vchannels[vchannel].seekPos == nil {
+						vchannels[vchannel].skippedInsMsgNum++
 					}
 				case commonpb.MsgType_Delete:
-					if vchannels[msg.GetVChannel()].seekPos == nil {
-						vchannels[msg.GetVChannel()].skippedDelMsgNum++
+					vchannel := msg.(*msgstream.DeleteMsg).GetShardName()
+					if vchannels[vchannel].seekPos == nil {
+						vchannels[vchannel].skippedDelMsgNum++
 					}
 				case commonpb.MsgType_DropCollection:
-					collectionID, err := strconv.ParseInt(msg.GetCollectionID(), 10, 64)
-					assert.NoError(t, err)
+					collectionID := msg.(*msgstream.DropCollectionMsg).GetCollectionID()
 					for vchannel := range vchannels {
 						if vchannels[vchannel].seekPos == nil &&
 							funcutil.GetCollectionIDFromVChannel(vchannel) == collectionID {
