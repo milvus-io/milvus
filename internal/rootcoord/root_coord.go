@@ -165,6 +165,10 @@ func (c *Core) UpdateStateCode(code commonpb.StateCode) {
 	log.Ctx(c.ctx).Info("update rootcoord state", zap.String("state", code.String()))
 }
 
+func (c *Core) SetMeta(meta IMetaTable) {
+	c.meta = meta
+}
+
 func (c *Core) GetStateCode() commonpb.StateCode {
 	return commonpb.StateCode(c.stateCode.Load())
 }
@@ -3243,6 +3247,7 @@ func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.Gra
 		for _, priv := range privGroup {
 			newGrant, err := createGrantEntity(grant, priv.Name)
 			if err != nil {
+				log.Info("fail to create grant entity", zap.Any("grant", grant), zap.Error(err))
 				return nil, err
 			}
 			newGrants = append(newGrants, newGrant)
