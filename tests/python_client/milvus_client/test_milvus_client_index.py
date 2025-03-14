@@ -697,11 +697,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name="my_json", index_type="INVERTED", params={"json_cast_type": DataType.VARCHAR})
         # 7. create index
-        error = {ct.err_code: 1100, ct.err_msg: "json index must specify json path: missing parameter"
-                                                "[missing_param=json_path]: invalid parameter[expected=valid index params]"
-                                                "[actual=invalid index params]"}
-        self.create_index(client, collection_name, index_params,
-                          check_task=CheckTasks.err_res, check_items=error)
+        self.create_index(client, collection_name, index_params)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)

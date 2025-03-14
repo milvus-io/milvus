@@ -1131,6 +1131,69 @@ func Test_parseIndexParams(t *testing.T) {
 		err := cit.parseIndexParams(context.TODO())
 		assert.Error(t, err)
 	})
+
+	t.Run("create index with json field", func(t *testing.T) {
+		Params.Save(Params.AutoIndexConfig.ScalarAutoIndexEnable.Key, "false")
+		defer Params.Reset(Params.AutoIndexConfig.ScalarAutoIndexEnable.Key)
+		cit = &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.JSONCastTypeKey,
+						Value: "1",
+					},
+					{
+						Key:   common.IndexTypeKey,
+						Value: "INVERTED",
+					},
+				},
+				IndexName: "",
+				FieldName: "FieldJSON",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldJSON",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_JSON,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		jsonPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, cit.newIndexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, jsonPath, "FieldJSON")
+
+		cit = &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.JSONCastTypeKey,
+						Value: "1",
+					},
+					{
+						Key:   common.IndexTypeKey,
+						Value: "INVERTED",
+					},
+				},
+				IndexName: "",
+				FieldName: "DynamicField",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldJSON",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_JSON,
+				IsDynamic:    true,
+			},
+		}
+		err = cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		jsonPath, err = funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, cit.newIndexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, jsonPath, "DynamicField")
+	})
 }
 
 func Test_wrapUserIndexParams(t *testing.T) {
