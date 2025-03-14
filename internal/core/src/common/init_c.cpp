@@ -25,7 +25,7 @@
 #include "common/Tracer.h"
 #include "log/Log.h"
 
-std::once_flag flag1, flag2, flag3, flag4, flag5, flag6;
+std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7;
 std::once_flag traceFlag;
 
 void
@@ -75,6 +75,14 @@ InitDefaultExprEvalBatchSize(int64_t val) {
     std::call_once(
         flag6,
         [](int val) { milvus::SetDefaultExecEvalExprBatchSize(val); },
+        val);
+}
+
+void
+InitDefaultOptimizeExprEnable(bool val) {
+    std::call_once(
+        flag7,
+        [](bool val) { milvus::SetDefaultOptimizeExprEnable(val); },
         val);
 }
 

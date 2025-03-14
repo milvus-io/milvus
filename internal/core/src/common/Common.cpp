@@ -28,6 +28,7 @@ int64_t LOW_PRIORITY_THREAD_CORE_COEFFICIENT =
     DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 int CPU_NUM = DEFAULT_CPU_NUM;
 int64_t EXEC_EVAL_EXPR_BATCH_SIZE = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
+bool OPTIMIZE_EXPR_ENABLED = DEFAULT_OPTIMIZE_EXPR_ENABLED;
 
 void
 SetIndexSliceSize(const int64_t size) {
@@ -65,6 +66,12 @@ SetDefaultExecEvalExprBatchSize(int64_t val) {
 void
 SetCpuNum(const int num) {
     CPU_NUM = num;
+}
+
+void
+SetDefaultOptimizeExprEnable(bool val) {
+    OPTIMIZE_EXPR_ENABLED = val;
+    LOG_INFO("set default optimize expr enabled: {}", OPTIMIZE_EXPR_ENABLED);
 }
 
 }  // namespace milvus
