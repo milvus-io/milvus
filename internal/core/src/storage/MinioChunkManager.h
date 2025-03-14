@@ -42,6 +42,7 @@
 #include "common/Exception.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
+#include "log/Log.h"
 
 namespace milvus::storage {
 
@@ -52,18 +53,28 @@ enum class RemoteStorageType {
 };
 
 template <typename... Args>
-
-static SegcoreError
-ThrowS3Error(const std::string& func,
-             const Aws::S3::S3Error& err,
-             const std::string& fmtString,
-             Args&&... args) {
+static std::string
+S3ErrorMessage(const std::string& func,
+               const Aws::S3::S3Error& err,
+               const std::string& fmtString,
+               Args&&... args) {
     std::ostringstream oss;
     const auto& message = fmt::format(fmtString, std::forward<Args>(args)...);
     oss << "Error in " << func << "[errcode:" << int(err.GetResponseCode())
         << ", exception:" << err.GetExceptionName()
         << ", errmessage:" << err.GetMessage() << ", params:" << message << "]";
-    throw SegcoreError(S3Error, oss.str());
+    return oss.str();
+}
+
+template <typename... Args>
+static SegcoreError
+ThrowS3Error(const std::string& func,
+             const Aws::S3::S3Error& err,
+             const std::string& fmtString,
+             Args&&... args) {
+    std::string error_message = S3ErrorMessage(func, err, fmtString, args...);
+    LOG_WARN(error_message);
+    throw SegcoreError(S3Error, error_message);
 }
 
 static bool
