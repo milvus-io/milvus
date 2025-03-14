@@ -541,10 +541,8 @@ func (sd *shardDelegator) LoadL0(ctx context.Context, infos []*querypb.SegmentLo
 	return nil
 }
 
-func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkoracle.Candidate) (storage.PrimaryKeys, []storage.Timestamp) {
-	// TODO: this could be large, host all L0 delete on delegator might be a dangerous, consider mmap it on local segment and stream processing it
+func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkoracle.Candidate, fn func(pk storage.PrimaryKey, ts uint64) error) error {
 	level0Segments := sd.deleteBuffer.ListL0()
-	deltaData := storage.NewDeltaData(0)
 
 	for _, segment := range level0Segments {
 		segment := segment.(*segments.L0Segment)
@@ -561,14 +559,36 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkorac
 				hits := candidate.BatchPkExist(lc)
 				for i, hit := range hits {
 					if hit {
-						deltaData.Append(segmentPks[idx+i], segmentTss[idx+i])
+						if err := fn(segmentPks[idx+i], segmentTss[idx+i]); err != nil {
+							return err
+						}
 					}
 				}
 			}
 		}
 	}
+	return nil
+}
+
+func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkoracle.Candidate) (storage.PrimaryKeys, []storage.Timestamp) {
+	deltaData := storage.NewDeltaData(0)
+
+	sd.rangeHitL0Deletions(partitionID, candidate, func(pk storage.PrimaryKey, ts uint64) error {
+		deltaData.Append(pk, ts)
+		return nil
+	})
 
 	return deltaData.DeletePks(), deltaData.DeleteTimestamps()
+}
+
+func (sd *shardDelegator) StreamForwardLevel0Deletions(bufferedForwarder *BufferForwarder, partitionID int64, candidate pkoracle.Candidate) error {
+	err := sd.rangeHitL0Deletions(partitionID, candidate, func(pk storage.PrimaryKey, ts uint64) error {
+		return bufferedForwarder.Buffer(pk, ts)
+	})
+	if err != nil {
+		return err
+	}
+	return bufferedForwarder.Flush()
 }
 
 func (sd *shardDelegator) RefreshLevel0DeletionStats() {
@@ -621,10 +641,6 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	// apply buffered delete for new segments
 	// no goroutines here since qnv2 has no load merging logic
 	for _, info := range infos {
-		log := log.With(
-			zap.Int64("segmentID", info.GetSegmentID()),
-			zap.Time("startPosition", tsoutil.PhysicalTime(info.GetStartPosition().GetTimestamp())),
-		)
 		candidate := idCandidates[info.GetSegmentID()]
 		// after L0 segment feature
 		// growing segemnts should have load stream delete as well
@@ -636,24 +652,12 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			deleteScope = querypb.DataScope_Streaming
 		}
 
-		deleteData := &storage.DeleteData{}
-		// start position is dml position for segment
-		// if this position is before deleteBuffer's safe ts, it means some delete shall be read from msgstream
-		// if info.GetStartPosition().GetTimestamp() < sd.deleteBuffer.SafeTs() {
-		// 	log.Info("load delete from stream...")
-		// 	streamDeleteData, err := sd.readDeleteFromMsgstream(ctx, info.GetStartPosition(), sd.deleteBuffer.SafeTs(), candidate)
-		// 	if err != nil {
-		// 		log.Warn("failed to read delete data from msgstream", zap.Error(err))
-		// 		return err
-		// 	}
+		bufferedForwarder := NewBufferedForwarder(paramtable.Get().QueryNodeCfg.ForwardBatchSize.GetAsInt64(),
+			deleteViaWorker(ctx, worker, targetNodeID, info, deleteScope))
 
-		// 	deleteData.Merge(streamDeleteData)
-		// 	log.Info("load delete from stream done")
-		// }
 		// list buffered delete
 		deleteRecords := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
 		tsHitDeleteRows := int64(0)
-		start := time.Now()
 		for _, entry := range deleteRecords {
 			for _, record := range entry.Data {
 				tsHitDeleteRows += int64(len(record.DeleteData.Pks))
@@ -672,32 +676,18 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 					hits := candidate.BatchPkExist(lc)
 					for i, hit := range hits {
 						if hit {
-							deleteData.Append(pks[idx+i], record.DeleteData.Tss[idx+i])
+							err := bufferedForwarder.Buffer(pks[idx+i], record.DeleteData.Tss[idx+i])
+							if err != nil {
+								return err
+							}
 						}
 					}
 				}
 			}
 		}
-		// if delete count not empty, apply
-		if deleteData.RowCount > 0 {
-			log.Info("forward delete to worker...",
-				zap.Int64("tsHitDeleteRowNum", tsHitDeleteRows),
-				zap.Int64("bfHitDeleteRowNum", deleteData.RowCount),
-				zap.Int64("bfCost", time.Since(start).Milliseconds()),
-			)
-			err := worker.Delete(ctx, &querypb.DeleteRequest{
-				Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(targetNodeID)),
-				CollectionId: info.GetCollectionID(),
-				PartitionId:  info.GetPartitionID(),
-				SegmentId:    info.GetSegmentID(),
-				PrimaryKeys:  storage.ParsePrimaryKeys2IDs(deleteData.Pks),
-				Timestamps:   deleteData.Tss,
-				Scope:        deleteScope,
-			})
-			if err != nil {
-				log.Warn("failed to apply delete when LoadSegment", zap.Error(err))
-				return err
-			}
+		err := bufferedForwarder.Flush()
+		if err != nil {
+			return err
 		}
 	}
 

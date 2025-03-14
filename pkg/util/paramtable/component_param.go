@@ -2669,6 +2669,7 @@ type queryNodeConfig struct {
 	// delta forward
 	LevelZeroForwardPolicy      ParamItem `refreshable:"true"`
 	StreamingDeltaForwardPolicy ParamItem `refreshable:"true"`
+	ForwardBatchSize            ParamItem `refreshable:"true"`
 
 	// loader
 	IoPoolSize             ParamItem `refreshable:"false"`
@@ -3276,6 +3277,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.StreamingDeltaForwardPolicy.Init(base.mgr)
+
+	p.ForwardBatchSize = ParamItem{
+		Key:          "queryNode.forwardBatchSize",
+		Version:      "2.5.7",
+		Doc:          "the batch size delegator uses for forwarding stream delete in loading procedure",
+		DefaultValue: "4194304", // 4MB
+		Export:       true,
+	}
+	p.ForwardBatchSize.Init(base.mgr)
 
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",

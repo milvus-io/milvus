@@ -100,6 +100,12 @@ func (dd *DeltaData) MemSize() int64 {
 	return result
 }
 
+func (dd *DeltaData) Reset() {
+	dd.deletePks.Reset()
+	dd.deleteTimestamps = dd.deleteTimestamps[:0]
+	dd.delRowCount = 0
+}
+
 func NewDeltaData(cap int64) *DeltaData {
 	return &DeltaData{
 		deleteTimestamps: make([]Timestamp, 0, cap),
@@ -114,6 +120,23 @@ func NewDeltaDataWithPkType(cap int64, pkType schemapb.DataType) (*DeltaData, er
 		return nil, err
 	}
 	return result, nil
+}
+
+func NewDeltaDataWithData(pks PrimaryKeys, tss []uint64) (*DeltaData, error) {
+	if pks.Len() != len(tss) {
+		return nil, merr.WrapErrParameterInvalidMsg("length of pks and tss not equal")
+	}
+	dd := &DeltaData{
+		deletePks:        pks,
+		deleteTimestamps: tss,
+		delRowCount:      int64(pks.Len()),
+	}
+
+	dd.typeInitOnce.Do(func() {
+		dd.pkType = pks.Type()
+	})
+
+	return dd, nil
 }
 
 type DeleteLog struct {

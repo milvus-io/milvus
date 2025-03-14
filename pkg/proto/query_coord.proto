@@ -790,6 +790,7 @@ message DeleteRequest {
     schema.IDs primary_keys = 6;
     repeated uint64 timestamps = 7;
     DataScope scope = 8;
+    bool use_load = 9;
 }
 
 message DeleteBatchRequest {
