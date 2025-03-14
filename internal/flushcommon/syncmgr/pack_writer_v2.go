@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	iTypeutil "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -212,7 +211,7 @@ func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack)
 	defer builder.Release()
 
 	for _, chunk := range pack.insertData {
-		if err := iTypeutil.BuildRecord(builder, chunk, bw.metaCache.Schema().GetFields()); err != nil {
+		if err := storage.BuildRecord(builder, chunk, bw.metaCache.Schema().GetFields()); err != nil {
 			return nil, err
 		}
 	}

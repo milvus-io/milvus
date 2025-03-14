@@ -31,6 +31,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	tr *timerecord.TimeRecorder,
 	currentTime time.Time,
 	collectionTtl int64,
+	storageVersion int64,
 ) ([]*datapb.CompactionSegment, error) {
 	_ = tr.RecordSpan()
 
@@ -42,7 +43,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	writer := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), plan.GetSchema(), maxRows, partitionID, collectionID, plan.GetChannel(), 4096)
+	writer := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), plan.GetSchema(), maxRows, partitionID, collectionID, plan.GetChannel(), 4096, storageVersion)
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	if err != nil {

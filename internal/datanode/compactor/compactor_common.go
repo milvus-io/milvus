@@ -25,14 +25,18 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const compactionBatchSize = 100
@@ -292,4 +296,48 @@ func bm25SerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator
 	}
 
 	return binlogs, nil
+}
+
+// enable write with storage v2 format if any source segment is in storage v2 format or enabled by config
+func getCompactStorageVersion(segmentBinlogs []*datapb.CompactionSegmentBinlogs) int64 {
+	v2Segments := lo.Filter(segmentBinlogs, func(seg *datapb.CompactionSegmentBinlogs, _ int) bool {
+		return seg.GetStorageVersion() == storage.StorageV2
+	})
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() || len(v2Segments) > 0 {
+		return storage.StorageV2
+	}
+	return storage.StorageV1
+}
+
+func splitColumnByStats(v1Segments []*datapb.CompactionSegmentBinlogs, splitThresHold int64, schema *schemapb.CollectionSchema) []storagecommon.ColumnGroup {
+	groups := make([]storagecommon.ColumnGroup, 0)
+	shortColumnGroup := storagecommon.ColumnGroup{Columns: make([]int, 0)}
+	memorySizes := make(map[storage.FieldID]int64, len(v1Segments[0].GetFieldBinlogs()))
+	rowNums := make(map[storage.FieldID]int64, len(v1Segments[0].GetFieldBinlogs()))
+	for _, seg := range v1Segments {
+		for _, fieldBinlogs := range seg.GetFieldBinlogs() {
+			fieldID := fieldBinlogs.GetFieldID()
+			if _, ok := memorySizes[fieldID]; !ok {
+				memorySizes[fieldID] = 0
+				rowNums[fieldID] = 0
+			}
+			memorySizes[fieldID] += lo.SumBy(fieldBinlogs.GetBinlogs(), func(binlog *datapb.Binlog) int64 {
+				return binlog.GetMemorySize()
+			})
+			rowNums[fieldID] += lo.SumBy(fieldBinlogs.GetBinlogs(), func(binlog *datapb.Binlog) int64 {
+				return binlog.GetEntriesNum()
+			})
+		}
+	}
+	for i, field := range schema.GetFields() {
+		if rowNums[field.FieldID] != 0 && memorySizes[field.FieldID]/rowNums[field.FieldID] >= splitThresHold {
+			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}})
+		} else {
+			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
+		}
+	}
+	if len(shortColumnGroup.Columns) > 0 {
+		groups = append(groups, shortColumnGroup)
+	}
+	return groups
 }

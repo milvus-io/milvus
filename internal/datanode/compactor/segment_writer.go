@@ -35,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -66,6 +68,9 @@ type MultiSegmentWriter struct {
 
 	res []*datapb.CompactionSegment
 	// DONOT leave it empty of all segments are deleted, just return a segment with zero meta for datacoord
+
+	storageVersion int64
+	rwOption       []storage.RwOption
 }
 
 type compactionAlloactor struct {
@@ -86,20 +91,22 @@ func (alloc *compactionAlloactor) allocSegmentID() (typeutil.UniqueID, error) {
 
 func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator *compactionAlloactor, segmentSize int64,
 	schema *schemapb.CollectionSchema,
-	maxRows int64, partitionID, collectionID int64, channel string, batchSize int,
+	maxRows int64, partitionID, collectionID int64, channel string, batchSize int, storageVersion int64, rwOption ...storage.RwOption,
 ) *MultiSegmentWriter {
 	return &MultiSegmentWriter{
-		ctx:          ctx,
-		binlogIO:     binlogIO,
-		allocator:    allocator,
-		maxRows:      maxRows, // For bloomfilter only
-		segmentSize:  segmentSize,
-		schema:       schema,
-		partitionID:  partitionID,
-		collectionID: collectionID,
-		channel:      channel,
-		batchSize:    batchSize,
-		res:          make([]*datapb.CompactionSegment, 0),
+		ctx:            ctx,
+		binlogIO:       binlogIO,
+		allocator:      allocator,
+		maxRows:        maxRows, // For bloomfilter only
+		segmentSize:    segmentSize,
+		schema:         schema,
+		partitionID:    partitionID,
+		collectionID:   collectionID,
+		channel:        channel,
+		batchSize:      batchSize,
+		res:            make([]*datapb.CompactionSegment, 0),
+		storageVersion: storageVersion,
+		rwOption:       rwOption,
 	}
 }
 
@@ -118,6 +125,7 @@ func (w *MultiSegmentWriter) closeWriter() error {
 			NumOfRows:           w.writer.GetRowNum(),
 			Channel:             w.channel,
 			Bm25Logs:            lo.Values(bm25Logs),
+			StorageVersion:      w.storageVersion,
 		}
 
 		w.res = append(w.res, result)
@@ -127,7 +135,8 @@ func (w *MultiSegmentWriter) closeWriter() error {
 			zap.String("channel", w.channel),
 			zap.Int64("totalRows", w.writer.GetRowNum()),
 			zap.Uint64("totalSize", w.writer.GetWrittenUncompressed()),
-			zap.Int64("expected segment size", w.segmentSize))
+			zap.Int64("expected segment size", w.segmentSize),
+			zap.Int64("storageVersion", w.storageVersion))
 	}
 	return nil
 }
@@ -146,17 +155,40 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 	chunkSize := paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64()
 	rootPath := binlog.GetRootPath()
 
-	rw, err := storage.NewBinlogRecordWriter(w.ctx, w.collectionID, w.partitionID, newSegmentID,
-		w.schema, w.allocator.logIDAlloc, chunkSize, rootPath, w.maxRows,
+	w.rwOption = append(w.rwOption,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return w.binlogIO.Upload(ctx, kvs)
-		}))
+		}),
+		storage.WithVersion(w.storageVersion),
+	)
+	rw, err := storage.NewBinlogRecordWriter(w.ctx, w.collectionID, w.partitionID, newSegmentID,
+		w.schema, w.allocator.logIDAlloc, chunkSize, rootPath, w.maxRows, w.rwOption...,
+	)
 	if err != nil {
 		return err
 	}
 
 	w.writer = storage.NewBinlogValueWriter(rw, w.batchSize)
 	return nil
+}
+
+func (w *MultiSegmentWriter) splitColumnByRecord(r storage.Record, splitThresHold int64) []storagecommon.ColumnGroup {
+	groups := make([]storagecommon.ColumnGroup, 0)
+	shortColumnGroup := storagecommon.ColumnGroup{Columns: make([]int, 0)}
+	for i, fieldID := range w.schema.Fields {
+		arr := r.Column(fieldID.FieldID)
+		size := storage.CalculateArraySize(arr)
+		rows := arr.Len()
+		if rows != 0 && int64(size/rows) >= splitThresHold {
+			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}})
+		} else {
+			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
+		}
+	}
+	if len(shortColumnGroup.Columns) > 0 {
+		groups = append(groups, shortColumnGroup)
+	}
+	return groups
 }
 
 func (w *MultiSegmentWriter) GetWrittenUncompressed() uint64 {
@@ -179,11 +211,21 @@ func (w *MultiSegmentWriter) GetCompactionSegments() []*datapb.CompactionSegment
 
 func (w *MultiSegmentWriter) Write(r storage.Record) error {
 	if w.writer == nil || w.writer.GetWrittenUncompressed() >= uint64(w.segmentSize) {
+		if w.storageVersion == storage.StorageV2 {
+			rwOptions := storage.DefaultRwOptions()
+			for _, opt := range w.rwOption {
+				opt(rwOptions)
+			}
+			if storage.GetColumnGroups(rwOptions) == nil {
+				w.rwOption = append(w.rwOption,
+					storage.WithColumnGroups(w.splitColumnByRecord(r, packed.ColumnGroupSizeThreshold)),
+				)
+			}
+		}
 		if err := w.rotateWriter(); err != nil {
 			return err
 		}
 	}
-
 	return w.writer.Write(r)
 }
 

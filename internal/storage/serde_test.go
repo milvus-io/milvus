@@ -223,7 +223,7 @@ func TestCalculateArraySize(t *testing.T) {
 			arr := tt.arrayBuilder()
 			defer arr.Release()
 
-			size := calculateArraySize(arr)
+			size := CalculateArraySize(arr)
 			if size != tt.expectedSize {
 				t.Errorf("Expected size %d, got %d", tt.expectedSize, size)
 			}
@@ -245,7 +245,7 @@ func TestCalculateArraySizeWithOffset(t *testing.T) {
 	slicedArray := array.NewSlice(fullArray, 1, 4) // Offset = 1, End = 4
 	defer slicedArray.Release()
 
-	size := calculateArraySize(slicedArray)
+	size := CalculateArraySize(slicedArray)
 	expectedSize := len("one") + len("two") + len("three") + 1 // "one", "two", "three", bitmap(1 bytes)
 
 	if size != expectedSize {

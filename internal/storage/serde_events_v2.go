@@ -124,66 +124,70 @@ func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSch
 	}
 
 	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		pkField := func() *schemapb.FieldSchema {
-			for _, field := range schema.Fields {
-				if field.GetIsPrimaryKey() {
-					return field
-				}
-			}
-			return nil
-		}()
-		if pkField == nil {
-			return merr.WrapErrServiceInternal("no primary key field found")
-		}
+		return ValueDeserializerV2(r, v, schema.Fields)
+	}), nil
+}
 
-		rec, ok := r.(*simpleArrowRecord)
-		if !ok {
-			return merr.WrapErrServiceInternal("can not cast to simple arrow record")
-		}
-
-		numFields := len(schema.Fields)
-		for i := 0; i < rec.Len(); i++ {
-			if v[i] == nil {
-				v[i] = &Value{
-					Value: make(map[FieldID]interface{}, numFields),
-				}
+func ValueDeserializerV2(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema) error {
+	pkField := func() *schemapb.FieldSchema {
+		for _, field := range fieldSchema {
+			if field.GetIsPrimaryKey() {
+				return field
 			}
-			value := v[i]
-			m := value.Value.(map[FieldID]interface{})
-			for _, field := range schema.Fields {
-				fieldID := field.FieldID
-				column := r.Column(fieldID)
-				if column.IsNull(i) {
-					m[fieldID] = nil
-				} else {
-					d, ok := serdeMap[field.DataType].deserialize(column, i)
-					if ok {
-						m[fieldID] = d
-					} else {
-						return merr.WrapErrServiceInternal(fmt.Sprintf("can not deserialize field [%s]", field.Name))
-					}
-				}
-			}
-
-			rowID, ok := m[common.RowIDField].(int64)
-			if !ok {
-				return merr.WrapErrIoKeyNotFound("no row id column found")
-			}
-			value.ID = rowID
-			value.Timestamp = m[common.TimeStampField].(int64)
-
-			pkCol := rec.field2Col[pkField.FieldID]
-			pk, err := GenPrimaryKeyByRawData(m[pkField.FieldID], schema.Fields[pkCol].DataType)
-			if err != nil {
-				return err
-			}
-
-			value.PK = pk
-			value.IsDeleted = false
-			value.Value = m
 		}
 		return nil
-	}), nil
+	}()
+	if pkField == nil {
+		return merr.WrapErrServiceInternal("no primary key field found")
+	}
+
+	rec, ok := r.(*simpleArrowRecord)
+	if !ok {
+		return merr.WrapErrServiceInternal("can not cast to simple arrow record")
+	}
+
+	numFields := len(fieldSchema)
+	for i := 0; i < rec.Len(); i++ {
+		if v[i] == nil {
+			v[i] = &Value{
+				Value: make(map[FieldID]interface{}, numFields),
+			}
+		}
+		value := v[i]
+		m := value.Value.(map[FieldID]interface{})
+		for _, field := range fieldSchema {
+			fieldID := field.FieldID
+			column := r.Column(fieldID)
+			if column.IsNull(i) {
+				m[fieldID] = nil
+			} else {
+				d, ok := serdeMap[field.DataType].deserialize(column, i)
+				if ok {
+					m[fieldID] = d
+				} else {
+					return merr.WrapErrServiceInternal(fmt.Sprintf("can not deserialize field [%s]", field.Name))
+				}
+			}
+		}
+
+		rowID, ok := m[common.RowIDField].(int64)
+		if !ok {
+			return merr.WrapErrIoKeyNotFound("no row id column found")
+		}
+		value.ID = rowID
+		value.Timestamp = m[common.TimeStampField].(int64)
+
+		pkCol := rec.field2Col[pkField.FieldID]
+		pk, err := GenPrimaryKeyByRawData(m[pkField.FieldID], fieldSchema[pkCol].DataType)
+		if err != nil {
+			return err
+		}
+
+		value.PK = pk
+		value.IsDeleted = false
+		value.Value = m
+	}
+	return nil
 }
 
 var _ RecordWriter = (*packedRecordWriter)(nil)
@@ -207,7 +211,7 @@ func (pw *packedRecordWriter) Write(r Record) error {
 	}
 	pw.rowNum += int64(r.Len())
 	for col, arr := range rec.r.Columns() {
-		size := uint64(calculateArraySize(arr))
+		size := uint64(CalculateArraySize(arr))
 		pw.writtenUncompressed += size
 		for columnGroup, group := range pw.columnGroups {
 			if lo.Contains(group.Columns, col) {

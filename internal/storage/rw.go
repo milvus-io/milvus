@@ -45,6 +45,14 @@ type rwOptions struct {
 	columnGroups        []storagecommon.ColumnGroup
 }
 
+func GetColumnGroups(opt *rwOptions) []storagecommon.ColumnGroup {
+	return opt.columnGroups
+}
+
+func GetVersion(opt *rwOptions) int64 {
+	return opt.version
+}
+
 type RwOption func(*rwOptions)
 
 func DefaultRwOptions() *rwOptions {
@@ -158,6 +166,9 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			blobsWriter, allocator, chunkSize, rootPath, maxRowNum,
 		)
 	case StorageV2:
+		if len(rwOptions.columnGroups) == 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("packed binlog record writer requires column groups")
+		}
 		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, chunkSize, rootPath, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
