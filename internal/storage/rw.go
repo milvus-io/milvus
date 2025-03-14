@@ -97,6 +97,11 @@ func WithColumnGroups(columnGroups []storagecommon.ColumnGroup) RwOption {
 }
 
 func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloader downloaderFn) (ChunkedBlobsReader, error) {
+	if len(binlogs) == 0 {
+		return func() ([]*Blob, error) {
+			return nil, sio.EOF
+		}, nil
+	}
 	sort.Slice(binlogs, func(i, j int) bool {
 		return binlogs[i].FieldID < binlogs[j].FieldID
 	})

@@ -108,13 +108,13 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 		}
 	}
 
-	composeRecord := func() (Record, bool) {
+	composeRecord := func() (Record, error) {
 		recs := make([]arrow.Array, len(crr.schema.Fields))
 
 		for i, f := range crr.schema.Fields {
 			if crr.rrs[i] != nil {
 				if ok := crr.rrs[i].Next(); !ok {
-					return nil, false
+					return nil, io.EOF
 				}
 				recs[i] = crr.rrs[i].Record().Column(0)
 			} else {
@@ -122,7 +122,7 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 				// Note that we're intentionally not filling default value here, because the
 				// deserializer will fill them later.
 				if !f.Nullable {
-					return nil, false // FIXME: return error
+					return nil, merr.WrapErrServiceInternal(fmt.Sprintf("missing field data %s", f.Name))
 				}
 				dim, _ := typeutil.GetDim(f)
 				builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[f.DataType].arrowType(int(dim)))
@@ -133,25 +133,20 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 		return &compositeRecord{
 			index: crr.index,
 			recs:  recs,
-		}, true
+		}, nil
 	}
 
 	// Try compose records
-	var (
-		r  Record
-		ok bool
-	)
-	r, ok = composeRecord()
-	if !ok {
-		// If failed the first time, try iterate next batch (blob), the error may be io.EOF
+	r, err := composeRecord()
+	if err == io.EOF {
+		// if EOF, try iterate next batch (blob)
 		if err := crr.iterateNextBatch(); err != nil {
 			return nil, err
 		}
-		// If iterate next batch success, try compose again
-		if r, ok = composeRecord(); !ok {
-			// If the next blob is empty, return io.EOF (it's rare).
-			return nil, io.EOF
-		}
+		r, err = composeRecord() // try compose again
+	}
+	if err != nil {
+		return nil, err
 	}
 	return r, nil
 }
