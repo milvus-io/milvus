@@ -12,16 +12,8 @@ from common import common_type as ct
 from common import common_func as cf
 from utils.util_log import test_log as log
 from base.client_v2_base import TestMilvusClientV2Base
-import heapq
-from time import sleep
-from decimal import Decimal, getcontext
-import decimal
-import multiprocessing
-import numbers
+from base.client_base import TestcaseBase
 import random
-import math
-import numpy
-import threading
 import pytest
 import pandas as pd
 from faker import Faker
@@ -37,57 +29,323 @@ cf.patch_faker_text(fake_zh, cf.zh_vocabularies_distribution)
 pd.set_option("expand_frame_repr", False)
 
 prefix = "search_collection"
-search_num = 10
-max_dim = ct.max_dim
-min_dim = ct.min_dim
-epsilon = ct.epsilon
-hybrid_search_epsilon = 0.01
-gracefulTime = ct.gracefulTime
 default_nb = ct.default_nb
-default_nb_medium = ct.default_nb_medium
 default_nq = ct.default_nq
 default_dim = ct.default_dim
 default_limit = ct.default_limit
-max_limit = ct.max_limit
 default_search_exp = "int64 >= 0"
 default_search_string_exp = "varchar >= \"0\""
 default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
-default_invaild_string_exp = "varchar >= 0"
 default_json_search_exp = "json_field[\"number\"] >= 0"
 perfix_expr = 'varchar like "0%"'
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
-default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
-default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:7]
-uid = "test_search"
 nq = 1
-epsilon = 0.001
 field_name = default_float_vec_field_name
-binary_field_name = default_binary_vec_field_name
 search_param = {"nprobe": 1}
 entity = gen_entities(1, is_normal=True)
 entities = gen_entities(default_nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(default_nb)
 default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
-index_name1 = cf.gen_unique_str("float")
-index_name2 = cf.gen_unique_str("varhar")
 half_nb = ct.default_nb // 2
-max_hybrid_search_req_num = ct.max_hybrid_search_req_num
 
 default_primary_key_field_name = "id"
 default_vector_field_name = "vector"
 default_float_field_name = ct.default_float_field_name
-default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
 
 
-class TestSearchPagination(TestMilvusClientV2Base):
+@pytest.mark.xdist_group("TestMilvusClientSearchPagination")
+class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
+    """Test search with pagination functionality"""
+
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = cf.gen_unique_str("test_search_pagination")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_collection(self, request):
+        """
+        Initialize collection before test class runs
+        """
+        # Get client connection
+        client = self._client()
+        
+        # Create collection
+        self.collection_schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        self.collection_schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        self.collection_schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.collection_schema.add_field(default_float_field_name, DataType.FLOAT)
+        self.collection_schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=65535)
+        self.create_collection(client, self.collection_name, schema=self.collection_schema)
+
+        # Insert data 5 times with non-duplicated primary keys
+        for j in range(5):
+            rows = [{default_primary_key_field_name: i + j * default_nb,
+                    default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                    default_float_field_name: (i + j * default_nb) * 1.0,
+                    default_string_field_name: str(i + j * default_nb)}
+                   for i in range(default_nb)]
+            self.insert(client, self.collection_name, rows)
+        self.flush(client, self.collection_name)
+
+        # Create index
+        self.index_params = self.prepare_index_params(client)[0]
+        self.index_params.add_index(field_name=default_vector_field_name, 
+                                  metric_type="COSINE",
+                                  index_type="IVF_FLAT", 
+                                  params={"nlist": 128})
+        self.create_index(client, self.collection_name, index_params=self.index_params)
+
+        # Load collection
+        self.load_collection(client, self.collection_name)
+
+        def teardown():
+            self.drop_collection(self._client(), self.collection_name)
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_search_with_pagination_default(self):
+        """
+        target: test search with pagination
+        method: 1. connect and create a collection
+                2. search pagination with offset
+                3. search with offset+limit
+                4. compare with the search results whose corresponding ids should be the same
+        expected: search successfully and ids is correct
+        """
+        client = self._client()
+        # 1. Create collection with schema
+        collection_name = self.collection_name
+
+        # 2. Search with pagination for 10 pages
+        limit = 100
+        pages = 10
+        vectors_to_search = cf.gen_vectors(default_nq, default_dim)
+        all_pages_results = []
+        for page in range(pages):
+            offset = page * limit
+            search_params = {"metric_type": "COSINE", "params": {"nprobe": 100}, "offset": offset}
+            search_res_with_offset, _ = self.search(
+                client,
+                collection_name,
+                vectors_to_search[:default_nq],
+                anns_field=default_vector_field_name,
+                search_params=search_params,
+                limit=limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={"enable_milvus_client_api": True,
+                             "nq": default_nq,
+                             "limit": limit
+                             }
+            )
+            all_pages_results.append(search_res_with_offset)
+
+        # 3. Search without pagination
+        search_params_full = {"metric_type": "COSINE", "params": {"nprobe": 100}}
+        search_res_full, _ = self.search(
+            client,
+            collection_name,
+            vectors_to_search[:default_nq],
+            anns_field=default_vector_field_name,
+            search_params=search_params_full,
+            limit=limit * pages
+        )
+
+        # 4. Compare results - verify pagination results equal the results in full search with offsets
+        for p in range(pages):
+            page_res = all_pages_results[p]
+            for i in range(default_nq):
+                page_ids = [page_res[i][j].get('id') for j in range(limit)]
+                ids_in_full = [search_res_full[i][p * limit:p * limit + limit][j].get('id') for j in range(limit)]
+                assert page_ids == ids_in_full
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_search_with_pagination_default1(self):
+        """
+        target: test search with pagination
+        method: 1. connect and create a collection
+                2. search pagination with offset
+                3. search with offset+limit
+                4. compare with the search results whose corresponding ids should be the same
+        expected: search successfully and ids is correct
+        """
+        client = self._client()
+        # 1. Create collection with schema
+        collection_name = self.collection_name
+
+        # 2. Search with pagination for 10 pages
+        limit = 100
+        pages = 10
+        vectors_to_search = cf.gen_vectors(default_nq, default_dim)
+        all_pages_results = []
+        for page in range(pages):
+            offset = page * limit
+            search_params = {"metric_type": "COSINE", "params": {"nprobe": 100}, "offset": offset}
+            search_res_with_offset, _ = self.search(
+                client,
+                collection_name,
+                vectors_to_search[:default_nq],
+                anns_field=default_vector_field_name,
+                search_params=search_params,
+                limit=limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={"enable_milvus_client_api": True,
+                             "nq": default_nq,
+                             "limit": limit
+                             }
+            )
+            all_pages_results.append(search_res_with_offset)
+
+        # 3. Search without pagination
+        search_params_full = {"metric_type": "COSINE", "params": {"nprobe": 100}}
+        search_res_full, _ = self.search(
+            client,
+            collection_name,
+            vectors_to_search[:default_nq],
+            anns_field=default_vector_field_name,
+            search_params=search_params_full,
+            limit=limit * pages
+        )
+
+        # 4. Compare results - verify pagination results equal the results in full search with offsets
+        for p in range(pages):
+            page_res = all_pages_results[p]
+            for i in range(default_nq):
+                page_ids = [page_res[i][j].get('id') for j in range(limit)]
+                ids_in_full = [search_res_full[i][p * limit:p * limit + limit][j].get('id') for j in range(limit)]
+                assert page_ids == ids_in_full
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_search_with_pagination_default2(self):
+        """
+        target: test search with pagination
+        method: 1. connect and create a collection
+                2. search pagination with offset
+                3. search with offset+limit
+                4. compare with the search results whose corresponding ids should be the same
+        expected: search successfully and ids is correct
+        """
+        client = self._client()
+        # 1. Create collection with schema
+        collection_name = self.collection_name
+
+        # 2. Search with pagination for 10 pages
+        limit = 100
+        pages = 10
+        vectors_to_search = cf.gen_vectors(default_nq, default_dim)
+        all_pages_results = []
+        for page in range(pages):
+            offset = page * limit
+            search_params = {"metric_type": "COSINE", "params": {"nprobe": 100}, "offset": offset}
+            search_res_with_offset, _ = self.search(
+                client,
+                collection_name,
+                vectors_to_search[:default_nq],
+                anns_field=default_vector_field_name,
+                search_params=search_params,
+                limit=limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={"enable_milvus_client_api": True,
+                             "nq": default_nq,
+                             "limit": limit
+                             }
+            )
+            all_pages_results.append(search_res_with_offset)
+
+        # 3. Search without pagination
+        search_params_full = {"metric_type": "COSINE", "params": {"nprobe": 100}}
+        search_res_full, _ = self.search(
+            client,
+            collection_name,
+            vectors_to_search[:default_nq],
+            anns_field=default_vector_field_name,
+            search_params=search_params_full,
+            limit=limit * pages
+        )
+
+        # 4. Compare results - verify pagination results equal the results in full search with offsets
+        for p in range(pages):
+            page_res = all_pages_results[p]
+            for i in range(default_nq):
+                page_ids = [page_res[i][j].get('id') for j in range(limit)]
+                ids_in_full = [search_res_full[i][p * limit:p * limit + limit][j].get('id') for j in range(limit)]
+                assert page_ids == ids_in_full
+
+    # @pytest.mark.tags(CaseLabel.L0)
+    # def test_milvus_client_search_with_pagination_default(self):
+    #     """
+    #     target: test search with pagination
+    #     method: 1. connect and create a collection
+    #             2. search pagination with offset
+    #             3. search with offset+limit
+    #             4. compare with the search results whose corresponding ids should be the same
+    #     expected: search successfully and ids is correct
+    #     """
+    #     client = self._client()
+    #     # 1. Create collection with schema
+    #     collection_name = cf.gen_unique_str("test_search_pagination")
+    #     self.create_collection(client, collection_name, default_dim)
+    #
+    #     # Insert data 5 times with non-duplicated primary keys
+    #     for j in range(5):
+    #         rows = [{default_primary_key_field_name: i + j * default_nb,
+    #                 default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+    #                 default_float_field_name: (i + j * default_nb) * 1.0,
+    #                 default_string_field_name: str(i + j * default_nb)}
+    #                for i in range(default_nb)]
+    #         self.insert(client, collection_name, rows)
+    #     self.flush(client, collection_name)
+    #
+    #     # 2. Search with pagination for 10 pages
+    #     limit = 100
+    #     pages = 10
+    #     vectors_to_search = cf.gen_vectors(default_nq, default_dim)
+    #     all_pages_results = []
+    #     for page in range(pages):
+    #         offset = page * limit
+    #         search_params = {"metric_type": "COSINE", "params": {"nprobe": 100}, "offset": offset}
+    #         search_res_with_offset, _ = self.search(
+    #             client,
+    #             collection_name,
+    #             vectors_to_search[:default_nq],
+    #             anns_field=default_vector_field_name,
+    #             search_params=search_params,
+    #             limit=limit,
+    #             check_task=CheckTasks.check_search_results,
+    #             check_items={"enable_milvus_client_api": True,
+    #                 "nq": default_nq,
+    #                 "limit": limit
+    #             }
+    #         )
+    #         all_pages_results.append(search_res_with_offset)
+    #
+    #     # 3. Search without pagination
+    #     search_params_full = {"metric_type": "COSINE", "params": {"nprobe": 100}}
+    #     search_res_full, _ = self.search(
+    #         client,
+    #         collection_name,
+    #         vectors_to_search[:default_nq],
+    #         anns_field=default_vector_field_name,
+    #         search_params=search_params_full,
+    #         limit=limit * pages
+    #     )
+    #
+    #     # 4. Compare results - verify pagination results equal the results in full search with offsets
+    #     for p in range(pages):
+    #         page_res = all_pages_results[p]
+    #         for i in range(default_nq):
+    #             page_ids = [page_res[i][j].get('id') for j in range(limit)]
+    #             ids_in_full = [search_res_full[i][p*limit:p*limit+limit][j].get('id') for j in range(limit)]
+    #             assert page_ids == ids_in_full
+
+
+class TestSearchPagination(TestcaseBase):
     """ Test case of search pagination """
 
     @pytest.fixture(scope="function", params=[0, 10, 100])
@@ -115,61 +373,6 @@ class TestSearchPagination(TestMilvusClientV2Base):
     #  The following are valid base cases
     ******************************************************************
     """
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("limit", [10, 20])
-    def test_search_with_pagination(self, offset, limit):
-        """
-        target: test search with pagination
-        method: 1. connect and create a collection
-                2. search pagination with offset
-                3. search with offset+limit
-                4. compare with the search results whose corresponding ids should be the same
-        expected: search successfully and ids is correct
-        """
-        client = self._client()
-        
-        # 1. Create collection with schema
-        collection_name = cf.gen_unique_str("test_search_pagination")
-        self.create_collection(client, collection_name, default_dim)
-
-        # Insert data
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-
-        # 2. Search with pagination
-        vectors_to_search = cf.gen_vectors(default_nq, default_dim)
-        search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
-        search_res, _ = self.search(
-            client,
-            collection_name,
-            vectors_to_search[:default_nq],
-            anns_field=default_vector_field_name,
-            search_params=search_params,
-            limit=limit,
-            check_task=CheckTasks.check_search_results,
-            check_items={"enable_milvus_client_api": True,
-                "nq": default_nq,
-                "limit": limit
-            }
-        )
-
-        # 3. Search with offset+limit
-        search_params_full = {"metric_type": "COSINE", "params": {"nprobe": 10}}
-        res, _ = self.search(
-            client,
-            collection_name,
-            vectors_to_search[:default_nq],
-            anns_field=default_vector_field_name,
-            search_params=search_params_full,
-            limit=limit + offset
-        )
-
-        # 4. Compare results
-        for i in range(len(search_res[0])):
-            assert search_res[0][i] == res[0][i]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_string_with_pagination(self, offset, _async):
@@ -245,8 +448,8 @@ class TestSearchPagination(TestMilvusClientV2Base):
                                   default_limit + offset)[0]
 
         assert len(search_res[0].ids) == len(res[0].ids[offset:])
-        assert sorted(search_res[0].distances, key=numpy.float32) == sorted(
-            res[0].distances[offset:], key=numpy.float32)
+        assert sorted(search_res[0].distances, key=np.float32) == sorted(
+            res[0].distances[offset:], key=np.float32)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_all_vector_type_with_pagination(self, vector_data_type):
