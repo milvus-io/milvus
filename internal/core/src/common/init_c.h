@@ -54,6 +54,9 @@ InitDefaultJSONKeyStatsCommitInterval(int64_t val);
 void
 InitDefaultJSONKeyStatsEnable(bool val);
 
+void
+InitDefaultOptimizeExprEnable(bool val);
+
 #ifdef __cplusplus
 };
 #endif

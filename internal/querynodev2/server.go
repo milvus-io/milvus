@@ -236,6 +236,9 @@ func (node *QueryNode) InitSegcore() error {
 	cJSONKeyStatsCommitInterval := C.int64_t(paramtable.Get().QueryNodeCfg.JSONKeyStatsCommitInterval.GetAsInt64())
 	C.InitDefaultJSONKeyStatsCommitInterval(cJSONKeyStatsCommitInterval)
 
+	cOptimizeExprEnabled := C.bool(paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool())
+	C.InitDefaultOptimizeExprEnable(cOptimizeExprEnabled)
+
 	cJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool())
 	C.InitDefaultJSONKeyStatsEnable(cJSONKeyStatsEnabled)
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())

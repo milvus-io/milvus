@@ -114,6 +114,21 @@ class PhyColumnExpr : public Expr {
     VectorPtr
     DoEval(OffsetVector* input = nullptr);
 
+    std::string
+    ToString() const {
+        return fmt::format("{}", expr_->ToString());
+    }
+
+    bool
+    IsSource() const override {
+        return true;
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return expr_->GetColumn();
+    }
+
  private:
     bool is_indexed_;
 
