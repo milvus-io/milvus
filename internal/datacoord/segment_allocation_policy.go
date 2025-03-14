@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -250,10 +251,92 @@ func sealByTotalGrowingSegmentsSize() channelSealPolicy {
 	}
 }
 
+func sealByBlockingL0(meta *meta) channelSealPolicy {
+	return func(channel string, segments []*SegmentInfo, _ Timestamp) ([]*SegmentInfo, string) {
+		if len(segments) == 0 {
+			return nil, ""
+		}
+
+		sizeLimit := paramtable.Get().DataCoordCfg.BlockingL0SizeInMB.GetAsInt64() * 1024 * 1024 // MB to bytes
+		entryNumLimit := paramtable.Get().DataCoordCfg.BlockingL0EntryNum.GetAsInt64()
+
+		if sizeLimit < 0 && entryNumLimit < 0 {
+			// both policies are disable, just return
+			return nil, ""
+		}
+
+		isLimitMet := func(blockingSize, blockingEntryNum int64) bool {
+			return (sizeLimit < 0 || blockingSize < sizeLimit) &&
+				(entryNumLimit < 0 || blockingEntryNum < entryNumLimit)
+		}
+
+		l0segments := meta.SelectSegments(context.TODO(), WithChannel(channel), SegmentFilterFunc(func(segment *SegmentInfo) bool {
+			return segment.GetLevel() == datapb.SegmentLevel_L0
+		}))
+
+		// sort growing by start pos
+		sortSegmentsByStartPosition(segments)
+
+		// example:
+		// G1  [0-----------------------------
+		// G2            [7-------------------
+		// G3      [4-------------------------
+		// G4			           [10--------
+		// L0a [0-----5]
+		// L0b          [6-------9]
+		// L0c                     [10------20]
+		// say L0a&L0b make total size/num exceed limit,
+		// we shall seal G1,G2,G3 since they have overlap ts range blocking l0 compaction
+
+		// calculate size & num
+		id2Size := lo.SliceToMap(l0segments, func(l0Segment *SegmentInfo) (int64, int64) {
+			return l0Segment.GetID(), int64(GetBinlogSizeAsBytes(l0Segment.GetDeltalogs()))
+		})
+		id2EntryNum := lo.SliceToMap(l0segments, func(l0Segment *SegmentInfo) (int64, int64) {
+			return l0Segment.GetID(), int64(GetBinlogEntriesNum(l0Segment.GetDeltalogs()))
+		})
+
+		// util func to calculate blocking statistics
+		blockingStats := func(l0Segments []*SegmentInfo, minStartTs uint64) (blockingSize int64, blockingEntryNum int64) {
+			for _, l0Segment := range l0Segments {
+				// GetBinlogSizeAsBytes()
+				if l0Segment.GetDmlPosition().GetTimestamp() >= minStartTs {
+					blockingSize += id2Size[l0Segment.GetID()]
+					blockingEntryNum += id2EntryNum[l0Segment.GetID()]
+				}
+			}
+			return blockingSize, blockingEntryNum
+		}
+
+		candidates := segments
+
+		var result []*SegmentInfo
+		for len(candidates) > 0 {
+			// minStartPos must be [0], since growing is sorted
+			blockingSize, blockingEntryNum := blockingStats(l0segments, candidates[0].GetStartPosition().GetTimestamp())
+
+			// if remaining blocking size and num are both less than configured limit, skip sealing segments
+			if isLimitMet(blockingSize, blockingEntryNum) {
+				break
+			}
+			result = append(result, candidates[0])
+			candidates = candidates[1:]
+		}
+		return result, fmt.Sprintf("seal segments due to blocking l0 size/num")
+	}
+}
+
 // sortSegmentsByLastExpires sort segmentStatus with lastExpireTime ascending order
 func sortSegmentsByLastExpires(segs []*SegmentInfo) {
 	sort.Slice(segs, func(i, j int) bool {
 		return segs[i].LastExpireTime < segs[j].LastExpireTime
+	})
+}
+
+// sortSegmentsByLastExpires sort segments with start position
+func sortSegmentsByStartPosition(segs []*SegmentInfo) {
+	sort.Slice(segs, func(i, j int) bool {
+		return segs[i].GetStartPosition().GetTimestamp() < segs[j].GetStartPosition().GetTimestamp()
 	})
 }
 
