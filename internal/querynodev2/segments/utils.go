@@ -263,20 +263,21 @@ func getFieldSchema(schema *schemapb.CollectionSchema, fieldID int64) (*schemapb
 
 func isIndexMmapEnable(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) bool {
 	enableMmap, exist := common.IsMmapIndexEnabled(indexInfo.IndexParams...)
-	if exist {
+	// fast path for returning disabled, need to perform index type check for enabled case
+	if exist && !enableMmap {
 		return enableMmap
 	}
 	indexType := common.GetIndexType(indexInfo.IndexParams)
 	var indexSupportMmap bool
-	var defaultEnableMmap bool
+	// var defaultEnableMmap bool
 	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
 		indexSupportMmap = vecindexmgr.GetVecIndexMgrInstance().IsMMapSupported(indexType)
-		defaultEnableMmap = params.Params.QueryNodeCfg.MmapVectorIndex.GetAsBool()
+		enableMmap = params.Params.QueryNodeCfg.MmapVectorIndex.GetAsBool() || enableMmap
 	} else {
 		indexSupportMmap = indexparamcheck.IsScalarMmapIndex(indexType)
-		defaultEnableMmap = params.Params.QueryNodeCfg.MmapScalarIndex.GetAsBool()
+		enableMmap = params.Params.QueryNodeCfg.MmapScalarIndex.GetAsBool() || enableMmap
 	}
-	return indexSupportMmap && defaultEnableMmap
+	return indexSupportMmap && enableMmap
 }
 
 func isDataMmapEnable(fieldSchema *schemapb.FieldSchema) bool {
