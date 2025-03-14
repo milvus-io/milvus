@@ -5,6 +5,7 @@ option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/internalpb";
 import "common.proto";
 import "schema.proto";
 import "milvus.proto";
+import "plan.proto";
 
 message GetTimeTickChannelRequest {
 }
@@ -197,6 +198,10 @@ message RetrieveRequest {
   int32 reduce_type = 17;
   common.ConsistencyLevel consistency_level = 18;
   bool is_iterator = 19;
+  // for query agg
+  repeated int64 group_by_field_ids = 20;
+  repeated plan.Aggregate aggregates = 21;
+  bool ignore_null_keys = 22;
 }
 
 
@@ -210,7 +215,7 @@ message RetrieveResults {
   repeated string channelIDs_retrieved = 7;
   repeated int64 global_sealed_segmentIDs = 8;
 
-   // query request cost
+  // query request cost
   CostAggregation costAggregation = 13;
   int64 all_retrieve_count = 14;
   bool has_more_result = 15;

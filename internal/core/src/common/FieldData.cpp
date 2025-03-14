@@ -324,4 +324,71 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
     }
 }
 
+void
+ResizeScalarFieldData(const DataType& type,
+                      int64_t new_num_rows,
+                      FieldDataPtr& field_data) {
+    switch (type) {
+        case DataType::BOOL: {
+            auto inner_field_data =
+                std::dynamic_pointer_cast<FieldData<bool>>(field_data);
+            inner_field_data->resize_field_data(new_num_rows);
+            return;
+        }
+        case DataType::INT8: {
+            auto inner_field_data =
+                std::dynamic_pointer_cast<FieldData<int8_t>>(field_data);
+            inner_field_data->resize_field_data(new_num_rows);
+            return;
+        }
+        case DataType::INT16: {
+            auto inner_field_data =
+                std::dynamic_pointer_cast<FieldData<int16_t>>(field_data);
+            inner_field_data->resize_field_data(new_num_rows);
+            return;
+        }
+        case DataType::INT32: {
+            auto inner_field_data =
+                std::dynamic_pointer_cast<FieldData<int32_t>>(field_data);
+            inner_field_data->resize_field_data(new_num_rows);
+            return;
+        }
+        case DataType::INT64: {
+            auto inner_field_data =
+                std::dynamic_pointer_cast<FieldData<int64_t>>(field_data);
+            inner_field_data->resize_field_data(new_num_rows);
+            return;
+        }
+        case DataType::FLOAT: {
+            auto inner_field_data =
+                std::dynamic_pointer_cast<FieldData<float>>(field_data);
+            inner_field_data->resize_field_data(new_num_rows);
+            return;
+        }
+        case DataType::DOUBLE: {
+            auto inner_field_data =
+                std::dynamic_pointer_cast<FieldData<double>>(field_data);
+            inner_field_data->resize_field_data(new_num_rows);
+            return;
+        }
+        case DataType::STRING:
+        case DataType::VARCHAR: {
+            auto inner_field_data =
+                std::dynamic_pointer_cast<FieldData<std::string>>(field_data);
+            inner_field_data->resize_field_data(new_num_rows);
+            return;
+        }
+        case DataType::JSON: {
+            auto inner_field_data =
+                std::dynamic_pointer_cast<FieldData<Json>>(field_data);
+            inner_field_data->resize_field_data(new_num_rows);
+            return;
+        }
+        default:
+            PanicInfo(DataTypeInvalid,
+                      "ResizeScalarFieldData not support data type " +
+                          GetDataTypeName(type));
+    }
+}
+
 }  // namespace milvus
