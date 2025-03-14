@@ -68,7 +68,6 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     int chunk_size = 100;
     int total_row_count = chunk_num * chunk_size;
     int bitset_size = (total_row_count + 7) / 8;
-    int chunk_bitset_size = (chunk_size + 7) / 8;
 
     auto column = std::make_shared<ChunkedColumn>();
     auto schema = std::make_shared<Schema>();
@@ -78,11 +77,11 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     for (int i = 0; i < chunk_num; i++) {
         auto dataset = segcore::DataGen(schema, chunk_size);
         auto data = dataset.get_col<float>(fakevec_id);
-        auto buf_size = chunk_bitset_size + 4 * data.size();
+        auto buf_size = 4 * data.size();
 
         char* buf = new char[buf_size];
         defer.AddDefer([buf]() { delete[] buf; });
-        memcpy(buf + chunk_bitset_size, data.data(), 4 * data.size());
+        memcpy(buf, data.data(), 4 * data.size());
 
         auto chunk = std::make_shared<FixedWidthChunk>(
             chunk_size, dim, buf, buf_size, 4, false);
