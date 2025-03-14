@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -264,6 +265,10 @@ func (i *GrpcAccessInfo) Expression() string {
 		return expr.(string)
 	}
 
+	if req, ok := i.req.(*milvuspb.HybridSearchRequest); ok {
+		return listToString(lo.Map(req.GetRequests(), func(req *milvuspb.SearchRequest, _ int) string { return req.GetDsl() }))
+	}
+
 	dsl, ok := requestutil.GetDSLFromRequest(i.req)
 	if ok {
 		return dsl.(string)
@@ -296,6 +301,18 @@ func (i *GrpcAccessInfo) ConsistencyLevel() string {
 	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
 	if ok {
 		return level.String()
+	}
+	return Unknown
+}
+
+func (i *GrpcAccessInfo) AnnsField() string {
+	if req, ok := i.req.(*milvuspb.SearchRequest); ok {
+		return getAnnsFieldFromKvs(req.GetSearchParams())
+	}
+
+	if req, ok := i.req.(*milvuspb.HybridSearchRequest); ok {
+		fields := lo.Map(req.GetRequests(), func(req *milvuspb.SearchRequest, _ int) string { return getAnnsFieldFromKvs(req.GetSearchParams()) })
+		return listToString(fields)
 	}
 	return Unknown
 }
