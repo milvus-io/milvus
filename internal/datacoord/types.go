@@ -46,4 +46,5 @@ type Task interface {
 	SetEndTime(time.Time)
 	GetEndTime() time.Time
 	GetTaskType() string
+	DropTaskMeta(ctx context.Context, meta *meta) error
 }

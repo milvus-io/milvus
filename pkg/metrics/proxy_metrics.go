@@ -435,7 +435,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "queue_task_num",
 			Help:      "",
-		}, []string{nodeIDLabelName, queueTypeLabelName, taskStateLabel})
+		}, []string{nodeIDLabelName, queueTypeLabelName, TaskStateLabel})
 
 	ProxyParseExpressionLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
