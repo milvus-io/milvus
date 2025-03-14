@@ -41,3 +41,14 @@ func TestRegisterMessageIDUnmarshaler(t *testing.T) {
 		})
 	})
 }
+
+func TestCases(t *testing.T) {
+	msgID := mock_message.NewMockMessageID(t)
+	msgID.EXPECT().Marshal().Return("123").Maybe()
+	message.CreateTestInsertMessage(t, 1, 100, 100, msgID)
+	message.CreateTestCreateCollectionMessage(t, 1, 100, msgID)
+	message.CreateTestEmptyInsertMesage(1, nil)
+	message.CreateTestDropCollectionMessage(t, 1, 100, msgID)
+	message.CreateTestTimeTickSyncMessage(t, 1, 100, msgID)
+	message.CreateTestCreateSegmentMessage(t, 1, 100, msgID)
+}

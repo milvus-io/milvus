@@ -26,6 +26,7 @@ package index
 #include "indexbuilder/init_c.h"
 */
 import "C"
+
 import (
 	"github.com/cockroachdb/errors"
 
