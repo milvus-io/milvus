@@ -9,12 +9,13 @@ import (
 )
 
 func TestPChannelInfo(t *testing.T) {
-	info := PChannelInfo{Name: "pchannel", Term: 1}
+	info := PChannelInfo{Name: "pchannel", Term: 1, AccessMode: AccessModeRO}
 	pbInfo := NewProtoFromPChannelInfo(info)
 
 	info2 := NewPChannelInfoFromProto(pbInfo)
 	assert.Equal(t, info.Name, info2.Name)
 	assert.Equal(t, info.Term, info2.Term)
+	assert.Equal(t, info.AccessMode, info2.AccessMode)
 
 	assert.Panics(t, func() {
 		NewProtoFromPChannelInfo(PChannelInfo{Name: "", Term: 1})

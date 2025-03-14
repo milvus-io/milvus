@@ -31,60 +31,54 @@ func adaptImplsToWAL(
 	builders []interceptors.InterceptorBuilder,
 	cleanup func(),
 ) wal.WAL {
-	param := interceptors.InterceptorBuildParam{
-		WALImpls: basicWAL,
-		WAL:      syncutil.NewFuture[wal.WAL](),
-	}
 	logger := resource.Resource().Logger().With(
 		log.FieldComponent("wal"),
-		zap.Any("channel", basicWAL.Channel()),
+		zap.String("channel", basicWAL.Channel().String()),
 	)
-	wal := &walAdaptorImpl{
+	roWAL := &roWALAdaptorImpl{
+		roWALImpls:  basicWAL,
 		lifetime:    typeutil.NewLifetime(),
 		available:   make(chan struct{}),
 		idAllocator: typeutil.NewIDAllocator(),
-		inner:       basicWAL,
-		// TODO: make the pool size configurable.
-		appendExecutionPool:    conc.NewPool[struct{}](10),
-		interceptorBuildResult: buildInterceptor(builders, param),
 		scannerRegistry: scannerRegistry{
 			channel:     basicWAL.Channel(),
 			idAllocator: typeutil.NewIDAllocator(),
 		},
-		scanners:     typeutil.NewConcurrentMap[int64, wal.Scanner](),
-		cleanup:      cleanup,
-		writeMetrics: metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
-		scanMetrics:  metricsutil.NewScanMetrics(basicWAL.Channel()),
-		logger:       logger,
+		scanners:    typeutil.NewConcurrentMap[int64, wal.Scanner](),
+		cleanup:     cleanup,
+		scanMetrics: metricsutil.NewScanMetrics(basicWAL.Channel()),
 	}
-	wal.writeMetrics.SetLogger(logger)
+	roWAL.SetLogger(logger)
+	if basicWAL.Channel().AccessMode == types.AccessModeRO {
+		// if the wal is read-only, return it directly.
+		return roWAL
+	}
+
+	// build append interceptor for a wal.
+	param := interceptors.InterceptorBuildParam{
+		WALImpls: basicWAL,
+		WAL:      syncutil.NewFuture[wal.WAL](),
+	}
+	wal := &walAdaptorImpl{
+		roWALAdaptorImpl: roWAL,
+		rwWALImpls:       basicWAL,
+		// TODO: make the pool size configurable.
+		appendExecutionPool:    conc.NewPool[struct{}](10),
+		interceptorBuildResult: buildInterceptor(builders, param),
+		writeMetrics:           metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
+	}
 	param.WAL.Set(wal)
 	return wal
 }
 
 // walAdaptorImpl is a wrapper of WALImpls to extend it into a WAL interface.
 type walAdaptorImpl struct {
-	lifetime               *typeutil.Lifetime
-	available              chan struct{}
-	idAllocator            *typeutil.IDAllocator
-	inner                  walimpls.WALImpls
+	*roWALAdaptorImpl
+
+	rwWALImpls             walimpls.WALImpls
 	appendExecutionPool    *conc.Pool[struct{}]
 	interceptorBuildResult interceptorBuildResult
-	scannerRegistry        scannerRegistry
-	scanners               *typeutil.ConcurrentMap[int64, wal.Scanner]
-	cleanup                func()
 	writeMetrics           *metricsutil.WriteMetrics
-	scanMetrics            *metricsutil.ScanMetrics
-	logger                 *log.MLogger
-}
-
-func (w *walAdaptorImpl) WALName() string {
-	return w.inner.WALName()
-}
-
-// Channel returns the channel info of wal.
-func (w *walAdaptorImpl) Channel() types.PChannelInfo {
-	return w.inner.Channel()
 }
 
 // GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
@@ -93,7 +87,7 @@ func (w *walAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel st
 		return 0, status.NewOnShutdownError("wal is on shutdown")
 	}
 	defer w.lifetime.Done()
-	operator := resource.Resource().TimeTickInspector().MustGetOperator(w.inner.Channel())
+	operator := resource.Resource().TimeTickInspector().MustGetOperator(w.rwWALImpls.Channel())
 	mvccManager, err := operator.MVCCManager(ctx)
 	if err != nil {
 		// Unreachable code forever.
@@ -102,7 +96,7 @@ func (w *walAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel st
 	currentMVCC := mvccManager.GetMVCCOfVChannel(vchannel)
 	if !currentMVCC.Confirmed {
 		// if the mvcc is not confirmed, trigger a sync operation to make it confirmed as soon as possible.
-		resource.Resource().TimeTickInspector().TriggerSync(w.inner.Channel())
+		resource.Resource().TimeTickInspector().TriggerSync(w.rwWALImpls.Channel())
 	}
 	return currentMVCC.Timetick, nil
 }
@@ -140,7 +134,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 				return notPersistHint.MessageID, nil
 			}
 			metricsGuard.StartWALImplAppend()
-			msgID, err := w.inner.Append(ctx, msg)
+			msgID, err := w.rwWALImpls.Append(ctx, msg)
 			metricsGuard.FinishWALImplAppend()
 			return msgID, err
 		})
@@ -185,59 +179,20 @@ func (w *walAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMes
 	})
 }
 
-// Read returns a scanner for reading records from the wal.
-func (w *walAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.Scanner, error) {
-	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, status.NewOnShutdownError("wal is on shutdown")
-	}
-	defer w.lifetime.Done()
-
-	name, err := w.scannerRegistry.AllocateScannerName()
-	if err != nil {
-		return nil, err
-	}
-	// wrap the scanner with cleanup function.
-	id := w.idAllocator.Allocate()
-	s := newScannerAdaptor(
-		name,
-		w.inner,
-		opts,
-		w.scanMetrics.NewScannerMetrics(),
-		func() { w.scanners.Remove(id) })
-	w.scanners.Insert(id, s)
-	return s, nil
-}
-
-// IsAvailable returns whether the wal is available.
-func (w *walAdaptorImpl) IsAvailable() bool {
-	select {
-	case <-w.available:
-		return false
-	default:
-		return true
-	}
-}
-
-// Available returns a channel that will be closed when the wal is shut down.
-func (w *walAdaptorImpl) Available() <-chan struct{} {
-	return w.available
-}
-
 // Close overrides Scanner Close function.
 func (w *walAdaptorImpl) Close() {
-	logger := w.logger.With(zap.String("processing", "WALClose"))
-	logger.Info("wal begin to close, start graceful close...")
+	w.Logger().Info("wal begin to close, start graceful close...")
 	// graceful close the interceptors before wal closing.
 	w.interceptorBuildResult.GracefulCloseFunc()
 
-	logger.Info("wal graceful close done, wait for operation to be finished...")
+	w.Logger().Info("wal graceful close done, wait for operation to be finished...")
 
 	// begin to close the wal.
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.lifetime.Wait()
 	close(w.available)
 
-	logger.Info("wal begin to close scanners...")
+	w.Logger().Info("wal begin to close scanners...")
 
 	// close all wal instances.
 	w.scanners.Range(func(id int64, s wal.Scanner) bool {
@@ -246,16 +201,16 @@ func (w *walAdaptorImpl) Close() {
 		return true
 	})
 
-	logger.Info("scanner close done, close inner wal...")
-	w.inner.Close()
+	w.Logger().Info("scanner close done, close inner wal...")
+	w.rwWALImpls.Close()
 
-	logger.Info("wal close done, close interceptors...")
+	w.Logger().Info("wal close done, close interceptors...")
 	w.interceptorBuildResult.Close()
 	w.appendExecutionPool.Free()
 
-	logger.Info("call wal cleanup function...")
+	w.Logger().Info("call wal cleanup function...")
 	w.cleanup()
-	logger.Info("wal closed")
+	w.Logger().Info("wal closed")
 
 	// close all metrics.
 	w.scanMetrics.Close()

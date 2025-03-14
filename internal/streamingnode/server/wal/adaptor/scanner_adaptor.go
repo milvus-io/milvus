@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -24,7 +25,7 @@ var _ wal.Scanner = (*scannerAdaptorImpl)(nil)
 // newScannerAdaptor creates a new scanner adaptor.
 func newScannerAdaptor(
 	name string,
-	l walimpls.WALImpls,
+	l walimpls.ROWALImpls,
 	readOption wal.ReadOption,
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
@@ -58,7 +59,7 @@ func newScannerAdaptor(
 type scannerAdaptorImpl struct {
 	*helper.ScannerHelper
 	logger        *log.MLogger
-	innerWAL      walimpls.WALImpls
+	innerWAL      walimpls.ROWALImpls
 	readOption    wal.ReadOption
 	filterFunc    func(message.ImmutableMessage) bool
 	reorderBuffer *utility.ReOrderByTimeTickBuffer // support time tick reorder.
@@ -122,9 +123,12 @@ func (s *scannerAdaptorImpl) execute() {
 
 // produceEventLoop produces the message from the wal and write ahead buffer.
 func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMessage) error {
-	wb, err := resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer(s.Context())
-	if err != nil {
-		return err
+	var wb wab.ROWriteAheadBuffer
+	var err error
+	if s.Channel().AccessMode == types.AccessModeRW {
+		if wb, err = resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer(s.Context()); err != nil {
+			return err
+		}
 	}
 
 	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)

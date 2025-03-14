@@ -136,49 +136,77 @@ func (f *testOneWALFramework) Run() {
 			Name: f.pchannel,
 			Term: int64(f.term),
 		}
-		w, err := f.opener.Open(ctx, &wal.OpenOption{
+		rwWAL, err := f.opener.Open(ctx, &wal.OpenOption{
 			Channel: pChannel,
 		})
 		assert.NoError(f.t, err)
-		assert.NotNil(f.t, w)
-		assert.Equal(f.t, pChannel.Name, w.Channel().Name)
+		assert.NotNil(f.t, rwWAL)
+		assert.Equal(f.t, pChannel.Name, rwWAL.Channel().Name)
 
-		f.testReadAndWrite(ctx, w)
+		pChannel.AccessMode = types.AccessModeRO
+		roWAL, err := f.opener.Open(ctx, &wal.OpenOption{
+			Channel: pChannel,
+		})
+		assert.NoError(f.t, err)
+		f.testReadAndWrite(ctx, rwWAL, roWAL)
 		// close the wal
-		w.Close()
+		rwWAL.Close()
+		roWAL.Close()
 	}
 }
 
-func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, w wal.WAL) {
-	f.testSendCreateCollection(ctx, w)
-	defer f.testSendDropCollection(ctx, w)
+func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, rwWAL wal.WAL, roWAL wal.ROWAL) {
+	f.testSendCreateCollection(ctx, rwWAL)
+	defer f.testSendDropCollection(ctx, rwWAL)
 
 	// Test read and write.
 	wg := sync.WaitGroup{}
-	wg.Add(3)
+	wg.Add(5)
 
 	var newWritten []message.ImmutableMessage
-	var read1, read2 []message.ImmutableMessage
+	var read1, read2, read3 []message.ImmutableMessage
 	appendDone := make(chan struct{})
+	go func() {
+		defer wg.Done()
+		lastMVCC, err := rwWAL.GetLatestMVCCTimestamp(context.Background(), testVChannel)
+		assert.NoError(f.t, err)
+		for {
+			select {
+			case <-appendDone:
+				return
+			case <-time.After(time.Duration(rand.Int31n(100)) * time.Millisecond):
+				newMVCC, err := rwWAL.GetLatestMVCCTimestamp(context.Background(), testVChannel)
+				assert.NoError(f.t, err)
+				assert.GreaterOrEqual(f.t, newMVCC, lastMVCC)
+				lastMVCC = newMVCC
+			}
+		}
+	}()
 	go func() {
 		defer func() {
 			close(appendDone)
 			wg.Done()
 		}()
 		var err error
-		newWritten, err = f.testAppend(ctx, w)
+		newWritten, err = f.testAppend(ctx, rwWAL)
 		assert.NoError(f.t, err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
-		read1, err = f.testRead(ctx, w)
+		read1, err = f.testRead(ctx, rwWAL)
 		assert.NoError(f.t, err)
 	}()
 	go func() {
 		defer wg.Done()
 		var err error
-		read2, err = f.testRead(ctx, w)
+		read3, err = f.testRead(ctx, roWAL)
+		assert.NoError(f.t, err)
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		read2, err = f.testRead(ctx, rwWAL)
 		assert.NoError(f.t, err)
 	}()
 	wg.Wait()
@@ -186,17 +214,29 @@ func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, w wal.WAL) {
 	// read result should be sorted by timetick.
 	f.assertSortByTimeTickMessageList(read1)
 	f.assertSortByTimeTickMessageList(read2)
+	f.assertSortByTimeTickMessageList(read3)
 
 	// all written messages should be read.
 	sort.Sort(sortByMessageID(newWritten))
 	f.written = append(f.written, newWritten...)
 	sort.Sort(sortByMessageID(read1))
 	sort.Sort(sortByMessageID(read2))
+	sort.Sort(sortByMessageID(read3))
 	f.assertEqualMessageList(f.written, read1)
 	f.assertEqualMessageList(f.written, read2)
+	f.assertEqualMessageList(f.written, read3)
 
 	// test read with option
-	f.testReadWithOption(ctx, w)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		f.testReadWithOption(ctx, rwWAL)
+	}()
+	go func() {
+		defer wg.Done()
+		f.testReadWithOption(ctx, roWAL)
+	}()
+	wg.Wait()
 }
 
 func (f *testOneWALFramework) testSendCreateCollection(ctx context.Context, w wal.WAL) {
@@ -343,7 +383,7 @@ func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]mess
 	return messages, nil
 }
 
-func (f *testOneWALFramework) testRead(ctx context.Context, w wal.WAL) ([]message.ImmutableMessage, error) {
+func (f *testOneWALFramework) testRead(ctx context.Context, w wal.ROWAL) ([]message.ImmutableMessage, error) {
 	s, err := w.Read(ctx, wal.ReadOption{
 		VChannel:      testVChannel,
 		DeliverPolicy: options.DeliverPolicyAll(),
@@ -385,7 +425,7 @@ func (f *testOneWALFramework) testRead(ctx context.Context, w wal.WAL) ([]messag
 	return msgs, nil
 }
 
-func (f *testOneWALFramework) testReadWithOption(ctx context.Context, w wal.WAL) {
+func (f *testOneWALFramework) testReadWithOption(ctx context.Context, w wal.ROWAL) {
 	loopCount := 5
 	wg := sync.WaitGroup{}
 	wg.Add(loopCount)
