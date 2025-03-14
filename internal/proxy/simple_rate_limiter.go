@@ -366,6 +366,7 @@ func IsDDLRequest(rt internalpb.RateType) bool {
 	switch rt {
 	case internalpb.RateType_DDLCollection,
 		internalpb.RateType_DDLPartition,
+		internalpb.RateType_DDLDB,
 		internalpb.RateType_DDLIndex,
 		internalpb.RateType_DDLFlush,
 		internalpb.RateType_DDLCompaction:
