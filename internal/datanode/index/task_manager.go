@@ -17,6 +17,7 @@
 package index
 
 import "C"
+
 import (
 	"context"
 	"sync"
