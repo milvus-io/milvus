@@ -1,7 +1,6 @@
 package indexparamcheck
 
 import (
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,7 +26,7 @@ func Test_INVERTEDIndexChecker(t *testing.T) {
 
 func Test_CheckTrain(t *testing.T) {
 	c := newINVERTEDChecker()
-	assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, map[string]string{"json_cast_type": strconv.Itoa(int(schemapb.DataType_Bool)), "json_path": "json['a']"}))
-	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, map[string]string{"json_cast_type": strconv.Itoa(int(schemapb.DataType_Array)), "json_path": "json['a']"}))
+	assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, map[string]string{"json_cast_type": "BOOL", "json_path": "json['a']"}))
+	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, map[string]string{"json_cast_type": "array", "json_path": "json['a']"}))
 	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, map[string]string{"json_cast_type": "abc", "json_path": "json['a']"}))
 }
