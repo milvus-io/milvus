@@ -28,22 +28,22 @@ enum class JSONType {
     STRING_ESCAPE
 };
 using stdclock = std::chrono::high_resolution_clock;
-class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
+class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
-    explicit JsonKeyInvertedIndex(
+    explicit JsonKeyStatsInvertedIndex(
         const storage::FileManagerContext& ctx,
         bool is_load,
         int64_t json_key_data_format = 0,
         int64_t json_stats_tantivy_memory_budget = 16777216);
 
-    explicit JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
-                                  const char* unique_id);
+    explicit JsonKeyStatsInvertedIndex(int64_t commit_interval_in_ms,
+                                       const char* unique_id);
 
-    explicit JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
-                                  const char* unique_id,
-                                  const std::string& path);
+    explicit JsonKeyStatsInvertedIndex(int64_t commit_interval_in_ms,
+                                       const char* unique_id,
+                                       const std::string& path);
 
-    ~JsonKeyInvertedIndex() override{};
+    ~JsonKeyStatsInvertedIndex() override{};
 
  public:
     IndexStatsPtr
