@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -29,6 +28,7 @@ import (
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
@@ -119,10 +119,18 @@ func TestSimpleRateLimiter(t *testing.T) {
 		for _, rt := range internalpb.RateType_value {
 			if internalpb.RateType_DDLFlush == internalpb.RateType(rt) {
 				// the flush request has 0.1 rate limiter that means only allow to execute one request each 10 seconds.
-				time.Sleep(10 * time.Second)
 				err := simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType_DDLFlush, 1)
 				assert.NoError(t, err)
 				err = simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType_DDLFlush, 1)
+				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
+				continue
+			}
+			if internalpb.RateType_DDLDB == internalpb.RateType(rt) {
+				err := simpleLimiter.Check(util.InvalidDBID, nil, internalpb.RateType(rt), 1)
+				assert.NoError(t, err)
+				err = simpleLimiter.Check(util.InvalidDBID, nil, internalpb.RateType(rt), 5)
+				assert.NoError(t, err)
+				err = simpleLimiter.Check(util.InvalidDBID, nil, internalpb.RateType(rt), 1)
 				assert.ErrorIs(t, err, merr.ErrServiceRateLimit)
 				continue
 			}
@@ -382,5 +390,15 @@ func TestRateLimiter(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Error(t, collectionRateLimiters.GetQuotaExceededError(internalpb.RateType_DQLQuery))
 		assert.Error(t, collectionRateLimiters.GetQuotaExceededError(internalpb.RateType_DMLInsert))
+	})
+
+	t.Run("test quota", func(t *testing.T) {
+		paramtable.Init()
+		simpleLimiter := NewSimpleLimiter(0, 0)
+		err := simpleLimiter.Check(-1, nil, internalpb.RateType_DDLDB, 1)
+		assert.NoError(t, err)
+
+		err = simpleLimiter.Check(-1, nil, internalpb.RateType_DDLDB, 1)
+		assert.NoError(t, err)
 	})
 }
