@@ -8,8 +8,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -42,6 +44,17 @@ func (dt *deleteTaskByStreamingService) Execute(ctx context.Context) (err error)
 		return err
 	}
 
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
+	if err != nil {
+		log.Ctx(ctx).Warn("get collection schema from global meta cache failed", zap.String("collectionName", dt.req.GetCollectionName()), zap.Error(err))
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+	}
+	ezID, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.CripherEZIDKey, schema.Properties)
+	cipher, err := getCipher(ezID)
+	if err != nil {
+		return err
+	}
+
 	var msgs []message.MutableMessage
 	for hashKey, deleteMsgs := range result {
 		vchannel := dt.vChannels[hashKey]
@@ -52,6 +65,7 @@ func (dt *deleteTaskByStreamingService) Execute(ctx context.Context) (err error)
 				}).
 				WithBody(deleteMsg.DeleteRequest).
 				WithVChannel(vchannel).
+				WithCipher(cipher, ezID).
 				BuildMutable()
 			if err != nil {
 				return err

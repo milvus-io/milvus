@@ -1,11 +1,13 @@
 package message
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -103,6 +105,8 @@ type mutableMesasgeBuilder[H proto.Message, B proto.Message] struct {
 	body        B
 	properties  propertiesImpl
 	allVChannel bool
+	cipher      hook.Cipher
+	ezID        string
 }
 
 // WithMessageHeader creates a new builder with determined message type.
@@ -175,6 +179,12 @@ func (b *mutableMesasgeBuilder[H, B]) WithProperties(kvs map[string]string) *mut
 	return b
 }
 
+func (b *mutableMesasgeBuilder[H, B]) WithCipher(cipher hook.Cipher, ezID string) *mutableMesasgeBuilder[H, B] {
+	b.cipher = cipher
+	b.ezID = ezID
+	return b
+}
+
 // BuildMutable builds a mutable message.
 // Panic if not set payload and message type.
 // should only used at client side.
@@ -226,10 +236,24 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to marshal body")
 	}
-	return &messageImpl{
+
+	msg := &messageImpl{
 		payload:    payload,
 		properties: b.properties,
-	}, nil
+	}
+
+	// encrypt msg when cipher exist
+	if b.ezID != "" {
+		if b.cipher == nil {
+			return nil, fmt.Errorf("faild to encrypt message without cipher plugin")
+		}
+
+		err := msg.encrypt(b.ezID, b.cipher)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to encrypt message")
+		}
+	}
+	return msg, nil
 }
 
 // NewImmutableTxnMessageBuilder creates a new txn builder.
@@ -246,6 +270,7 @@ type ImmutableTxnMessageBuilder struct {
 	txnCtx   TxnContext
 	begin    ImmutableBeginTxnMessageV2
 	messages []ImmutableMessage
+	cipher   hook.Cipher
 }
 
 // ExpiredTimeTick returns the expired time tick of the txn.
@@ -271,9 +296,14 @@ func (b *ImmutableTxnMessageBuilder) EstimateSize() int {
 	return size
 }
 
+func (b *ImmutableTxnMessageBuilder) WithCipher(cipher hook.Cipher) *ImmutableTxnMessageBuilder {
+	b.cipher = cipher
+	return b
+}
+
 // Build builds a txn message.
 func (b *ImmutableTxnMessageBuilder) Build(commit ImmutableCommitTxnMessageV2) (ImmutableTxnMessage, error) {
-	msg, err := newImmutableTxnMesasgeFromWAL(b.begin, b.messages, commit)
+	msg, err := newImmutableTxnMesasgeFromWAL(b.begin, b.messages, commit, b.cipher)
 	b.begin = nil
 	b.messages = nil
 	return msg, err
@@ -284,6 +314,7 @@ func newImmutableTxnMesasgeFromWAL(
 	begin ImmutableBeginTxnMessageV2,
 	body []ImmutableMessage,
 	commit ImmutableCommitTxnMessageV2,
+	cipher hook.Cipher,
 ) (ImmutableTxnMessage, error) {
 	// combine begin and commit messages into one.
 	msg, err := newTxnMessageBuilderV2().
@@ -296,7 +327,14 @@ func newImmutableTxnMesasgeFromWAL(
 	}
 	// we don't need to modify the begin message's timetick, but set all the timetick of body messages.
 	for idx, m := range body {
-		body[idx] = m.(*immutableMessageImpl).cloneForTxnBody(commit.TimeTick(), commit.LastConfirmedMessageID())
+		msg := m.(*immutableMessageImpl).cloneForTxnBody(commit.TimeTick(), commit.LastConfirmedMessageID())
+		if cipher != nil {
+			err := msg.decrypt(cipher)
+			if err != nil {
+				return nil, err
+			}
+		}
+		body[idx] = msg
 	}
 
 	immutableMessage := msg.WithTimeTick(commit.TimeTick()).

@@ -3,7 +3,9 @@
 package mock_message
 
 import (
+	hook "github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -108,6 +110,98 @@ func (_c *MockMutableMessage_BroadcastHeader_Call) Return(_a0 *message.Broadcast
 }
 
 func (_c *MockMutableMessage_BroadcastHeader_Call) RunAndReturn(run func() *message.BroadcastHeader) *MockMutableMessage_BroadcastHeader_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Decrypt provides a mock function with given fields: cipher
+func (_m *MockMutableMessage) Decrypt(cipher hook.Cipher) error {
+	ret := _m.Called(cipher)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Decrypt")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(hook.Cipher) error); ok {
+		r0 = rf(cipher)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockMutableMessage_Decrypt_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Decrypt'
+type MockMutableMessage_Decrypt_Call struct {
+	*mock.Call
+}
+
+// Decrypt is a helper method to define mock.On call
+//   - cipher hook.Cipher
+func (_e *MockMutableMessage_Expecter) Decrypt(cipher interface{}) *MockMutableMessage_Decrypt_Call {
+	return &MockMutableMessage_Decrypt_Call{Call: _e.mock.On("Decrypt", cipher)}
+}
+
+func (_c *MockMutableMessage_Decrypt_Call) Run(run func(cipher hook.Cipher)) *MockMutableMessage_Decrypt_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(hook.Cipher))
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_Decrypt_Call) Return(_a0 error) *MockMutableMessage_Decrypt_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_Decrypt_Call) RunAndReturn(run func(hook.Cipher) error) *MockMutableMessage_Decrypt_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Encrypt provides a mock function with given fields: cipher
+func (_m *MockMutableMessage) Encrypt(cipher hook.Cipher) error {
+	ret := _m.Called(cipher)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Encrypt")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(hook.Cipher) error); ok {
+		r0 = rf(cipher)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockMutableMessage_Encrypt_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Encrypt'
+type MockMutableMessage_Encrypt_Call struct {
+	*mock.Call
+}
+
+// Encrypt is a helper method to define mock.On call
+//   - cipher hook.Cipher
+func (_e *MockMutableMessage_Expecter) Encrypt(cipher interface{}) *MockMutableMessage_Encrypt_Call {
+	return &MockMutableMessage_Encrypt_Call{Call: _e.mock.On("Encrypt", cipher)}
+}
+
+func (_c *MockMutableMessage_Encrypt_Call) Run(run func(cipher hook.Cipher)) *MockMutableMessage_Encrypt_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(hook.Cipher))
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_Encrypt_Call) Return(_a0 error) *MockMutableMessage_Encrypt_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_Encrypt_Call) RunAndReturn(run func(hook.Cipher) error) *MockMutableMessage_Encrypt_Call {
 	_c.Call.Return(run)
 	return _c
 }

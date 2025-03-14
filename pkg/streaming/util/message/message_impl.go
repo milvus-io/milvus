@@ -2,7 +2,9 @@ package message
 
 import (
 	"fmt"
+	"strconv"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 )
 
@@ -111,6 +113,16 @@ func (m *messageImpl) WithBroadcastID(id uint64) BroadcastMutableMessage {
 	return m
 }
 
+func (m *messageImpl) withEZK(ezID string) MutableMessage {
+	m.properties.Set(messageEZK, ezID)
+	return m
+}
+
+func (m *messageImpl) withSafeKey(safeKey string) MutableMessage {
+	m.properties.Set(messageSafeKey, safeKey)
+	return m
+}
+
 // IntoImmutableMessage converts current message to immutable message.
 func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
 	// payload and id is always immutable, so we only clone the prop here is ok.
@@ -122,6 +134,22 @@ func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
 			properties: prop,
 		},
 	}
+}
+
+func (m *messageImpl) safeKey() string {
+	value, ok := m.properties.Get(messageSafeKey)
+	if !ok {
+		return ""
+	}
+	return value
+}
+
+func (m *messageImpl) ezKey() string {
+	value, ok := m.properties.Get(messageEZK)
+	if !ok {
+		return ""
+	}
+	return value
 }
 
 // TxnContext returns the transaction context of current message.
@@ -232,6 +260,59 @@ func (m *messageImpl) SplitIntoMutableMessage() []MutableMessage {
 		vchannelExist[vchannel] = struct{}{}
 	}
 	return msgs
+}
+
+func (m *messageImpl) encrypt(ezID string, cipher hook.Cipher) error {
+	// skip msg for all channel
+	if m.VChannel() == "" {
+		return nil
+	}
+
+	id, err := strconv.ParseInt(ezID, 10, 64)
+	if err != nil {
+		return err
+	}
+
+	encryptor, safeKey, err := cipher.GetEncryptor(id)
+	if err != nil {
+		// TODO: AOIASD PRINT LOG AND RETURN MESSAGEID
+		return err
+	}
+
+	payload, err := encryptor.Encrypt(m.payload)
+	if err != nil {
+		return err
+	}
+
+	m.withSafeKey(string(safeKey))
+	m.withEZK(ezID)
+	m.payload = payload
+	return nil
+}
+
+func (m *messageImpl) decrypt(cipher hook.Cipher) error {
+	// skip msg for all channel or without ezID
+	if m.VChannel() == "" || m.ezKey() == "" {
+		return nil
+	}
+
+	id, err := strconv.ParseInt(m.ezKey(), 10, 64)
+	if err != nil {
+		return err
+	}
+
+	decryptor, err := cipher.GetDecryptor(id, []byte(m.safeKey()))
+	if err != nil {
+		return err
+	}
+
+	payload, err := decryptor.Decrypt(m.payload)
+	if err != nil {
+		return err
+	}
+
+	m.payload = payload
+	return nil
 }
 
 // CloneMutableMessage clones the current mutable message.
