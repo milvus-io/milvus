@@ -2,6 +2,8 @@ import random
 from sklearn import preprocessing
 import numpy as np
 import time
+import concurrent.futures
+from typing import Dict, List
 from utils.utils import gen_collection_name, patch_faker_text, en_vocabularies_distribution, \
     zh_vocabularies_distribution
 from utils.util_log import test_log as logger
@@ -71,9 +73,26 @@ class TestCreateIndex(TestBase):
                  }
             ]
         }
-        rsp = self.index_client.index_create(payload)
-        assert rsp['code'] == 0
-        time.sleep(10)
+
+        # Create multiple index creation tasks
+        num_threads = 10  # Number of concurrent tasks
+        payloads = [payload.copy() for _ in range(num_threads)]
+
+        def create_index(idx_payload: Dict) -> Dict:
+            return self.index_client.index_create(idx_payload)
+
+        # Execute index creation concurrently
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+            future_to_payload = {executor.submit(create_index, p): p for p in payloads}
+            for future in concurrent.futures.as_completed(future_to_payload):
+                try:
+                    rsp = future.result()
+                    assert rsp['code'] == 0
+                except Exception as e:
+                    logger.info(f'Index creation failed with error: {str(e)}')
+                    raise
+
+        time.sleep(10)  # Wait for all indexes to be ready
         # list index, expect not empty
         rsp = self.index_client.index_list(collection_name=name)
         # describe index
