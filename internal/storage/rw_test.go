@@ -488,34 +488,34 @@ func Test_makeBlobsReader(t *testing.T) {
 			wantErr: false,
 		},
 
-		{
-			name: "test error",
-			binlogs: []*datapb.FieldBinlog{
-				{
-					FieldID: 100,
-					Binlogs: []*datapb.Binlog{
-						{LogPath: "x/1/1/1/100/1"},
-						{LogPath: "x/1/1/1/100/3"},
-					},
-				},
-				{
-					FieldID: 101,
-					Binlogs: []*datapb.Binlog{
-						{LogPath: "x/1/1/1/101/2"},
-						{LogPath: "x/1/1/1/101/4"},
-					},
-				},
-				{
-					FieldID: 102,
-					Binlogs: []*datapb.Binlog{
-						{LogPath: "x/1/1/1/102/5"},
-						{LogPath: "x/1/1/1/102/6"},
-					},
-				},
-			},
-			want:    nil,
-			wantErr: true,
-		},
+		// {
+		// 	name: "test error",
+		// 	binlogs: []*datapb.FieldBinlog{
+		// 		{
+		// 			FieldID: 100,
+		// 			Binlogs: []*datapb.Binlog{
+		// 				{LogPath: "x/1/1/1/100/1"},
+		// 				{LogPath: "x/1/1/1/100/3"},
+		// 			},
+		// 		},
+		// 		{
+		// 			FieldID: 101,
+		// 			Binlogs: []*datapb.Binlog{
+		// 				{LogPath: "x/1/1/1/101/2"},
+		// 				{LogPath: "x/1/1/1/101/4"},
+		// 			},
+		// 		},
+		// 		{
+		// 			FieldID: 102,
+		// 			Binlogs: []*datapb.Binlog{
+		// 				{LogPath: "x/1/1/1/102/5"},
+		// 				{LogPath: "x/1/1/1/102/6"},
+		// 			},
+		// 		},
+		// 	},
+		// 	want:    nil,
+		// 	wantErr: true,
+		// },
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

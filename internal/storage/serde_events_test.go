@@ -45,7 +45,7 @@ import (
 
 func TestBinlogDeserializeReader(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
-		reader, err := NewBinlogDeserializeReader(nil, func() ([]*Blob, error) {
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), func() ([]*Blob, error) {
 			return nil, io.EOF
 		})
 		assert.NoError(t, err)
