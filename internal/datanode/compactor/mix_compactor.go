@@ -206,7 +206,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
-	reader, err := storage.NewBinlogRecordReader(ctx, seg.GetFieldBinlogs(), t.plan.GetSchema(), storage.WithDownloader(t.binlogIO.Download))
+	reader, err := storage.NewBinlogRecordReader(ctx, seg.GetFieldBinlogs(), t.plan.GetSchema(), storage.WithDownloader(t.binlogIO.Download), storage.WithVersion(seg.GetStorageVersion()))
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 		return
@@ -216,6 +216,15 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	writeSlice := func(r storage.Record, start, end int) error {
 		sliced := r.Slice(start, end)
 		defer sliced.Release()
+		// should turn composite record to simple record when reading with v1 format and writing with v2 format
+		if seg.GetStorageVersion() == storage.StorageV1 && paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+			sar, err := storage.CompositeToSimpleArrowRecord(sliced, t.plan.GetSchema().GetFields())
+			if err != nil {
+				log.Warn("compact wrong, failed to convert composite record to simple record", zap.Error(err))
+				return err
+			}
+			sliced = sar
+		}
 		err = mWriter.Write(sliced)
 		if err != nil {
 			log.Warn("compact wrong, failed to writer row", zap.Error(err))
@@ -312,16 +321,12 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, err
 	}
 	// Unable to deal with all empty segments cases, so return error
-	isEmpty := func() bool {
-		for _, seg := range t.plan.GetSegmentBinlogs() {
-			for _, field := range seg.GetFieldBinlogs() {
-				if len(field.GetBinlogs()) > 0 {
-					return false
-				}
-			}
-		}
-		return true
-	}()
+	isEmpty := lo.EveryBy(lo.FlatMap(t.plan.GetSegmentBinlogs(), func(seg *datapb.CompactionSegmentBinlogs, _ int) []*datapb.FieldBinlog {
+		return seg.GetFieldBinlogs()
+	}), func(field *datapb.FieldBinlog) bool {
+		return len(field.GetBinlogs()) == 0
+	})
+
 	if isEmpty {
 		log.Warn("compact wrong, all segments' binlogs are empty")
 		return nil, errors.New("illegal compaction plan")

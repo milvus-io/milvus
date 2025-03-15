@@ -459,8 +459,9 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 		segmentClone := &datapb.CompactionSegmentBinlogs{
 			SegmentID: segment.SegmentID,
 			// only FieldBinlogs and deltalogs needed
-			Deltalogs:    segment.Deltalogs,
-			FieldBinlogs: segment.FieldBinlogs,
+			Deltalogs:      segment.Deltalogs,
+			FieldBinlogs:   segment.FieldBinlogs,
+			StorageVersion: segment.StorageVersion,
 		}
 		future := t.mappingPool.Submit(func() (any, error) {
 			err := t.mappingSegment(ctx, segmentClone)
@@ -571,13 +572,16 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 	rr, err := storage.NewBinlogRecordReader(ctx, segment.GetFieldBinlogs(), t.plan.Schema, storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 		return t.binlogIO.Download(ctx, paths)
-	}))
+	}), storage.WithVersion(segment.StorageVersion))
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return err
 	}
 
 	reader := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
+		if segment.StorageVersion == storage.StorageV2 {
+			return storage.ValueDeserializerV2(r, v, t.plan.Schema.Fields)
+		}
 		return storage.ValueDeserializer(r, v, t.plan.Schema.Fields)
 	})
 	defer reader.Close()

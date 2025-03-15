@@ -158,6 +158,9 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			blobsWriter, allocator, chunkSize, rootPath, maxRowNum,
 		)
 	case StorageV2:
+		if len(rwOptions.columnGroups) == 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("packed binlog record writer requires column groups")
+		}
 		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, chunkSize, rootPath, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,

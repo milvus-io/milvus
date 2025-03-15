@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
@@ -287,6 +288,12 @@ func (node *DataNode) Init() error {
 		node.flowgraphManager = pipeline.NewFlowgraphManager()
 
 		index.InitSegcore()
+		// init storage v2 file system.
+		err = initcore.InitStorageV2FileSystem(paramtable.Get())
+		if err != nil {
+			initError = err
+			return
+		}
 
 		log.Info("init datanode done", zap.String("Address", node.address))
 	})
