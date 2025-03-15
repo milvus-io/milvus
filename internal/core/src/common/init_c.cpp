@@ -88,10 +88,10 @@ InitDefaultJSONKeyStatsCommitInterval(int64_t val) {
 }
 
 void
-InitDefaultJSONKeyStatsEnable(bool val) {
+InitDefaultGrowingJSONKeyStatsEnable(bool val) {
     std::call_once(
         flag9,
-        [](bool val) { milvus::SetDefaultJSONKeyStatsEnable(val); },
+        [](bool val) { milvus::SetDefaultGrowingJSONKeyStatsEnable(val); },
         val);
 }
 

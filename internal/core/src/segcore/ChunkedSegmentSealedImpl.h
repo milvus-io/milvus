@@ -100,13 +100,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadJsonKeyIndex(
         FieldId field_id,
-        std::unique_ptr<index::JsonKeyInvertedIndex> index) override {
+        std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) override {
         std::unique_lock lck(mutex_);
         const auto& field_meta = schema_->operator[](field_id);
         json_key_indexes_[field_id] = std::move(index);
     }
 
-    index::JsonKeyInvertedIndex*
+    index::JsonKeyStatsInvertedIndex*
     GetJsonKeyIndex(FieldId field_id) const override {
         std::shared_lock lck(mutex_);
         auto iter = json_key_indexes_.find(field_id);
@@ -417,7 +417,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // whether the segment is sorted by the pk
     bool is_sorted_by_pk_ = false;
     // used for json expr optimization
-    std::unordered_map<FieldId, std::unique_ptr<index::JsonKeyInvertedIndex>>
+    std::unordered_map<FieldId,
+                       std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
         json_key_indexes_;
 };
 

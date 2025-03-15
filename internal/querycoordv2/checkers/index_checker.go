@@ -253,7 +253,7 @@ func (c *IndexChecker) checkSegmentStats(segment *meta.Segment, schema *schemapb
 		for _, field := range schema.GetFields() {
 			// Check if the field exists in both loadFieldMap and jsonStatsFieldMap
 			h := typeutil.CreateFieldSchemaHelper(field)
-			if h.EnableJSONKeyIndex() {
+			if h.EnableJSONKeyStatsIndex() {
 				if _, ok := loadFieldMap[field.FieldID]; ok {
 					if _, ok := jsonStatsFieldMap[field.FieldID]; !ok {
 						result = append(result, field.FieldID)

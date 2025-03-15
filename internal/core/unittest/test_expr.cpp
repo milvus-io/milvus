@@ -66,7 +66,8 @@ class ExprTest
         data_type = std::get<0>(param).first;  // Get the DataType from the pair
         metric_type =
             std::get<0>(param).second;  // Get the MetricType from the pair
-        JSON_KEY_STATS_ENABLED = std::get<1>(param);  // Get the bool parameter
+        GROWING_JSON_KEY_STATS_ENABLED =
+            std::get<1>(param);  // Get the bool parameter
     }
 
     // replace the metric type in the plan string with the proper type

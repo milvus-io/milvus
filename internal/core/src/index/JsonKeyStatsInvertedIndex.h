@@ -28,22 +28,22 @@ enum class JSONType {
     STRING_ESCAPE
 };
 using stdclock = std::chrono::high_resolution_clock;
-class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
+class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
-    explicit JsonKeyInvertedIndex(
+    explicit JsonKeyStatsInvertedIndex(
         const storage::FileManagerContext& ctx,
         bool is_load,
         int64_t json_key_data_format = 0,
         int64_t json_stats_tantivy_memory_budget = 16777216);
 
-    explicit JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
-                                  const char* unique_id);
+    explicit JsonKeyStatsInvertedIndex(int64_t commit_interval_in_ms,
+                                       const char* unique_id);
 
-    explicit JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
-                                  const char* unique_id,
-                                  const std::string& path);
+    explicit JsonKeyStatsInvertedIndex(int64_t commit_interval_in_ms,
+                                       const char* unique_id,
+                                       const std::string& path);
 
-    ~JsonKeyInvertedIndex() override{};
+    ~JsonKeyStatsInvertedIndex() override{};
 
  public:
     IndexStatsPtr
@@ -72,7 +72,7 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
             LOG_INFO("json key filter size:{}", array.array_.len);
             for (size_t j = 0; j < array.array_.len; j++) {
                 auto the_offset = array.array_.array[j];
-                if (json_key_data_format_ == 0) {
+                if (json_key_data_format_ == 1) {
                     if (DecodeValid(the_offset)) {
                         auto tuple = DecodeValue(the_offset);
                         auto row_id = std::get<1>(tuple);
@@ -136,6 +136,21 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
 
     void
     CreateReader();
+
+    bool
+    has_escape_sequence(const std::string& str) {
+        for (size_t i = 0; i < str.size(); ++i) {
+            if (str[i] == '\\' && i + 1 < str.size()) {
+                char next = str[i + 1];
+                if (next == 'n' || next == 't' || next == 'r' || next == 'b' ||
+                    next == 'f' || next == 'v' || next == '\\' ||
+                    next == '\"' || next == '\'') {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
  private:
     void
@@ -250,21 +265,6 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
         } catch (...) {
             return false;
         }
-    }
-
-    bool
-    has_escape_sequence(const std::string& str) {
-        for (size_t i = 0; i < str.size(); ++i) {
-            if (str[i] == '\\' && i + 1 < str.size()) {
-                char next = str[i + 1];
-                if (next == 'n' || next == 't' || next == 'r' || next == 'b' ||
-                    next == 'f' || next == 'v' || next == '\\' ||
-                    next == '\"' || next == '\'') {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     JSONType

@@ -128,7 +128,7 @@ class FieldMeta {
     enable_analyzer() const;
 
     bool
-    enable_jsonIndex() const;
+    enable_growing_jsonStats() const;
 
     TokenizerParams
     get_analyzer_params() const;

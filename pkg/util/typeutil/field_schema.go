@@ -53,7 +53,7 @@ func (h *FieldSchemaHelper) EnableMatch() bool {
 	return err == nil && enable
 }
 
-func (h *FieldSchemaHelper) EnableJSONKeyIndex() bool {
+func (h *FieldSchemaHelper) EnableJSONKeyStatsIndex() bool {
 	return IsJSONType(h.schema.GetDataType())
 }
 
