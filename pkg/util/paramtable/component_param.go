@@ -2509,6 +2509,8 @@ type queryNodeConfig struct {
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
 	InterimIndexSubDim            ParamItem `refreshable:"false"`
 	InterimIndexRefineRatio       ParamItem `refreshable:"false"`
+	InterimIndexRefineType        ParamItem `refreshable:"false"`
+	InterimIndexLossLessRefine    ParamItem `refreshable:"false"`
 	DenseVectorInterminIndexType  ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
@@ -2701,6 +2703,24 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.DenseVectorInterminIndexType.Init(base.mgr)
+
+	p.InterimIndexRefineType = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.refineType",
+		Version:      "2.5.6",
+		DefaultValue: "DATA_VIEW",
+		Doc:          `Data representation of SCANN_DVR index, options: 'DATA_VIEW', 'FLOAT16', 'BFLOAT16' and 'UINT8'`,
+		Export:       true,
+	}
+	p.InterimIndexRefineType.Init(base.mgr)
+
+	p.InterimIndexLossLessRefine = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.losslessRefine",
+		Version:      "2.5.6",
+		DefaultValue: "true",
+		Doc:          `whether to use refineType to refine for fatser but loss a little precision`,
+		Export:       true,
+	}
+	p.InterimIndexLossLessRefine.Init(base.mgr)
 
 	p.KnowhereScoreConsistency = ParamItem{
 		Key:          "queryNode.segcore.knowhereScoreConsistency",

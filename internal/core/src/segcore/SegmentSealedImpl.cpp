@@ -1940,7 +1940,8 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
                       ->Dim()
                 : field_meta.get_dim();
 
-        auto build_config = field_binlog_config->GetBuildBaseParams();
+        auto build_config =
+            field_binlog_config->GetBuildBaseParams(field_meta.get_data_type());
         build_config[knowhere::meta::DIM] = std::to_string(dim);
         build_config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
         auto index_metric = field_binlog_config->GetMetricType();
