@@ -44,10 +44,16 @@ type WorkerManager interface {
 	RemoveNode(nodeID typeutil.UniqueID)
 	StoppingNode(nodeID typeutil.UniqueID)
 	PickClient() (typeutil.UniqueID, types.IndexNodeClient)
-	QuerySlots() map[int64]int64
+	QuerySlots() map[typeutil.UniqueID]*WorkerSlots
 	ClientSupportDisk() bool
 	GetAllClients() map[typeutil.UniqueID]types.IndexNodeClient
 	GetClientByID(nodeID typeutil.UniqueID) (types.IndexNodeClient, bool)
+}
+
+type WorkerSlots struct {
+	NodeID         int64
+	TotalSlots     int64
+	AvailableSlots int64
 }
 
 // IndexNodeManager is used to manage the client of IndexNode.
@@ -116,14 +122,14 @@ func (nm *IndexNodeManager) AddNode(nodeID typeutil.UniqueID, address string) er
 	return nil
 }
 
-func (nm *IndexNodeManager) QuerySlots() map[int64]int64 {
+func (nm *IndexNodeManager) QuerySlots() map[typeutil.UniqueID]*WorkerSlots {
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), querySlotTimeout)
 	defer cancel()
 
-	nodeSlots := make(map[int64]int64)
+	nodeSlots := make(map[typeutil.UniqueID]*WorkerSlots)
 	mu := &sync.Mutex{}
 	wg := &sync.WaitGroup{}
 	for nodeID, client := range nm.nodeClients {
@@ -143,7 +149,11 @@ func (nm *IndexNodeManager) QuerySlots() map[int64]int64 {
 				}
 				mu.Lock()
 				defer mu.Unlock()
-				nodeSlots[nodeID] = resp.GetTaskSlots()
+				nodeSlots[nodeID] = &WorkerSlots{
+					NodeID:         nodeID,
+					TotalSlots:     resp.GetTotalSlots(),
+					AvailableSlots: resp.GetAvailableSlots(),
+				}
 			}(nodeID)
 		}
 	}
@@ -182,7 +192,7 @@ func (nm *IndexNodeManager) PickClient() (typeutil.UniqueID, types.IndexNodeClie
 						zap.String("reason", resp.GetStatus().GetReason()))
 					return
 				}
-				if resp.GetTaskSlots() > 0 {
+				if resp.GetAvailableSlots() > 0 {
 					nodeMutex.Lock()
 					defer nodeMutex.Unlock()
 					if pickNodeID == 0 {
