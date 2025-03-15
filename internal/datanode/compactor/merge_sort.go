@@ -53,28 +53,11 @@ func mergeSortMultipleSegments(ctx context.Context,
 	segmentReaders := make([]storage.RecordReader, len(binlogs))
 	segmentFilters := make([]compaction.EntityFilter, len(binlogs))
 	for i, s := range binlogs {
-		var binlogBatchCount int
-		for _, b := range s.GetFieldBinlogs() {
-			if b != nil {
-				binlogBatchCount = len(b.GetBinlogs())
-				break
-			}
+		reader, err := storage.NewBinlogRecordReader(ctx, s.GetFieldBinlogs(), plan.GetSchema(), storage.WithDownloader(binlogIO.Download))
+		if err != nil {
+			return nil, err
 		}
-
-		if binlogBatchCount == 0 {
-			log.Warn("compacting empty segment", zap.Int64("segmentID", s.GetSegmentID()))
-			continue
-		}
-
-		binlogPaths := make([][]string, binlogBatchCount)
-		for idx := 0; idx < binlogBatchCount; idx++ {
-			var batchPaths []string
-			for _, f := range s.GetFieldBinlogs() {
-				batchPaths = append(batchPaths, f.GetBinlogs()[idx].GetLogPath())
-			}
-			binlogPaths[idx] = batchPaths
-		}
-		segmentReaders[i] = NewSegmentRecordReader(ctx, binlogPaths, binlogIO)
+		segmentReaders[i] = reader
 		deltalogPaths := make([]string, 0)
 		for _, d := range s.GetDeltalogs() {
 			for _, l := range d.GetBinlogs() {
