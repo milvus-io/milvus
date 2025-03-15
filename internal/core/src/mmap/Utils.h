@@ -90,7 +90,7 @@ WriteFieldData(File& file,
                const FieldDataPtr& data,
                uint64_t& total_written,
                std::vector<uint64_t>& indices,
-               std::vector<std::vector<uint64_t>>& element_indices,
+               std::vector<std::vector<uint32_t>>& element_indices,
                FixedVector<bool>& valid_data) {
     if (IsVariableDataType(data_type)) {
         switch (data_type) {
@@ -146,8 +146,14 @@ WriteFieldData(File& file,
                     if (written < array->byte_size()) {
                         THROW_FILE_WRITE_ERROR
                     }
-                    element_indices.emplace_back(array->get_offsets());
-                    total_written += written;
+                    if (IsVariableDataType(array->get_element_type())) {
+                        element_indices.emplace_back(
+                            array->get_offsets_data(),
+                            array->get_offsets_data() + array->length());
+                    } else {
+                        element_indices.emplace_back();
+                    }
+                    total_written += array->byte_size();
                 }
                 break;
             }
