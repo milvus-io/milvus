@@ -244,6 +244,7 @@ func (ms *mqMsgStream) Close() {
 	ms.client.Close()
 	close(ms.receiveBuf)
 	paramtable.Get().Unwatch(paramtable.Get().CommonCfg.TTMsgEnabled.Key, ms.configEvent)
+	log.Ctx(ms.ctx).Info("mq msg stream closed")
 }
 
 func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
@@ -636,7 +637,7 @@ func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subN
 				return errors.Wrapf(err, errMsg)
 			}
 
-			panic(fmt.Sprintf("%s, errors = %s", errMsg, err.Error()))
+			panic(fmt.Sprintf("%s, subName = %s, errors = %s", errMsg, subName, err.Error()))
 		}
 	}
 
