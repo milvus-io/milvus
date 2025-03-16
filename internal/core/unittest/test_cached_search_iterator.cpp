@@ -252,12 +252,10 @@ class CachedSearchIteratorTest
         size_t offset = 0;
         for (size_t i = 0; i < num_chunks_; ++i) {
             const size_t rows = std::min(nb_ - offset, kSizePerChunk);
-            const size_t chunk_bitset_size = (rows + 7) / 8;
-            const size_t buf_size =
-                chunk_bitset_size + rows * dim_ * sizeof(float);
+            const size_t buf_size = rows * dim_ * sizeof(float);
             auto& chunk_data = column_data_[i];
             chunk_data.resize(buf_size);
-            memcpy(chunk_data.data() + chunk_bitset_size,
+            memcpy(chunk_data.data(),
                    base_dataset_.cbegin() + offset * dim_,
                    rows * dim_ * sizeof(float));
             column_->AddChunk(std::make_shared<FixedWidthChunk>(
