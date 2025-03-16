@@ -4324,6 +4324,92 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	return resp, nil
 }
 
+func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetSegmentsInfo")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+	log.Debug("GetSegmentsInfo",
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", req.DbName),
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+
+	resp := &internalpb.GetSegmentsInfoResponse{
+		Status: merr.Success(),
+	}
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	method := "GetSegmentsInfo"
+	tr := timerecord.NewTimeRecorder(method)
+	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	collection := fmt.Sprint(req.GetCollectionID())
+	defer func() {
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel, req.GetDbName(), collection).Inc()
+		if resp.GetStatus().GetCode() != 0 {
+			log.Warn("import failed", zap.String("err", resp.GetStatus().GetReason()))
+			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel, req.GetDbName(), collection).Inc()
+		} else {
+			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel, req.GetDbName(), collection).Inc()
+		}
+		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	}()
+
+	infoResp, err := node.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+		SegmentIDs:       req.GetSegmentIDs(),
+		IncludeUnHealthy: true,
+	})
+	if err != nil {
+		log.Warn("GetSegmentInfo fail",
+			zap.Error(err))
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	err = merr.Error(infoResp.GetStatus())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	log.Debug("GetPersistentSegmentInfo",
+		zap.Int("len(infos)", len(infoResp.Infos)),
+		zap.Any("status", infoResp.Status))
+	getLogIDs := func(binlogs []*datapb.FieldBinlog) []*internalpb.FieldBinlog {
+		logIDs := make([]*internalpb.FieldBinlog, 0, len(binlogs))
+		for _, fb := range binlogs {
+			fieldLogIDs := make([]int64, 0, len(fb.GetBinlogs()))
+			for _, b := range fb.GetBinlogs() {
+				fieldLogIDs = append(fieldLogIDs, b.GetLogID())
+			}
+			logIDs = append(logIDs, &internalpb.FieldBinlog{
+				FieldID: fb.GetFieldID(),
+				LogIDs:  fieldLogIDs,
+			})
+		}
+		return logIDs
+	}
+	segmentInfos := make([]*internalpb.SegmentInfo, 0, len(req.GetSegmentIDs()))
+	for _, info := range infoResp.GetInfos() {
+		segmentInfos = append(segmentInfos, &internalpb.SegmentInfo{
+			SegmentID:    info.GetID(),
+			CollectionID: info.GetCollectionID(),
+			PartitionID:  info.GetPartitionID(),
+			VChannel:     info.GetInsertChannel(),
+			NumRows:      info.GetNumOfRows(),
+			State:        info.GetState(),
+			Level:        commonpb.SegmentLevel(info.GetLevel()),
+			IsSorted:     info.GetIsSorted(),
+			InsertLogs:   getLogIDs(info.GetBinlogs()),
+			DeltaLogs:    getLogIDs(info.GetDeltalogs()),
+			StatsLogs:    getLogIDs(info.GetStatslogs()),
+		})
+	}
+
+	resp.SegmentInfos = segmentInfos
+	return resp, nil
+}
+
 // GetQuerySegmentInfo gets segment information from QueryCoord.
 func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetQuerySegmentInfo")

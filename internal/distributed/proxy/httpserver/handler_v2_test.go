@@ -1862,6 +1862,51 @@ func TestMethodPost(t *testing.T) {
 		Reason:   "",
 		Progress: 100,
 	}, nil).Twice()
+	mp.EXPECT().GetSegmentsInfo(mock.Anything, mock.Anything).Return(&internalpb.GetSegmentsInfoResponse{
+		Status: &StatusSuccess,
+		SegmentInfos: []*internalpb.SegmentInfo{
+			{
+				SegmentID:    3,
+				CollectionID: 1,
+				PartitionID:  2,
+				NumRows:      1000,
+				VChannel:     "ch-1",
+				State:        commonpb.SegmentState_Flushed,
+				Level:        commonpb.SegmentLevel_L1,
+				IsSorted:     true,
+				InsertLogs: []*internalpb.FieldBinlog{
+					{
+						FieldID: 0,
+						LogIDs:  []int64{1, 5, 9},
+					},
+					{
+						FieldID: 1,
+						LogIDs:  []int64{2, 6, 10},
+					},
+					{
+						FieldID: 100,
+						LogIDs:  []int64{3, 7, 11},
+					},
+					{
+						FieldID: 101,
+						LogIDs:  []int64{4, 8, 12},
+					},
+				},
+				DeltaLogs: []*internalpb.FieldBinlog{
+					{
+						FieldID: 100,
+						LogIDs:  []int64{13, 14, 15},
+					},
+				},
+				StatsLogs: []*internalpb.FieldBinlog{
+					{
+						FieldID: 100,
+						LogIDs:  []int64{16},
+					},
+				},
+			},
+		},
+	}, nil).Once()
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
 	queryTestCases = append(queryTestCases, rawTestCase{
@@ -1949,6 +1994,9 @@ func TestMethodPost(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(PrivilegeGroupCategory, RemovePrivilegesFromGroupAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(SegmentCategory, DescribeAction),
 	})
 
 	for _, testcase := range queryTestCases {
