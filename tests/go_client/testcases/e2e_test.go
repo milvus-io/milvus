@@ -13,35 +13,35 @@ import (
 )
 
 func TestMilvusDefault(t *testing.T) {
-	// 创建上下文和客户端
+	// Create context and client
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
-	// 创建集合
+	// Create collection
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
-	// 插入数据
+	// Insert data
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(100))
 
-	// 刷新数据
+	// Flush data
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 
-	// 创建索引
+	// Create index
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 
-	// 加载集合
+	// Load collection
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
-	// 准备搜索向量
+	// Prepare search vectors
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 
-	// 执行搜索
+	// Execute search
 	searchResult, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).
 		WithConsistencyLevel(entity.ClStrong))
 	require.NoError(t, err)
 	require.Equal(t, common.DefaultNq, len(searchResult))
 
-	// 获取主键字段名
+	// Get primary key field name
 	var pkFieldName string
 	for _, field := range schema.Fields {
 		if field.IsPrimaryKey {
@@ -51,24 +51,24 @@ func TestMilvusDefault(t *testing.T) {
 	}
 	require.NotEmpty(t, pkFieldName, "Primary key field not found")
 
-	// 执行查询
+	// Execute query
 	queryResult, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
 		WithFilter(pkFieldName+" in [1, 2, 3, 4]").
 		WithOutputFields("*"))
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, queryResult.GetColumn(pkFieldName).Len(), 4)
 
-	// 释放集合
+	// Release collection
 	err = mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(schema.CollectionName))
 	require.NoError(t, err)
 
-	// 重新插入数据
+	// Re-insert data
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(100))
 
-	// 重新加载集合
+	// Reload collection
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
-	// 执行批量搜索
+	// Execute batch search
 	vectors = hp.GenSearchVectors(5, common.DefaultDim, entity.FieldTypeFloatVector)
 	searchResult, err = mc.Search(ctx, client.NewSearchOption(schema.CollectionName, 5, vectors).
 		WithConsistencyLevel(entity.ClStrong))
