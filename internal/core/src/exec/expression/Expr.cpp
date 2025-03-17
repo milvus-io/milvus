@@ -67,7 +67,9 @@ CompileExpressions(const std::vector<expr::TypedExprPtr>& sources,
                                              enable_constant_folding));
     }
 
-    OptimizeCompiledExprs(context, exprs);
+    if (OPTIMIZE_EXPR_ENABLED) {
+        OptimizeCompiledExprs(context, exprs);
+    }
 
     return exprs;
 }
@@ -309,9 +311,174 @@ CompileExpression(const expr::TypedExprPtr& expr,
     return result;
 }
 
+bool
+IsLikeExpr(std::shared_ptr<Expr> input) {
+    if (input->name() == "PhyUnaryRangeFilterExpr") {
+        auto optype = std::static_pointer_cast<PhyUnaryRangeFilterExpr>(input)
+                          ->GetLogicalExpr()
+                          ->op_type_;
+        switch (optype) {
+            case proto::plan::PrefixMatch:
+            case proto::plan::PostfixMatch:
+            case proto::plan::Match:
+                return true;
+            default:
+                return false;
+        }
+    }
+    return false;
+}
+
+inline void
+ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
+                    ExecContext* context,
+                    bool& has_heavy_operation) {
+    auto* segment = context->get_query_context()->get_segment();
+    if (!segment || !expr) {
+        return;
+    }
+    std::vector<size_t> reorder;
+    std::vector<size_t> numeric_expr;
+    std::vector<size_t> indexed_expr;
+    std::vector<size_t> string_expr;
+    std::vector<size_t> str_like_expr;
+    std::vector<size_t> json_expr;
+    std::vector<size_t> json_like_expr;
+    std::vector<size_t> array_expr;
+    std::vector<size_t> array_like_expr;
+    std::vector<size_t> compare_expr;
+    std::vector<size_t> other_expr;
+    std::vector<size_t> heavy_conjunct_expr;
+    std::vector<size_t> light_conjunct_expr;
+
+    const auto& inputs = expr->GetInputsRef();
+    for (int i = 0; i < inputs.size(); i++) {
+        auto input = inputs[i];
+
+        if (input->IsSource() && input->GetColumnInfo().has_value()) {
+            auto column = input->GetColumnInfo().value();
+            if (IsNumericDataType(column.data_type_)) {
+                numeric_expr.push_back(i);
+                continue;
+            }
+            if (segment->HasIndex(column.field_id_)) {
+                indexed_expr.push_back(i);
+                continue;
+            }
+
+            if (IsStringDataType(column.data_type_)) {
+                auto is_like_expr = IsLikeExpr(input);
+                if (is_like_expr) {
+                    str_like_expr.push_back(i);
+                    has_heavy_operation = true;
+                } else {
+                    string_expr.push_back(i);
+                }
+                continue;
+            }
+
+            if (IsArrayDataType(column.data_type_)) {
+                auto is_like_expr = IsLikeExpr(input);
+                if (is_like_expr) {
+                    array_like_expr.push_back(i);
+                    has_heavy_operation = true;
+                } else {
+                    array_expr.push_back(i);
+                }
+                continue;
+            }
+
+            if (IsJsonDataType(column.data_type_)) {
+                auto is_like_expr = IsLikeExpr(input);
+                if (is_like_expr) {
+                    json_like_expr.push_back(i);
+                } else {
+                    json_expr.push_back(i);
+                }
+                has_heavy_operation = true;
+                continue;
+            }
+        }
+
+        if (input->name() == "PhyConjunctFilterExpr") {
+            bool sub_expr_heavy = false;
+            auto expr = std::static_pointer_cast<PhyConjunctFilterExpr>(input);
+            ReorderConjunctExpr(expr, context, sub_expr_heavy);
+            has_heavy_operation |= sub_expr_heavy;
+            if (sub_expr_heavy) {
+                heavy_conjunct_expr.push_back(i);
+            } else {
+                light_conjunct_expr.push_back(i);
+            }
+            continue;
+        }
+
+        if (input->name() == "PhyCompareFilterExpr") {
+            compare_expr.push_back(i);
+            has_heavy_operation = true;
+            continue;
+        }
+
+        other_expr.push_back(i);
+    }
+
+    reorder.reserve(inputs.size());
+    // Final reorder sequence:
+    // 1. Numeric column expressions (fastest to evaluate)
+    // 2. Indexed column expressions (can use index for efficient filtering)
+    // 3. String column expressions
+    // 4. Light conjunct expressions (conjunctions without heavy operations)
+    // 5. Other expressions
+    // 6. Array column expression
+    // 7. String like expression
+    // 8. Array like expression
+    // 9. JSON column expressions (expensive to evaluate)
+    // 10. JSON like expression (more expensive than common json compare)
+    // 11. Heavy conjunct expressions (conjunctions with heavy operations)
+    // 12. Compare filter expressions (most expensive, comparing two columns)
+    reorder.insert(reorder.end(), numeric_expr.begin(), numeric_expr.end());
+    reorder.insert(reorder.end(), indexed_expr.begin(), indexed_expr.end());
+    reorder.insert(reorder.end(), string_expr.begin(), string_expr.end());
+    reorder.insert(
+        reorder.end(), light_conjunct_expr.begin(), light_conjunct_expr.end());
+    reorder.insert(reorder.end(), other_expr.begin(), other_expr.end());
+    reorder.insert(reorder.end(), array_expr.begin(), array_expr.end());
+    reorder.insert(reorder.end(), str_like_expr.begin(), str_like_expr.end());
+    reorder.insert(
+        reorder.end(), array_like_expr.begin(), array_like_expr.end());
+    reorder.insert(reorder.end(), json_expr.begin(), json_expr.end());
+    reorder.insert(reorder.end(), json_like_expr.begin(), json_like_expr.end());
+    reorder.insert(
+        reorder.end(), heavy_conjunct_expr.begin(), heavy_conjunct_expr.end());
+    reorder.insert(reorder.end(), compare_expr.begin(), compare_expr.end());
+
+    AssertInfo(reorder.size() == inputs.size(),
+               "reorder size:{} but input size:{}",
+               reorder.size(),
+               inputs.size());
+
+    expr->Reorder(reorder);
+}
+
 inline void
 OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs) {
-    //TODO: add optimization pattern
+    std::chrono::high_resolution_clock::time_point start =
+        std::chrono::high_resolution_clock::now();
+    for (const auto& expr : exprs) {
+        if (expr->name() == "PhyConjunctFilterExpr") {
+            LOG_DEBUG("before reoder filter expression: {}", expr->ToString());
+            auto conjunct_expr =
+                std::static_pointer_cast<PhyConjunctFilterExpr>(expr);
+            bool has_heavy_operation = false;
+            ReorderConjunctExpr(conjunct_expr, context, has_heavy_operation);
+            LOG_DEBUG("after reorder filter expression: {}", expr->ToString());
+        }
+    }
+    std::chrono::high_resolution_clock::time_point end =
+        std::chrono::high_resolution_clock::now();
+    double cost =
+        std::chrono::duration<double, std::micro>(end - start).count();
+    monitor::internal_core_optimize_expr_latency.Observe(cost / 1000);
 }
 
 }  // namespace exec

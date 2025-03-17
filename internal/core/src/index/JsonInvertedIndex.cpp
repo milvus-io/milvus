@@ -35,7 +35,7 @@ JsonInvertedIndex<T>::build_index_for_json(
         for (int64_t i = 0; i < n; i++) {
             auto json_column = static_cast<const Json*>(data->RawValue(i));
             if (this->schema_.nullable() && !data->is_valid(i)) {
-                this->null_offset_.push_back(i);
+                this->null_offset_.push_back(offset);
                 this->wrapper_->template add_multi_data<T>(
                     nullptr, 0, offset++);
                 continue;
@@ -43,20 +43,11 @@ JsonInvertedIndex<T>::build_index_for_json(
             value_result<GetType> res = json_column->at<GetType>(nested_path_);
             auto err = res.error();
             if (err != simdjson::SUCCESS) {
-                AssertInfo(
-                    err == simdjson::INCORRECT_TYPE ||
-                        err == simdjson::NO_SUCH_FIELD ||
-                        err == simdjson::INVALID_JSON_POINTER,
-                    "Failed to parse json, err: {}, json: {}, pointer: {}",
-                    err,
-                    *json_column,
-                    nested_path_);
-                if (err == simdjson::INVALID_JSON_POINTER) {
-                    LOG_WARN("Invalid json pointer, json: {}, pointer: {}",
-                             *json_column,
-                             nested_path_);
+                error_recorder_.Record(*json_column, nested_path_, err);
+                if (err == simdjson::NO_SUCH_FIELD ||
+                    err == simdjson::INVALID_JSON_POINTER) {
+                    this->null_offset_.push_back(offset);
                 }
-                this->null_offset_.push_back(i);
                 this->wrapper_->template add_multi_data<T>(
                     nullptr, 0, offset++);
                 continue;
@@ -70,6 +61,8 @@ JsonInvertedIndex<T>::build_index_for_json(
             }
         }
     }
+
+    error_recorder_.PrintErrStats();
 }
 
 template class JsonInvertedIndex<bool>;

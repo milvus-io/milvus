@@ -84,3 +84,4 @@ const std::string JSON_CAST_TYPE = "json_cast_type";
 const std::string JSON_PATH = "json_path";
 const bool DEFAULT_JSON_KEY_STATS_ENABLED = false;
 const int64_t DEFAULT_JSON_KEY_STATS_COMMIT_INTERVAL = 200;
+const bool DEFAULT_OPTIMIZE_EXPR_ENABLED = true;

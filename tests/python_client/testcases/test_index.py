@@ -1234,7 +1234,7 @@ class TestIndexInvalid(TestcaseBase):
         expected: success
         """
         collection_w = self.init_collection_general(prefix, is_index=False, vector_data_type=vector_data_type)[0]
-        scalar_index_params = {"index_type": "INVERTED", "json_cast_type": DataType.INT32, "json_path": ct.default_json_field_name+"['a']"}
+        scalar_index_params = {"index_type": "INVERTED", "json_cast_type": "double", "json_path": ct.default_json_field_name+"['a']"}
         collection_w.create_index(ct.default_json_field_name, index_params=scalar_index_params)
 
     @pytest.mark.tags(CaseLabel.L1)

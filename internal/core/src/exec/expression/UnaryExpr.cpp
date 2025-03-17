@@ -89,51 +89,51 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray<milvus::Array>() {
 
 template <typename T>
 VectorPtr
-PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex() {
-    return ExecRangeVisitorImplArray<T>();
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex(EvalCtx& context) {
+    return ExecRangeVisitorImplArray<T>(context);
 }
 
 template <>
 VectorPtr
-PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<
-    proto::plan::Array>() {
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<proto::plan::Array>(
+    EvalCtx& context) {
     switch (expr_->op_type_) {
         case proto::plan::Equal:
         case proto::plan::NotEqual: {
             switch (expr_->column_.element_type_) {
                 case DataType::BOOL: {
-                    return ExecArrayEqualForIndex<bool>(expr_->op_type_ ==
-                                                        proto::plan::NotEqual);
+                    return ExecArrayEqualForIndex<bool>(
+                        context, expr_->op_type_ == proto::plan::NotEqual);
                 }
                 case DataType::INT8: {
                     return ExecArrayEqualForIndex<int8_t>(
-                        expr_->op_type_ == proto::plan::NotEqual);
+                        context, expr_->op_type_ == proto::plan::NotEqual);
                 }
                 case DataType::INT16: {
                     return ExecArrayEqualForIndex<int16_t>(
-                        expr_->op_type_ == proto::plan::NotEqual);
+                        context, expr_->op_type_ == proto::plan::NotEqual);
                 }
                 case DataType::INT32: {
                     return ExecArrayEqualForIndex<int32_t>(
-                        expr_->op_type_ == proto::plan::NotEqual);
+                        context, expr_->op_type_ == proto::plan::NotEqual);
                 }
                 case DataType::INT64: {
                     return ExecArrayEqualForIndex<int64_t>(
-                        expr_->op_type_ == proto::plan::NotEqual);
+                        context, expr_->op_type_ == proto::plan::NotEqual);
                 }
                 case DataType::FLOAT:
                 case DataType::DOUBLE: {
                     // not accurate on floating point number, rollback to bruteforce.
                     return ExecRangeVisitorImplArray<proto::plan::Array>(
-                        nullptr);
+                        context);
                 }
                 case DataType::VARCHAR: {
                     if (segment_->type() == SegmentType::Growing) {
                         return ExecArrayEqualForIndex<std::string>(
-                            expr_->op_type_ == proto::plan::NotEqual);
+                            context, expr_->op_type_ == proto::plan::NotEqual);
                     } else {
                         return ExecArrayEqualForIndex<std::string_view>(
-                            expr_->op_type_ == proto::plan::NotEqual);
+                            context, expr_->op_type_ == proto::plan::NotEqual);
                     }
                 }
                 default:
@@ -144,7 +144,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<
             }
         }
         default:
-            return ExecRangeVisitorImplArray<proto::plan::Array>();
+            return ExecRangeVisitorImplArray<proto::plan::Array>(context);
     }
 }
 
@@ -154,31 +154,31 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     SetHasOffsetInput((input != nullptr));
     switch (expr_->column_.data_type_) {
         case DataType::BOOL: {
-            result = ExecRangeVisitorImpl<bool>(input);
+            result = ExecRangeVisitorImpl<bool>(context);
             break;
         }
         case DataType::INT8: {
-            result = ExecRangeVisitorImpl<int8_t>(input);
+            result = ExecRangeVisitorImpl<int8_t>(context);
             break;
         }
         case DataType::INT16: {
-            result = ExecRangeVisitorImpl<int16_t>(input);
+            result = ExecRangeVisitorImpl<int16_t>(context);
             break;
         }
         case DataType::INT32: {
-            result = ExecRangeVisitorImpl<int32_t>(input);
+            result = ExecRangeVisitorImpl<int32_t>(context);
             break;
         }
         case DataType::INT64: {
-            result = ExecRangeVisitorImpl<int64_t>(input);
+            result = ExecRangeVisitorImpl<int64_t>(context);
             break;
         }
         case DataType::FLOAT: {
-            result = ExecRangeVisitorImpl<float>(input);
+            result = ExecRangeVisitorImpl<float>(context);
             break;
         }
         case DataType::DOUBLE: {
-            result = ExecRangeVisitorImpl<double>(input);
+            result = ExecRangeVisitorImpl<double>(context);
             break;
         }
         case DataType::VARCHAR: {
@@ -186,9 +186,9 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()
                      .growing_enable_mmap) {
-                result = ExecRangeVisitorImpl<std::string>(input);
+                result = ExecRangeVisitorImpl<std::string>(context);
             } else {
-                result = ExecRangeVisitorImpl<std::string_view>(input);
+                result = ExecRangeVisitorImpl<std::string_view>(context);
             }
             break;
         }
@@ -227,20 +227,20 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             } else {
                 switch (val_type) {
                     case proto::plan::GenericValue::ValCase::kBoolVal:
-                        result = ExecRangeVisitorImplJson<bool>(input);
+                        result = ExecRangeVisitorImplJson<bool>(context);
                         break;
                     case proto::plan::GenericValue::ValCase::kInt64Val:
-                        result = ExecRangeVisitorImplJson<int64_t>(input);
+                        result = ExecRangeVisitorImplJson<int64_t>(context);
                         break;
                     case proto::plan::GenericValue::ValCase::kFloatVal:
-                        result = ExecRangeVisitorImplJson<double>(input);
+                        result = ExecRangeVisitorImplJson<double>(context);
                         break;
                     case proto::plan::GenericValue::ValCase::kStringVal:
-                        result = ExecRangeVisitorImplJson<std::string>(input);
+                        result = ExecRangeVisitorImplJson<std::string>(context);
                         break;
                     case proto::plan::GenericValue::ValCase::kArrayVal:
-                        result =
-                            ExecRangeVisitorImplJson<proto::plan::Array>(input);
+                        result = ExecRangeVisitorImplJson<proto::plan::Array>(
+                            context);
                         break;
                     default:
                         PanicInfo(
@@ -254,28 +254,28 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             switch (val_type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
                     SetNotUseIndex();
-                    result = ExecRangeVisitorImplArray<bool>(input);
+                    result = ExecRangeVisitorImplArray<bool>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
                     SetNotUseIndex();
-                    result = ExecRangeVisitorImplArray<int64_t>(input);
+                    result = ExecRangeVisitorImplArray<int64_t>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
                     SetNotUseIndex();
-                    result = ExecRangeVisitorImplArray<double>(input);
+                    result = ExecRangeVisitorImplArray<double>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
                     SetNotUseIndex();
-                    result = ExecRangeVisitorImplArray<std::string>(input);
+                    result = ExecRangeVisitorImplArray<std::string>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kArrayVal:
                     if (!has_offset_input_ &&
                         CanUseIndexForArray<milvus::Array>()) {
                         result = ExecRangeVisitorImplArrayForIndex<
-                            proto::plan::Array>();
+                            proto::plan::Array>(context);
                     } else {
                         result = ExecRangeVisitorImplArray<proto::plan::Array>(
-                            input);
+                            context);
                     }
                     break;
                 default:
@@ -293,17 +293,19 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
 template <typename ValueType>
 VectorPtr
-PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
 
     if (!arg_inited_) {
         value_arg_.SetValue<ValueType>(expr_->val_);
@@ -315,16 +317,18 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
     if (expr_->column_.nested_path_.size() > 0) {
         index = std::stoi(expr_->column_.nested_path_[0]);
     }
-    auto execute_sub_batch = [op_type]<FilterType filter_type =
-                                           FilterType::sequential>(
-        const milvus::ArrayView* data,
-        const bool* valid_data,
-        const int32_t* offsets,
-        const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        ValueType val,
-        int index) {
+    int processed_cursor = 0;
+    auto execute_sub_batch =
+        [ op_type, &processed_cursor, &
+          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::ArrayView* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res,
+            ValueType val,
+            int index) {
         switch (op_type) {
             case proto::plan::GreaterThan: {
                 UnaryElementFuncForArray<ValueType,
@@ -338,6 +342,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
                      index,
                      res,
                      valid_res,
+                     bitmap_input,
+                     processed_cursor,
                      offsets);
                 break;
             }
@@ -353,6 +359,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
                      index,
                      res,
                      valid_res,
+                     bitmap_input,
+                     processed_cursor,
                      offsets);
                 break;
             }
@@ -368,6 +376,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
                      index,
                      res,
                      valid_res,
+                     bitmap_input,
+                     processed_cursor,
                      offsets);
                 break;
             }
@@ -383,6 +393,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
                      index,
                      res,
                      valid_res,
+                     bitmap_input,
+                     processed_cursor,
                      offsets);
                 break;
             }
@@ -398,6 +410,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
                      index,
                      res,
                      valid_res,
+                     bitmap_input,
+                     processed_cursor,
                      offsets);
                 break;
             }
@@ -413,6 +427,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
                      index,
                      res,
                      valid_res,
+                     bitmap_input,
+                     processed_cursor,
                      offsets);
                 break;
             }
@@ -428,6 +444,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
                      index,
                      res,
                      valid_res,
+                     bitmap_input,
+                     processed_cursor,
                      offsets);
                 break;
             }
@@ -443,6 +461,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
                      index,
                      res,
                      valid_res,
+                     bitmap_input,
+                     processed_cursor,
                      offsets);
                 break;
             }
@@ -452,6 +472,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
                     fmt::format("unsupported operator type for unary expr: {}",
                                 op_type));
         }
+        processed_cursor += size;
     };
     int64_t processed_size;
     if (has_offset_input_) {
@@ -477,7 +498,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(OffsetVector* input) {
 
 template <typename T>
 VectorPtr
-PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
+PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
+                                                bool reverse) {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
@@ -491,7 +513,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
     auto val = GetValueFromProto<proto::plan::Array>(expr_->val_);
     if (val.array_size() == 0) {
         // rollback to bruteforce. no candidates will be filtered out via index.
-        return ExecRangeVisitorImplArray<proto::plan::Array>();
+        return ExecRangeVisitorImplArray<proto::plan::Array>(context);
     }
 
     // cache the result to suit the framework.
@@ -587,12 +609,14 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
 
 template <typename ExprValueType>
 VectorPtr
-PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
 
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
     if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
         return ExecRangeVisitorImplJsonForIndex<ExprValueType>();
@@ -608,13 +632,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
         value_arg_.SetValue<ExprValueType>(expr_->val_);
         arg_inited_ = true;
     }
-
-    ExprValueType val = value_arg_.GetValue<ExprValueType>();
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
+
+    ExprValueType val = value_arg_.GetValue<ExprValueType>();
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
@@ -648,8 +672,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
         res[i] = (cmp);                                             \
     } while (false)
 
+    int processed_cursor = 0;
     auto execute_sub_batch =
-        [ op_type, pointer ]<FilterType filter_type = FilterType::sequential>(
+        [ op_type, pointer, &processed_cursor, &
+          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -657,6 +683,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             ExprValueType val) {
+        bool has_bitmap_input = !bitmap_input.empty();
         switch (op_type) {
             case proto::plan::GreaterThan: {
                 for (size_t i = 0; i < size; ++i) {
@@ -666,6 +693,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
                     }
                     if (valid_data != nullptr && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
+                        continue;
+                    }
+                    if (has_bitmap_input &&
+                        !bitmap_input[i + processed_cursor]) {
                         continue;
                     }
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
@@ -686,6 +717,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
+                    if (has_bitmap_input &&
+                        !bitmap_input[i + processed_cursor]) {
+                        continue;
+                    }
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
@@ -702,6 +737,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
                     }
                     if (valid_data != nullptr && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
+                        continue;
+                    }
+                    if (has_bitmap_input &&
+                        !bitmap_input[i + processed_cursor]) {
                         continue;
                     }
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
@@ -722,6 +761,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
+                    if (has_bitmap_input &&
+                        !bitmap_input[i + processed_cursor]) {
+                        continue;
+                    }
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
@@ -738,6 +781,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
                     }
                     if (valid_data != nullptr && !valid_data[offset]) {
                         res[i] = valid_res[i] = false;
+                        continue;
+                    }
+                    if (has_bitmap_input &&
+                        !bitmap_input[i + processed_cursor]) {
                         continue;
                     }
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
@@ -764,6 +811,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
+                    if (has_bitmap_input &&
+                        !bitmap_input[i + processed_cursor]) {
+                        continue;
+                    }
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         auto doc = data[i].doc();
                         auto array = doc.at_pointer(pointer).get_array();
@@ -788,6 +839,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
+                    if (has_bitmap_input &&
+                        !bitmap_input[i + processed_cursor]) {
+                        continue;
+                    }
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
@@ -810,6 +865,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
                         res[i] = valid_res[i] = false;
                         continue;
                     }
+                    if (has_bitmap_input &&
+                        !bitmap_input[i + processed_cursor]) {
+                        continue;
+                    }
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
@@ -825,6 +884,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(OffsetVector* input) {
                     fmt::format("unsupported operator type for unary expr: {}",
                                 op_type));
         }
+        processed_cursor += size;
     };
     int64_t processed_size;
     if (has_offset_input_) {
@@ -1373,7 +1433,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
 
 template <typename T>
 VectorPtr
-PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(OffsetVector* input) {
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
     if (expr_->op_type_ == proto::plan::OpType::TextMatch) {
         if (has_offset_input_) {
             PanicInfo(
@@ -1386,7 +1446,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(OffsetVector* input) {
     if (CanUseIndex<T>() && !has_offset_input_) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
-        return ExecRangeVisitorImplForData<T>(input);
+        return ExecRangeVisitorImplForData<T>(context);
     }
 }
 
@@ -1536,10 +1596,13 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
 
 template <typename T>
 VectorPtr
-PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(OffsetVector* input) {
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
+    auto* input = context.get_offset_input();
+    const auto& bitmap_input = context.get_bitmap_input();
+
     if (auto res = PreCheckOverflow<T>(input)) {
         return res;
     }
@@ -1555,62 +1618,112 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(OffsetVector* input) {
         arg_inited_ = true;
     }
     IndexInnerType val = GetValueFromProto<IndexInnerType>(expr_->val_);
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
     auto expr_type = expr_->op_type_;
 
-    auto execute_sub_batch = [expr_type]<FilterType filter_type =
-                                             FilterType::sequential>(
-        const T* data,
-        const bool* valid_data,
-        const int32_t* offsets,
-        const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        IndexInnerType val) {
+    size_t processed_cursor = 0;
+    auto execute_sub_batch =
+        [ expr_type, &processed_cursor, &
+          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+            const T* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res,
+            IndexInnerType val) {
         switch (expr_type) {
             case proto::plan::GreaterThan: {
                 UnaryElementFunc<T, proto::plan::GreaterThan, filter_type> func;
-                func(data, size, val, res, offsets);
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
                 break;
             }
             case proto::plan::GreaterEqual: {
                 UnaryElementFunc<T, proto::plan::GreaterEqual, filter_type>
                     func;
-                func(data, size, val, res, offsets);
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
                 break;
             }
             case proto::plan::LessThan: {
                 UnaryElementFunc<T, proto::plan::LessThan, filter_type> func;
-                func(data, size, val, res, offsets);
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
                 break;
             }
             case proto::plan::LessEqual: {
                 UnaryElementFunc<T, proto::plan::LessEqual, filter_type> func;
-                func(data, size, val, res, offsets);
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
                 break;
             }
             case proto::plan::Equal: {
                 UnaryElementFunc<T, proto::plan::Equal, filter_type> func;
-                func(data, size, val, res, offsets);
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
                 break;
             }
             case proto::plan::NotEqual: {
                 UnaryElementFunc<T, proto::plan::NotEqual, filter_type> func;
-                func(data, size, val, res, offsets);
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
                 break;
             }
             case proto::plan::PrefixMatch: {
                 UnaryElementFunc<T, proto::plan::PrefixMatch, filter_type> func;
-                func(data, size, val, res, offsets);
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
                 break;
             }
             case proto::plan::Match: {
                 UnaryElementFunc<T, proto::plan::Match, filter_type> func;
-                func(data, size, val, res, offsets);
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
                 break;
             }
             default:
@@ -1623,7 +1736,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(OffsetVector* input) {
         // so not divide data again for the reason that it may reduce performance if the null distribution is scattered
         // but to mask res with valid_data after the batch operation.
         if (valid_data != nullptr) {
+            bool has_bitmap_input = !bitmap_input.empty();
             for (int i = 0; i < size; i++) {
+                if (has_bitmap_input && !bitmap_input[i + processed_cursor]) {
+                    continue;
+                }
                 auto offset = i;
                 if constexpr (filter_type == FilterType::random) {
                     offset = (offsets) ? offsets[i] : i;
@@ -1633,6 +1750,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(OffsetVector* input) {
                 }
             }
         }
+        processed_cursor += size;
     };
 
     auto skip_index_func = [expr_type, val](const SkipIndex& skip_index,
