@@ -229,7 +229,7 @@ class VectorFieldIndexing : public FieldIndexing {
     has_raw_data() const override;
 
     knowhere::Json
-    get_build_params() const;
+    get_build_params(DataType data_type) const;
 
     SearchInfo
     get_search_params(const SearchInfo& searchInfo) const;

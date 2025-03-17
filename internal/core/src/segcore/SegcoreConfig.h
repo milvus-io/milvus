@@ -106,6 +106,37 @@ class SegcoreConfig {
         return dense_index_type_;
     }
 
+    void
+    set_refine_quant_type(const std::string& refine_type) {
+        if (refine_type == "NONE") {
+            refine_type_ = knowhere::RefineType::DATA_VIEW;
+        } else if (refine_type == "BFLOAT16") {
+            refine_type_ = knowhere::RefineType::BFLOAT16_QUANT;
+        } else if (refine_type == "FLOAT16") {
+            refine_type_ = knowhere::RefineType::FLOAT16_QUANT;
+        } else if (refine_type == "UINT8") {
+            refine_type_ = knowhere::RefineType::UINT8_QUANT;
+        } else {
+            PanicInfo(Unsupported,
+                      "unsupported refine type for intermin index.");
+        }
+    }
+
+    knowhere::RefineType
+    get_refine_quant_type() const {
+        return refine_type_;
+    }
+
+    void
+    set_refine_with_quant_flag(bool flag) {
+        refine_with_quant_flag_ = flag;
+    }
+
+    bool
+    get_refine_with_quant_flag() const {
+        return refine_with_quant_flag_;
+    }
+
  private:
     inline static const std::unordered_set<std::string>
         valid_dense_vector_index_type = {
@@ -120,6 +151,9 @@ class SegcoreConfig {
     inline static float refine_ratio_ = 3.0;
     inline static std::string dense_index_type_ =
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+    inline static knowhere::RefineType refine_type_ =
+        knowhere::RefineType::DATA_VIEW;
+    inline static bool refine_with_quant_flag_ = false;
 };
 
 }  // namespace milvus::segcore

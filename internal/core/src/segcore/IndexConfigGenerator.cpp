@@ -43,6 +43,8 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
     build_params_[knowhere::indexparam::SSIZE] = std::to_string(
         std::max((int)(config_.get_chunk_rows() / config_.get_nlist()), 48));
     build_params_[knowhere::indexparam::SUB_DIM] = config_.get_sub_dim();
+    build_params_[knowhere::indexparam::REFINE_TYPE] =
+        config_.get_refine_quant_type();
 
     if (is_sparse) {
         const auto& index_params = index_meta_.GetIndexParams();
@@ -68,6 +70,9 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
         std::to_string(config_.get_nprobe());
     search_params_[knowhere::indexparam::REFINE_RATIO] =
         config_.get_refine_ratio();
+
+    search_params_[knowhere::indexparam::REFINE_WITH_QUANT] =
+        config_.get_refine_with_quant_flag();
 
     // note for sparse vector index: drop_ratio_build is not allowed for growing
     // segment index.
@@ -106,8 +111,24 @@ VecIndexConfig::GetMetricType() noexcept {
 }
 
 knowhere::Json
-VecIndexConfig::GetBuildBaseParams() {
-    return build_params_;
+VecIndexConfig::GetBuildBaseParams(DataType data_type) {
+    if (data_type == DataType::VECTOR_BFLOAT16 &&
+        build_params_[knowhere::indexparam::REFINE_TYPE] ==
+            knowhere::RefineType::FLOAT16_QUANT) {
+        auto out_config = build_params_;
+        out_config[knowhere::indexparam::REFINE_TYPE] =
+            knowhere::RefineType::BFLOAT16_QUANT;
+        return out_config;
+    } else if (data_type == DataType::VECTOR_FLOAT16 &&
+               build_params_[knowhere::indexparam::REFINE_TYPE] ==
+                   knowhere::RefineType::BFLOAT16_QUANT) {
+        auto out_config = build_params_;
+        out_config[knowhere::indexparam::REFINE_TYPE] =
+            knowhere::RefineType::FLOAT16_QUANT;
+        return out_config;
+    } else {
+        return build_params_;
+    }
 }
 
 SearchInfo
