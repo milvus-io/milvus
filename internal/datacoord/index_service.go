@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -318,13 +317,6 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		} else if len(indexes) == 1 {
 			req.IndexName = indexes[0].IndexName
 		}
-	}
-
-	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(GetIndexType(req.IndexParams)) && !s.indexNodeManager.ClientSupportDisk() {
-		errMsg := "all IndexNodes do not support disk indexes, please verify"
-		log.Warn(errMsg)
-		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(merr.WrapErrIndexNotSupported(GetIndexType(req.IndexParams))), nil
 	}
 
 	allocatedIndexID, err := s.allocator.AllocID(ctx)
