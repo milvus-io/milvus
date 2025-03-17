@@ -644,7 +644,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			deleteViaWorker(ctx, worker, targetNodeID, info, deleteScope))
 
 		// list buffered delete
-		deleteRecords := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
+		deleteRecords := sd.deleteBuffer.ListAfter(position.GetTimestamp())
 		for _, entry := range deleteRecords {
 			for _, record := range entry.Data {
 				if record.PartitionID != common.AllPartitionsID && candidate.Partition() != record.PartitionID {
