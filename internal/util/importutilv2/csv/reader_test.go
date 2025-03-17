@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -140,7 +141,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 
 	// read from csv file
 	ctx := context.Background()
-	f := storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus_test/test_csv_reader/"))
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath("/tmp/milvus_test/test_csv_reader/"))
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	suite.NoError(err)
 

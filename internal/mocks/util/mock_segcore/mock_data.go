@@ -34,12 +34,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -435,17 +436,17 @@ func GenTestIndexMeta(collectionID int64, schema *schemapb.CollectionSchema) *se
 
 func NewTestChunkManagerFactory(params *paramtable.ComponentParam, rootPath string) *storage.ChunkManagerFactory {
 	return storage.NewChunkManagerFactory("minio",
-		storage.RootPath(rootPath),
-		storage.Address(params.MinioCfg.Address.GetValue()),
-		storage.AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
-		storage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
-		storage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
-		storage.SslCACert(params.MinioCfg.SslCACert.GetValue()),
-		storage.BucketName(params.MinioCfg.BucketName.GetValue()),
-		storage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
-		storage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
-		storage.IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
-		storage.CreateBucket(true))
+		objectstorage.RootPath(rootPath),
+		objectstorage.Address(params.MinioCfg.Address.GetValue()),
+		objectstorage.AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
+		objectstorage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
+		objectstorage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
+		objectstorage.SslCACert(params.MinioCfg.SslCACert.GetValue()),
+		objectstorage.BucketName(params.MinioCfg.BucketName.GetValue()),
+		objectstorage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
+		objectstorage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
+		objectstorage.IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
+		objectstorage.CreateBucket(true))
 }
 
 func SaveBinLog(ctx context.Context,

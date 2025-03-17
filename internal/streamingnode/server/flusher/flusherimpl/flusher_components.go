@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
-	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -31,8 +30,6 @@ import (
 type flusherComponents struct {
 	wal               wal.WAL
 	broker            broker.Broker
-	syncMgr           syncmgr.SyncManager
-	wbMgr             writebuffer.BufferManager
 	cpUpdater         *util.ChannelCheckpointUpdater
 	chunkManager      storage.ChunkManager
 	dataServices      map[string]*dataSyncServiceWrapper
@@ -67,12 +64,12 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 		&util.PipelineParams{
 			Ctx:                context.Background(),
 			Broker:             impl.broker,
-			SyncMgr:            impl.syncMgr,
+			SyncMgr:            resource.Resource().SyncManager(),
 			ChunkManager:       impl.chunkManager,
-			WriteBufferManager: impl.wbMgr,
+			WriteBufferManager: resource.Resource().WriteBufferManager(),
 			CheckpointUpdater:  impl.cpUpdater,
 			Allocator:          idalloc.NewMAllocator(resource.Resource().IDAllocator()),
-			MsgHandler:         newMsgHandler(impl.wbMgr),
+			MsgHandler:         newMsgHandler(resource.Resource().WriteBufferManager()),
 		},
 		msgChan,
 		&datapb.VchannelInfo{
@@ -156,9 +153,7 @@ func (impl *flusherComponents) Close() {
 		ds.Close()
 		impl.logger.Info("data sync service closed for flusher closing", zap.String("vchannel", vchannel))
 	}
-	impl.wbMgr.Stop()
 	impl.cpUpdater.Close()
-	impl.syncMgr.Close()
 	impl.checkpointManager.Close()
 }
 
@@ -210,12 +205,12 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 		&util.PipelineParams{
 			Ctx:                context.Background(),
 			Broker:             impl.broker,
-			SyncMgr:            impl.syncMgr,
+			SyncMgr:            resource.Resource().SyncManager(),
 			ChunkManager:       impl.chunkManager,
-			WriteBufferManager: impl.wbMgr,
+			WriteBufferManager: resource.Resource().WriteBufferManager(),
 			CheckpointUpdater:  impl.cpUpdater,
 			Allocator:          idalloc.NewMAllocator(resource.Resource().IDAllocator()),
-			MsgHandler:         newMsgHandler(impl.wbMgr),
+			MsgHandler:         newMsgHandler(resource.Resource().WriteBufferManager()),
 		},
 		&datapb.ChannelWatchInfo{Vchan: recoverInfo.GetInfo(), Schema: recoverInfo.GetSchema()},
 		input,

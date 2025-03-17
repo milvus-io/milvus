@@ -227,7 +227,7 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 	return true
 }
 
-func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeClient, meta *meta) bool {
+func (at *analyzeTask) AssignTask(ctx context.Context, client types.DataNodeClient, meta *meta) bool {
 	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
@@ -256,7 +256,7 @@ func (at *analyzeTask) setResult(result *workerpb.AnalyzeResult) {
 	at.taskInfo = result
 }
 
-func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {
+func (at *analyzeTask) QueryResult(ctx context.Context, client types.DataNodeClient) {
 	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
@@ -277,14 +277,17 @@ func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeCl
 	// infos length is always one.
 	for _, result := range resp.GetAnalyzeJobResults().GetResults() {
 		if result.GetTaskID() == at.GetTaskID() {
-			log.Ctx(ctx).Info("query analysis task info successfully",
-				zap.Int64("taskID", at.GetTaskID()), zap.String("result state", result.GetState().String()),
-				zap.String("failReason", result.GetFailReason()))
 			if result.GetState() == indexpb.JobState_JobStateFinished || result.GetState() == indexpb.JobState_JobStateFailed ||
 				result.GetState() == indexpb.JobState_JobStateRetry {
+				log.Ctx(ctx).Info("query analysis task info successfully",
+					zap.Int64("taskID", at.GetTaskID()), zap.String("result state", result.GetState().String()),
+					zap.String("failReason", result.GetFailReason()))
 				// state is retry or finished or failed
 				at.setResult(result)
 			} else if result.GetState() == indexpb.JobState_JobStateNone {
+				log.Ctx(ctx).Info("query analysis task info successfully",
+					zap.Int64("taskID", at.GetTaskID()), zap.String("result state", result.GetState().String()),
+					zap.String("failReason", result.GetFailReason()))
 				at.SetState(indexpb.JobState_JobStateRetry, "analyze task state is none in info response")
 			}
 			// inProgress or unissued/init, keep InProgress state
@@ -296,7 +299,7 @@ func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeCl
 	at.SetState(indexpb.JobState_JobStateRetry, "analyze result is not in info response")
 }
 
-func (at *analyzeTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
+func (at *analyzeTask) DropTaskOnWorker(ctx context.Context, client types.DataNodeClient) bool {
 	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
@@ -319,4 +322,8 @@ func (at *analyzeTask) DropTaskOnWorker(ctx context.Context, client types.IndexN
 
 func (at *analyzeTask) SetJobInfo(meta *meta) error {
 	return meta.analyzeMeta.FinishTask(at.GetTaskID(), at.taskInfo)
+}
+
+func (at *analyzeTask) DropTaskMeta(ctx context.Context, meta *meta) error {
+	return meta.analyzeMeta.DropAnalyzeTask(ctx, at.GetTaskID())
 }

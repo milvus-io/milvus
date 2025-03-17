@@ -108,7 +108,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
 
 			s.Error(m.AddStatsTask(t))
-			_, ok := m.tasks[1]
+			_, ok := m.tasks.Get(1)
 			s.False(ok)
 		})
 
@@ -116,13 +116,13 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
 
 			s.NoError(m.AddStatsTask(t))
-			_, ok := m.tasks[1]
+			_, ok := m.tasks.Get(1)
 			s.True(ok)
 		})
 
 		s.Run("already exist", func() {
 			s.Error(m.AddStatsTask(t))
-			_, ok := m.tasks[1]
+			_, ok := m.tasks.Get(1)
 			s.True(ok)
 		})
 	})
@@ -132,13 +132,13 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
 
 			s.NoError(m.UpdateVersion(1, 1180))
-			task, ok := m.tasks[1]
+			task, ok := m.tasks.Get(1)
 			s.True(ok)
 			s.Equal(int64(1), task.GetVersion())
 		})
 
 		s.Run("task not exist", func() {
-			_, ok := m.tasks[100]
+			_, ok := m.tasks.Get(100)
 			s.False(ok)
 
 			s.Error(m.UpdateVersion(100, 1180))
@@ -148,7 +148,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
 
 			s.Error(m.UpdateVersion(1, 1180))
-			task, ok := m.tasks[1]
+			task, ok := m.tasks.Get(1)
 			s.True(ok)
 			// still 1
 			s.Equal(int64(1), task.GetVersion())
@@ -160,7 +160,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
 
 			s.Error(m.UpdateBuildingTask(1))
-			task, ok := m.tasks[1]
+			task, ok := m.tasks.Get(1)
 			s.True(ok)
 			s.Equal(indexpb.JobState_JobStateInit, task.GetState())
 			s.Equal(int64(1180), task.GetNodeID())
@@ -170,14 +170,14 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
 
 			s.NoError(m.UpdateBuildingTask(1))
-			task, ok := m.tasks[1]
+			task, ok := m.tasks.Get(1)
 			s.True(ok)
 			s.Equal(indexpb.JobState_JobStateInProgress, task.GetState())
 			s.Equal(int64(1180), task.GetNodeID())
 		})
 
 		s.Run("task not exist", func() {
-			_, ok := m.tasks[100]
+			_, ok := m.tasks.Get(100)
 			s.False(ok)
 
 			s.Error(m.UpdateBuildingTask(100))
@@ -217,7 +217,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
 
 			s.Error(m.FinishTask(1, result))
-			task, ok := m.tasks[1]
+			task, ok := m.tasks.Get(1)
 			s.True(ok)
 			s.Equal(indexpb.JobState_JobStateInProgress, task.GetState())
 		})
@@ -226,7 +226,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
 
 			s.NoError(m.FinishTask(1, result))
-			task, ok := m.tasks[1]
+			task, ok := m.tasks.Get(1)
 			s.True(ok)
 			s.Equal(indexpb.JobState_JobStateFinished, task.GetState())
 		})
@@ -268,7 +268,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
 
 			s.Error(m.DropStatsTask(1))
-			_, ok := m.tasks[1]
+			_, ok := m.tasks.Get(1)
 			s.True(ok)
 		})
 
@@ -276,7 +276,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
 
 			s.NoError(m.DropStatsTask(1))
-			_, ok := m.tasks[1]
+			_, ok := m.tasks.Get(1)
 			s.False(ok)
 
 			s.NoError(m.DropStatsTask(1000))

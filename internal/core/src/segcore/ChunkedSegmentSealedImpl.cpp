@@ -201,46 +201,6 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
     scalar_indexings_[field_id] =
         std::move(const_cast<LoadIndexInfo&>(info).index);
-    // reverse pk from scalar index and set pks to offset
-    if (schema_->get_primary_field_id() == field_id) {
-        AssertInfo(field_id.get() != -1, "Primary key is -1");
-        switch (field_meta.get_data_type()) {
-            case DataType::INT64: {
-                auto int64_index = dynamic_cast<index::ScalarIndex<int64_t>*>(
-                    scalar_indexings_[field_id].get());
-                if (!is_sorted_by_pk_ && insert_record_.empty_pks() &&
-                    int64_index->HasRawData()) {
-                    for (int i = 0; i < row_count; ++i) {
-                        auto raw = int64_index->Reverse_Lookup(i);
-                        AssertInfo(raw.has_value(), "pk not found");
-                        insert_record_.insert_pk(raw.value(), i);
-                    }
-                    insert_record_.seal_pks();
-                }
-                break;
-            }
-            case DataType::VARCHAR: {
-                auto string_index =
-                    dynamic_cast<index::ScalarIndex<std::string>*>(
-                        scalar_indexings_[field_id].get());
-                if (!is_sorted_by_pk_ && insert_record_.empty_pks() &&
-                    string_index->HasRawData()) {
-                    for (int i = 0; i < row_count; ++i) {
-                        auto raw = string_index->Reverse_Lookup(i);
-                        AssertInfo(raw.has_value(), "pk not found");
-                        insert_record_.insert_pk(raw.value(), i);
-                    }
-                    insert_record_.seal_pks();
-                }
-                break;
-            }
-            default: {
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported primary key type {}",
-                                      field_meta.get_data_type()));
-            }
-        }
-    }
 
     set_bit(index_ready_bitset_, field_id, true);
     update_row_count(row_count);
@@ -571,7 +531,7 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
                 //     DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
                 auto var_column =
                     std::make_shared<ChunkedVariableColumn<std::string>>(
-                        chunks);
+                        field_meta, chunks);
                 // var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;
@@ -579,21 +539,22 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
             case milvus::DataType::JSON: {
                 auto var_column =
                     std::make_shared<ChunkedVariableColumn<milvus::Json>>(
-                        chunks);
+                        field_meta, chunks);
                 // var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;
             }
             case milvus::DataType::ARRAY: {
-                auto arr_column = std::make_shared<ChunkedArrayColumn>(chunks);
+                auto arr_column =
+                    std::make_shared<ChunkedArrayColumn>(field_meta, chunks);
                 // arr_column->Seal(std::move(indices),
                 //                  std::move(element_indices));
                 column = std::move(arr_column);
                 break;
             }
             case milvus::DataType::VECTOR_SPARSE_FLOAT: {
-                auto sparse_column =
-                    std::make_shared<ChunkedSparseFloatColumn>(chunks);
+                auto sparse_column = std::make_shared<ChunkedSparseFloatColumn>(
+                    field_meta, chunks);
                 // sparse_column->Seal(std::move(indices));
                 column = std::move(sparse_column);
                 break;
@@ -604,7 +565,7 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
             }
         }
     } else {
-        column = std::make_shared<ChunkedColumn>(chunks);
+        column = std::make_shared<ChunkedColumn>(field_meta, chunks);
     }
 
     // column->SetValidData(std::move(valid_data));

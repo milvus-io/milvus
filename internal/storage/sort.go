@@ -234,11 +234,11 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 	var pq *PriorityQueue[index]
 	switch recs[0].Column(pkFieldId).(type) {
 	case *array.Int64:
-		pq = NewPriorityQueue[index](func(x, y *index) bool {
+		pq = NewPriorityQueue(func(x, y *index) bool {
 			return recs[x.ri].Column(pkFieldId).(*array.Int64).Value(x.i) < recs[y.ri].Column(pkFieldId).(*array.Int64).Value(y.i)
 		})
 	case *array.String:
-		pq = NewPriorityQueue[index](func(x, y *index) bool {
+		pq = NewPriorityQueue(func(x, y *index) bool {
 			return recs[x.ri].Column(pkFieldId).(*array.String).Value(x.i) < recs[y.ri].Column(pkFieldId).(*array.String).Value(y.i)
 		})
 	}

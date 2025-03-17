@@ -254,7 +254,8 @@ func getRateTypes(scope internalpb.RateScope, opType opType) typeutil.Set[intern
 	var allRateTypes typeutil.Set[internalpb.RateType]
 	switch scope {
 	case internalpb.RateScope_Cluster:
-		fallthrough
+		allRateTypes = ddlRateTypes.Union(dmlRateTypes).Union(dqlRateTypes)
+		allRateTypes.Insert(internalpb.RateType_DDLDB)
 	case internalpb.RateScope_Database:
 		allRateTypes = ddlRateTypes.Union(dmlRateTypes).Union(dqlRateTypes)
 	case internalpb.RateScope_Collection:

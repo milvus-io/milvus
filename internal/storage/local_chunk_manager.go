@@ -29,6 +29,7 @@ import (
 	"golang.org/x/exp/mmap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -40,13 +41,13 @@ type LocalChunkManager struct {
 var _ ChunkManager = (*LocalChunkManager)(nil)
 
 // NewLocalChunkManager create a new local manager object.
-func NewLocalChunkManager(opts ...Option) *LocalChunkManager {
-	c := newDefaultConfig()
+func NewLocalChunkManager(opts ...objectstorage.Option) *LocalChunkManager {
+	c := objectstorage.NewDefaultConfig()
 	for _, opt := range opts {
 		opt(c)
 	}
 	return &LocalChunkManager{
-		localPath: c.rootPath,
+		localPath: c.RootPath,
 	}
 }
 

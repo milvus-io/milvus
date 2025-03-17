@@ -17,9 +17,12 @@
 package utils
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 const DefaultTimeout int64 = 30
@@ -33,23 +36,31 @@ func send(req *http.Request) ([]byte, error) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Call service faild, read response failed, errs:[%v]", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Call %s faild, errs:[%s, %s]", req.URL, resp.Status, body)
+		return nil, fmt.Errorf("Call service faild, errs:[%s, %s]", resp.Status, body)
 	}
 	return body, nil
 }
 
-func RetrySend(req *http.Request, maxRetries int) ([]byte, error) {
+func RetrySend(ctx context.Context, data []byte, httpMethod string, url string, headers map[string]string, maxRetries int, retryDelay int) ([]byte, error) {
 	var err error
-	var res []byte
+	var body []byte
 	for i := 0; i < maxRetries; i++ {
-		res, err = send(req)
-		if err == nil {
-			return res, nil
+		req, reqErr := http.NewRequestWithContext(ctx, httpMethod, url, bytes.NewBuffer(data))
+		if reqErr != nil {
+			return nil, reqErr
 		}
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		body, err = send(req)
+		if err == nil {
+			return body, nil
+		}
+		time.Sleep(time.Duration(retryDelay) * time.Second)
 	}
 	return nil, err
 }

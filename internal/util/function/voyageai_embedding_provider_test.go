@@ -69,7 +69,7 @@ func createVoyageAIProvider(url string, schema *schemapb.FieldSchema, providerNa
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: voyage3Large},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: embeddingURLParamKey, Value: url},
 			{Key: dimParamKey, Value: "1024"},
@@ -135,26 +135,6 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestEmbeddingIn8() {
 			_, err := provider.CallEmbedding(data, SearchMode)
 			s.NoError(err)
 		}
-	}
-
-	// Invalid model name
-	{
-		functionSchema := &schemapb.FunctionSchema{
-			Name:             "test",
-			Type:             schemapb.FunctionType_TextEmbedding,
-			InputFieldNames:  []string{"text"},
-			OutputFieldNames: []string{"vector"},
-			InputFieldIds:    []int64{101},
-			OutputFieldIds:   []int64{102},
-			Params: []*commonpb.KeyValuePair{
-				{Key: modelNameParamKey, Value: voyage3Lite},
-				{Key: apiKeyParamKey, Value: "mock"},
-				{Key: embeddingURLParamKey, Value: ts.URL},
-				{Key: dimParamKey, Value: "1024"},
-			},
-		}
-		_, err := NewCohereEmbeddingProvider(int8VecField, functionSchema)
-		s.Error(err)
 	}
 }
 
@@ -318,10 +298,11 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() 
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: voyage3Large},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: embeddingURLParamKey, Value: "mock"},
 			{Key: dimParamKey, Value: "1024"},
+			{Key: truncationParamKey, Value: "true"},
 		},
 	}
 	provider, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema)
@@ -329,11 +310,12 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() 
 	s.Equal(provider.FieldDim(), int64(1024))
 	s.True(provider.MaxBatch() > 0)
 
-	// Invalid model
+	// Invalid truncation
 	{
-		functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: "UnkownModel"}
+		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: truncationParamKey, Value: "Invalid"}
 		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema)
 		s.Error(err)
+		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: truncationParamKey, Value: "false"}
 	}
 
 	// Invalid dim

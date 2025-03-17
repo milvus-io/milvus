@@ -204,9 +204,10 @@ func defaultSegmentSealPolicy() []SegmentSealPolicy {
 	}
 }
 
-func defaultChannelSealPolicy() []channelSealPolicy {
+func defaultChannelSealPolicy(meta *meta) []channelSealPolicy {
 	return []channelSealPolicy{
 		sealByTotalGrowingSegmentsSize(),
+		sealByBlockingL0(meta),
 	}
 }
 
@@ -226,7 +227,7 @@ func newSegmentManager(meta *meta, allocator allocator.Allocator, opts ...allocO
 		estimatePolicy:      defaultCalUpperLimitPolicy(),
 		allocPolicy:         defaultAllocatePolicy(),
 		segmentSealPolicies: defaultSegmentSealPolicy(),
-		channelSealPolicies: defaultChannelSealPolicy(),
+		channelSealPolicies: defaultChannelSealPolicy(meta),
 		flushPolicy:         defaultFlushPolicy(),
 	}
 	for _, opt := range opts {
@@ -582,7 +583,7 @@ func (s *SegmentManager) CleanZeroSealedSegmentsOfChannel(ctx context.Context, c
 			return true
 		}
 		// Check if segment is empty
-		if segment.GetLastExpireTime() > 0 && segment.GetLastExpireTime() < cpTs && segment.currRows == 0 && segment.GetNumOfRows() == 0 {
+		if segment.GetLastExpireTime() > 0 && segment.GetLastExpireTime() < cpTs && segment.GetNumOfRows() == 0 {
 			log.Info("try remove empty sealed segment after channel cp updated",
 				zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id),
 				zap.String("channel", channel), zap.Any("cpTs", cpTs))

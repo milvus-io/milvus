@@ -69,7 +69,7 @@ func createSiliconflowProvider(url string, schema *schemapb.FieldSchema, provide
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: bAAIBgeLargeEhV15},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: embeddingURLParamKey, Value: url},
 		},
@@ -187,7 +187,7 @@ func (s *SiliconflowTextEmbeddingProviderSuite) TestNewSiliconflowEmbeddingProvi
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: bAAIBgeLargeEhV15},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: embeddingURLParamKey, Value: "mock"},
 		},
@@ -196,11 +196,4 @@ func (s *SiliconflowTextEmbeddingProviderSuite) TestNewSiliconflowEmbeddingProvi
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
 	s.True(provider.MaxBatch() > 0)
-
-	// Invalid model
-	{
-		functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: "UnkownModel"}
-		_, err := NewSiliconflowEmbeddingProvider(s.schema.Fields[2], functionSchema)
-		s.Error(err)
-	}
 }

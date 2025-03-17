@@ -178,3 +178,19 @@ func (c *Client) DropIndex(ctx context.Context, opt DropIndexOption, callOptions
 		return merr.CheckRPCCall(resp, err)
 	})
 }
+
+func (c *Client) AlterIndexProperties(ctx context.Context, opt AlterIndexPropertiesOption, callOptions ...grpc.CallOption) error {
+	req := opt.Request()
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterIndex(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}
+
+func (c *Client) DropIndexProperties(ctx context.Context, opt DropIndexPropertiesOption, callOptions ...grpc.CallOption) error {
+	req := opt.Request()
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterIndex(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}

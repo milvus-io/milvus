@@ -18,7 +18,6 @@ package compactor
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -212,9 +211,10 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	s.task.plan.ClusteringKeyField = 100
 	s.task.plan.PreferSegmentRows = 2048
 	s.task.plan.MaxSegmentRows = 2048
+	s.task.plan.MaxSize = 1024 * 1024 * 1024 // max segment size = 1GB, we won't touch this value
 	s.task.plan.PreAllocatedSegmentIDs = &datapb.IDRange{
-		Begin: time.Now().UnixMilli(),
-		End:   time.Now().UnixMilli() + 1000,
+		Begin: 1,
+		End:   101,
 	}
 
 	// 8+8+8+4+7+4*4=51
@@ -295,9 +295,10 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 	s.task.plan.ClusteringKeyField = 100
 	s.task.plan.PreferSegmentRows = 3000
 	s.task.plan.MaxSegmentRows = 3000
+	s.task.plan.MaxSize = 1024 * 1024 * 1024 // max segment size = 1GB, we won't touch this value
 	s.task.plan.PreAllocatedSegmentIDs = &datapb.IDRange{
-		Begin: time.Now().UnixMilli(),
-		End:   time.Now().UnixMilli() + 1000,
+		Begin: 1,
+		End:   1000,
 	}
 
 	// 8+8+8+4+7+4*4=51
@@ -311,7 +312,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 	compactionResult, err := s.task.Compact()
 	s.Require().NoError(err)
 	s.Equal(2, len(s.task.clusterBuffers))
-	s.Equal(4, len(compactionResult.GetSegments()))
+	s.Equal(2, len(compactionResult.GetSegments()))
 	totalBinlogNum := 0
 	totalRowNum := int64(0)
 	for _, fb := range compactionResult.GetSegments()[0].GetInsertLogs() {
@@ -330,7 +331,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 			statsRowNum += b.GetEntriesNum()
 		}
 	}
-	s.Equal(3, totalBinlogNum/len(schema.GetFields()))
+	s.Equal(5, totalBinlogNum/len(schema.GetFields()))
 	s.Equal(1, statsBinlogNum)
 	s.Equal(totalRowNum, statsRowNum)
 }
@@ -368,9 +369,10 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 	s.task.plan.ClusteringKeyField = 100
 	s.task.plan.PreferSegmentRows = 2048
 	s.task.plan.MaxSegmentRows = 2048
+	s.task.plan.MaxSize = 1024 * 1024 * 1024 // 1GB
 	s.task.plan.PreAllocatedSegmentIDs = &datapb.IDRange{
-		Begin: time.Now().UnixMilli(),
-		End:   time.Now().UnixMilli() + 1000,
+		Begin: 1,
+		End:   1000,
 	}
 
 	// 8 + 8 + 8 + 7 + 8 = 39
@@ -417,173 +419,6 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 
 	s.Equal(1, bm25BinlogNum)
 	s.Equal(totalRowNum, bm25RowNum)
-}
-
-func (s *ClusteringCompactionTaskSuite) TestCheckBuffersAfterCompaction() {
-	s.Run("no leak", func() {
-		task := &clusteringCompactionTask{clusterBuffers: []*ClusterBuffer{{}}}
-
-		s.NoError(task.checkBuffersAfterCompaction())
-	})
-
-	s.Run("leak binlog", func() {
-		task := &clusteringCompactionTask{
-			clusterBuffers: []*ClusterBuffer{
-				{
-					flushedBinlogs: map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog{
-						1: {
-							101: {
-								FieldID: 101,
-								Binlogs: []*datapb.Binlog{{LogID: 1000}},
-							},
-						},
-					},
-				},
-			},
-		}
-		s.Error(task.checkBuffersAfterCompaction())
-	})
-}
-
-func (s *ClusteringCompactionTaskSuite) TestGenerateBM25Stats() {
-	s.Run("normal case", func() {
-		segmentID := int64(1)
-		task := &clusteringCompactionTask{
-			collectionID: 111,
-			partitionID:  222,
-			bm25FieldIds: []int64{102},
-			logIDAlloc:   s.mockAlloc,
-			binlogIO:     s.mockBinlogIO,
-		}
-
-		statsMap := make(map[int64]*storage.BM25Stats)
-		statsMap[102] = storage.NewBM25Stats()
-		statsMap[102].Append(map[uint32]float32{1: 1})
-
-		binlogs, err := task.generateBM25Stats(context.Background(), segmentID, statsMap)
-		s.NoError(err)
-		s.Equal(1, len(binlogs))
-		s.Equal(1, len(binlogs[0].Binlogs))
-		s.Equal(int64(102), binlogs[0].FieldID)
-		s.Equal(int64(1), binlogs[0].Binlogs[0].GetEntriesNum())
-	})
-
-	s.Run("alloc ID failed", func() {
-		segmentID := int64(1)
-		mockAlloc := allocator.NewMockAllocator(s.T())
-		mockAlloc.EXPECT().Alloc(mock.Anything).Return(0, 0, fmt.Errorf("mock error")).Once()
-
-		task := &clusteringCompactionTask{
-			collectionID: 111,
-			partitionID:  222,
-			bm25FieldIds: []int64{102},
-			logIDAlloc:   mockAlloc,
-		}
-
-		statsMap := make(map[int64]*storage.BM25Stats)
-		statsMap[102] = storage.NewBM25Stats()
-		statsMap[102].Append(map[uint32]float32{1: 1})
-
-		_, err := task.generateBM25Stats(context.Background(), segmentID, statsMap)
-		s.Error(err)
-	})
-
-	s.Run("upload failed", func() {
-		segmentID := int64(1)
-		mockBinlogIO := mock_util.NewMockBinlogIO(s.T())
-		mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
-
-		task := &clusteringCompactionTask{
-			collectionID: 111,
-			partitionID:  222,
-			bm25FieldIds: []int64{102},
-			logIDAlloc:   s.mockAlloc,
-			binlogIO:     mockBinlogIO,
-		}
-
-		statsMap := make(map[int64]*storage.BM25Stats)
-		statsMap[102] = storage.NewBM25Stats()
-		statsMap[102].Append(map[uint32]float32{1: 1})
-
-		_, err := task.generateBM25Stats(context.Background(), segmentID, statsMap)
-		s.Error(err)
-	})
-}
-
-func (s *ClusteringCompactionTaskSuite) TestGeneratePkStats() {
-	pkField := &schemapb.FieldSchema{
-		FieldID:      100,
-		Name:         "pk",
-		IsPrimaryKey: true,
-		Description:  "",
-		DataType:     schemapb.DataType_Int64,
-	}
-	s.Run("num rows zero", func() {
-		task := &clusteringCompactionTask{
-			primaryKeyField: pkField,
-		}
-		binlogs, err := task.generatePkStats(context.Background(), 1, 0, nil)
-		s.Error(err)
-		s.Nil(binlogs)
-	})
-
-	s.Run("download binlogs failed", func() {
-		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
-		task := &clusteringCompactionTask{
-			binlogIO:        s.mockBinlogIO,
-			primaryKeyField: pkField,
-		}
-		binlogs, err := task.generatePkStats(context.Background(), 1, 100, [][]string{{"abc", "def"}})
-		s.Error(err)
-		s.Nil(binlogs)
-	})
-
-	s.Run("NewInsertBinlogIterator failed", func() {
-		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{[]byte("mock")}, nil)
-		task := &clusteringCompactionTask{
-			binlogIO:        s.mockBinlogIO,
-			primaryKeyField: pkField,
-		}
-		binlogs, err := task.generatePkStats(context.Background(), 1, 100, [][]string{{"abc", "def"}})
-		s.Error(err)
-		s.Nil(binlogs)
-	})
-
-	s.Run("upload failed", func() {
-		schema := genCollectionSchema()
-		segWriter, err := NewSegmentWriter(schema, 1000, compactionBatchSize, SegmentID, PartitionID, CollectionID, []int64{})
-		s.Require().NoError(err)
-		for i := 0; i < 2000; i++ {
-			v := storage.Value{
-				PK:        storage.NewInt64PrimaryKey(int64(i)),
-				Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
-				Value:     genRow(int64(i)),
-			}
-			err = segWriter.Write(&v)
-			s.Require().NoError(err)
-		}
-		segWriter.FlushAndIsFull()
-
-		kvs, _, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
-		s.NoError(err)
-		mockBinlogIO := mock_util.NewMockBinlogIO(s.T())
-		mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)
-		mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
-		task := &clusteringCompactionTask{
-			collectionID: CollectionID,
-			partitionID:  PartitionID,
-			plan: &datapb.CompactionPlan{
-				Schema: genCollectionSchema(),
-			},
-			binlogIO:        mockBinlogIO,
-			primaryKeyField: pkField,
-			logIDAlloc:      s.mockAlloc,
-		}
-
-		binlogs, err := task.generatePkStats(context.Background(), 1, 100, [][]string{{"abc", "def"}})
-		s.Error(err)
-		s.Nil(binlogs)
-	})
 }
 
 func genRow(magic int64) map[int64]interface{} {

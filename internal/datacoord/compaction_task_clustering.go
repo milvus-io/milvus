@@ -106,7 +106,6 @@ func (t *clusteringCompactionTask) Process() bool {
 	if currentState != lastState {
 		ts := time.Now().Unix()
 		lastStateDuration := ts - t.GetTaskProto().GetLastStateStartTime()
-		log.Info("clustering compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState), zap.Int64("elapse seconds", lastStateDuration))
 		metrics.DataCoordCompactionLatency.
 			WithLabelValues(fmt.Sprint(typeutil.IsVectorType(t.GetTaskProto().GetClusteringKeyField().DataType)), t.GetTaskProto().Channel, datapb.CompactionType_ClusteringCompaction.String(), lastState).
 			Observe(float64(lastStateDuration * 1000))
@@ -208,6 +207,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		BeginLogID:             beginLogID,
 		PreAllocatedSegmentIDs: taskProto.GetPreAllocatedSegmentIDs(),
 		SlotUsage:              t.GetSlotUsage(),
+		MaxSize:                taskProto.GetMaxSize(),
 	}
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 
@@ -365,7 +365,7 @@ func (t *clusteringCompactionTask) processStats() error {
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing), setResultSegments(resultSegments))
 }
 
-// this is just a temporary solution. A more long-term solution should be for the indexnode
+// this is just a temporary solution. A more long-term solution should be for the datanode
 // to regenerate the clustering information corresponding to each segment and merge them at the vshard level.
 func (t *clusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments map[int64][]int64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

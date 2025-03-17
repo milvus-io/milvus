@@ -52,6 +52,7 @@ func initLimitConfigMaps() {
 				internalpb.RateType_DMLBulkLoad:   &quotaConfig.DMLMaxBulkLoadRate,
 				internalpb.RateType_DQLSearch:     &quotaConfig.DQLMaxSearchRate,
 				internalpb.RateType_DQLQuery:      &quotaConfig.DQLMaxQueryRate,
+				internalpb.RateType_DDLDB:         &quotaConfig.MaxDBRate,
 			},
 			internalpb.RateScope_Database: {
 				internalpb.RateType_DDLCollection: &quotaConfig.DDLCollectionRatePerDB,

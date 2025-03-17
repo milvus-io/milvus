@@ -52,6 +52,7 @@ image:
     repository: harbor.milvus.io/milvus/milvus
     tag: PR-35426-20240812-46dadb120
 indexCoordinator:
+  enabled: false
   resources:
     limits:
       cpu: "1"
@@ -59,6 +60,7 @@ indexCoordinator:
       cpu: "0.1"
       memory: 50Mi
 indexNode:
+  enabled: false
   disk:
     enabled: true
   resources:
