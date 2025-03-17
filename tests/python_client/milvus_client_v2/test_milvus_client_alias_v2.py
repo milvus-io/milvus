@@ -29,12 +29,12 @@ default_float_field_name = ct.default_float_field_name
 default_string_field_name = ct.default_string_field_name
 
 
-class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
+class TestMilvusClientV2AliasInvalid(TestMilvusClientV2Base):
     """ Negative test cases of alias interface parameters"""
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("alias_name", ct.invalid_resource_names)
-    def test_milvus_client_create_alias_with_invalid_name(self, alias_name):
+    def test_milvus_client_v2_create_alias_with_invalid_name(self, alias_name):
         """
         target: test alias inserting data
         method: create a collection with invalid alias name
@@ -57,11 +57,11 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
-class TestMilvusClientAliasOperation(TestMilvusClientV2Base):
+class TestMilvusClientV2AliasOperation(TestMilvusClientV2Base):
     """ Test cases of alias interface operations"""
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_alter_alias_operation_default(self):
+    def test_milvus_client_v2_alter_alias_operation_default(self):
         """
         target: test collection altering alias
         method:
@@ -149,7 +149,7 @@ class TestMilvusClientAliasOperation(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name2)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_create_drop_alias_operation_default(self):
+    def test_milvus_client_v2_create_drop_alias_operation_default(self):
         """
         target: test collection creating and dropping alias
         method: 
@@ -208,7 +208,7 @@ class TestMilvusClientAliasOperation(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_collection_operations_by_alias(self):
+    def test_milvus_client_v2_collection_operations_by_alias(self):
         """
         target: test collection operations using alias
         method: 
@@ -246,11 +246,11 @@ class TestMilvusClientAliasOperation(TestMilvusClientV2Base):
         assert not self.has_collection(client, collection_name)[0]
 
 
-class TestMilvusClientAliasOperationInvalid(TestMilvusClientV2Base):
+class TestMilvusClientV2AliasOperationInvalid(TestMilvusClientV2Base):
     """ Test cases of alias interface invalid operations"""
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_create_duplication_alias(self):
+    def test_milvus_client_v2_create_duplication_alias(self):
         """
         target: test create duplicate alias
         method: create alias twice with same name to different collections
@@ -283,7 +283,7 @@ class TestMilvusClientAliasOperationInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name2)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_alter_not_exist_alias(self):
+    def test_milvus_client_v2_alter_not_exist_alias(self):
         """
         target: test alter not exist alias
         method: alter alias that not exists
@@ -312,7 +312,7 @@ class TestMilvusClientAliasOperationInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_drop_not_exist_alias(self):
+    def test_milvus_client_v2_drop_not_exist_alias(self):
         """
         target: test drop not exist alias
         method: drop alias that not exists
@@ -325,7 +325,7 @@ class TestMilvusClientAliasOperationInvalid(TestMilvusClientV2Base):
         self.drop_alias(client, alias_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_drop_same_alias_twice(self):
+    def test_milvus_client_v2_drop_same_alias_twice(self):
         """
         target: test drop same alias twice
         method: drop alias twice
@@ -351,7 +351,7 @@ class TestMilvusClientAliasOperationInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_create_dup_name_collection(self):
+    def test_milvus_client_v2_create_dup_name_collection(self):
         """
         target: test create collection with duplicate name
         method: create collection with alias name
@@ -380,7 +380,7 @@ class TestMilvusClientAliasOperationInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_reuse_alias_name(self):
+    def test_milvus_client_v2_reuse_alias_name(self):
         """
         target: test reuse alias name from dropped collection
         method: 
@@ -419,7 +419,7 @@ class TestMilvusClientAliasOperationInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name2)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_rename_collection_to_alias_name(self):
+    def test_milvus_client_v2_rename_collection_to_alias_name(self):
         """
         target: test rename collection to alias name
         method: 
