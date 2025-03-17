@@ -61,14 +61,9 @@ func (s *MetaWriterSuite) TestReturnError() {
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(seg, true)
-<<<<<<< HEAD
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	task := NewSyncTask()
 	task.WithMetaCache(s.metacache)
-=======
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
-	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(new(SyncPack))
->>>>>>> 8a42492bdc (ok)
 	err := s.writer.UpdateSync(ctx, task)
 	s.Error(err)
 }
