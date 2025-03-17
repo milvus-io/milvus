@@ -458,6 +458,8 @@ export LDFLAGS="-L/opt/homebrew/opt/llvm@15/lib"
 export CPPFLAGS="-I/opt/homebrew/opt/llvm@15/include"
 ```
 
+---
+
 Q: The binary fails to open on my OS with the error "Unsupported system page size"?
 
 A: This occurs when your OS uses a large memory page size, which must be explicitly declared during compilation. Follow these steps to resolve it:
