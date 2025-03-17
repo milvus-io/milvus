@@ -26,7 +26,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
     """ Test case of end-to-end interface """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail("issue #40686")
+    @pytest.mark.skip(reason="issue #40686")
     @pytest.mark.parametrize("flush_enable", [True, False])
     @pytest.mark.parametrize("scalar_index_enable", [True, False])
     def test_milvus_client_e2e_default(self, flush_enable, scalar_index_enable):
