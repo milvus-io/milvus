@@ -25,6 +25,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+      - name: Install GitHub CLI
+        run: |
+          sudo apt update
+          sudo apt install -y gh
+      - name: Close Previous PRs
+        run: |
+          REPO=${{ github.repository }}
+
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # Set up GitHub CLI authentication non-interactively
+          gh auth login --with-token <<< "${{ secrets.ALL_CONTRIBUTORS_TOKEN }}"
+            
+          BRANCH_PREFIX="update_knowhere_commit_"
+            
+          prs=$(gh pr list --repo "$REPO" --state open --json number,headRefName --jq ".[] | select(.headRefName | startswith(\"$BRANCH_PREFIX\")) | .number")
+            
+          for pr in $prs; do
+              echo "Closing old PR #$pr"
+              gh pr close $pr --repo "$REPO"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
       - name: get knowhere latest commit
         id: get-knowhere-latest-commit
         run: | 

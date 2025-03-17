@@ -81,23 +81,10 @@ type QueryCoordTopology struct {
 	Connections ConnTopology         `json:"connections"`
 }
 
-// IndexClusterTopology shows the topology between IndexCoord and IndexNodes
-type IndexClusterTopology struct {
-	Self           IndexCoordInfos  `json:"self"`
-	ConnectedNodes []IndexNodeInfos `json:"connected_nodes"`
-}
-
-// IndexCoordTopology shows the whole metrics of index cluster
-type IndexCoordTopology struct {
-	Cluster     IndexClusterTopology `json:"cluster"`
-	Connections ConnTopology         `json:"connections"`
-}
-
 // DataClusterTopology shows the topology between DataCoord and DataNodes
 type DataClusterTopology struct {
-	Self                DataCoordInfos   `json:"self"`
-	ConnectedDataNodes  []DataNodeInfos  `json:"connected_data_nodes"`
-	ConnectedIndexNodes []IndexNodeInfos `json:"connected_index_nodes"`
+	Self               DataCoordInfos  `json:"self"`
+	ConnectedDataNodes []DataNodeInfos `json:"connected_data_nodes"`
 }
 
 // DataCoordTopology shows the whole metrics of index cluster

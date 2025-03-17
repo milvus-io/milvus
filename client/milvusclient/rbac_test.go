@@ -320,6 +320,7 @@ func (s *RoleSuite) TestDescribeRole() {
 						},
 						Role:    &milvuspb.RoleEntity{Name: roleName},
 						Grantor: &milvuspb.GrantorEntity{User: &milvuspb.UserEntity{Name: "admin"}, Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"}},
+						DbName:  "aaa",
 					},
 					{
 						ObjectName: "*",
@@ -432,14 +433,14 @@ func (s *PrivilegeGroupSuite) TestGrantV2() {
 			return merr.Success(), nil
 		}).Once()
 
-		err := s.client.GrantV2(ctx, NewGrantV2Option(roleName, privilegeName, dbName, collectionName))
+		err := s.client.GrantPrivilegeV2(ctx, NewGrantPrivilegeV2Option(roleName, privilegeName, collectionName).WithDbName(dbName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
 		s.mock.EXPECT().OperatePrivilegeV2(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
-		err := s.client.GrantV2(ctx, NewGrantV2Option(roleName, privilegeName, dbName, collectionName))
+		err := s.client.GrantPrivilegeV2(ctx, NewGrantPrivilegeV2Option(roleName, privilegeName, collectionName).WithDbName(dbName))
 		s.Error(err)
 	})
 }
@@ -462,14 +463,14 @@ func (s *PrivilegeGroupSuite) TestRevokeV2() {
 			return merr.Success(), nil
 		}).Once()
 
-		err := s.client.RevokeV2(ctx, NewRevokeV2Option(roleName, privilegeName, dbName, collectionName))
+		err := s.client.RevokePrivilegeV2(ctx, NewRevokePrivilegeV2Option(roleName, privilegeName, collectionName).WithDbName(dbName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
 		s.mock.EXPECT().OperatePrivilegeV2(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
-		err := s.client.RevokeV2(ctx, NewRevokeV2Option(roleName, privilegeName, dbName, collectionName))
+		err := s.client.RevokePrivilegeV2(ctx, NewRevokePrivilegeV2Option(roleName, privilegeName, collectionName).WithDbName(dbName))
 		s.Error(err)
 	})
 }

@@ -1563,6 +1563,11 @@ func TestGetRateType(t *testing.T) {
 		a := getRateTypes(internalpb.RateScope_Cluster, ddl)
 		assert.Equal(t, 5, a.Len())
 	})
+
+	t.Run("ddl cluster scope", func(t *testing.T) {
+		a := getRateTypes(internalpb.RateScope_Cluster, allOps)
+		assert.Equal(t, 12, a.Len())
+	})
 }
 
 func TestResetAllCurrentRates(t *testing.T) {

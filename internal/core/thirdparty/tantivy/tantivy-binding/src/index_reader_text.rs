@@ -5,7 +5,7 @@ use tantivy::{
 };
 
 use crate::error::Result;
-use crate::{index_reader::IndexReaderWrapper, analyzer::standard_analyzer};
+use crate::{analyzer::standard_analyzer, index_reader::IndexReaderWrapper};
 
 impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,
@@ -62,13 +62,14 @@ impl IndexReaderWrapper {
 
 #[cfg(test)]
 mod tests {
+    use tantivy::query::TermQuery;
     use tempfile::TempDir;
 
-    use crate::{index_writer::IndexWriterWrapper, tokenizer::create_tokenizer};
+    use crate::{analyzer::create_analyzer, index_writer::IndexWriterWrapper};
     #[test]
     fn test_jeba() {
         let params = "{\"tokenizer\": \"jieba\"}".to_string();
-        let tokenizer = create_tokenizer(&params).unwrap();
+        let tokenizer = create_analyzer(&params).unwrap();
         let dir = TempDir::new().unwrap();
 
         let mut writer = IndexWriterWrapper::create_text_writer(
@@ -95,5 +96,37 @@ mod tests {
         let reader = writer.create_reader().unwrap();
         let res = reader.phrase_match_query("网球滑雪", slop).unwrap();
         assert_eq!(res, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_read() {
+        let tokenizer = create_analyzer("").unwrap();
+        let dir = TempDir::new().unwrap();
+        let mut writer = IndexWriterWrapper::create_text_writer(
+            "text".to_string(),
+            dir.path().to_str().unwrap().to_string(),
+            "default".to_string(),
+            tokenizer,
+            1,
+            50_000_000,
+            false,
+        );
+
+        for i in 0..10000 {
+            writer.add_string("hello world", i).unwrap();
+        }
+        writer.commit().unwrap();
+
+        let reader = writer.create_reader().unwrap();
+
+        let query = TermQuery::new(
+            tantivy::Term::from_field_text(reader.field.clone(), "hello"),
+            tantivy::schema::IndexRecordOption::Basic,
+        );
+
+        let res = reader.search(&query).unwrap();
+        assert_eq!(res, (0..10000).collect::<Vec<u32>>());
+        let res = reader.search_i64(&query).unwrap();
+        assert_eq!(res, (0..10000).collect::<Vec<i64>>());
     }
 }

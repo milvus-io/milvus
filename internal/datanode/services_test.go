@@ -43,9 +43,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -109,7 +111,7 @@ func (s *DataNodeServicesSuite) SetupTest() {
 	err = s.node.Start()
 	s.Require().NoError(err)
 
-	s.node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/milvus_test/datanode"))
+	s.node.chunkManager = storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/milvus_test/datanode"))
 	paramtable.SetNodeID(1)
 }
 
@@ -211,7 +213,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 	})
 
 	s.Run("unhealthy", func() {
-		node := &DataNode{}
+		node := &DataNode{lifetime: lifetime.NewLifetime(commonpb.StateCode_Abnormal)}
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, _ := node.GetCompactionState(s.ctx, nil)
 		s.Assert().Equal(merr.Code(merr.ErrServiceNotReady), resp.GetStatus().GetCode())
@@ -224,7 +226,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 	s.Run("service_not_ready", func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		node := &DataNode{}
+		node := &DataNode{lifetime: lifetime.NewLifetime(commonpb.StateCode_Abnormal)}
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		req := &datapb.CompactionPlan{
 			PlanID:  1000,
@@ -382,7 +384,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 	s.Run("service_not_ready", func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		node := &DataNode{}
+		node := &DataNode{lifetime: lifetime.NewLifetime(commonpb.StateCode_Abnormal)}
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		req := &datapb.FlushSegmentsRequest{
 			Base: &commonpb.MsgBase{
@@ -468,15 +470,15 @@ func (s *DataNodeServicesSuite) TestShowConfigurations() {
 	}
 
 	// test closed server
-	node := &DataNode{}
+	node := &DataNode{lifetime: lifetime.NewLifetime(commonpb.StateCode_Abnormal)}
 	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
-	node.stateCode.Store(commonpb.StateCode_Abnormal)
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	resp, err := node.ShowConfigurations(s.ctx, req)
 	s.Assert().NoError(err)
 	s.Assert().False(merr.Ok(resp.GetStatus()))
 
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	resp, err = node.ShowConfigurations(s.ctx, req)
 	s.Assert().NoError(err)
 	s.Assert().True(merr.Ok(resp.GetStatus()))
@@ -490,12 +492,12 @@ func (s *DataNodeServicesSuite) TestGetMetrics() {
 	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 	node.flowgraphManager = pipeline.NewFlowgraphManager()
 	// server is closed
-	node.stateCode.Store(commonpb.StateCode_Abnormal)
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err := node.GetMetrics(s.ctx, &milvuspb.GetMetricsRequest{})
 	s.Assert().NoError(err)
 	s.Assert().False(merr.Ok(resp.GetStatus()))
 
-	node.stateCode.Store(commonpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	// failed to parse metric type
 	invalidRequest := "invalid request"

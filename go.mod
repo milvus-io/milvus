@@ -2,13 +2,13 @@ module github.com/milvus-io/milvus
 
 go 1.22
 
-toolchain go1.22.0
+toolchain go1.22.7
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.11.1
-	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.6.0
+	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.6.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.1.0
-	github.com/aliyun/credentials-go v1.2.7
+	github.com/aliyun/credentials-go v1.2.7 // indirect
 	github.com/apache/arrow/go/v17 v17.0.0
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/blang/semver/v4 v4.0.0
@@ -36,7 +36,7 @@ require (
 	github.com/spf13/cast v1.3.1
 	github.com/spf13/viper v1.8.1
 	github.com/stretchr/testify v1.9.0
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865 // indirect
 	github.com/tikv/client-go/v2 v2.0.4
 	go.etcd.io/etcd/api/v3 v3.5.5
 	go.etcd.io/etcd/client/v3 v3.5.5

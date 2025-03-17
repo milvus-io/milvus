@@ -111,6 +111,7 @@ const (
 	cacheNameLabelName       = "cache_name"
 	cacheStateLabelName      = "cache_state"
 	dataSourceLabelName      = "data_source"
+	dataTypeLabelName        = "data_type"
 	importStageLabelName     = "import_stage"
 	requestScope             = "scope"
 	fullMethodLabelName      = "full_method"
@@ -126,12 +127,17 @@ const (
 	cgoTypeLabelName         = `cgo_type`
 	queueTypeLabelName       = `queue_type`
 
+	// model function/UDF labels
+	functionTypeName = "function_type_name"
+	functionProvider = "function_provider"
+	functionName     = "function_name"
+
 	// entities label
 	LoadedLabel         = "loaded"
 	NumEntitiesAllLabel = "all"
 
-	taskTypeLabel  = "task_type"
-	taskStateLabel = "task_state"
+	TaskTypeLabel  = "task_type"
+	TaskStateLabel = "task_state"
 )
 
 var (

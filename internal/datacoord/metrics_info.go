@@ -211,9 +211,8 @@ func (s *Server) getSystemInfoMetrics(
 	// get datacoord info
 	nodes := s.cluster.GetSessions()
 	clusterTopology := metricsinfo.DataClusterTopology{
-		Self:                s.getDataCoordMetrics(ctx),
-		ConnectedDataNodes:  make([]metricsinfo.DataNodeInfos, 0, len(nodes)),
-		ConnectedIndexNodes: make([]metricsinfo.IndexNodeInfos, 0),
+		Self:               s.getDataCoordMetrics(ctx),
+		ConnectedDataNodes: make([]metricsinfo.DataNodeInfos, 0, len(nodes)),
 	}
 
 	// for each data node, fetch metrics info
@@ -233,7 +232,7 @@ func (s *Server) getSystemInfoMetrics(
 			log.Warn("fails to get IndexNode metrics", zap.Error(err))
 			continue
 		}
-		clusterTopology.ConnectedIndexNodes = append(clusterTopology.ConnectedIndexNodes, infos)
+		clusterTopology.ConnectedDataNodes = append(clusterTopology.ConnectedDataNodes, infos)
 	}
 
 	// compose topolgoy struct
@@ -343,8 +342,8 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	return infos, nil
 }
 
-func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node types.IndexNodeClient) (metricsinfo.IndexNodeInfos, error) {
-	infos := metricsinfo.IndexNodeInfos{
+func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node types.DataNodeClient) (metricsinfo.DataNodeInfos, error) {
+	infos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			HasError: true,
 			ID:       int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
@@ -374,7 +373,7 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 
 	err = metricsinfo.UnmarshalComponentInfos(metrics.GetResponse(), &infos)
 	if err != nil {
-		log.Warn("invalid metrics of IndexNode found",
+		log.Warn("invalid metrics of DataNode found",
 			zap.Error(err))
 		infos.BaseComponentInfos.ErrorReason = err.Error()
 		return infos, nil

@@ -131,11 +131,10 @@ func BenchmarkDeserializeReader(b *testing.B) {
 		assert.NoError(b, err)
 		defer reader.Close()
 		for i := 0; i < len; i++ {
-			err = reader.Next()
-			_ = reader.Value()
+			_, err = reader.NextValue()
 			assert.NoError(b, err)
 		}
-		err = reader.Next()
+		_, err = reader.NextValue()
 		assert.Equal(b, io.EOF, err)
 	}
 }

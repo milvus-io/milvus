@@ -417,53 +417,6 @@ func (_c *MockBroker_UpdateChannelCheckpoint_Call) RunAndReturn(run func(context
 	return _c
 }
 
-// UpdateSegmentStatistics provides a mock function with given fields: ctx, req
-func (_m *MockBroker) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) error {
-	ret := _m.Called(ctx, req)
-
-	if len(ret) == 0 {
-		panic("no return value specified for UpdateSegmentStatistics")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.UpdateSegmentStatisticsRequest) error); ok {
-		r0 = rf(ctx, req)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockBroker_UpdateSegmentStatistics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateSegmentStatistics'
-type MockBroker_UpdateSegmentStatistics_Call struct {
-	*mock.Call
-}
-
-// UpdateSegmentStatistics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *datapb.UpdateSegmentStatisticsRequest
-func (_e *MockBroker_Expecter) UpdateSegmentStatistics(ctx interface{}, req interface{}) *MockBroker_UpdateSegmentStatistics_Call {
-	return &MockBroker_UpdateSegmentStatistics_Call{Call: _e.mock.On("UpdateSegmentStatistics", ctx, req)}
-}
-
-func (_c *MockBroker_UpdateSegmentStatistics_Call) Run(run func(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest)) *MockBroker_UpdateSegmentStatistics_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.UpdateSegmentStatisticsRequest))
-	})
-	return _c
-}
-
-func (_c *MockBroker_UpdateSegmentStatistics_Call) Return(_a0 error) *MockBroker_UpdateSegmentStatistics_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockBroker_UpdateSegmentStatistics_Call) RunAndReturn(run func(context.Context, *datapb.UpdateSegmentStatisticsRequest) error) *MockBroker_UpdateSegmentStatistics_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // NewMockBroker creates a new instance of MockBroker. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockBroker(t interface {

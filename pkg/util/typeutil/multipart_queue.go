@@ -46,10 +46,17 @@ func (pq *MultipartQueue[T]) Next() T {
 // !!! Should only be called `Next` do not return nil.
 func (pq *MultipartQueue[T]) UnsafeAdvance() {
 	if len(pq.pendings[0]) == 1 {
+		// release the memory after advance.
+		pq.pendings[0] = nil
+
 		pq.pendings = pq.pendings[1:]
 		pq.cnt--
 		return
 	}
+	// release the memory after advance.
+	var nop T
+	pq.pendings[0][0] = nop
+
 	pq.pendings[0] = pq.pendings[0][1:]
 	pq.cnt--
 }

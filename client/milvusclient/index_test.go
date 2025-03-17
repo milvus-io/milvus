@@ -217,6 +217,78 @@ func (s *IndexSuite) TestDropIndex() {
 	})
 }
 
+func (s *IndexSuite) TestAlterIndexProperties() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.Run("success", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		indexName := fmt.Sprintf("idx_%s", s.randString(6))
+
+		key := fmt.Sprintf("key_%s", s.randString(6))
+		val := fmt.Sprintf("val_%s", s.randString(6))
+
+		s.mock.EXPECT().AlterIndex(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, air *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
+			s.Equal(collectionName, air.GetCollectionName())
+			s.Equal(indexName, air.GetIndexName())
+			if s.Len(air.GetExtraParams(), 1) {
+				kv := air.GetExtraParams()[0]
+				s.Equal(key, kv.GetKey())
+				s.Equal(val, kv.GetValue())
+			}
+
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.AlterIndexProperties(ctx, NewAlterIndexPropertiesOption(collectionName, indexName).WithProperty(key, val))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		indexName := fmt.Sprintf("idx_%s", s.randString(6))
+
+		key := fmt.Sprintf("key_%s", s.randString(6))
+		val := fmt.Sprintf("val_%s", s.randString(6))
+		s.mock.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.AlterIndexProperties(ctx, NewAlterIndexPropertiesOption(collectionName, indexName).WithProperty(key, val))
+		s.Error(err)
+	})
+}
+
+func (s *IndexSuite) TestDropIndexProperties() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.Run("success", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		indexName := fmt.Sprintf("idx_%s", s.randString(6))
+
+		key := fmt.Sprintf("key_%s", s.randString(6))
+
+		s.mock.EXPECT().AlterIndex(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, air *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
+			s.Equal(collectionName, air.GetCollectionName())
+			s.Equal(indexName, air.GetIndexName())
+			s.ElementsMatch([]string{key}, air.GetDeleteKeys())
+
+			return merr.Success(), nil
+		}).Once()
+
+		err := s.client.DropIndexProperties(ctx, NewDropIndexPropertiesOption(collectionName, indexName, key))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		indexName := fmt.Sprintf("idx_%s", s.randString(6))
+
+		key := fmt.Sprintf("coll_%s", s.randString(6))
+		s.mock.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.DropIndexProperties(ctx, NewDropIndexPropertiesOption(collectionName, indexName, key))
+		s.Error(err)
+	})
+}
+
 func TestIndex(t *testing.T) {
 	suite.Run(t, new(IndexSuite))
 }

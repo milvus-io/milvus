@@ -6,12 +6,9 @@ use futures::executor::block_on;
 use libc::c_char;
 use log::info;
 use tantivy::schema::{
-    Field, IndexRecordOption, OwnedValue, Schema, SchemaBuilder, TextFieldIndexing, TextOptions,
-    FAST, INDEXED,
+    Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, FAST, INDEXED,
 };
-use tantivy::{
-    doc, tokenizer, Document, Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument,
-};
+use tantivy::{doc, Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument};
 
 use crate::data_type::TantivyDataType;
 

@@ -24,6 +24,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 )
 
 const (
@@ -34,14 +36,14 @@ func TestLocalCM(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("test RootPath", func(t *testing.T) {
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(objectstorage.RootPath(localPath))
 		assert.Equal(t, localPath, testCM.RootPath())
 	})
 
 	t.Run("test load", func(t *testing.T) {
 		testLoadRoot := "test_load"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(objectstorage.RootPath(localPath))
 		defer testCM.RemoveWithPrefix(ctx, testCM.RootPath())
 
 		prepareTests := []struct {
@@ -150,7 +152,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test write", func(t *testing.T) {
 		testMultiSaveRoot := "test_write"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(objectstorage.RootPath(localPath))
 		defer testCM.RemoveWithPrefix(ctx, testCM.RootPath())
 
 		key1 := path.Join(localPath, testMultiSaveRoot, "key_1")
@@ -177,7 +179,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test MultiSave", func(t *testing.T) {
 		testMultiSaveRoot := "test_multisave"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(objectstorage.RootPath(localPath))
 		defer testCM.RemoveWithPrefix(ctx, testCM.RootPath())
 
 		err := testCM.Write(ctx, path.Join(localPath, testMultiSaveRoot, "key_1"), []byte("111"))
@@ -207,7 +209,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test Remove", func(t *testing.T) {
 		testRemoveRoot := "test_remove"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(objectstorage.RootPath(localPath))
 
 		// empty prefix is not allowed
 		err := testCM.RemoveWithPrefix(ctx, "")
@@ -308,7 +310,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test ReadAt", func(t *testing.T) {
 		testLoadPartialRoot := "read_at"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(objectstorage.RootPath(localPath))
 		defer testCM.RemoveWithPrefix(ctx, testCM.RootPath())
 
 		key := path.Join(localPath, testLoadPartialRoot, "TestMinIOKV_LoadPartial_key")
@@ -353,7 +355,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test Size", func(t *testing.T) {
 		testGetSizeRoot := "get_size"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(objectstorage.RootPath(localPath))
 		defer testCM.RemoveWithPrefix(ctx, testCM.RootPath())
 
 		key := path.Join(localPath, testGetSizeRoot, "TestMinIOKV_GetSize_key")
@@ -376,7 +378,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test read", func(t *testing.T) {
 		testGetSizeRoot := "get_path"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(objectstorage.RootPath(localPath))
 		defer testCM.RemoveWithPrefix(ctx, testCM.RootPath())
 
 		key := path.Join(localPath, testGetSizeRoot, "TestMinIOKV_GetPath_key")
@@ -397,7 +399,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test Path", func(t *testing.T) {
 		testGetSizeRoot := "get_path"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(objectstorage.RootPath(localPath))
 		defer testCM.RemoveWithPrefix(ctx, testCM.RootPath())
 
 		key := path.Join(localPath, testGetSizeRoot, "TestMinIOKV_GetPath_key")
@@ -420,7 +422,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test Prefix", func(t *testing.T) {
 		testPrefix := "prefix"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(objectstorage.RootPath(localPath))
 		defer testCM.RemoveWithPrefix(ctx, testCM.RootPath())
 
 		// write 2 files:
@@ -465,7 +467,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test ListWithPrefix", func(t *testing.T) {
 		testPrefix := "prefix-ListWithPrefix"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(objectstorage.RootPath(localPath))
 		defer testCM.RemoveWithPrefix(ctx, testCM.RootPath())
 
 		// write 4 files:

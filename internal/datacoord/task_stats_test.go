@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -35,6 +34,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type statsTaskSuite struct {
@@ -54,6 +55,24 @@ func (s *statsTaskSuite) SetupSuite() {
 	s.taskID = 1178
 	s.segID = 1179
 	s.targetID = 1180
+
+	tasks := typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
+	statsTask := &indexpb.StatsTask{
+		CollectionID:  1,
+		PartitionID:   2,
+		SegmentID:     s.segID,
+		InsertChannel: "ch1",
+		TaskID:        s.taskID,
+		SubJobType:    indexpb.StatsSubJob_Sort,
+		Version:       0,
+		NodeID:        0,
+		State:         indexpb.JobState_JobStateInit,
+		FailReason:    "",
+	}
+	tasks.Insert(s.taskID, statsTask)
+	secondaryIndex := typeutil.NewConcurrentMap[string, *indexpb.StatsTask]()
+	secondaryKey := createSecondaryIndexKey(statsTask.GetSegmentID(), statsTask.GetSubJobType().String())
+	secondaryIndex.Insert(secondaryKey, statsTask)
 
 	s.mt = &meta{
 		segments: &SegmentsInfo{
@@ -109,23 +128,11 @@ func (s *statsTaskSuite) SetupSuite() {
 		},
 
 		statsTaskMeta: &statsTaskMeta{
-			RWMutex: sync.RWMutex{},
-			ctx:     context.Background(),
-			catalog: nil,
-			tasks: map[int64]*indexpb.StatsTask{
-				s.taskID: {
-					CollectionID:  1,
-					PartitionID:   2,
-					SegmentID:     s.segID,
-					InsertChannel: "ch1",
-					TaskID:        s.taskID,
-					SubJobType:    indexpb.StatsSubJob_Sort,
-					Version:       0,
-					NodeID:        0,
-					State:         indexpb.JobState_JobStateInit,
-					FailReason:    "",
-				},
-			},
+			keyLock:         lock.NewKeyLock[UniqueID](),
+			ctx:             context.Background(),
+			catalog:         nil,
+			tasks:           tasks,
+			segmentID2Tasks: secondaryIndex,
 		},
 	}
 }
@@ -372,7 +379,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 	s.Run("AssignTask", func() {
 		s.Run("assign failed", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "mock error",
@@ -395,7 +402,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("assign success", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 				Reason:    "",
@@ -420,7 +427,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 	s.Run("QueryResult", func() {
 		s.Run("query failed", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -432,7 +439,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("state finished", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
@@ -463,7 +470,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("task none", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
@@ -490,7 +497,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("task not exist", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
@@ -509,7 +516,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 	s.Run("DropTaskOnWorker", func() {
 		s.Run("drop failed", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "mock error",
@@ -519,7 +526,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("drop success", func() {
-			in := mocks.NewMockIndexNodeClient(s.T())
+			in := mocks.NewMockDataNodeClient(s.T())
 			in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 				Reason:    "",
@@ -595,7 +602,9 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 			s.NoError(st.SetJobInfo(s.mt))
 			s.NotNil(s.mt.GetHealthySegment(context.TODO(), s.targetID))
-			s.Equal(indexpb.JobState_JobStateFinished, s.mt.statsTaskMeta.tasks[s.taskID].GetState())
+			t, ok := s.mt.statsTaskMeta.tasks.Get(s.taskID)
+			s.True(ok)
+			s.Equal(indexpb.JobState_JobStateFinished, t.GetState())
 			s.Equal(datapb.SegmentLevel_L2, s.mt.GetHealthySegment(context.TODO(), s.targetID).GetLevel())
 		})
 	})

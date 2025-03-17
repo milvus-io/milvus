@@ -855,6 +855,7 @@ message ChannelTarget {
   repeated int64 growing_segmentIDs = 3;
   repeated PartitionTarget partition_targets = 4;
   msg.MsgPosition seek_position = 5;
+  msg.MsgPosition delete_checkpoint = 6;
 }
 
 message CollectionTarget {

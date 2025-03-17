@@ -503,15 +503,8 @@ indexCoord:
 indexNode:
   scheduler:
     buildParallel: 1
-  enableDisk: true # enable index node build disk vector index
+  enableDisk: true # enable build disk vector index
   maxDiskUsagePercentage: 95
-  ip:  # TCP/IP address of indexNode. If not specified, use the first unicastable address
-  port: 21121 # TCP port of indexNode
-  grpc:
-    serverMaxSendSize: 536870912 # The maximum size of each RPC request that the indexNode can send, unit: byte
-    serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the indexNode can receive, unit: byte
-    clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on indexNode can send, unit: byte
-    clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on indexNode can receive, unit: byte
 
 dataCoord:
   channel:
@@ -550,6 +543,12 @@ dataCoord:
       # The size threshold in MB, if the total size of growing segments of each shard 
       # exceeds this threshold, the largest growing segment will be sealed.
       growingSegmentsMemSize: 4096
+      # If the total entry number of l0 logs of each shard 
+      # exceeds this threshold, the earliest growing segments will be sealed.
+      blockingL0EntryNum: 5000000
+      # The size threshold in MB, if the total entry number of l0 logs of each shard 
+      # exceeds this threshold, the earliest growing segments will be sealed.
+      blockingL0SizeInMB: 64
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
   # Switch value to control if to enable segment compaction. 
@@ -904,6 +903,7 @@ quotaAndLimits:
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)
   quotaCenterCollectInterval: 3
+  forceDenyAllDDL: false # true to force deny all DDL requests, false to allow.
   limits:
     allocRetryTimes: 15 # retry times when delete alloc forward data from rate limit failed
     allocWaitInterval: 1000 # retry wait duration when delete alloc forward data rate failed, in millisecond
@@ -952,6 +952,13 @@ quotaAndLimits:
     max: -1
     db:
       max: -1 # qps of db level, default no limit, rate for manualCompaction
+  dbRate:
+    enabled: false # Whether DB request throttling is enabled
+    # Maximum number of db-related requests per second.
+    # Setting this item to 10 indicates that Milvus processes no more than 10 db-related requests per second, including db creation/drop/alter requests.
+    # To use this setting, set quotaAndLimits.dbRate.enabled to true at the same time.
+    # 		
+    max: -1
   dml:
     enabled: false # Whether DML request throttling is enabled.
     insertRate:

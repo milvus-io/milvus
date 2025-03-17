@@ -98,7 +98,7 @@ func TestEmbeddingOK(t *testing.T) {
 		c := NewVoyageAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		r, err := c.Embedding("voyage-3", []string{"sentence"}, 0, "query", "float", 0)
+		r, err := c.Embedding("voyage-3", []string{"sentence"}, 0, "query", "float", true, 0)
 		ret := r.(*EmbeddingResponse[float32])
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Data[0].Index, 0)
@@ -158,7 +158,7 @@ func TestEmbeddingInt8Embed(t *testing.T) {
 		c := NewVoyageAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		r, err := c.Embedding("voyage-3", []string{"sentence"}, 0, "query", "int8", 0)
+		r, err := c.Embedding("voyage-3", []string{"sentence"}, 0, "query", "int8", false, 0)
 		ret := r.(*EmbeddingResponse[int8])
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Data[0].Index, 0)
@@ -169,7 +169,7 @@ func TestEmbeddingInt8Embed(t *testing.T) {
 		assert.Equal(t, ret.Data[1].Embedding, []int8{3, 4})
 		assert.Equal(t, ret.Data[2].Embedding, []int8{5, 6})
 
-		_, err = c.Embedding("voyage-3", []string{"sentence"}, 0, "query", "unknow", 0)
+		_, err = c.Embedding("voyage-3", []string{"sentence"}, 0, "query", "unknow", true, 0)
 		assert.Error(t, err)
 	}
 }
@@ -186,7 +186,7 @@ func TestEmbeddingFailed(t *testing.T) {
 		c := NewVoyageAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		_, err = c.Embedding("voyage-3", []string{"sentence"}, 0, "query", "float", 0)
+		_, err = c.Embedding("voyage-3", []string{"sentence"}, 0, "query", "float", false, 0)
 		assert.True(t, err != nil)
 	}
 }

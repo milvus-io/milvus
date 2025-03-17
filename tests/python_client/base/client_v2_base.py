@@ -144,6 +144,7 @@ class TestMilvusClientV2Base(Base):
                timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.search, collection_name, data, filter, limit,
                                   output_fields, search_params], **kwargs)
@@ -154,10 +155,25 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
+    def hybrid_search(self, client, collection_name, reqs, ranker, limit=10, output_fields=None, timeout=None,
+                      check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.hybrid_search, collection_name, reqs, ranker, limit,
+                                  output_fields], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       collection_name=collection_name, reqs=reqs, ranker=ranker, limit=limit,
+                                       output_fields=output_fields, **kwargs).run()
+        return res, check_result
+
+    @trace()
     def search_iterator(self, client, collection_name, data, batch_size, limit=-1, filter=None, output_fields=None,
                         search_params=None, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.search_iterator, collection_name, data, batch_size, filter, limit,
                                   output_fields, search_params], **kwargs)
@@ -755,6 +771,19 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
+    def grant_privilege_v2(self, client, role_name, privilege, collection_name, db_name=None,
+                           timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.grant_privilege_v2, role_name, privilege, collection_name,
+                                  db_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       role_name=role_name, privilege=privilege,
+                                       collection_name=collection_name, db_name=db_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
     def revoke_privilege(self, client, role_name, object_type, privilege, object_name, db_name="",
                          timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
@@ -767,37 +796,89 @@ class TestMilvusClientV2Base(Base):
                                        object_name=object_name, db_name=db_name, **kwargs).run()
         return res, check_result
 
-    def create_privilege_group(self, client, privilege_group: str, check_task=None, check_items=None, **kwargs):
+    @trace()
+    def create_privilege_group(self, client, privilege_group: str, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.create_privilege_group, privilege_group], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       privilege_group=privilege_group, **kwargs).run()
         return res, check_result
 
-    def drop_privilege_group(self, client, privilege_group: str, check_task=None, check_items=None, **kwargs):
+    @trace()
+    def drop_privilege_group(self, client, privilege_group: str, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.drop_privilege_group, privilege_group], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       privilege_group=privilege_group, **kwargs).run()
         return res, check_result
 
-    def list_privilege_groups(self, client, check_task=None, check_items=None, **kwargs):
+    @trace()
+    def list_privilege_groups(self, client, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.list_privilege_groups], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def add_privileges_to_group(self, client, privilege_group: str, privileges: list, check_task=None, check_items=None,
-                                **kwargs):
+    @trace()
+    def add_privileges_to_group(self, client, privilege_group: str, privileges: list, timeout=None,
+                                check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.add_privileges_to_group, privilege_group, privileges], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       privilege_group=privilege_group, privileges=privileges, **kwargs).run()
         return res, check_result
 
-    def remove_privileges_from_group(self, client, privilege_group: str, privileges: list, check_task=None, check_items=None,
-                                     **kwargs):
+    @trace()
+    def remove_privileges_from_group(self, client, privilege_group: str, privileges: list, timeout=None,
+                                     check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.remove_privileges_from_group, privilege_group, privileges],
                                  **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       privilege_group=privilege_group, privileges=privileges, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def grant_privilege_v2(self, client, role_name: str, privilege: str, collection_name: str, db_name=None, timeout=None,
+                           check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.grant_privilege_v2, role_name, privilege, collection_name, db_name],
+                                 **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       role_name=role_name, privilege=privilege,
+                                       collection_name=collection_name, db_name=db_name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def revoke_privilege_v2(self, client, role_name: str, privilege: str, collection_name: str, db_name=None,
+                            timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.revoke_privilege_v2, role_name, privilege, collection_name, db_name],
+                                 **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       role_name=role_name, privilege=privilege,
+                                       collection_name=collection_name, db_name=db_name, **kwargs).run()
         return res, check_result
 
     @trace()
@@ -849,7 +930,7 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def alter_collection_field(self, client, collection_name, field_name, field_params, timeout=None,
-                                    check_task=None, check_items=None, **kwargs):
+                               check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
 
         func_name = sys._getframe().f_code.co_name
@@ -860,7 +941,7 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def alter_database_properties(self, client, db_name, properties, timeout=None,
-                               check_task=None, check_items=None, **kwargs):
+                                  check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
 
@@ -871,22 +952,12 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def drop_database_properties(self, client, db_name, property_keys, timeout=None,
-                                  check_task=None, check_items=None, **kwargs):
+                                 check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.drop_database_properties, db_name, property_keys], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
-        return res, check_result
-
-    @trace()
-    def create_database(self, client, db_name, timeout=None, check_task=None, check_items=None, **kwargs):
-        timeout = TIMEOUT if timeout is None else timeout
-        kwargs.update({"timeout": timeout})
-
-        func_name = sys._getframe().f_code.co_name
-        res, check = api_request([client.create_database, db_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
@@ -930,4 +1001,91 @@ class TestMilvusClientV2Base(Base):
                                        analyzer_params=analyzer_params, **kwargs).run()
         return res, check_result
 
+    def compact(self, client, collection_name, is_clustering=False, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
 
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.compact, collection_name, is_clustering], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       collection_name=collection_name, is_clustering=is_clustering, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def get_compaction_state(self, client, job_id, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.get_compaction_state, job_id], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, job_id=job_id, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def create_resource_group(self, client, name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.create_resource_group, name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       name=name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def update_resource_groups(self, client, configs, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.update_resource_groups, configs], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       configs=configs, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_resource_group(self, client, name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.update_resource_groups, name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       name=name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def describe_resource_group(self, client, name, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.describe_resource_group, name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       name=name, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def list_resource_groups(self, client, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.list_resource_groups], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def transfer_replica(self, client, source_group, target_group, collection_name, num_replicas,
+                         timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.transfer_replica, source_group, target_group, collection_name, num_replicas], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       source_group=source_group, target_group=target_group,
+                                       collection_name=collection_name, num_replicas=num_replicas,
+                                       **kwargs).run()
+        return res, check_result

@@ -25,12 +25,41 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 )
 
 var _ datapb.DataNodeClient = &GrpcDataNodeClient{}
 
 type GrpcDataNodeClient struct {
 	Err error
+}
+
+func (m *GrpcDataNodeClient) CreateJob(ctx context.Context, in *workerpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) QueryJobs(ctx context.Context, in *workerpb.QueryJobsRequest, opts ...grpc.CallOption) (*workerpb.QueryJobsResponse, error) {
+	return &workerpb.QueryJobsResponse{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) DropJobs(ctx context.Context, in *workerpb.DropJobsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) GetJobStats(ctx context.Context, in *workerpb.GetJobStatsRequest, opts ...grpc.CallOption) (*workerpb.GetJobStatsResponse, error) {
+	return &workerpb.GetJobStatsResponse{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) CreateJobV2(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) QueryJobsV2(ctx context.Context, in *workerpb.QueryJobsV2Request, opts ...grpc.CallOption) (*workerpb.QueryJobsV2Response, error) {
+	return &workerpb.QueryJobsV2Response{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) DropJobsV2(ctx context.Context, in *workerpb.DropJobsV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
 }
 
 func (m *GrpcDataNodeClient) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {

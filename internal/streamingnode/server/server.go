@@ -1,11 +1,12 @@
 package server
 
 import (
-	"context"
+	"fmt"
 
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -33,25 +34,19 @@ type Server struct {
 }
 
 // Init initializes the streamingnode server.
-func (s *Server) Init(ctx context.Context) (err error) {
+func (s *Server) init() {
 	log.Info("init streamingnode server...")
 	// init all basic components.
-	s.initBasicComponent(ctx)
+	s.initBasicComponent()
 
 	// init all service.
-	s.initService(ctx)
+	s.initService()
 	log.Info("streamingnode server initialized")
 
 	// init storage v2 file system.
-	err = initcore.InitStorageV2FileSystem(paramtable.Get())
-	if err != nil {
-		return err
+	if err := initcore.InitStorageV2FileSystem(paramtable.Get()); err != nil {
+		panic(fmt.Sprintf("unrecoverable error happens at init storage v2 file system, %+v", err))
 	}
-	return nil
-}
-
-// Start starts the streamingnode server.
-func (s *Server) Start() {
 }
 
 // Stop stops the streamingnode server.
@@ -59,12 +54,13 @@ func (s *Server) Stop() {
 	log.Info("stopping streamingnode server...")
 	log.Info("close wal manager...")
 	s.walManager.Close()
+	log.Info("release streamingnode resources...")
+	resource.Release()
 	log.Info("streamingnode server stopped")
-	log.Info("stopping flusher...")
 }
 
 // initBasicComponent initialize all underlying dependency for streamingnode.
-func (s *Server) initBasicComponent(_ context.Context) {
+func (s *Server) initBasicComponent() {
 	var err error
 	s.walManager, err = walmanager.OpenManager()
 	if err != nil {
@@ -75,7 +71,7 @@ func (s *Server) initBasicComponent(_ context.Context) {
 }
 
 // initService initializes the grpc service.
-func (s *Server) initService(_ context.Context) {
+func (s *Server) initService() {
 	s.handlerService = service.NewHandlerService(s.walManager)
 	s.managerService = service.NewManagerService(s.walManager)
 	s.registerGRPCService(s.grpcServer)
