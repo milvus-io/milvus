@@ -114,7 +114,7 @@ class JsonKeyStatsIndexTest : public ::testing::TestWithParam<bool> {
         config["insert_files"] = std::vector<std::string>{log_path};
 
         auto build_index =
-            std::make_shared<JsonKeyStatsInvertedIndex>(ctx, false, 1);
+            std::make_shared<JsonKeyStatsInvertedIndex>(ctx, false);
         build_index->Build(config);
 
         auto create_index_result = build_index->Upload(config);
@@ -127,7 +127,7 @@ class JsonKeyStatsIndexTest : public ::testing::TestWithParam<bool> {
         index::CreateIndexInfo index_info{};
         config["index_files"] = index_files;
 
-        index_ = std::make_shared<JsonKeyStatsInvertedIndex>(ctx, true, 1);
+        index_ = std::make_shared<JsonKeyStatsInvertedIndex>(ctx, true);
         index_->Load(milvus::tracer::TraceContext{}, config);
     }
 

@@ -33,7 +33,6 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
     explicit JsonKeyStatsInvertedIndex(
         const storage::FileManagerContext& ctx,
         bool is_load,
-        int64_t json_key_data_format = 0,
         int64_t json_stats_tantivy_memory_budget = 16777216);
 
     explicit JsonKeyStatsInvertedIndex(int64_t commit_interval_in_ms,
@@ -72,32 +71,31 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
             LOG_INFO("json key filter size:{}", array.array_.len);
             for (size_t j = 0; j < array.array_.len; j++) {
                 auto the_offset = array.array_.array[j];
-                if (json_key_data_format_ == 1) {
-                    if (DecodeValid(the_offset)) {
-                        auto tuple = DecodeValue(the_offset);
-                        auto row_id = std::get<1>(tuple);
-                        if (row_id >= row) {
-                            continue;
-                        }
-                        bitset[row_id] = filter(true,
-                                                std::get<0>(tuple),
-                                                std::get<1>(tuple),
-                                                0,
-                                                0,
-                                                std::get<2>(tuple));
-                    } else {
-                        auto tuple = DecodeOffset(the_offset);
-                        auto row_id = std::get<1>(tuple);
-                        if (row_id >= row) {
-                            continue;
-                        }
-                        bitset[row_id] = filter(false,
-                                                std::get<0>(tuple),
-                                                std::get<1>(tuple),
-                                                std::get<2>(tuple),
-                                                std::get<3>(tuple),
-                                                0);
+
+                if (DecodeValid(the_offset)) {
+                    auto tuple = DecodeValue(the_offset);
+                    auto row_id = std::get<1>(tuple);
+                    if (row_id >= row) {
+                        continue;
                     }
+                    bitset[row_id] = filter(true,
+                                            std::get<0>(tuple),
+                                            std::get<1>(tuple),
+                                            0,
+                                            0,
+                                            std::get<2>(tuple));
+                } else {
+                    auto tuple = DecodeOffset(the_offset);
+                    auto row_id = std::get<1>(tuple);
+                    if (row_id >= row) {
+                        continue;
+                    }
+                    bitset[row_id] = filter(false,
+                                            std::get<0>(tuple),
+                                            std::get<1>(tuple),
+                                            std::get<2>(tuple),
+                                            std::get<3>(tuple),
+                                            0);
                 }
             }
 
@@ -144,7 +142,8 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
                 char next = str[i + 1];
                 if (next == 'n' || next == 't' || next == 'r' || next == 'b' ||
                     next == 'f' || next == 'v' || next == '\\' ||
-                    next == '\"' || next == '\'') {
+                    next == '\"' || next == '\'' || next == '0' ||
+                    next == 'u' || next == '/') {
                     return true;
                 }
             }
@@ -291,7 +290,6 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
     mutable std::mutex mtx_;
     std::atomic<stdclock::time_point> last_commit_time_;
     int64_t commit_interval_in_ms_;
-    int64_t json_key_data_format_ = 0;
     std::atomic<bool> is_data_uncommitted_ = false;
 };
 }  // namespace milvus::index

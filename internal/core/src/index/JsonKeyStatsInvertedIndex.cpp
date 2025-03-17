@@ -45,13 +45,13 @@ JsonKeyStatsInvertedIndex::AddJSONEncodeValue(
         length,
         value);
     int64_t combine_id = 0;
-    if (json_key_data_format_ == 1) {
-        if (flag) {
-            combine_id = EncodeValue(flag, type, row_id, value);
-        } else {
-            combine_id = EncodeOffset(flag, type, row_id, offset, length);
-        }
+
+    if (flag) {
+        combine_id = EncodeValue(flag, type, row_id, value);
+    } else {
+        combine_id = EncodeOffset(flag, type, row_id, offset, length);
     }
+
     mp[key].push_back(combine_id);
 }
 
@@ -248,20 +248,15 @@ JsonKeyStatsInvertedIndex::AddJson(
 JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
     const storage::FileManagerContext& ctx,
     bool is_load,
-    int64_t json_key_data_format,
     int64_t json_stats_tantivy_memory_budget)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
-    LOG_INFO(
-        "JsonKeyStatsInvertedIndex json_stats_tantivy_memory_budget:{}, "
-        "json_key_data_format:{}",
-        json_stats_tantivy_memory_budget,
-        json_key_data_format);
+    LOG_INFO("json_stats_tantivy_memory_budget:{}",
+             json_stats_tantivy_memory_budget);
     schema_ = ctx.fieldDataMeta.field_schema;
     field_id_ = ctx.fieldDataMeta.field_id;
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
-    json_key_data_format_ = json_key_data_format;
     if (is_load) {
         auto prefix = disk_file_manager_->GetLocalJsonKeyIndexPrefix();
         path_ = prefix;
@@ -287,7 +282,6 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
     int64_t commit_interval_in_ms, const char* unique_id)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
-    json_key_data_format_ = 1;
     d_type_ = TantivyDataType::Keyword;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id, d_type_, "", false, true);
@@ -299,7 +293,6 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
     const std::string& path)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
-    json_key_data_format_ = 1;
     boost::filesystem::path prefix = path;
     boost::filesystem::path sub_path = unique_id;
     path_ = (prefix / sub_path).string();

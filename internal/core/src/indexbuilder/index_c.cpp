@@ -272,7 +272,6 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
         auto index = std::make_unique<index::JsonKeyStatsInvertedIndex>(
             fileManagerContext,
             false,
-            build_index_info->json_key_stats_data_format(),
             build_index_info->json_key_stats_tantivy_memory());
         index->Build(config);
         auto create_index_result = index->Upload(config);

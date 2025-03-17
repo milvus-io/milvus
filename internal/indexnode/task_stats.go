@@ -775,8 +775,12 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 		zap.Any("statsJobType", st.req.GetSubJobType()),
+		zap.Int64("jsonKeyStatsDataFormat", jsonKeyStatsDataFormat),
 	)
-
+	if jsonKeyStatsDataFormat != 1 {
+		log.Info("create json key index failed dataformat invalid")
+		return nil
+	}
 	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
 		return binlog.GetFieldID()
 	})
@@ -822,7 +826,6 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 			FieldSchema:               field,
 			StorageConfig:             newStorageConfig,
 			JsonKeyStatsTantivyMemory: tantivyMemory,
-			JsonKeyStatsDataFormat:    jsonKeyStatsDataFormat,
 		}
 
 		uploaded, err := indexcgowrapper.CreateJSONKeyIndex(ctx, buildIndexParams)

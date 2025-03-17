@@ -1178,14 +1178,13 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 	}
 
 	cgoProto := &indexcgopb.LoadJsonKeyIndexInfo{
-		FieldID:                jsonKeyStats.GetFieldID(),
-		Version:                jsonKeyStats.GetVersion(),
-		BuildID:                jsonKeyStats.GetBuildID(),
-		Files:                  jsonKeyStats.GetFiles(),
-		Schema:                 f,
-		CollectionID:           s.Collection(),
-		PartitionID:            s.Partition(),
-		JsonKeyStatsDataFormat: jsonKeyStats.GetJsonKeyStatsDataFormat(),
+		FieldID:      jsonKeyStats.GetFieldID(),
+		Version:      jsonKeyStats.GetVersion(),
+		BuildID:      jsonKeyStats.GetBuildID(),
+		Files:        jsonKeyStats.GetFiles(),
+		Schema:       f,
+		CollectionID: s.Collection(),
+		PartitionID:  s.Partition(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
