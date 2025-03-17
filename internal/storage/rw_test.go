@@ -19,7 +19,6 @@ package storage
 import (
 	"context"
 	"io"
-	sio "io"
 	"math"
 	"strconv"
 	"sync/atomic"
@@ -529,7 +528,7 @@ func Test_makeBlobsReader(t *testing.T) {
 			got := make([][]*Blob, 0)
 			for {
 				bs, err := reader()
-				if err == sio.EOF {
+				if err == io.EOF {
 					break
 				}
 				if err != nil {
