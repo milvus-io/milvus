@@ -17,16 +17,6 @@ This document will help to set up your Milvus development environment and to run
       - [Go](#go)
       - [Docker \& Docker Compose](#docker--docker-compose)
     - [Building Milvus](#building-milvus)
-  - [Building Milvus v2.3.4 arm image to support ky10 sp3](#building-milvus-v234-arm-image-to-support-ky10-sp3)
-    - [Software Requirements](#software-requirements)
-      - [Install cmake](#install-cmake)
-      - [Installing Dependencies](#installing-dependencies)
-      - [Install conan](#install-conan)
-      - [Install GO 1.22](#install-go-122)
-      - [Download source code](#download-source-code)
-      - [Check OS PAGESIZE](#check-os-pagesize)
-      - [Modify the MILVUS_JEMALLOC_LG_PAGE setting](#modify-the-milvus_jemalloc_lg_page-setting)
-    - [Build Image](#build-image)
   - [A Quick Start for Testing Milvus](#a-quick-start-for-testing-milvus)
     - [Pre-submission Verification](#pre-submission-verification)
     - [Unit Tests](#unit-tests)
@@ -50,7 +40,7 @@ The details below outline the hardware and software requirements for building on
 
 The following specification (either physical or virtual machine resources) is recommended for Milvus to build and run from source code.
 
-```
+```yaml
 - 8GB of RAM
 - 50GB of free disk space
 ```
@@ -67,8 +57,10 @@ Here's a list of verified OS types where Milvus can successfully build and run:
 - MacOS (Apple Silicon)
 
 ### Compiler Setup
+
 You can use Vscode to integrate C++ and Go together. Please replace user.settings file with below configs:
-```bash
+
+```json
 {
     "go.toolsEnvVars": {
         "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
@@ -103,7 +95,7 @@ You can use Vscode to integrate C++ and Go together. Please replace user.setting
 
 Linux systems (Recommend Ubuntu 20.04 or later):
 
-```bash
+```text
 go: >= 1.21
 cmake: >= 3.18
 gcc: 7.5
@@ -112,7 +104,7 @@ conan: 1.61
 
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 
-```bash
+```text
 go: >= 1.21
 cmake: >= 3.18
 llvm: >= 15
@@ -121,7 +113,7 @@ conan: 1.61
 
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 
-```bash
+```text
 go: >= 1.21 (Arch=ARM64)
 cmake: >= 3.18
 llvm: >= 15
@@ -133,7 +125,7 @@ conan: 1.61
 In the Milvus repository root, simply run:
 
 ```bash
-$ ./scripts/install_deps.sh
+./scripts/install_deps.sh
 ```
 
 #### Caveats
@@ -143,8 +135,8 @@ $ ./scripts/install_deps.sh
 Once you have finished, confirm that `gcc` and `make` are installed:
 
 ```shell
-$ gcc --version
-$ make --version
+gcc --version
+make --version
 ```
 
 #### CMake & Conan
@@ -154,7 +146,7 @@ The algorithm library of Milvus, Knowhere is written in c++. CMake is required i
 Confirm that cmake is available:
 
 ```shell
-$ cmake --version
+cmake --version
 ```
 
 Note: 3.25 or higher cmake version is required to build Milvus.
@@ -176,29 +168,32 @@ Milvus is written in [Go](http://golang.org/). If you don't have a Go developmen
 Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set as detailed in [How to Write Go Code](https://golang.org/doc/code.html) before proceeding.
 
 ```shell
-$ go version
+go version
 ```
+
 Note: go >= 1.22 is required to build Milvus.
 
 #### Docker & Docker Compose
 
 Milvus depends on etcd, Pulsar and MinIO. Using Docker Compose to manage these is an easy way in local development. To install Docker and Docker Compose in your development environment, follow the instructions from the Docker website below:
 
-- Docker: https://docs.docker.com/get-docker/
-- Docker Compose: https://docs.docker.com/compose/install/
+- Docker: <https://docs.docker.com/get-docker/>
+- Docker Compose: <https://docs.docker.com/compose/install/>
 
 ### Building Milvus
+
+(Note: if you are building Milvus on an operating system that uses large memory page size, ensure the MILVUS_JEMALLOC_LG_PAGE configuration variable is adjusted in the build script. For step-by-step guidance, refer to the FAQs section.)
 
 To build the Milvus project, run the following command:
 
 ```shell
-$ make
+make
 ```
 
 Milvus uses `conan` to manage 3rd-party dependencies. `conan` will check the consistency of these dependencies every time you run `make`. This process can take a considerable amount of time, especially if the network is poor. If you make sure that the 3rd-party dependencies are consistent, you can use the following command to skip this step:
 
 ```shell
-$ make SKIP_3RDPARTY=1
+make SKIP_3RDPARTY=1
 ```
 
 If this command succeeds, you will now have an executable at `bin/milvus` in your Milvus project directory.
@@ -206,174 +201,16 @@ If this command succeeds, you will now have an executable at `bin/milvus` in you
 If you want to run the `bin/milvus` executable on the host machine, you need to set `LD_LIBRARY_PATH` temporarily:
 
 ```shell
-$ LD_LIBRARY_PATH=./internal/core/output/lib:lib:$LD_LIBRARY_PATH ./bin/milvus
+LD_LIBRARY_PATH=./internal/core/output/lib:lib:$LD_LIBRARY_PATH ./bin/milvus
 ```
 
 If you want to update proto file before `make`, we can use the following command:
 
 ```shell
-$ make generated-proto-go
+make generated-proto-go
 ```
 
 If you want to know more, you can read Makefile.
-## Building Milvus v2.3.4 arm image to support ky10 sp3
-
-### Software Requirements
-The details below outline the software requirements for building on Ubuntu 20.04
-#### Install cmake
-
-```bash
-apt update
-wget https://github.com/Kitware/CMake/releases/download/v3.27.9/cmake-3.27.9-linux-aarch64.tar.gz
-tar zxf cmake-3.27.9-linux-aarch64.tar.gz 
-mv cmake-3.27.9-linux-aarch64 /usr/local/cmake
-vi /etc/profile
-export PATH=$PATH:/usr/local/cmake/bin
-source /etc/profile
-cmake --version
-```
-
-#### Installing Dependencies
-
-```bash
-sudo apt install -y clang-format clang-tidy ninja-build gcc g++ curl zip unzip tar
-```
-
-#### Install conan
-
-```bash
-# Verify python3 version, need python3 version > 3.8 and version <= 3.11
-python3 --version
-# pip install conan 1.64.1
-pip3 install conan==1.64.1
-```
-
-#### Install GO 1.22
-
-```bash
-wget https://go.dev/dl/go1.22.8.linux-arm64.tar.gz
-tar zxf go1.22.8.linux-arm64.tar.gz
-mv ./go /usr/local
-vi /etc/profile
-export PATH=$PATH:/usr/local/go/bin
-source /etc/profile
-go version
-```
-
-#### Download source code
-
-```bash
-git clone https://github.com/milvus-io/milvus.git
-git checkout v2.3.4
-cd ./milvus
-```
-
-#### Check OS PAGESIZE 
-
-```bash
-getconf PAGESIZE
-```
-
-The PAGESIZE for the ky10 SP3 operating system is 65536, which is 64KB.
-
-#### Modify the MILVUS_JEMALLOC_LG_PAGE setting
-
-The `MILVUS_JEMALLOC_LG_PAGE` variable's primary function is to specify the size of large pages during the compilation of jemalloc. Jemalloc is a memory allocator designed to enhance the performance and efficiency of applications in a multi-threaded environment. By specifying the size of large pages, memory management and access can be optimized, thereby improving performance.
-
-Large page support allows the operating system to manage and allocate memory in larger blocks, reducing the number of page table entries, thereby decreasing the time for page table lookups and improving the efficiency of memory access. This is particularly important when processing large amounts of data, as it can significantly reduce page faults and Translation Lookaside Buffer (TLB) misses, enhancing application performance.
-
-On ARM64 architectures, different systems may support different page sizes, such as 4KB and 64KB. The `MILVUS_JEMALLOC_LG_PAGE` setting allows developers to customize the compilation of jemalloc for the target platform, ensuring it can efficiently operate on systems with varying page sizes. By specifying the `--with-lg-page` configuration option, jemalloc can utilize the optimal page size supported by the system when managing memory.
-
-For example, if a system supports a 64KB page size, by setting `MILVUS_JEMALLOC_LG_PAGE` to the corresponding value (the power of 2, 64KB is 2 to the 16th power, so the value is 16), jemalloc can allocate and manage memory in 64KB units, which can improve the performance of applications running on that system.
-
-Modify the make configuration file, located at: `./milvus/scripts/core_build.sh`, with the following changes:
-
-```diff
-arch=$(uname -m)
-CMAKE_CMD="cmake \
-${CMAKE_EXTRA_ARGS} \
- -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
- -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
- -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
- -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
- -DCMAKE_LIBRARY_ARCHITECTURE=${arch} \
- -DBUILD_COVERAGE=${BUILD_COVERAGE} \
- -DMILVUS_GPU_VERSION=${GPU_VERSION} \
- -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
- -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
- -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
-+ -DMILVUS_JEMALLOC_LG_PAGE=16 \
- -DUSE_ASAN=${USE_ASAN} \
- -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
- -DCPU_ARCH=${CPU_ARCH} \
- -DINDEX_ENGINE=${INDEX_ENGINE} \
- -DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} \
- -DENABLE_AZURE_FS=${ENABLE_AZURE_FS} "
-if [ -z "$BUILD_WITHOUT_AZURE" ]; then
-CMAKE_CMD=${CMAKE_CMD}"-DAZURE_BUILD_DIR=${AZURE_BUILD_DIR} \
- -DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} "
-fi
-CMAKE_CMD=${CMAKE_CMD}"${CPP_SRC_DIR}"
-```
-
-Using `-DMILVUS_JEMALLOC_LG_PAGE=16` as a compilation option for jemalloc is because it specifies the size
-
-of "large pages" as 2 to the 16th power bytes, which equals 65536 bytes or 64KB. This value is set to optimize memory management and improve performance, especially on systems that support or prefer using large pages to reduce the overhead of page table management.
-
-Specifying `-DMILVUS_JEMALLOC_LG_PAGE=16` during the compilation of jemalloc informs jemalloc to assume the system's large page size is 64KB. This allows jemalloc to work more efficiently with the operating system's memory manager, using large pages to optimize performance. This is crucial for ensuring optimal performance on systems with different default page sizes, particularly in environments that might have different memory management needs due to varying hardware or system configurations.
-
-### Build Image
-
-```bash
-cd ./milvus
-cp build/docker/milvus/ubuntu20.04/Dockerfile .
-```
-
-Modify the Dockerfile as follows:
-
-```dockerfile
-# Copyright (C) 2019-2022 Zilliz. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
-# with the License. You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software distributed under the License
-# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-# or implied. See the License for the specific language governing permissions and limitations under the License.
-
-FROM ubuntu:focal-20220426
-
-ARG TARGETARCH
-
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates libaio-dev libgomp1 && \
-    apt-get remove --purge -y && \
-    rm -rf /var/lib/apt/lists/*
-
-COPY ./bin/ /milvus/bin/
-
-COPY ./configs/ /milvus/configs/
-
-COPY ./internal/core/output/lib/ /milvus/lib/
-
-ENV PATH=/milvus/bin:$PATH
-ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
-ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
-ENV MALLOC_CONF=background_thread:true
-
-# Add Tini
-ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH /tini
-RUN chmod +x /tini
-ENTRYPOINT ["/tini", "--"]
-
-WORKDIR /milvus/
-```
-
-Build command: `docker build -t ghostbaby/milvus:v2.3.4_arm64 . `
-
-Verify the image: `docker run ghostbaby/milvus:v2.3.4_arm64 milvus run proxy`
 
 ## A Quick Start for Testing Milvus
 
@@ -384,7 +221,7 @@ Pre-submission verification provides a battery of checks and tests to give your 
 To run all pre-submission verification tests, use this command:
 
 ```shell
-$ make verifiers
+make verifiers
 ```
 
 ### Unit Tests
@@ -396,43 +233,43 @@ You may set up a local docker environment with our docker compose yaml file to s
 For Apple Silicon users (Apple M1):
 
 ```shell
-$ cd deployments/docker/dev
-$ docker compose -f docker-compose-apple-silicon.yml up -d
-$ cd ../../../
-$ make unittest
+cd deployments/docker/dev
+docker compose -f docker-compose-apple-silicon.yml up -d
+cd ../../../
+make unittest
 ```
 
 For others:
 
 ```shell
-$ cd deployments/docker/dev
-$ docker compose up -d
-$ cd ../../../
-$ make unittest
+cd deployments/docker/dev
+docker compose up -d
+cd ../../../
+make unittest
 ```
 
 To run only cpp test:
 
 ```shell
-$ make test-cpp
+make test-cpp
 ```
 
 To run only go test:
 
 ```shell
-$ make test-go
+make test-go
 ```
 
 To run a single test case (TestSearchTask in /internal/proxy directory, for example):
 
 ```shell
-$ source scripts/setenv.sh && go test -v ./internal/proxy/ -test.run TestSearchTask
+source scripts/setenv.sh && go test -v ./internal/proxy/ -test.run TestSearchTask
 ```
 
 If using Mac with M1 chip
 
 ```
-$ source scripts/setenv.sh && go test -tags=dynamic -v ./internal/proxy/ -test.run TestSearchTask
+source scripts/setenv.sh && go test -tags=dynamic -v ./internal/proxy/ -test.run TestSearchTask
 ```
 
 ### Code coverage
@@ -442,7 +279,7 @@ Before submitting your pull request, make sure your code change is covered by un
 Run unit test and generate code coverage report:
 
 ```shell
-$ make codecov
+make codecov
 ```
 
 This command will generate html report for Golang and C++ respectively.
@@ -452,13 +289,13 @@ For C++ report, open the `cpp_coverage/index.html` under milvus project path.
 You also can generate Golang coverage report by:
 
 ```shell
-$ make codecov-go
+make codecov-go
 ```
 
 Or C++ coverage report by:
 
 ```shell
-$ make codecov-cpp
+make codecov-cpp
 ```
 
 ### E2E Tests
@@ -489,9 +326,9 @@ $ ./scripts/start_standalone.sh
 To run E2E tests, use these commands:
 
 ```shell
-$ cd tests/python_client
-$ pip install -r requirements.txt
-$ pytest --tags=L0 -n auto
+cd tests/python_client
+pip install -r requirements.txt
+pytest --tags=L0 -n auto
 ```
 
 ### Test on local branch
@@ -501,7 +338,7 @@ $ pytest --tags=L0 -n auto
 After preparing deployment environment, we can start the cluster on your host machine
 
 ```shell
-$ ./scripts/start_cluster.sh
+./scripts/start_cluster.sh
 ```
 
 #### With docker
@@ -555,6 +392,7 @@ A: We are aware that some tests can be flaky occasionally. If there's something 
 ---
 
 Q: Brew: Unexpected Disconnect while reading sideband packet
+
 ```bash
 ==> Tapping homebrew/core
 remote: Enumerating objects: 1107077, done.
@@ -568,6 +406,7 @@ Failed during: git fetch --force origin refs/heads/master:refs/remotes/origin/ma
 ```
 
 A: try to increase http post buffer
+
 ```bash
 git config --global http.postBuffer 1M
 ```
@@ -577,6 +416,7 @@ git config --global http.postBuffer 1M
 Q: Brew: command not found” after installation
 
 A: set up git config
+
 ```bash
 git config --global user.email xxx
 git config --global user.name xxx
@@ -611,8 +451,63 @@ A: Fixed by exporting Python bin PATH in your bash.
 Q: Llvm: use of undeclared identifier ‘kSecFormatOpenSSL’
 
 A: Reinstall llvm@15
+
 ```bash
 brew reinstall llvm@15
 export LDFLAGS="-L/opt/homebrew/opt/llvm@15/lib"
 export CPPFLAGS="-I/opt/homebrew/opt/llvm@15/include"
 ```
+
+Q: The binary fails to open on my OS with the error "Unsupported system page size"?
+
+A: This occurs when your OS uses a large memory page size, which must be explicitly declared during compilation. Follow these steps to resolve it:
+
+First, check your OS page size by running the following command:
+
+```bash
+getconf PAGESIZE
+```
+
+If the output is 65536, your system uses 64KB pages.
+
+The `MILVUS_JEMALLOC_LG_PAGE` variable's primary function is to specify the size of large pages during the compilation of jemalloc. Jemalloc is a memory allocator designed to enhance the performance and efficiency of applications in a multi-threaded environment. By specifying the size of large pages, memory management and access can be optimized, thereby improving performance.
+
+Large page support allows the operating system to manage and allocate memory in larger blocks, reducing the number of page table entries, thereby decreasing the time for page table lookups and improving the efficiency of memory access. This is particularly important when processing large amounts of data, as it can significantly reduce page faults and Translation Lookaside Buffer (TLB) misses, enhancing application performance.
+
+On ARM64 architectures, different systems may support different page sizes, such as 4KB and 64KB. The `MILVUS_JEMALLOC_LG_PAGE` setting allows developers to customize the compilation of jemalloc for the target platform, ensuring it can efficiently operate on systems with varying page sizes. By specifying the `--with-lg-page` configuration option, jemalloc can utilize the optimal page size supported by the system when managing memory.
+
+For example, if a system supports a 64KB page size, by setting `MILVUS_JEMALLOC_LG_PAGE` to the corresponding value (the power of 2, 64KB is 2 to the 16th power, so the value is 16), jemalloc can allocate and manage memory in 64KB units, which can improve the performance of applications running on that system.
+
+Modify the make configuration file, located at: `./milvus/scripts/core_build.sh`, with the following changes:
+
+```diff
+arch=$(uname -m)
+CMAKE_CMD="cmake \
+${CMAKE_EXTRA_ARGS} \
+ -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
+ -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
+ -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+ -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
+ -DCMAKE_LIBRARY_ARCHITECTURE=${arch} \
+ -DBUILD_COVERAGE=${BUILD_COVERAGE} \
+ -DMILVUS_GPU_VERSION=${GPU_VERSION} \
+ -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
+ -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
+ -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
++ -DMILVUS_JEMALLOC_LG_PAGE=16 \
+ -DUSE_ASAN=${USE_ASAN} \
+ -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
+ -DCPU_ARCH=${CPU_ARCH} \
+ -DINDEX_ENGINE=${INDEX_ENGINE} \
+ -DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} \
+ -DENABLE_AZURE_FS=${ENABLE_AZURE_FS} "
+if [ -z "$BUILD_WITHOUT_AZURE" ]; then
+CMAKE_CMD=${CMAKE_CMD}"-DAZURE_BUILD_DIR=${AZURE_BUILD_DIR} \
+ -DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} "
+fi
+CMAKE_CMD=${CMAKE_CMD}"${CPP_SRC_DIR}"
+```
+
+Using `-DMILVUS_JEMALLOC_LG_PAGE=16` as a compilation option for jemalloc is because it specifies the size of "large pages" as 2 to the 16th power bytes, which equals 65536 bytes or 64KB. This value is set to optimize memory management and improve performance, especially on systems that support or prefer using large pages to reduce the overhead of page table management.
+
+Specifying `-DMILVUS_JEMALLOC_LG_PAGE=16` during the compilation of jemalloc informs jemalloc to assume the system's large page size is 64KB. This allows jemalloc to work more efficiently with the operating system's memory manager, using large pages to optimize performance. This is crucial for ensuring optimal performance on systems with different default page sizes, particularly in environments that might have different memory management needs due to varying hardware or system configurations.
