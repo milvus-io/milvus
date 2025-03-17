@@ -32,6 +32,7 @@ type PrimaryKeys interface {
 	Size() int64
 	Len() int
 	MustMerge(pks PrimaryKeys)
+	Reset()
 }
 
 type Int64PrimaryKeys struct {
@@ -90,6 +91,10 @@ func (pks *Int64PrimaryKeys) MustMerge(another PrimaryKeys) {
 	}
 
 	pks.values = append(pks.values, aPks.values...)
+}
+
+func (pks *Int64PrimaryKeys) Reset() {
+	pks.values = pks.values[:0]
 }
 
 type VarcharPrimaryKeys struct {
@@ -155,4 +160,9 @@ func (pks *VarcharPrimaryKeys) MustMerge(another PrimaryKeys) {
 
 	pks.values = append(pks.values, aPks.values...)
 	pks.size += aPks.size
+}
+
+func (pks *VarcharPrimaryKeys) Reset() {
+	pks.values = pks.values[:0]
+	pks.size = 0
 }
