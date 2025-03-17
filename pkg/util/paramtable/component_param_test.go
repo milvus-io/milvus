@@ -670,9 +670,6 @@ func TestCachedParam(t *testing.T) {
 	Init()
 	params := Get()
 
-	assert.True(t, params.DataNodeCfg.EnableDisk.GetAsBool())
-	assert.True(t, params.DataNodeCfg.EnableDisk.GetAsBool())
-
 	assert.Equal(t, 256*1024*1024, params.QueryCoordGrpcServerCfg.ServerMaxRecvSize.GetAsInt())
 	assert.Equal(t, 256*1024*1024, params.QueryCoordGrpcServerCfg.ServerMaxRecvSize.GetAsInt())
 

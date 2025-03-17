@@ -507,8 +507,6 @@ indexCoord:
 indexNode:
   scheduler:
     buildParallel: 1
-  enableDisk: true # enable build disk vector index
-  maxDiskUsagePercentage: 95
 
 dataCoord:
   channel:

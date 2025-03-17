@@ -150,7 +150,7 @@ type Server struct {
 	// indexCoord             types.IndexCoord
 
 	// segReferManager  *SegmentReferenceManager
-	indexNodeManager          *session.IndexNodeManager
+	indexNodeManager          session.WorkerManager
 	indexEngineVersionManager IndexEngineVersionManager
 
 	taskScheduler *taskScheduler

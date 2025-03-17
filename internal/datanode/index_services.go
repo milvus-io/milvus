@@ -218,7 +218,6 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 		InProgressJobNum: int64(active),
 		EnqueueJobNum:    int64(unissued),
 		TaskSlots:        int64(slots),
-		EnableDisk:       paramtable.Get().DataNodeCfg.EnableDisk.GetAsBool(),
 	}, nil
 }
 
