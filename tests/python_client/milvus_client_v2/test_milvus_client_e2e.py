@@ -26,8 +26,9 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
     """ Test case of end-to-end interface """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("flush_enable", [True])
-    @pytest.mark.parametrize("scalar_index_enable", [True])
+    @pytest.mark.xfail("issue #40686")
+    @pytest.mark.parametrize("flush_enable", [True, False])
+    @pytest.mark.parametrize("scalar_index_enable", [True, False])
     def test_milvus_client_e2e_default(self, flush_enable, scalar_index_enable):
         """
         target: test high level api: client.create_collection, insert, search, query
@@ -60,50 +61,24 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         schema.add_field("json_field", DataType.JSON, nullable=True)
         # Array type
         schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=12, nullable=True)
-        
-        # Create index parameters
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index("embeddings", metric_type="COSINE")
-        
-        # Add autoindex for scalar fields if enabled
-        if scalar_index_enable:
-            index_params.add_index(field_name="int8_field", index_type="AUTOINDEX")
-            index_params.add_index(field_name="int16_field", index_type="AUTOINDEX")
-            index_params.add_index(field_name="int32_field", index_type="AUTOINDEX")
-            index_params.add_index(field_name="int64_field", index_type="AUTOINDEX")
-            index_params.add_index(field_name="float_field", index_type="AUTOINDEX")
-            index_params.add_index(field_name="double_field", index_type="AUTOINDEX")
-            index_params.add_index(field_name="varchar_field", index_type="AUTOINDEX")
-        
+
         # Create collection
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-        
-        # Verify scalar indexes are created if enabled
-        indexes = self.list_indexes(client, collection_name)[0]
-        log.info(f"Created indexes: {indexes}")
-        expected_scalar_indexes = ["int8_field", "int16_field", "int32_field", "int64_field", 
-                                 "float_field", "double_field", "varchar_field"]
-        if scalar_index_enable:
-            for field in expected_scalar_indexes:
-                assert field in indexes, f"Scalar index not created for field: {field}"
-        else:
-            for field in expected_scalar_indexes:
-                assert field not in indexes, f"Scalar index should not be created for field: {field}"
-        
+        self.create_collection(client, collection_name, schema=schema)
+
         # 2. Insert data with null values for nullable fields
-        num_inserts = 3  # 插入3批数据
+        num_inserts = 3  # insert data for 3 times
         total_rows = []
         for batch in range(num_inserts):
             vectors = cf.gen_vectors(default_nb, default_dim)
             rows = []
-            start_id = batch * default_nb  # 每批数据的起始id
-            
+            start_id = batch * default_nb  # ensure id is not duplicated
+
             for i in range(default_nb):
                 row = {
-                    "id": start_id + i,  # 使用起始id加偏移量确保id不重复
+                    "id": start_id + i,  # ensure id is not duplicated
                     "embeddings": list(vectors[i])
                 }
-                
+
                 # Add nullable fields with null values for every 5th record
                 if i % 5 == 0:
                     row.update({
@@ -129,16 +104,16 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
                         "double_field": float(i) * 1.0,
                         "varchar_field": f"varchar_{start_id + i}",
                         "json_field": {"id": start_id + i, "value": f"json_{start_id + i}"},
-                        "array_field": [i, i+1, i+2]
+                        "array_field": [i, i + 1, i + 2]
                     })
                 rows.append(row)
                 total_rows.append(row)
-            
+
             t0 = time.time()
             self.insert(client, collection_name, rows)
             t1 = time.time()
             log.info(f"Insert batch {batch + 1}: {default_nb} entities cost {t1 - t0:.4f} seconds")
-        
+
         log.info(f"Total inserted {num_inserts * default_nb} entities")
 
         if flush_enable:
@@ -147,7 +122,36 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         else:
             log.info("Flush disabled: skipping flush operation")
 
-        # 3. Load collection
+        # Create index parameters
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("embeddings", metric_type="COSINE")
+
+        # Add autoindex for scalar fields if enabled
+        if scalar_index_enable:
+            index_params.add_index(field_name="int8_field", index_type="AUTOINDEX")
+            index_params.add_index(field_name="int16_field", index_type="AUTOINDEX")
+            index_params.add_index(field_name="int32_field", index_type="AUTOINDEX")
+            index_params.add_index(field_name="int64_field", index_type="AUTOINDEX")
+            index_params.add_index(field_name="float_field", index_type="AUTOINDEX")
+            index_params.add_index(field_name="double_field", index_type="AUTOINDEX")
+            index_params.add_index(field_name="varchar_field", index_type="AUTOINDEX")
+
+        # 3. create index
+        self.create_index(client, collection_name, index_params)
+
+        # Verify scalar indexes are created if enabled
+        indexes = self.list_indexes(client, collection_name)[0]
+        log.info(f"Created indexes: {indexes}")
+        expected_scalar_indexes = ["int8_field", "int16_field", "int32_field", "int64_field", 
+                                 "float_field", "double_field", "varchar_field"]
+        if scalar_index_enable:
+            for field in expected_scalar_indexes:
+                assert field in indexes, f"Scalar index not created for field: {field}"
+        else:
+            for field in expected_scalar_indexes:
+                assert field not in indexes, f"Scalar index should not be created for field: {field}"
+
+        # 4. Load collection
         t0 = time.time()
         self.load_collection(client, collection_name)
         t1 = time.time()
