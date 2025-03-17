@@ -3215,7 +3215,7 @@ def gen_fp16_vectors(num, dim):
     return raw_vectors, fp16_vectors
 
 
-def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
+def gen_sparse_vectors(nb, dim=1000, sparse_format="dok", empty_percentage=0):
     # default sparse format is dok, dict of keys
     # another option is coo, coordinate List
 
@@ -3223,6 +3223,11 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
     vectors = [{
         d: rng.random() for d in list(set(random.sample(range(dim), random.randint(20, 30)) + [0, 1]))
     } for _ in range(nb)]
+    if empty_percentage > 0:
+        empty_nb = int(nb * empty_percentage / 100)
+        empty_ids = random.sample(range(nb), empty_nb)
+        for i in empty_ids:
+            vectors[i] = {}
     if sparse_format == "coo":
         vectors = [
             {"indices": list(x.keys()), "values": list(x.values())} for x in vectors
