@@ -18,6 +18,7 @@
 #include "storage/gcp-native-storage/GcpNativeClientManager.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
+#include "log/Log.h"
 
 namespace milvus {
 namespace storage {
