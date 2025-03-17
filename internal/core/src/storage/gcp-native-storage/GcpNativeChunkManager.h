@@ -41,7 +41,7 @@ ThrowGcpNativeError(const std::string& func,
                     const std::exception& err,
                     const std::string& fmt_string,
                     Args&&... args) {
-    std::string error_message = GcpErrorMessage(func, err, fmtString, args...);
+    std::string error_message = GcpErrorMessage(func, err, fmt_string, args...);
     LOG_WARN(error_message);
     throw SegcoreError(GcpNativeError, error_message);
 }

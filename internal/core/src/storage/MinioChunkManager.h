@@ -56,10 +56,10 @@ template <typename... Args>
 static std::string
 S3ErrorMessage(const std::string& func,
                const Aws::S3::S3Error& err,
-               const std::string& fmtString,
+               const std::string& fmt_string,
                Args&&... args) {
     std::ostringstream oss;
-    const auto& message = fmt::format(fmtString, std::forward<Args>(args)...);
+    const auto& message = fmt::format(fmt_string, std::forward<Args>(args)...);
     oss << "Error in " << func << "[errcode:" << int(err.GetResponseCode())
         << ", exception:" << err.GetExceptionName()
         << ", errmessage:" << err.GetMessage() << ", params:" << message << "]";
@@ -70,9 +70,9 @@ template <typename... Args>
 static SegcoreError
 ThrowS3Error(const std::string& func,
              const Aws::S3::S3Error& err,
-             const std::string& fmtString,
+             const std::string& fmt_string,
              Args&&... args) {
-    std::string error_message = S3ErrorMessage(func, err, fmtString, args...);
+    std::string error_message = S3ErrorMessage(func, err, fmt_string, args...);
     LOG_WARN(error_message);
     throw SegcoreError(S3Error, error_message);
 }
