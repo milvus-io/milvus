@@ -653,11 +653,8 @@ TEST(storage, InsertDataFloat16Vector) {
 
 TEST(storage, IndexData) {
     std::vector<uint8_t> data = {1, 2, 3, 4, 5, 6, 7, 8};
-    auto field_data =
-        milvus::storage::CreateFieldData(storage::DataType::INT8, false);
-    field_data->FillFieldData(data.data(), data.size());
-
-    storage::IndexData index_data(field_data);
+    Slice slice(data.data(), data.size());
+    storage::IndexData index_data(slice);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     index_data.SetFieldDataMeta(field_data_meta);
     index_data.SetTimestamps(0, 100);
@@ -672,11 +669,10 @@ TEST(storage, IndexData) {
     ASSERT_EQ(new_index_data->GetCodecType(), storage::IndexDataType);
     ASSERT_EQ(new_index_data->GetTimeRage(),
               std::make_pair(Timestamp(0), Timestamp(100)));
-    auto new_field_data = new_index_data->GetFieldData();
-    ASSERT_EQ(new_field_data->get_data_type(), storage::DataType::INT8);
-    ASSERT_EQ(new_field_data->Size(), data.size());
+    ASSERT_FALSE(new_index_data->GetFieldData() != nullptr);
+    ASSERT_TRUE(new_index_data->HasPayloadSlice());
     std::vector<uint8_t> new_data(data.size());
-    memcpy(new_data.data(), new_field_data->Data(), new_field_data->DataSize());
+    memcpy(new_data.data(), new_index_data->PayloadData(), new_index_data->PayloadSize());
     ASSERT_EQ(data, new_data);
 }
 
