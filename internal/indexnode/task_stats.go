@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -43,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	_ "github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -352,7 +354,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			return err
 		}
 	}
-	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort || st.req.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob {
+	if (st.req.EnableJsonKeyStatsInSort && st.req.GetSubJobType() == indexpb.StatsSubJob_Sort) || st.req.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob {
 		if !st.req.GetEnableJsonKeyStats() {
 			return nil
 		}
@@ -773,8 +775,12 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 		zap.Any("statsJobType", st.req.GetSubJobType()),
+		zap.Int64("jsonKeyStatsDataFormat", jsonKeyStatsDataFormat),
 	)
-
+	if jsonKeyStatsDataFormat != 1 {
+		log.Info("create json key index failed dataformat invalid")
+		return nil
+	}
 	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
 		return binlog.GetFieldID()
 	})
@@ -801,7 +807,7 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 	jsonKeyIndexStats := make(map[int64]*datapb.JsonKeyStats)
 	for _, field := range st.req.GetSchema().GetFields() {
 		h := typeutil.CreateFieldSchemaHelper(field)
-		if !h.EnableJSONKeyIndex() {
+		if !h.EnableJSONKeyStatsIndex() {
 			continue
 		}
 		log.Info("field enable json key index, ready to create json key index", zap.Int64("field id", field.GetFieldID()))
@@ -820,7 +826,6 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 			FieldSchema:               field,
 			StorageConfig:             newStorageConfig,
 			JsonKeyStatsTantivyMemory: tantivyMemory,
-			JsonKeyStatsDataFormat:    jsonKeyStatsDataFormat,
 		}
 
 		uploaded, err := indexcgowrapper.CreateJSONKeyIndex(ctx, buildIndexParams)
@@ -850,6 +855,7 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 		st.req.GetInsertChannel(),
 		jsonKeyIndexStats)
 
+	metrics.IndexNodeBuildJSONStatsLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(totalElapse.Seconds())
 	log.Info("create json key index done",
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
 		zap.Duration("total elapse", totalElapse))

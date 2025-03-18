@@ -51,16 +51,11 @@ def entity_suffix(entities):
 class TestcaseBaseBulkInsert(TestcaseBase):
 
     @pytest.fixture(scope="function", autouse=True)
-    def init_minio_client(self, minio_host):
+    def init_minio_client(self, minio_host, minio_bucket):
         Path("/tmp/bulk_insert_data").mkdir(parents=True, exist_ok=True)
-        self._connect()
-        self.milvus_sys = MilvusSys(alias='default')
-        ms = MilvusSys()
         minio_port = "9000"
         self.minio_endpoint = f"{minio_host}:{minio_port}"
-        self.bucket_name = ms.index_nodes[0]["infos"]["system_configurations"][
-            "minio_bucket_name"
-        ]
+        self.bucket_name = minio_bucket
 
 
 class TestBulkInsert(TestcaseBaseBulkInsert):

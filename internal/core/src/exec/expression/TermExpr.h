@@ -151,6 +151,7 @@ class PhyTermFilterExpr : public SegmentExpr {
     int32_t consistency_level_ = 0;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
+    std::shared_ptr<MultiElement> arg_set_float_;
     SingleElement arg_val_;
 };
 }  //namespace exec

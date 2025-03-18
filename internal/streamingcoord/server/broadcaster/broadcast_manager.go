@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -19,9 +18,11 @@ import (
 // newBroadcastTaskManager creates a new broadcast task manager with recovery info.
 func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) (*broadcastTaskManager, []*pendingBroadcastTask) {
 	logger := resource.Resource().Logger().With(log.FieldComponent("broadcaster"))
+	metrics := newBroadcasterMetrics()
+
 	recoveryTasks := make([]*broadcastTask, 0, len(protos))
 	for _, proto := range protos {
-		t := newBroadcastTaskFromProto(proto)
+		t := newBroadcastTaskFromProto(proto, metrics)
 		t.SetLogger(logger.With(zap.Uint64("broadcastID", t.header.BroadcastID)))
 		recoveryTasks = append(recoveryTasks, t)
 	}
@@ -34,6 +35,7 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) (*broadcastTas
 				panic(fmt.Sprintf("unreachable: dirty recovery info in metastore, broadcast ids: [%d, %d]", oldTaskID, task.header.BroadcastID))
 			}
 			rks[rk] = task.header.BroadcastID
+			metrics.IncomingResourceKey(rk.Domain)
 		}
 		tasks[task.header.BroadcastID] = task
 		if task.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING {
@@ -46,7 +48,7 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) (*broadcastTas
 		cond:         syncutil.NewContextCond(&sync.Mutex{}),
 		tasks:        tasks,
 		resourceKeys: rks,
-		version:      1,
+		metrics:      metrics,
 	}
 	m.SetLogger(logger)
 	return m, pendingTasks
@@ -58,22 +60,30 @@ type broadcastTaskManager struct {
 	cond         *syncutil.ContextCond
 	tasks        map[uint64]*broadcastTask      // map the broadcastID to the broadcastTaskState
 	resourceKeys map[message.ResourceKey]uint64 // map the resource key to the broadcastID
-	version      int                            // version is used to make sure that there's no update lost for watcher.
+	metrics      *broadcasterMetrics
 }
 
 // AddTask adds a new broadcast task into the manager.
 func (bm *broadcastTaskManager) AddTask(ctx context.Context, msg message.BroadcastMutableMessage) (*pendingBroadcastTask, error) {
+	var err error
+	if msg, err = bm.assignID(ctx, msg); err != nil {
+		return nil, err
+	}
+	task, err := bm.addBroadcastTask(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	return newPendingBroadcastTask(task), nil
+}
+
+// assignID assigns the broadcast id to the message.
+func (bm *broadcastTaskManager) assignID(ctx context.Context, msg message.BroadcastMutableMessage) (message.BroadcastMutableMessage, error) {
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "allocate new id failed")
 	}
 	msg = msg.WithBroadcastID(id)
-
-	task, err := bm.addBroadcastTask(msg)
-	if err != nil {
-		return nil, err
-	}
-	return newPendingBroadcastTask(task), nil
+	return msg, nil
 }
 
 // Ack acknowledges the message at the specified vchannel.
@@ -89,71 +99,56 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, broadcastID uint64, vch
 
 	if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
 		bm.removeBroadcastTask(broadcastID)
-	} else {
-		bm.increaseVersion()
 	}
 	return nil
 }
 
-// WatchAtVersion watches the version of the broadcast task manager.
-// When the version is greater than the input version, the watcher will be notified.
-func (bm *broadcastTaskManager) WatchAtVersion(version int) <-chan struct{} {
-	bm.cond.L.Lock()
-	if bm.version > version {
-		bm.cond.L.Unlock()
-		ch := make(chan struct{})
-		close(ch)
-		return ch
-	}
-	return bm.cond.WaitChan()
-}
-
-// CurrentVersion returns the current version of the broadcast task manager.
-func (bm *broadcastTaskManager) CurrentVersion() int {
-	bm.cond.L.Lock()
-	defer bm.cond.L.Unlock()
-	return bm.version
-}
-
-// GetBroadcastTaskByResourceKey returns the broadcast task by the resource key.
-func (bm *broadcastTaskManager) GetBroadcastTaskByResourceKey(resourceKey message.ResourceKey) (*broadcastTask, bool) {
-	bm.cond.L.Lock()
+// ReleaseResourceKeys releases the resource keys by the broadcastID.
+func (bm *broadcastTaskManager) ReleaseResourceKeys(broadcastID uint64) {
+	bm.cond.LockAndBroadcast()
 	defer bm.cond.L.Unlock()
 
-	broadcastID, ok := bm.resourceKeys[resourceKey]
-	if !ok {
-		return nil, false
-	}
-	task, ok := bm.tasks[broadcastID]
-	return task, ok
+	bm.removeResourceKeys(broadcastID)
 }
 
 // addBroadcastTask adds the broadcast task into the manager.
-func (bm *broadcastTaskManager) addBroadcastTask(msg message.BroadcastMutableMessage) (*broadcastTask, error) {
-	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg)
+func (bm *broadcastTaskManager) addBroadcastTask(ctx context.Context, msg message.BroadcastMutableMessage) (*broadcastTask, error) {
+	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics)
 	header := newIncomingTask.Header()
 	newIncomingTask.SetLogger(bm.Logger().With(zap.Uint64("broadcastID", header.BroadcastID)))
 
 	bm.cond.L.Lock()
-	defer bm.cond.L.Unlock()
-	// Check if the resource key is held by other task.
-	for key := range header.ResourceKeys {
-		if _, ok := bm.resourceKeys[key]; ok {
-			return nil, status.NewResourceAcquired(fmt.Sprintf("domain: %s, key: %s", key.Domain.String(), key.Key))
+	for bm.checkIfResourceKeyExist(header) {
+		if err := bm.cond.Wait(ctx); err != nil {
+			return nil, err
 		}
 	}
+
 	// setup the resource keys to make resource exclusive held.
 	for key := range header.ResourceKeys {
 		bm.resourceKeys[key] = header.BroadcastID
+		bm.metrics.IncomingResourceKey(key.Domain)
 	}
 	bm.tasks[header.BroadcastID] = newIncomingTask
+	bm.cond.L.Unlock()
+	// TODO: perform a task checker here to make sure the task is vaild to be broadcasted in future.
 	return newIncomingTask, nil
+}
+
+func (bm *broadcastTaskManager) checkIfResourceKeyExist(header *message.BroadcastHeader) bool {
+	for key := range header.ResourceKeys {
+		if _, ok := bm.resourceKeys[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // getBroadcastTaskByID return the task by the broadcastID.
 func (bm *broadcastTaskManager) getBroadcastTaskByID(broadcastID uint64) (*broadcastTask, bool) {
 	bm.cond.L.Lock()
 	defer bm.cond.L.Unlock()
+
 	t, ok := bm.tasks[broadcastID]
 	return t, ok
 }
@@ -163,20 +158,19 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 	bm.cond.LockAndBroadcast()
 	defer bm.cond.L.Unlock()
 
+	bm.removeResourceKeys(broadcastID)
+	delete(bm.tasks, broadcastID)
+}
+
+// removeResourceKeys removes the resource keys by the broadcastID.
+func (bm *broadcastTaskManager) removeResourceKeys(broadcastID uint64) {
 	task, ok := bm.tasks[broadcastID]
 	if !ok {
 		return
 	}
-	bm.version++
 	// remove the related resource keys
 	for key := range task.header.ResourceKeys {
 		delete(bm.resourceKeys, key)
+		bm.metrics.GoneResourceKey(key.Domain)
 	}
-	delete(bm.tasks, broadcastID)
-}
-
-func (bm *broadcastTaskManager) increaseVersion() {
-	bm.cond.LockAndBroadcast()
-	bm.version++
-	bm.cond.L.Unlock()
 }

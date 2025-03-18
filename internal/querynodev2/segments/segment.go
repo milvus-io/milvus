@@ -1156,6 +1156,10 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 }
 
 func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datapb.JsonKeyStats, schemaHelper *typeutil.SchemaHelper) error {
+	if jsonKeyStats.GetJsonKeyStatsDataFormat() == 0 {
+		log.Ctx(ctx).Info("load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
+		return nil
+	}
 	log.Ctx(ctx).Info("load json key index", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 	exists := false
 	for _, field := range s.fieldJSONStats {
@@ -1174,14 +1178,13 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 	}
 
 	cgoProto := &indexcgopb.LoadJsonKeyIndexInfo{
-		FieldID:                jsonKeyStats.GetFieldID(),
-		Version:                jsonKeyStats.GetVersion(),
-		BuildID:                jsonKeyStats.GetBuildID(),
-		Files:                  jsonKeyStats.GetFiles(),
-		Schema:                 f,
-		CollectionID:           s.Collection(),
-		PartitionID:            s.Partition(),
-		JsonKeyStatsDataFormat: jsonKeyStats.GetJsonKeyStatsDataFormat(),
+		FieldID:      jsonKeyStats.GetFieldID(),
+		Version:      jsonKeyStats.GetVersion(),
+		BuildID:      jsonKeyStats.GetBuildID(),
+		Files:        jsonKeyStats.GetFiles(),
+		Schema:       f,
+		CollectionID: s.Collection(),
+		PartitionID:  s.Partition(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)

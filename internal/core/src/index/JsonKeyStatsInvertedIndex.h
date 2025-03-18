@@ -28,22 +28,21 @@ enum class JSONType {
     STRING_ESCAPE
 };
 using stdclock = std::chrono::high_resolution_clock;
-class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
+class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
-    explicit JsonKeyInvertedIndex(
+    explicit JsonKeyStatsInvertedIndex(
         const storage::FileManagerContext& ctx,
         bool is_load,
-        int64_t json_key_data_format = 0,
         int64_t json_stats_tantivy_memory_budget = 16777216);
 
-    explicit JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
-                                  const char* unique_id);
+    explicit JsonKeyStatsInvertedIndex(int64_t commit_interval_in_ms,
+                                       const char* unique_id);
 
-    explicit JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
-                                  const char* unique_id,
-                                  const std::string& path);
+    explicit JsonKeyStatsInvertedIndex(int64_t commit_interval_in_ms,
+                                       const char* unique_id,
+                                       const std::string& path);
 
-    ~JsonKeyInvertedIndex() override{};
+    ~JsonKeyStatsInvertedIndex() override{};
 
  public:
     IndexStatsPtr
@@ -65,39 +64,38 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
         bool is_growing,
         bool is_strong_consistency,
         std::function<bool(
-            bool, uint8_t, uint32_t, uint16_t, uint16_t, uint32_t)> filter) {
+            bool, uint8_t, uint32_t, uint16_t, uint16_t, int32_t)> filter) {
         auto processArray = [this, &path, row, &filter]() {
             TargetBitmap bitset(row);
             auto array = wrapper_->term_query_i64(path);
             LOG_INFO("json key filter size:{}", array.array_.len);
             for (size_t j = 0; j < array.array_.len; j++) {
                 auto the_offset = array.array_.array[j];
-                if (json_key_data_format_ == 0) {
-                    if (DecodeValid(the_offset)) {
-                        auto tuple = DecodeValue(the_offset);
-                        auto row_id = std::get<1>(tuple);
-                        if (row_id >= row) {
-                            continue;
-                        }
-                        bitset[row_id] = filter(true,
-                                                std::get<0>(tuple),
-                                                std::get<1>(tuple),
-                                                0,
-                                                0,
-                                                std::get<2>(tuple));
-                    } else {
-                        auto tuple = DecodeOffset(the_offset);
-                        auto row_id = std::get<1>(tuple);
-                        if (row_id >= row) {
-                            continue;
-                        }
-                        bitset[row_id] = filter(false,
-                                                std::get<0>(tuple),
-                                                std::get<1>(tuple),
-                                                std::get<2>(tuple),
-                                                std::get<3>(tuple),
-                                                0);
+
+                if (DecodeValid(the_offset)) {
+                    auto tuple = DecodeValue(the_offset);
+                    auto row_id = std::get<1>(tuple);
+                    if (row_id >= row) {
+                        continue;
                     }
+                    bitset[row_id] = filter(true,
+                                            std::get<0>(tuple),
+                                            std::get<1>(tuple),
+                                            0,
+                                            0,
+                                            std::get<2>(tuple));
+                } else {
+                    auto tuple = DecodeOffset(the_offset);
+                    auto row_id = std::get<1>(tuple);
+                    if (row_id >= row) {
+                        continue;
+                    }
+                    bitset[row_id] = filter(false,
+                                            std::get<0>(tuple),
+                                            std::get<1>(tuple),
+                                            std::get<2>(tuple),
+                                            std::get<3>(tuple),
+                                            0);
                 }
             }
 
@@ -137,6 +135,22 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     void
     CreateReader();
 
+    bool
+    has_escape_sequence(const std::string& str) {
+        for (size_t i = 0; i < str.size(); ++i) {
+            if (str[i] == '\\' && i + 1 < str.size()) {
+                char next = str[i + 1];
+                if (next == 'n' || next == 't' || next == 'r' || next == 'b' ||
+                    next == 'f' || next == 'v' || next == '\\' ||
+                    next == '\"' || next == '\'' || next == '0' ||
+                    next == 'u' || next == '/') {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
  private:
     void
     AddJson(const char* json,
@@ -158,7 +172,7 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
                        uint32_t row_id,
                        uint16_t offset,
                        uint16_t length,
-                       uint32_t value,
+                       int32_t value,
                        std::map<std::string, std::vector<int64_t>>& mp);
 
     int64_t
@@ -176,7 +190,7 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     }
 
     int64_t
-    EncodeValue(uint8_t flag, uint8_t type, uint32_t row_id, uint32_t value) {
+    EncodeValue(uint8_t flag, uint8_t type, uint32_t row_id, int32_t value) {
         return static_cast<int64_t>(flag) << 63 |
                static_cast<int64_t>(type) << 60 |
                static_cast<int64_t>(row_id) << 32 | static_cast<int64_t>(value);
@@ -187,11 +201,11 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
         return (encode_offset >> 63) & 1;
     }
 
-    std::tuple<uint8_t, uint32_t, uint32_t>
+    std::tuple<uint8_t, uint32_t, int32_t>
     DecodeValue(int64_t encode_offset) {
         uint8_t type = (encode_offset >> 60) & 0x7;
         uint32_t row_id = (encode_offset >> 32) & 0x0FFFFFFF;
-        uint32_t value = encode_offset & 0xFFFFFFFF;
+        int32_t value = encode_offset & 0xFFFFFFFF;
         return std::make_tuple(type, row_id, value);
     }
 
@@ -252,21 +266,6 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
         }
     }
 
-    bool
-    has_escape_sequence(const std::string& str) {
-        for (size_t i = 0; i < str.size(); ++i) {
-            if (str[i] == '\\' && i + 1 < str.size()) {
-                char next = str[i + 1];
-                if (next == 'n' || next == 't' || next == 'r' || next == 'b' ||
-                    next == 'f' || next == 'v' || next == '\\' ||
-                    next == '\"' || next == '\'') {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
     JSONType
     getType(const std::string& str) {
         if (isBoolean(str)) {
@@ -291,7 +290,6 @@ class JsonKeyInvertedIndex : public InvertedIndexTantivy<std::string> {
     mutable std::mutex mtx_;
     std::atomic<stdclock::time_point> last_commit_time_;
     int64_t commit_interval_in_ms_;
-    int64_t json_key_data_format_ = 0;
     std::atomic<bool> is_data_uncommitted_ = false;
 };
 }  // namespace milvus::index

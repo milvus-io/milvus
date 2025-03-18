@@ -606,7 +606,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
                                              uint32_t row_id,
                                              uint16_t offset,
                                              uint16_t size,
-                                             uint32_t value) {
+                                             int32_t value) {
             if (valid) {
                 if constexpr (std::is_same_v<GetType, int64_t>) {
                     if (type != uint8_t(milvus::index::JSONType::INT32) &&

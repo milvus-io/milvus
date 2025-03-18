@@ -242,7 +242,8 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		BinlogMaxSize:             Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		EnableJsonKeyStats:        Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
 		JsonKeyStatsTantivyMemory: Params.DataCoordCfg.JSONKeyStatsMemoryBudgetInTantivy.GetAsInt64(),
-		JsonKeyStatsDataFormat:    0,
+		JsonKeyStatsDataFormat:    1,
+		EnableJsonKeyStatsInSort:  Params.DataCoordCfg.EnabledJSONKeyStatsInSort.GetAsBool(),
 	}
 
 	log.Info("stats task pre check successfully", zap.String("subJobType", st.subJobType.String()),
