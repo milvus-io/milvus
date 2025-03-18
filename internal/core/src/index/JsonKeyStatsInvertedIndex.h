@@ -191,9 +191,12 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
 
     int64_t
     EncodeValue(uint8_t flag, uint8_t type, uint32_t row_id, int32_t value) {
+        row_id &= 0x0FFFFFFF;
         return static_cast<int64_t>(flag) << 63 |
                static_cast<int64_t>(type) << 60 |
-               static_cast<int64_t>(row_id) << 32 | static_cast<int64_t>(value);
+               static_cast<int64_t>(row_id) << 32 |
+               static_cast<int64_t>(static_cast<uint32_t>(value));
+        ;
     }
 
     bool
@@ -205,7 +208,7 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
     DecodeValue(int64_t encode_offset) {
         uint8_t type = (encode_offset >> 60) & 0x7;
         uint32_t row_id = (encode_offset >> 32) & 0x0FFFFFFF;
-        int32_t value = encode_offset & 0xFFFFFFFF;
+        int32_t value = static_cast<int32_t>(encode_offset & 0xFFFFFFFF);
         return std::make_tuple(type, row_id, value);
     }
 
