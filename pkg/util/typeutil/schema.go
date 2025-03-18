@@ -1145,6 +1145,11 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 	return nil, errors.New("primary field is not found")
 }
 
+func IsFieldSparseFloatVector(schema *schemapb.CollectionSchema, fieldID int64) bool {
+	fieldSchema := GetField(schema, fieldID)
+	return fieldSchema != nil && IsSparseFloatVectorType(fieldSchema.DataType)
+}
+
 // GetPartitionKeyFieldSchema get partition field schema from collection schema
 func GetPartitionKeyFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
 	for _, fieldSchema := range schema.GetFields() {
