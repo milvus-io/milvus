@@ -102,7 +102,6 @@ func (pc *Consumer) Chan() <-chan common.Message {
 func (pc *Consumer) Seek(id common.MessageID, inclusive bool) error {
 	// If it is the earliest message ID, skip the seek to prevent failure.
 	if id.AtEarliestPosition() {
-		pc.hasSeek = true
 		return nil
 	}
 	messageID := id.(*pulsarID).messageID
