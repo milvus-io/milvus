@@ -133,7 +133,6 @@ func (c *dispatcherManager) Remove(vchannel string) {
 		c.deleteMetric(vchannel)
 		log.Info("remove soloDispatcher done")
 	}
-	c.lagTargets.GetAndRemove(vchannel)
 
 	if c.mainDispatcher != nil {
 		c.mainDispatcher.Handle(pause)
@@ -146,6 +145,7 @@ func (c *dispatcherManager) Remove(vchannel string) {
 			c.mainDispatcher.Handle(resume)
 		}
 	}
+	c.lagTargets.GetAndRemove(vchannel)
 }
 
 func (c *dispatcherManager) NumTarget() int {
