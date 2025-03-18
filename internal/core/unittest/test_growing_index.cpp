@@ -69,7 +69,7 @@ class GrowingIndexTest : public ::testing::TestWithParam<Param> {
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
     bool intermin_index_with_raw_data;
     bool is_sparse = false;
-    std::optional<std::string> dense_refine_type = "DATA_VIEW";
+    std::optional<std::string> dense_refine_type = "NONE";
 };
 
 INSTANTIATE_TEST_SUITE_P(
@@ -83,7 +83,7 @@ INSTANTIATE_TEST_SUITE_P(
                           knowhere::metric::L2),
         ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
                           knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR),
-        ::testing::Values("DATA_VIEW", "BFLOAT16", "FLOAT16", "UINT8")));
+        ::testing::Values("NONE", "BFLOAT16", "FLOAT16", "UINT8")));
 
 INSTANTIATE_TEST_SUITE_P(
     SparseIndexTypeParameters,
@@ -111,7 +111,7 @@ INSTANTIATE_TEST_SUITE_P(
         ::testing::Values(knowhere::metric::COSINE),
         ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
                           knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR),
-        ::testing::Values("DATA_VIEW", "BFLOAT16", "FLOAT16", "UINT8")));
+        ::testing::Values("NONE", "BFLOAT16", "FLOAT16", "UINT8")));
 
 TEST_P(GrowingIndexTest, Correctness) {
     auto schema = std::make_shared<Schema>();
