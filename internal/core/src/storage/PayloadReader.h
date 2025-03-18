@@ -27,6 +27,8 @@ namespace milvus::storage {
 
 class PayloadReader {
  public:
+    explicit PayloadReader(const FieldDataPtr& fieldData);
+
     explicit PayloadReader(const uint8_t* data,
                            int length,
                            DataType data_type,
@@ -36,11 +38,18 @@ class PayloadReader {
     ~PayloadReader() = default;
 
     void
-    init(std::shared_ptr<arrow::io::BufferReader> buffer, bool is_field_data);
+    init(const uint8_t* data, int length, bool is_field_data);
 
     const FieldDataPtr
     get_field_data() const {
         return field_data_;
+    }
+
+    int64_t
+    get_field_data_size() const {
+        if (field_data_)
+            return field_data_->Size();
+        return 0;
     }
 
     std::shared_ptr<arrow::RecordBatchReader>
@@ -53,6 +62,45 @@ class PayloadReader {
         return arrow_reader_;
     }
 
+    int64_t
+    get_payload_size() {
+        if (payload_buf_) {
+            return payload_buf_->Size();
+        }
+        return 0;
+    }
+
+    const uint8_t*
+    get_payload_data() {
+        if (payload_buf_) {
+            return payload_buf_->Data();
+        }
+        return nullptr;
+    }
+
+    bool
+    has_binary_payload() {
+        return payload_buf_ != nullptr;
+    }
+
+    bool
+    has_field_data() {
+        return field_data_ != nullptr;
+    }
+
+    DataType
+    get_payload_datatype() {
+        AssertInfo(payload_buf_ != nullptr || field_data_ != nullptr,
+                   "Neither payload_buf nor field_data is "
+                   "available, wrong state");
+        if (payload_buf_) {
+            return DataType::NONE;
+        }
+        if (field_data_) {
+            return field_data_->get_data_type();
+        }
+    }
+
  private:
     DataType column_type_;
     int dim_;
@@ -61,6 +109,9 @@ class PayloadReader {
 
     std::shared_ptr<parquet::arrow::FileReader> arrow_reader_;
     std::shared_ptr<arrow::RecordBatchReader> record_batch_reader_;
+
+    // buffer for zero-copy bytes
+    std::shared_ptr<BytesBuf> payload_buf_;
 };
 
 }  // namespace milvus::storage
