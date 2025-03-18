@@ -80,6 +80,11 @@ class EvalCtx {
         return bitmap_input_;
     }
 
+    void
+    clear_bitmap_input() {
+        bitmap_input_.clear();
+    }
+
  private:
     ExecContext* exec_ctx_ = nullptr;
     ExprSet* expr_set_ = nullptr;
