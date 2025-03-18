@@ -14,7 +14,7 @@ PWD 	  := $(shell pwd)
 GOPATH	:= $(shell $(GO) env GOPATH)
 SHELL 	:= /bin/bash
 OBJPREFIX := "github.com/milvus-io/milvus/cmd/milvus"
-MILVUS_GO_BUILD_TAGS := "dynamic,sonic"
+MILVUS_GO_BUILD_TAGS := "dynamic,sonic,with_jemalloc"
 
 INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
