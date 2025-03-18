@@ -138,7 +138,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage
 }
 
 func (r *reader) Read() (*storage.InsertData, error) {
-	insertData, err := storage.NewInsertData(r.schema)
+	insertData, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ OUTER:
 	if len(masks) == 0 { // no data will undergo filtration, return directly
 		return insertData, nil
 	}
-	result, err := storage.NewInsertData(r.schema)
+	result, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
 	if err != nil {
 		return nil, err
 	}
