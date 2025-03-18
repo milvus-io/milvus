@@ -679,6 +679,8 @@ func (m *indexMeta) IsUnIndexedSegment(collectionID UniqueID, segID UniqueID) bo
 }
 
 func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
 	segmentsIndexes := make(map[int64]map[UniqueID]*model.SegmentIndex)
 	for _, segmentID := range segIDs {
 		segmentsIndexes[segmentID] = m.getSegmentIndexes(collectionID, segmentID)
@@ -687,6 +689,8 @@ func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID)
 }
 
 func (m *indexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
 	return m.getSegmentIndexes(collectionID, segID)
 }
 
