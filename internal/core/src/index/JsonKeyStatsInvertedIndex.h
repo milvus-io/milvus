@@ -64,7 +64,7 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
         bool is_growing,
         bool is_strong_consistency,
         std::function<bool(
-            bool, uint8_t, uint32_t, uint16_t, uint16_t, uint32_t)> filter) {
+            bool, uint8_t, uint32_t, uint16_t, uint16_t, int32_t)> filter) {
         auto processArray = [this, &path, row, &filter]() {
             TargetBitmap bitset(row);
             auto array = wrapper_->term_query_i64(path);
@@ -172,7 +172,7 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
                        uint32_t row_id,
                        uint16_t offset,
                        uint16_t length,
-                       uint32_t value,
+                       int32_t value,
                        std::map<std::string, std::vector<int64_t>>& mp);
 
     int64_t
@@ -190,7 +190,7 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
     }
 
     int64_t
-    EncodeValue(uint8_t flag, uint8_t type, uint32_t row_id, uint32_t value) {
+    EncodeValue(uint8_t flag, uint8_t type, uint32_t row_id, int32_t value) {
         return static_cast<int64_t>(flag) << 63 |
                static_cast<int64_t>(type) << 60 |
                static_cast<int64_t>(row_id) << 32 | static_cast<int64_t>(value);
@@ -201,11 +201,11 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
         return (encode_offset >> 63) & 1;
     }
 
-    std::tuple<uint8_t, uint32_t, uint32_t>
+    std::tuple<uint8_t, uint32_t, int32_t>
     DecodeValue(int64_t encode_offset) {
         uint8_t type = (encode_offset >> 60) & 0x7;
         uint32_t row_id = (encode_offset >> 32) & 0x0FFFFFFF;
-        uint32_t value = encode_offset & 0xFFFFFFFF;
+        int32_t value = encode_offset & 0xFFFFFFFF;
         return std::make_tuple(type, row_id, value);
     }
 

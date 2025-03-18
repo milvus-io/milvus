@@ -28,7 +28,7 @@ JsonKeyStatsInvertedIndex::AddJSONEncodeValue(
     uint32_t row_id,
     uint16_t offset,
     uint16_t length,
-    uint32_t value,
+    int32_t value,
     std::map<std::string, std::vector<int64_t>>& mp) {
     std::string key = "";
     if (!paths.empty()) {
@@ -123,7 +123,7 @@ JsonKeyStatsInvertedIndex::TravelJson(
                                mp);
         } else if (type == JSONType::FLOAT) {
             auto fvalue = stof(value);
-            uint32_t valueBits = *reinterpret_cast<uint32_t*>(&fvalue);
+            int32_t valueBits = *reinterpret_cast<int32_t*>(&fvalue);
             AddJSONEncodeValue(path,
                                1,
                                static_cast<uint8_t>(JSONType::FLOAT),

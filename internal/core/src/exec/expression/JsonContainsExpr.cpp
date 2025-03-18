@@ -392,7 +392,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
                                                       uint32_t row_id,
                                                       uint16_t offset,
                                                       uint16_t size,
-                                                      uint32_t value) {
+                                                      int32_t value) {
             if (valid) {
                 return false;
             } else {
@@ -577,7 +577,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
                                                            uint32_t row_id,
                                                            uint16_t offset,
                                                            uint16_t size,
-                                                           uint32_t value) {
+                                                           int32_t value) {
             if (valid) {
                 return false;
             } else {
@@ -856,7 +856,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
                                                            uint32_t row_id,
                                                            uint16_t offset,
                                                            uint16_t size,
-                                                           uint32_t value) {
+                                                           int32_t value) {
             if (valid) {
                 return false;
             } else {
@@ -1105,7 +1105,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                                uint32_t row_id,
                                uint16_t offset,
                                uint16_t size,
-                               uint32_t value) {
+                               int32_t value) {
             if (valid) {
                 return false;
             } else {
@@ -1357,7 +1357,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
                                                            uint32_t row_id,
                                                            uint16_t offset,
                                                            uint16_t size,
-                                                           uint32_t value) {
+                                                           int32_t value) {
             if (valid) {
                 return false;
             } else {
@@ -1593,7 +1593,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
                                                            uint32_t row_id,
                                                            uint16_t offset,
                                                            uint16_t size,
-                                                           uint32_t value) {
+                                                           int32_t value) {
             if (valid) {
                 return false;
             } else {

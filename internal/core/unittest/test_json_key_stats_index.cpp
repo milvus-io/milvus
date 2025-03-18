@@ -217,7 +217,7 @@ TEST_P(JsonKeyStatsIndexTest, TestTermInFunc) {
                                              uint32_t row_id,
                                              uint16_t offset,
                                              uint16_t size,
-                                             uint32_t value) {
+                                             int32_t value) {
             return term_set.find(int64_t(value)) != term_set.end();
         };
         auto pointer = milvus::Json::pointer(testcase.nested_path);
@@ -295,7 +295,7 @@ TEST_P(JsonKeyStatsIndexTest, TestUnaryRangeInFunc) {
                                                       uint32_t row_id,
                                                       uint16_t offset,
                                                       uint16_t size,
-                                                      uint32_t value) {
+                                                      int32_t value) {
                 switch (op) {
                     case OpType::GreaterThan:
                         return int64_t(value) > testcase.val;
@@ -375,7 +375,7 @@ TEST_P(JsonKeyStatsIndexTest, TestBinaryRangeInFunc) {
                                              uint32_t row_id,
                                              uint16_t offset,
                                              uint16_t size,
-                                             uint32_t value) {
+                                             int32_t value) {
             if (valid) {
                 if (testcase.lower_inclusive && testcase.upper_inclusive) {
                     return testcase.lower <= int64_t(value) &&
@@ -455,7 +455,7 @@ TEST_P(JsonKeyStatsIndexTest, TestExistInFunc) {
                                             uint32_t row_id,
                                             uint16_t offset,
                                             uint16_t size,
-                                            uint32_t value) {
+                                            int32_t value) {
             return this->data_[row_id].exist(pointer);
         };
 
@@ -504,7 +504,7 @@ TEST_P(JsonKeyStatsIndexTest, TestJsonContainsAllFunc) {
                                                  uint32_t row_id,
                                                  uint16_t offset,
                                                  uint16_t size,
-                                                 uint32_t value) {
+                                                 int32_t value) {
                 auto array = this->data_[row_id].array_at(offset, size);
                 std::unordered_set<int64_t> tmp_elements(elements);
                 for (auto&& it : array) {
@@ -569,7 +569,7 @@ TEST(GrowingJsonKeyStatsIndexTest, GrowingIndex) {
                                          uint32_t row_id,
                                          uint16_t offset,
                                          uint16_t size,
-                                         uint32_t value) {
+                                         int32_t value) {
         if (value == checkVal) {
             return true;
         }

@@ -550,6 +550,10 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SortVectorElement<ValueType>>(expr_->vals_);
+        if constexpr (std::is_same_v<GetType, double>) {
+            arg_set_float_ =
+                std::make_shared<SortVectorElement<float>>(expr_->vals_);
+        }
         arg_inited_ = true;
     }
 
@@ -571,14 +575,15 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         auto vals = expr_->vals_;
+
         Assert(index != nullptr);
 
-        auto filter_func = [this, segment, &field_id, &vals](bool valid,
-                                                             uint8_t type,
-                                                             uint32_t row_id,
-                                                             uint16_t offset,
-                                                             uint16_t size,
-                                                             uint32_t value) {
+        auto filter_func = [this, segment, &field_id](bool valid,
+                                                      uint8_t type,
+                                                      uint32_t row_id,
+                                                      uint16_t offset,
+                                                      uint16_t size,
+                                                      int32_t value) {
             if (valid) {
                 if constexpr (std::is_same_v<GetType, int64_t>) {
                     if (type != uint8_t(milvus::index::JSONType::INT32) &&
@@ -609,9 +614,8 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
                 if constexpr (std::is_same_v<GetType, int64_t>) {
                     return this->arg_set_->In(value);
                 } else if constexpr (std::is_same_v<GetType, double>) {
-                    SortVectorElement<float> tmp{vals};
                     float restoredValue = *reinterpret_cast<float*>(&value);
-                    return tmp.In(restoredValue);
+                    return this->arg_set_float_->In(restoredValue);
                 } else if constexpr (std::is_same_v<GetType, bool>) {
                     bool restoredValue = *reinterpret_cast<bool*>(&value);
                     return this->arg_set_->In(restoredValue);
