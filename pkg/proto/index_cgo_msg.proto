@@ -83,7 +83,6 @@ message BuildIndexInfo {
   bool partition_key_isolation = 20;
   int32 current_scalar_index_version = 21;
   int64 json_key_stats_tantivy_memory = 22;
-  int64 json_key_stats_data_format = 23;
 }
 
 message LoadTextIndexInfo {
@@ -104,5 +103,4 @@ message LoadJsonKeyIndexInfo {
   schema.FieldSchema schema = 5;
   int64 collectionID = 6;
   int64 partitionID = 7;
-  int64 json_key_stats_data_format=8;
 }

@@ -96,6 +96,15 @@ var (
 			Help:      "latency of build index for segment",
 			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
+
+	IndexNodeBuildJSONStatsLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.IndexNodeRole,
+			Name:      "task_build_json_stats_latency",
+			Help:      "latency of building the index by knowhere",
+			Buckets:   indexBucket,
+		}, []string{nodeIDLabelName})
 )
 
 // RegisterIndexNode registers IndexNode metrics
@@ -108,4 +117,5 @@ func RegisterIndexNode(registry *prometheus.Registry) {
 	registry.MustRegister(IndexNodeSaveIndexFileLatency)
 	registry.MustRegister(IndexNodeIndexTaskLatencyInQueue)
 	registry.MustRegister(IndexNodeBuildIndexLatency)
+	registry.MustRegister(IndexNodeBuildJSONStatsLatency)
 }

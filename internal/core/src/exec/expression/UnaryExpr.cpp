@@ -1103,7 +1103,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                                      uint32_t row_id,
                                      uint16_t offset,
                                      uint16_t size,
-                                     uint32_t value) {
+                                     int32_t value) {
             if (valid) {
                 if (type == uint8_t(milvus::index::JSONType::UNKNOWN) ||
                     !arrayIndex.empty()) {
