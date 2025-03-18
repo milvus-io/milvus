@@ -580,12 +580,14 @@ std::unique_ptr<DataCodec>
 DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
                             const std::string& file,
                             bool is_field_data) {
+    //hc==need prune this size cost
     auto fileSize = chunk_manager->Size(file);
     auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
     chunk_manager->Read(file, buf.get(), fileSize);
 
     auto res = DeserializeFileData(buf, fileSize, is_field_data);
     res->SetData(buf);
+    // DataCodec must keep the buf alive for zero-copy usage, otherwise segmentation violation will occur
     return res;
 }
 
@@ -597,9 +599,9 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           FieldDataMeta field_meta,
                           std::string object_key) {
     // index not use valid_data, so no need to set nullable==true
-    auto field_data = CreateFieldData(DataType::INT8, false);
-    field_data->FillFieldData(buf, batch_size);
-    auto indexData = std::make_shared<IndexData>(field_data);
+    // for index slice, no parquet encoding is needed, directly use binary type
+    Slice index_slice(buf, batch_size);
+    auto indexData = std::make_shared<IndexData>(index_slice);
     indexData->set_index_meta(index_meta);
     indexData->SetFieldDataMeta(field_meta);
     auto serialized_index_data = indexData->serialize_to_remote_file();

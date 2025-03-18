@@ -78,7 +78,7 @@ struct BaseEventData {
     Timestamp end_timestamp;
     FieldDataPtr field_data;
     std::shared_ptr<PayloadReader> payload_reader;
-
+    std::optional<Slice> payload_slice_;
     BaseEventData() = default;
     explicit BaseEventData(BinlogReaderPtr reader,
                            int event_length,
@@ -117,10 +117,10 @@ struct BaseEvent {
 
 using InsertEvent = BaseEvent;
 using InsertEventData = BaseEventData;
-using IndexEvent = BaseEvent;
-using IndexEventData = BaseEventData;
 using DeleteEvent = BaseEvent;
 using DeleteEventData = BaseEventData;
+using IndexEvent = BaseEvent;
+using IndexEventData = BaseEventData;
 using CreateCollectionEvent = BaseEvent;
 using CreateCollectionEventData = BaseEventData;
 using CreatePartitionEvent = BaseEvent;
