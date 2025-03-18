@@ -49,13 +49,8 @@ DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data) {
                 reader, event_data_length, data_type, nullable, is_field_data);
 
             std::unique_ptr<InsertData> insert_data;
-            if (is_field_data) {
-                insert_data =
-                    std::make_unique<InsertData>(insert_event_data.field_data);
-            } else {
-                insert_data = std::make_unique<InsertData>(
-                    insert_event_data.payload_reader);
-            }
+            insert_data =
+                std::make_unique<InsertData>(insert_event_data.payload_reader);
             insert_data->SetFieldDataMeta(data_meta);
             insert_data->SetTimestamps(insert_event_data.start_timestamp,
                                        insert_event_data.end_timestamp);
@@ -66,9 +61,13 @@ DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data) {
                 header.event_length_ - GetEventHeaderSize(header);
             auto index_event_data =
                 IndexEventData(reader, event_data_length, data_type, nullable);
-            auto field_data = index_event_data.field_data;
-            // for compatible with golang indexcode.Serialize, which set dataType to String
-            if (data_type == DataType::STRING) {
+
+            if (index_event_data.payload_reader->get_payload_datatype() ==
+                DataType::STRING) {
+                AssertInfo(index_event_data.payload_reader->has_field_data(),
+                           "old index having no field_data");
+                auto field_data =
+                    index_event_data.payload_reader->get_field_data();
                 AssertInfo(field_data->get_data_type() == DataType::STRING,
                            "wrong index type in index binlog file");
                 AssertInfo(
@@ -79,10 +78,11 @@ DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data) {
                     (*static_cast<const std::string*>(field_data->RawValue(0)))
                         .c_str(),
                     field_data->Size());
-                field_data = new_field_data;
+                index_event_data.payload_reader =
+                    std::make_shared<PayloadReader>(new_field_data);
             }
-
-            auto index_data = std::make_unique<IndexData>(field_data);
+            auto index_data =
+                std::make_unique<IndexData>(index_event_data.payload_reader);
             index_data->SetFieldDataMeta(data_meta);
             IndexMeta index_meta;
             index_meta.segment_id = data_meta.segment_id;

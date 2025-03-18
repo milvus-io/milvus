@@ -255,3 +255,25 @@ struct fmt::formatter<milvus::storage::StorageType> : formatter<string_view> {
         return formatter<string_view>::format("unknown", ctx);
     }
 };
+
+struct BytesBuf {
+ public:
+    explicit BytesBuf(const uint8_t* data, int64_t length)
+        : data_(data), size_(length) {
+        AssertInfo(data != nullptr, "Data pointer for slice cannot be null.");
+    }
+
+    int64_t
+    Size() const {
+        return size_;
+    }
+
+    const uint8_t*
+    Data() const {
+        return data_;
+    }
+
+ private:
+    const uint8_t* data_;  // Only used when not owning the data
+    int64_t size_;
+};
