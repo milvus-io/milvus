@@ -10,7 +10,7 @@ from pymilvus import (
     WeightedRanker,
 )
 from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter
-from common.common_type import CaseLabel, CheckTasks
+from common.common_type import CheckTasks
 from common import common_func as cf
 from utils.util_log import test_log as log
 from base.client_base import TestcaseBase
@@ -75,7 +75,7 @@ class TestCreateCollectionWithTextEmbedding(TestcaseBase):
 
     @pytest.mark.parametrize("model_name", ["BAAI/bge-m3"])
     def test_create_collection_with_text_embedding_twice_with_same_schema(
-        self, model_name
+            self, model_name
     ):
         """
         target: test create collection with text embedding twice with same schema
@@ -185,7 +185,6 @@ class TestCreateCollectionWithTextEmbeddingNegative(TestcaseBase):
     ******************************************************************
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("model_name", ["unsupported_model"])
     def test_create_collection_with_text_embedding_unsupported_model(self, model_name):
         """
@@ -220,7 +219,6 @@ class TestCreateCollectionWithTextEmbeddingNegative(TestcaseBase):
             check_items={"err_code": 65535, "err_msg": "Unsupported model"},
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("model_name", ["BAAI/bge-m3"])
     def test_create_collection_with_text_embedding_unmatched_dim(self, model_name):
         """
@@ -258,7 +256,6 @@ class TestCreateCollectionWithTextEmbeddingNegative(TestcaseBase):
             },
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("model_name", ["BAAI/bge-m3"])
     def test_create_collection_with_text_embedding_invalid_api_key(self, model_name):
         """
@@ -696,8 +693,8 @@ class TestALLProviderWithTextEmbedding(TestcaseBase):
             except Exception as e:
                 error_msg = str(e)
                 if (
-                    "429 Too Many Requests" in error_msg
-                    or "'NoneType' object has no attribute" in error_msg
+                        "429 Too Many Requests" in error_msg
+                        or "'NoneType' object has no attribute" in error_msg
                 ) and retry_count < max_retries - 1:
                     log.info(
                         f"Rate limit exceeded, retrying in {retry_delay} seconds... (Attempt {retry_count + 1}/{max_retries})"
@@ -1060,7 +1057,6 @@ class TestInsertWithTextEmbeddingNegative(TestcaseBase):
     ******************************************************************
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("model_name", ["BAAI/bge-m3"])
     def test_insert_with_text_embedding_empty_document(self, model_name):
         """
@@ -1104,7 +1100,6 @@ class TestInsertWithTextEmbeddingNegative(TestcaseBase):
         )
         assert collection_w.num_entities == 0
 
-    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("model_name", ["BAAI/bge-m3"])
     def test_insert_with_text_embedding_long_document(self, model_name):
         """
@@ -1250,7 +1245,7 @@ class TestEmbeddingAccuracy(TestcaseBase):
 
             # Compare embeddings
             assert (
-                api_embedding is not None
+                    api_embedding is not None
             ), f"Failed to get embedding from SiliconFlow API for item {i}"
             assert len(milvus_embedding) == len(
                 api_embedding
@@ -1258,7 +1253,7 @@ class TestEmbeddingAccuracy(TestcaseBase):
 
             # Calculate cosine similarity
             cosine_sim = dot(milvus_embedding, api_embedding) / (
-                norm(milvus_embedding) * norm(api_embedding)
+                    norm(milvus_embedding) * norm(api_embedding)
             )
             similarities.append(cosine_sim)
 
@@ -1269,7 +1264,7 @@ class TestEmbeddingAccuracy(TestcaseBase):
 
             # Embeddings should be nearly identical (allowing for minor floating point differences)
             assert (
-                cosine_sim > 0.999
+                    cosine_sim > 0.999
             ), f"Embeddings are not similar enough for item {i}: {cosine_sim}"
 
         # Log summary statistics
@@ -1567,7 +1562,7 @@ class TestUpsertWithTextEmbedding(TestcaseBase):
         assert not np.allclose(old_embedding, new_embedding)
         # caculate cosine similarity
         sim = np.dot(old_embedding, new_embedding) / (
-            np.linalg.norm(old_embedding) * np.linalg.norm(new_embedding)
+                np.linalg.norm(old_embedding) * np.linalg.norm(new_embedding)
         )
         log.info(f"cosine similarity: {sim}")
         assert sim < 0.99
@@ -1692,15 +1687,15 @@ class TestImportWithTextEmbedding(TestcaseBase):
         else:
             file_type = BulkFileType.PARQUET
         with RemoteBulkWriter(
-            schema=schema,
-            remote_path="bulk_data",
-            connect_param=RemoteBulkWriter.ConnectParam(
-                bucket_name="milvus-bucket",
-                endpoint=f"{minio_host}:9000",
-                access_key="minioadmin",
-                secret_key="minioadmin",
-            ),
-            file_type=file_type,
+                schema=schema,
+                remote_path="bulk_data",
+                connect_param=RemoteBulkWriter.ConnectParam(
+                    bucket_name="milvus-bucket",
+                    endpoint=f"{minio_host}:9000",
+                    access_key="minioadmin",
+                    secret_key="minioadmin",
+                ),
+                file_type=file_type,
         ) as remote_writer:
             for i in range(nb):
                 row = {"id": i, "document": f"This is test document {i}"}
@@ -1803,7 +1798,7 @@ class TestHybridSearch(TestcaseBase):
         data = [{"id": i, "document": fake_en.text()} for i in range(data_size)]
 
         for batch in range(0, data_size, 100):
-            collection_w.insert(data[batch : batch + 100])
+            collection_w.insert(data[batch: batch + 100])
 
         # create index and load
         dense_index_params = {
@@ -1911,7 +1906,7 @@ class TestMultiVectorSearch(TestcaseBase):
         batch_size = 100
         data = [{"id": i, "document": fake_en.text()} for i in range(data_size)]
         for batch in range(0, data_size, batch_size):
-            collection_w.insert(data[batch : batch + batch_size])
+            collection_w.insert(data[batch: batch + batch_size])
 
         # create indexes and load
         for field in ["openai_dense", "bge_dense"]:
@@ -1961,7 +1956,6 @@ class TestSearchWithTextEmbeddingNegative(TestcaseBase):
     ******************************************************************
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("model_name", ["BAAI/bge-m3"])
     @pytest.mark.parametrize("query", ["", "hello world" * 8192])
     def test_search_with_text_embedding_negative_query(self, model_name, query):
@@ -2031,7 +2025,6 @@ class TestInsertPerformanceWithTextEmbeddingFunction(TestcaseBase):
     ******************************************************************
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_performance_with_text_embedding_function(self, tei_endpoint):
         """
         target: test insert performance with text embedding function for all providers and models
@@ -2229,7 +2222,7 @@ class TestInsertPerformanceWithTextEmbeddingFunction(TestcaseBase):
                                     concurrent_start = time.time()
 
                                     with concurrent.futures.ThreadPoolExecutor(
-                                        max_workers=concurrency
+                                            max_workers=concurrency
                                     ) as executor:
                                         future_to_idx = {
                                             executor.submit(
@@ -2238,7 +2231,7 @@ class TestInsertPerformanceWithTextEmbeddingFunction(TestcaseBase):
                                             for i in range(concurrency)
                                         }
                                         for future in concurrent.futures.as_completed(
-                                            future_to_idx
+                                                future_to_idx
                                         ):
                                             idx = future_to_idx[future]
                                             try:
@@ -2256,7 +2249,7 @@ class TestInsertPerformanceWithTextEmbeddingFunction(TestcaseBase):
 
                                     concurrent_end = time.time()
                                     concurrent_total_time = (
-                                        concurrent_end - concurrent_start
+                                            concurrent_end - concurrent_start
                                     )
 
                                     # Calculate concurrent metrics
@@ -2287,15 +2280,15 @@ class TestInsertPerformanceWithTextEmbeddingFunction(TestcaseBase):
 
                                     # Check if this is the best QPS so far
                                     if (
-                                        qps > best_qps and success_rate_pct >= 90
+                                            qps > best_qps and success_rate_pct >= 90
                                     ):  # Only consider if success rate is good
                                         best_qps = qps
                                         best_concurrency = concurrency
 
                                     # Check if we've hit a rate limit (success rate dropped significantly)
                                     if (
-                                        previous_success_rate > 90
-                                        and success_rate_pct < 70
+                                            previous_success_rate > 90
+                                            and success_rate_pct < 70
                                     ):
                                         rate_limit_detected = True
                                         print(
@@ -2428,7 +2421,7 @@ class TestInsertPerformanceWithTextEmbeddingFunction(TestcaseBase):
             single_tests = df[
                 (df["status"] == "success")
                 & (~df["test_type"].isin(["concurrent", "best_performance"]))
-            ]
+                ]
             for _, row in single_tests.iterrows():
                 performance_table.append(
                     {
@@ -2451,7 +2444,7 @@ class TestInsertPerformanceWithTextEmbeddingFunction(TestcaseBase):
 
             concurrent_tests = df[
                 (df["status"] == "success") & (df["test_type"] == "concurrent")
-            ]
+                ]
             for _, row in concurrent_tests.iterrows():
                 performance_table.append(
                     {
