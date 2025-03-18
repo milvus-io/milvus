@@ -45,7 +45,7 @@ ifdef USE_OPENDAL
 	use_opendal = ${USE_OPENDAL}
 endif
 # golangci-lint
-GOLANGCI_LINT_VERSION := 1.55.2
+GOLANGCI_LINT_VERSION := 1.64.7
 GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
 INSTALL_GOLANGCI_LINT := $(findstring $(GOLANGCI_LINT_VERSION), $(GOLANGCI_LINT_OUTPUT))
 # mockery

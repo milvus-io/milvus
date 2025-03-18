@@ -26,6 +26,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -346,7 +347,7 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegmentLackBinlog() {
 	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
 	addedFieldSet := typeutil.NewSet[int64]()
 	for _, f := range s.meta.GetSchema().GetFields() {
-		if f.FieldID == common.RowIDField || f.FieldID == common.TimeStampField || f.IsPrimaryKey || typeutil.IsVectorType(f.DataType) {
+		if !f.Nullable {
 			continue
 		}
 		addedFieldSet.Insert(f.FieldID)
@@ -454,7 +455,6 @@ func (s *MixCompactionTaskSuite) TestSplitMergeEntityExpired() {
 }
 
 func (s *MixCompactionTaskSuite) TestMergeNoExpirationLackBinlog() {
-	s.T().Skip() // Skip added field related tests for now.
 	s.initSegBuffer(1, 4)
 	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10*time.Second), 0)
 	tests := []struct {
@@ -471,18 +471,16 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpirationLackBinlog() {
 	alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
 	addedFieldSet := typeutil.NewSet[int64]()
 	for _, f := range s.meta.GetSchema().GetFields() {
-		if f.FieldID == common.RowIDField || f.FieldID == common.TimeStampField || f.IsPrimaryKey || typeutil.IsVectorType(f.DataType) {
+		if !f.Nullable {
 			continue
 		}
 		addedFieldSet.Insert(f.FieldID)
 	}
+	assert.NotEmpty(s.T(), addedFieldSet)
 
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	for fid, binlog := range fBinlogs {
 		if addedFieldSet.Contain(fid) {
-			if rand.Intn(2) == 0 {
-				continue
-			}
 			for _, k := range binlog.GetBinlogs() {
 				delete(kvs, k.LogPath)
 			}
@@ -996,6 +994,7 @@ func genTestCollectionMeta() *etcdpb.CollectionMeta {
 					FieldID:  StringField,
 					Name:     "field_string",
 					DataType: schemapb.DataType_String,
+					Nullable: true,
 				},
 				{
 					FieldID:  VarCharField,
