@@ -46,7 +46,6 @@ func TestWAL(t *testing.T) {
 			}, nil
 		})
 	broadcastServce.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil)
-	broadcastServce.EXPECT().BlockUntilEvent(mock.Anything, mock.Anything).Return(nil)
 	coordClient.EXPECT().Broadcast().Return(broadcastServce)
 	handler := mock_handler.NewMockHandlerClient(t)
 	handler.EXPECT().Close().Return()
@@ -139,12 +138,6 @@ func TestWAL(t *testing.T) {
 	err = w.Broadcast().Ack(ctx, types.BroadcastAckRequest{BroadcastID: 1, VChannel: vChannel1})
 	assert.NoError(t, err)
 
-	err = w.Broadcast().BlockUntilResourceKeyAckAll(ctx, message.NewCollectionNameResourceKey("r1"))
-	assert.NoError(t, err)
-
-	err = w.Broadcast().BlockUntilResourceKeyAckOnce(ctx, message.NewCollectionNameResourceKey("r2"))
-	assert.NoError(t, err)
-
 	w.Close()
 
 	resp = w.AppendMessages(ctx, newInsertMessage(vChannel1))
@@ -155,12 +148,6 @@ func TestWAL(t *testing.T) {
 	assert.Nil(t, r)
 
 	err = w.Broadcast().Ack(ctx, types.BroadcastAckRequest{BroadcastID: 1, VChannel: vChannel1})
-	assert.Error(t, err)
-
-	err = w.Broadcast().BlockUntilResourceKeyAckAll(ctx, message.NewCollectionNameResourceKey("r1"))
-	assert.Error(t, err)
-
-	err = w.Broadcast().BlockUntilResourceKeyAckOnce(ctx, message.NewCollectionNameResourceKey("r2"))
 	assert.Error(t, err)
 }
 

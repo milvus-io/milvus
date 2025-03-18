@@ -5,9 +5,7 @@ package mock_client
 import (
 	context "context"
 
-	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-
 	mock "github.com/stretchr/testify/mock"
 
 	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -69,53 +67,6 @@ func (_c *MockBroadcastService_Ack_Call) Return(_a0 error) *MockBroadcastService
 }
 
 func (_c *MockBroadcastService_Ack_Call) RunAndReturn(run func(context.Context, types.BroadcastAckRequest) error) *MockBroadcastService_Ack_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// BlockUntilEvent provides a mock function with given fields: ctx, ev
-func (_m *MockBroadcastService) BlockUntilEvent(ctx context.Context, ev *messagespb.BroadcastEvent) error {
-	ret := _m.Called(ctx, ev)
-
-	if len(ret) == 0 {
-		panic("no return value specified for BlockUntilEvent")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.BroadcastEvent) error); ok {
-		r0 = rf(ctx, ev)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockBroadcastService_BlockUntilEvent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BlockUntilEvent'
-type MockBroadcastService_BlockUntilEvent_Call struct {
-	*mock.Call
-}
-
-// BlockUntilEvent is a helper method to define mock.On call
-//   - ctx context.Context
-//   - ev *messagespb.BroadcastEvent
-func (_e *MockBroadcastService_Expecter) BlockUntilEvent(ctx interface{}, ev interface{}) *MockBroadcastService_BlockUntilEvent_Call {
-	return &MockBroadcastService_BlockUntilEvent_Call{Call: _e.mock.On("BlockUntilEvent", ctx, ev)}
-}
-
-func (_c *MockBroadcastService_BlockUntilEvent_Call) Run(run func(ctx context.Context, ev *messagespb.BroadcastEvent)) *MockBroadcastService_BlockUntilEvent_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*messagespb.BroadcastEvent))
-	})
-	return _c
-}
-
-func (_c *MockBroadcastService_BlockUntilEvent_Call) Return(_a0 error) *MockBroadcastService_BlockUntilEvent_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockBroadcastService_BlockUntilEvent_Call) RunAndReturn(run func(context.Context, *messagespb.BroadcastEvent) error) *MockBroadcastService_BlockUntilEvent_Call {
 	_c.Call.Return(run)
 	return _c
 }

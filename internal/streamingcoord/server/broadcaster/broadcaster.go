@@ -15,22 +15,7 @@ type Broadcaster interface {
 	// Ack acknowledges the message at the specified vchannel.
 	Ack(ctx context.Context, req types.BroadcastAckRequest) error
 
-	// Watch watches the broadcast event.
-	NewWatcher() (Watcher, error)
-
 	// Close closes the broadcaster.
-	Close()
-}
-
-// Watcher is the interface for watching the broadcast event.
-type Watcher interface {
-	// ObserveResourceKeyEvent observes the resource key event.
-	ObserveResourceKeyEvent(ctx context.Context, ev *message.BroadcastEvent) error
-
-	// EventChan returns the event channel.
-	EventChan() <-chan *message.BroadcastEvent
-
-	// Close closes the watcher.
 	Close()
 }
 
