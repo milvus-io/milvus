@@ -39,8 +39,8 @@ FieldMeta::enable_match() const {
 }
 
 bool
-FieldMeta::enable_jsonIndex() const {
-    return IsJsonDataType(type_) && JSON_KEY_STATS_ENABLED;
+FieldMeta::enable_growing_jsonStats() const {
+    return IsJsonDataType(type_) && GROWING_JSON_KEY_STATS_ENABLED;
 }
 
 bool

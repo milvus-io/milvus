@@ -12,7 +12,7 @@
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
-#include "index/JsonKeyInvertedIndex.h"
+#include "index/JsonKeyStatsInvertedIndex.h"
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
 #include "storage/MmapManager.h"
@@ -21,14 +21,14 @@ constexpr const char* TMP_JSON_INVERTED_LOG_PREFIX =
     "/tmp/milvus/json-key-inverted-index-log/";
 
 void
-JsonKeyInvertedIndex::AddJSONEncodeValue(
+JsonKeyStatsInvertedIndex::AddJSONEncodeValue(
     const std::vector<std::string>& paths,
     uint8_t flag,
     uint8_t type,
     uint32_t row_id,
     uint16_t offset,
     uint16_t length,
-    uint32_t value,
+    int32_t value,
     std::map<std::string, std::vector<int64_t>>& mp) {
     std::string key = "";
     if (!paths.empty()) {
@@ -45,18 +45,18 @@ JsonKeyInvertedIndex::AddJSONEncodeValue(
         length,
         value);
     int64_t combine_id = 0;
-    if (json_key_data_format_ == 0) {
-        if (flag) {
-            combine_id = EncodeValue(flag, type, row_id, value);
-        } else {
-            combine_id = EncodeOffset(flag, type, row_id, offset, length);
-        }
+
+    if (flag) {
+        combine_id = EncodeValue(flag, type, row_id, value);
+    } else {
+        combine_id = EncodeOffset(flag, type, row_id, offset, length);
     }
+
     mp[key].push_back(combine_id);
 }
 
 void
-JsonKeyInvertedIndex::AddInvertedRecord(
+JsonKeyStatsInvertedIndex::AddInvertedRecord(
     std::map<std::string, std::vector<int64_t>>& mp) {
     for (auto& iter : mp) {
         for (auto value : iter.second) {
@@ -66,7 +66,7 @@ JsonKeyInvertedIndex::AddInvertedRecord(
 }
 
 void
-JsonKeyInvertedIndex::TravelJson(
+JsonKeyStatsInvertedIndex::TravelJson(
     const char* json,
     jsmntok* tokens,
     int& index,
@@ -123,7 +123,7 @@ JsonKeyInvertedIndex::TravelJson(
                                mp);
         } else if (type == JSONType::FLOAT) {
             auto fvalue = stof(value);
-            uint32_t valueBits = *reinterpret_cast<uint32_t*>(&fvalue);
+            int32_t valueBits = *reinterpret_cast<int32_t*>(&fvalue);
             AddJSONEncodeValue(path,
                                1,
                                static_cast<uint8_t>(JSONType::FLOAT),
@@ -200,9 +200,10 @@ JsonKeyInvertedIndex::TravelJson(
 }
 
 void
-JsonKeyInvertedIndex::AddJson(const char* json,
-                              int64_t offset,
-                              std::map<std::string, std::vector<int64_t>>& mp) {
+JsonKeyStatsInvertedIndex::AddJson(
+    const char* json,
+    int64_t offset,
+    std::map<std::string, std::vector<int64_t>>& mp) {
     jsmn_parser parser;
     jsmntok_t* tokens = (jsmntok_t*)malloc(16 * sizeof(jsmntok_t));
     if (!tokens) {
@@ -244,23 +245,18 @@ JsonKeyInvertedIndex::AddJson(const char* json,
     free(tokens);
 }
 
-JsonKeyInvertedIndex::JsonKeyInvertedIndex(
+JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
     const storage::FileManagerContext& ctx,
     bool is_load,
-    int64_t json_key_data_format,
     int64_t json_stats_tantivy_memory_budget)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
-    LOG_INFO(
-        "JsonKeyInvertedIndex json_stats_tantivy_memory_budget:{}, "
-        "json_key_data_format:{}",
-        json_stats_tantivy_memory_budget,
-        json_key_data_format);
+    LOG_INFO("json_stats_tantivy_memory_budget:{}",
+             json_stats_tantivy_memory_budget);
     schema_ = ctx.fieldDataMeta.field_schema;
     field_id_ = ctx.fieldDataMeta.field_id;
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
-    json_key_data_format_ = json_key_data_format;
     if (is_load) {
         auto prefix = disk_file_manager_->GetLocalJsonKeyIndexPrefix();
         path_ = prefix;
@@ -282,8 +278,8 @@ JsonKeyInvertedIndex::JsonKeyInvertedIndex(
     }
 }
 
-JsonKeyInvertedIndex::JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
-                                           const char* unique_id)
+JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
+    int64_t commit_interval_in_ms, const char* unique_id)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Keyword;
@@ -291,9 +287,10 @@ JsonKeyInvertedIndex::JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
         unique_id, d_type_, "", false, true);
 }
 
-JsonKeyInvertedIndex::JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
-                                           const char* unique_id,
-                                           const std::string& path)
+JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
+    int64_t commit_interval_in_ms,
+    const char* unique_id,
+    const std::string& path)
     : commit_interval_in_ms_(commit_interval_in_ms),
       last_commit_time_(stdclock::now()) {
     boost::filesystem::path prefix = path;
@@ -306,7 +303,7 @@ JsonKeyInvertedIndex::JsonKeyInvertedIndex(int64_t commit_interval_in_ms,
 }
 
 IndexStatsPtr
-JsonKeyInvertedIndex::Upload(const Config& config) {
+JsonKeyStatsInvertedIndex::Upload(const Config& config) {
     finish();
     boost::filesystem::path p(path_);
     boost::filesystem::directory_iterator end_iter;
@@ -350,8 +347,8 @@ JsonKeyInvertedIndex::Upload(const Config& config) {
 }
 
 void
-JsonKeyInvertedIndex::Load(milvus::tracer::TraceContext ctx,
-                           const Config& config) {
+JsonKeyStatsInvertedIndex::Load(milvus::tracer::TraceContext ctx,
+                                const Config& config) {
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
@@ -374,7 +371,7 @@ JsonKeyInvertedIndex::Load(milvus::tracer::TraceContext ctx,
 }
 
 void
-JsonKeyInvertedIndex::BuildWithFieldData(
+JsonKeyStatsInvertedIndex::BuildWithFieldData(
     const std::vector<FieldDataPtr>& field_datas) {
     AssertInfo(schema_.data_type() == proto::schema::DataType::JSON,
                "schema data type is {}",
@@ -383,7 +380,7 @@ JsonKeyInvertedIndex::BuildWithFieldData(
 }
 
 void
-JsonKeyInvertedIndex::BuildWithFieldData(
+JsonKeyStatsInvertedIndex::BuildWithFieldData(
     const std::vector<FieldDataPtr>& field_datas, bool nullable) {
     int64_t offset = 0;
     std::map<std::string, std::vector<int64_t>> mp;
@@ -418,10 +415,10 @@ JsonKeyInvertedIndex::BuildWithFieldData(
 }
 
 void
-JsonKeyInvertedIndex::AddJSONDatas(size_t n,
-                                   const std::string* jsonDatas,
-                                   const bool* valids,
-                                   int64_t offset_begin) {
+JsonKeyStatsInvertedIndex::AddJSONDatas(size_t n,
+                                        const std::string* jsonDatas,
+                                        const bool* valids,
+                                        int64_t offset_begin) {
     std::map<std::string, std::vector<int64_t>> mp;
     for (int i = 0; i < n; i++) {
         auto offset = i + offset_begin;
@@ -439,12 +436,12 @@ JsonKeyInvertedIndex::AddJSONDatas(size_t n,
 }
 
 void
-JsonKeyInvertedIndex::Finish() {
+JsonKeyStatsInvertedIndex::Finish() {
     finish();
 }
 
 bool
-JsonKeyInvertedIndex::shouldTriggerCommit() {
+JsonKeyStatsInvertedIndex::shouldTriggerCommit() {
     auto span = (std::chrono::duration<double, std::milli>(
                      stdclock::now() - last_commit_time_.load()))
                     .count();
@@ -452,7 +449,7 @@ JsonKeyInvertedIndex::shouldTriggerCommit() {
 }
 
 void
-JsonKeyInvertedIndex::Commit() {
+JsonKeyStatsInvertedIndex::Commit() {
     std::unique_lock<std::mutex> lck(mtx_, std::defer_lock);
     if (lck.try_lock()) {
         is_data_uncommitted_ = false;
@@ -462,7 +459,7 @@ JsonKeyInvertedIndex::Commit() {
 }
 
 void
-JsonKeyInvertedIndex::Reload() {
+JsonKeyStatsInvertedIndex::Reload() {
     std::unique_lock<std::mutex> lck(mtx_, std::defer_lock);
     if (lck.try_lock()) {
         wrapper_->reload();
@@ -470,7 +467,7 @@ JsonKeyInvertedIndex::Reload() {
 }
 
 void
-JsonKeyInvertedIndex::CreateReader() {
+JsonKeyStatsInvertedIndex::CreateReader() {
     wrapper_->create_reader();
 }
 

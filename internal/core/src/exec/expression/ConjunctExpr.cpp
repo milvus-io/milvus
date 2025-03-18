@@ -119,6 +119,7 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         SetNextExprBitmapInput(all_flat_result, context);
     }
+    ClearBitmapInput(context);
 }
 
 }  //namespace exec

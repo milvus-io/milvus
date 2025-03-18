@@ -2138,13 +2138,13 @@ SegmentSealedImpl::LoadTextIndex(FieldId field_id,
 
 void
 SegmentSealedImpl::LoadJsonKeyIndex(
-    FieldId field_id, std::unique_ptr<index::JsonKeyInvertedIndex> index) {
+    FieldId field_id, std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) {
     std::unique_lock lck(mutex_);
     const auto& field_meta = schema_->operator[](field_id);
     json_key_indexes_[field_id] = std::move(index);
 }
 
-index::JsonKeyInvertedIndex*
+index::JsonKeyStatsInvertedIndex*
 SegmentSealedImpl::GetJsonKeyIndex(FieldId field_id) const {
     std::shared_lock lck(mutex_);
     auto iter = json_key_indexes_.find(field_id);

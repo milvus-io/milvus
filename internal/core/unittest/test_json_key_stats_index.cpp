@@ -23,7 +23,7 @@
 #include "index/IndexFactory.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "index/Meta.h"
-#include "index/JsonKeyInvertedIndex.h"
+#include "index/JsonKeyStatsInvertedIndex.h"
 #include "common/Json.h"
 #include "common/Types.h"
 using namespace milvus::index;
@@ -46,7 +46,7 @@ GenerateJsons(int size) {
     return jsons;
 }
 
-class JsonKeyIndexTest : public ::testing::TestWithParam<bool> {
+class JsonKeyStatsIndexTest : public ::testing::TestWithParam<bool> {
  protected:
     void
     Init(int64_t collection_id,
@@ -113,7 +113,8 @@ class JsonKeyIndexTest : public ::testing::TestWithParam<bool> {
         Config config;
         config["insert_files"] = std::vector<std::string>{log_path};
 
-        auto build_index = std::make_shared<JsonKeyInvertedIndex>(ctx, false);
+        auto build_index =
+            std::make_shared<JsonKeyStatsInvertedIndex>(ctx, false);
         build_index->Build(config);
 
         auto create_index_result = build_index->Upload(config);
@@ -126,7 +127,7 @@ class JsonKeyIndexTest : public ::testing::TestWithParam<bool> {
         index::CreateIndexInfo index_info{};
         config["index_files"] = index_files;
 
-        index_ = std::make_shared<JsonKeyInvertedIndex>(ctx, true);
+        index_ = std::make_shared<JsonKeyStatsInvertedIndex>(ctx, true);
         index_->Load(milvus::tracer::TraceContext{}, config);
     }
 
@@ -157,12 +158,12 @@ class JsonKeyIndexTest : public ::testing::TestWithParam<bool> {
              size_);
     }
 
-    virtual ~JsonKeyIndexTest() override {
+    virtual ~JsonKeyStatsIndexTest() override {
         boost::filesystem::remove_all(chunk_manager_->GetRootPath());
     }
 
  public:
-    std::shared_ptr<JsonKeyInvertedIndex> index_;
+    std::shared_ptr<JsonKeyStatsInvertedIndex> index_;
     DataType type_;
     bool nullable_;
     size_t size_;
@@ -172,11 +173,27 @@ class JsonKeyIndexTest : public ::testing::TestWithParam<bool> {
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
 };
 
-INSTANTIATE_TEST_SUITE_P(JsonKeyIndexTestSuite,
-                         JsonKeyIndexTest,
+INSTANTIATE_TEST_SUITE_P(JsonKeyStatsIndexTestSuite,
+                         JsonKeyStatsIndexTest,
                          ::testing::Values(true, false));
 
-TEST_P(JsonKeyIndexTest, TestTermInFunc) {
+TEST_P(JsonKeyStatsIndexTest, HasEscapeSequence) {
+    EXPECT_TRUE(index_->has_escape_sequence("Hello\\nWorld"));
+    EXPECT_TRUE(index_->has_escape_sequence("Tab\\tCharacter"));
+    EXPECT_TRUE(index_->has_escape_sequence("Carriage\\rReturn"));
+    EXPECT_TRUE(index_->has_escape_sequence("Backspace\\bTest"));
+    EXPECT_TRUE(index_->has_escape_sequence("FormFeed\\fTest"));
+    EXPECT_TRUE(index_->has_escape_sequence("Vertical\\vTab"));
+    EXPECT_TRUE(index_->has_escape_sequence("Backslash\\\\Test"));
+    EXPECT_TRUE(index_->has_escape_sequence("Quote\\\"Test"));
+    EXPECT_TRUE(index_->has_escape_sequence("SingleQuote\\'Test"));
+
+    EXPECT_FALSE(index_->has_escape_sequence("No escape sequence here"));
+    EXPECT_FALSE(index_->has_escape_sequence("Just a backslash \\"));
+    EXPECT_FALSE(index_->has_escape_sequence(""));
+}
+
+TEST_P(JsonKeyStatsIndexTest, TestTermInFunc) {
     struct Testcase {
         std::vector<int64_t> term;
         std::vector<std::string> nested_path;
@@ -200,7 +217,7 @@ TEST_P(JsonKeyIndexTest, TestTermInFunc) {
                                              uint32_t row_id,
                                              uint16_t offset,
                                              uint16_t size,
-                                             uint32_t value) {
+                                             int32_t value) {
             return term_set.find(int64_t(value)) != term_set.end();
         };
         auto pointer = milvus::Json::pointer(testcase.nested_path);
@@ -220,7 +237,7 @@ TEST_P(JsonKeyIndexTest, TestTermInFunc) {
     }
 }
 
-TEST_P(JsonKeyIndexTest, TestUnaryRangeInFunc) {
+TEST_P(JsonKeyStatsIndexTest, TestUnaryRangeInFunc) {
     struct Testcase {
         int64_t val;
         std::vector<std::string> nested_path;
@@ -278,7 +295,7 @@ TEST_P(JsonKeyIndexTest, TestUnaryRangeInFunc) {
                                                       uint32_t row_id,
                                                       uint16_t offset,
                                                       uint16_t size,
-                                                      uint32_t value) {
+                                                      int32_t value) {
                 switch (op) {
                     case OpType::GreaterThan:
                         return int64_t(value) > testcase.val;
@@ -322,7 +339,7 @@ TEST_P(JsonKeyIndexTest, TestUnaryRangeInFunc) {
     }
 }
 
-TEST_P(JsonKeyIndexTest, TestBinaryRangeInFunc) {
+TEST_P(JsonKeyStatsIndexTest, TestBinaryRangeInFunc) {
     struct Testcase {
         bool lower_inclusive;
         bool upper_inclusive;
@@ -358,7 +375,7 @@ TEST_P(JsonKeyIndexTest, TestBinaryRangeInFunc) {
                                              uint32_t row_id,
                                              uint16_t offset,
                                              uint16_t size,
-                                             uint32_t value) {
+                                             int32_t value) {
             if (valid) {
                 if (testcase.lower_inclusive && testcase.upper_inclusive) {
                     return testcase.lower <= int64_t(value) &&
@@ -421,7 +438,7 @@ TEST_P(JsonKeyIndexTest, TestBinaryRangeInFunc) {
     }
 }
 
-TEST_P(JsonKeyIndexTest, TestExistInFunc) {
+TEST_P(JsonKeyStatsIndexTest, TestExistInFunc) {
     struct Testcase {
         std::vector<std::string> nested_path;
     };
@@ -438,7 +455,7 @@ TEST_P(JsonKeyIndexTest, TestExistInFunc) {
                                             uint32_t row_id,
                                             uint16_t offset,
                                             uint16_t size,
-                                            uint32_t value) {
+                                            int32_t value) {
             return this->data_[row_id].exist(pointer);
         };
 
@@ -456,7 +473,7 @@ TEST_P(JsonKeyIndexTest, TestExistInFunc) {
         }
     }
 }
-TEST_P(JsonKeyIndexTest, TestJsonContainsAllFunc) {
+TEST_P(JsonKeyStatsIndexTest, TestJsonContainsAllFunc) {
     struct Testcase {
         std::vector<int64_t> term;
         std::vector<std::string> nested_path;
@@ -487,7 +504,7 @@ TEST_P(JsonKeyIndexTest, TestJsonContainsAllFunc) {
                                                  uint32_t row_id,
                                                  uint16_t offset,
                                                  uint16_t size,
-                                                 uint32_t value) {
+                                                 int32_t value) {
                 auto array = this->data_[row_id].array_at(offset, size);
                 std::unordered_set<int64_t> tmp_elements(elements);
                 for (auto&& it : array) {
@@ -523,8 +540,8 @@ TEST_P(JsonKeyIndexTest, TestJsonContainsAllFunc) {
     }
 }
 
-TEST(GrowingJsonKeyIndexTest, GrowingIndex) {
-    using Index = index::JsonKeyInvertedIndex;
+TEST(GrowingJsonKeyStatsIndexTest, GrowingIndex) {
+    using Index = index::JsonKeyStatsInvertedIndex;
     auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
                                          "json",
                                          "/tmp/test-jsonkey-index/");
@@ -552,7 +569,7 @@ TEST(GrowingJsonKeyIndexTest, GrowingIndex) {
                                          uint32_t row_id,
                                          uint16_t offset,
                                          uint16_t size,
-                                         uint32_t value) {
+                                         int32_t value) {
         if (value == checkVal) {
             return true;
         }

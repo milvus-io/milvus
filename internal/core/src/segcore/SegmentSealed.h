@@ -58,10 +58,11 @@ class SegmentSealed : public SegmentInternalInterface {
     get_insert_record() = 0;
 
     virtual void
-    LoadJsonKeyIndex(FieldId field_id,
-                     std::unique_ptr<index::JsonKeyInvertedIndex> index) = 0;
+    LoadJsonKeyIndex(
+        FieldId field_id,
+        std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) = 0;
 
-    virtual index::JsonKeyInvertedIndex*
+    virtual index::JsonKeyStatsInvertedIndex*
     GetJsonKeyIndex(FieldId field_id) const = 0;
 
     virtual std::pair<std::string_view, bool>
