@@ -303,51 +303,66 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	missingSegments := ds.GetMetaCache().DetectMissingSegments(allSegments)
 
 	newSegments := make([]*datapb.SyncSegmentInfo, 0, len(missingSegments))
-	futures := make([]*conc.Future[any], 0, len(missingSegments))
-
-	for _, segID := range missingSegments {
-		newSeg := req.GetSegmentInfos()[segID]
-		switch newSeg.GetLevel() {
-		case datapb.SegmentLevel_L0:
-			log.Warn("segment level is L0, may be the channel has not been successfully watched yet", zap.Int64("segmentID", segID))
-		case datapb.SegmentLevel_Legacy:
-			log.Warn("segment level is legacy, please check", zap.Int64("segmentID", segID))
-		default:
-			if newSeg.GetState() == commonpb.SegmentState_Flushed {
-				log.Info("segment loading PKs", zap.Int64("segmentID", segID))
+	newSegmentsBF := make([]*pkoracle.BloomFilterSet, 0, len(missingSegments))
+	if Params.DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
+		newSegmentsBF = make([]*pkoracle.BloomFilterSet, len(missingSegments))
+		for _, segID := range missingSegments {
+			newSeg := req.GetSegmentInfos()[segID]
+			switch newSeg.GetLevel() {
+			case datapb.SegmentLevel_L0:
+				log.Warn("segment level is L0, may be the channel has not been successfully watched yet", zap.Int64("segmentID", segID))
+			case datapb.SegmentLevel_Legacy:
+				log.Warn("segment level is legacy, please check", zap.Int64("segmentID", segID))
+			default:
+				if newSeg.GetState() == commonpb.SegmentState_Flushed {
+					newSegments = append(newSegments, newSeg)
+				}
 				newSegments = append(newSegments, newSeg)
-				future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
-					var val *pkoracle.BloomFilterSet
-					var err error
-					if Params.DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
-						return val, nil
-					}
-					err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
-					if err != nil {
-						log.Warn("failed to DecompressBinLog", zap.Error(err))
-						return val, err
-					}
-					pks, err := compaction.LoadStats(ctx, node.chunkManager, ds.GetMetaCache().Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
-					if err != nil {
-						log.Warn("failed to load segment stats log", zap.Error(err))
-						return val, err
-					}
-					val = pkoracle.NewBloomFilterSet(pks...)
-					return val, nil
-				})
-				futures = append(futures, future)
 			}
 		}
-	}
+	} else {
+		futures := make([]*conc.Future[any], 0, len(missingSegments))
+		for _, segID := range missingSegments {
+			newSeg := req.GetSegmentInfos()[segID]
+			switch newSeg.GetLevel() {
+			case datapb.SegmentLevel_L0:
+				log.Warn("segment level is L0, may be the channel has not been successfully watched yet", zap.Int64("segmentID", segID))
+			case datapb.SegmentLevel_Legacy:
+				log.Warn("segment level is legacy, please check", zap.Int64("segmentID", segID))
+			default:
+				if newSeg.GetState() == commonpb.SegmentState_Flushed {
+					log.Info("segment loading PKs", zap.Int64("segmentID", segID))
+					newSegments = append(newSegments, newSeg)
+					future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
+						var val *pkoracle.BloomFilterSet
+						var err error
+						err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+						if err != nil {
+							log.Warn("failed to DecompressBinLog", zap.Error(err))
+							return val, err
+						}
+						pks, err := compaction.LoadStats(ctx, node.chunkManager, ds.GetMetaCache().Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+						if err != nil {
+							log.Warn("failed to load segment stats log", zap.Error(err))
+							return val, err
+						}
+						val = pkoracle.NewBloomFilterSet(pks...)
+						return val, nil
+					})
+					futures = append(futures, future)
+				}
+			}
+		}
 
-	err := conc.AwaitAll(futures...)
-	if err != nil {
-		return merr.Status(err), nil
-	}
+		err := conc.AwaitAll(futures...)
+		if err != nil {
+			return merr.Status(err), nil
+		}
 
-	newSegmentsBF := lo.Map(futures, func(future *conc.Future[any], _ int) *pkoracle.BloomFilterSet {
-		return future.Value().(*pkoracle.BloomFilterSet)
-	})
+		newSegmentsBF = lo.Map(futures, func(future *conc.Future[any], _ int) *pkoracle.BloomFilterSet {
+			return future.Value().(*pkoracle.BloomFilterSet)
+		})
+	}
 
 	ds.GetMetaCache().UpdateSegmentView(req.GetPartitionId(), newSegments, newSegmentsBF, allSegments)
 	return merr.Success(), nil
