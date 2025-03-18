@@ -46,9 +46,9 @@ InsertData::Serialize(StorageType medium) {
 std::vector<uint8_t>
 InsertData::serialize_to_remote_file() {
     AssertInfo(field_data_meta_.has_value(), "field data not exist");
-    AssertInfo(field_data_ != nullptr, "empty field data");
-
-    DataType data_type = field_data_->get_data_type();
+    AssertInfo(payload_reader_->has_field_data(), "empty field data");
+    auto field_data = payload_reader_->get_field_data();
+    DataType data_type = field_data->get_data_type();
 
     // create descriptor event
     DescriptorEvent descriptor_event;
@@ -67,9 +67,8 @@ InsertData::serialize_to_remote_file() {
         des_event_data.post_header_lengths.push_back(
             GetEventFixPartSize(EventType(i)));
     }
-    des_event_data.extras[ORIGIN_SIZE_KEY] =
-        std::to_string(field_data_->Size());
-    des_event_data.extras[NULLABLE] = field_data_->IsNullable();
+    des_event_data.extras[ORIGIN_SIZE_KEY] = std::to_string(field_data->Size());
+    des_event_data.extras[NULLABLE] = field_data->IsNullable();
 
     auto& des_event_header = descriptor_event.event_header;
     // TODO :: set timestamp
@@ -84,7 +83,7 @@ InsertData::serialize_to_remote_file() {
     auto& insert_event_data = insert_event.event_data;
     insert_event_data.start_timestamp = time_range_.first;
     insert_event_data.end_timestamp = time_range_.second;
-    insert_event_data.field_data = field_data_;
+    insert_event_data.payload_reader = payload_reader_;
 
     auto& insert_event_header = insert_event.event_header;
     // TODO :: set timestamps
@@ -108,7 +107,7 @@ InsertData::serialize_to_remote_file() {
 std::vector<uint8_t>
 InsertData::serialize_to_local_file() {
     LocalInsertEvent event;
-    event.field_data = field_data_;
+    event.field_data = GetFieldData();
 
     return event.Serialize();
 }
