@@ -139,6 +139,7 @@ func authenticate(c *gin.Context) {
 		user, err := proxy.VerifyAPIKey(rawToken)
 		if err == nil {
 			c.Set(httpserver.ContextUsername, user)
+			c.Set(httpserver.ContextToken, rawToken)
 			return
 		}
 		log.Ctx(context.TODO()).Warn("fail to verify apikey", zap.Error(err))
