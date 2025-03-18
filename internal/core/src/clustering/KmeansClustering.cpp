@@ -106,7 +106,7 @@ KmeansClustering::SampleTrainData(
         }
         // shuffle files
         std::mt19937 rng(static_cast<unsigned int>(std::time(nullptr)));
-        std::shuffle(files.begin(), files.end(),  rng);
+        std::shuffle(files.begin(), files.end(), rng);
         FetchDataFiles<T>(
             buf, expected_train_size, expected_train_size, files, dim, offset);
         return;
