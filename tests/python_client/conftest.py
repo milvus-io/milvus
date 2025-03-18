@@ -47,6 +47,7 @@ def pytest_addoption(parser):
     parser.addoption('--field_name', action='store', default="field_name", help="field_name of index")
     parser.addoption('--replica_num', action='store', default=ct.default_replica_num, help="memory replica number")
     parser.addoption('--minio_host', action='store', default="localhost", help="minio service's ip")
+    parser.addoption('--minio_bucket', action='store', default="milvus-bucket", help="minio bucket name")
     parser.addoption('--uri', action='store', default="", help="uri for milvus client")
     parser.addoption('--token', action='store', default="root:Milvus", help="token for milvus client")
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
@@ -187,6 +188,10 @@ def field_name(request):
 @pytest.fixture
 def minio_host(request):
     return request.config.getoption("--minio_host")
+
+@pytest.fixture
+def minio_bucket(request):
+    return request.config.getoption("--minio_bucket")
 
 
 @pytest.fixture
