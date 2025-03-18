@@ -195,8 +195,7 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
         return static_cast<int64_t>(flag) << 63 |
                static_cast<int64_t>(type) << 60 |
                static_cast<int64_t>(row_id) << 32 |
-               static_cast<int64_t>(static_cast<uint32_t>(value));
-        ;
+               static_cast<uint32_t>(value);
     }
 
     bool
