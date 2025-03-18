@@ -155,6 +155,11 @@ class PhyConjunctFilterExpr : public Expr {
         }
     }
 
+    void
+    ClearBitmapInput(EvalCtx& context) {
+        context.clear_bitmap_input();
+    }
+
  private:
     int64_t
     UpdateResult(ColumnVectorPtr& input_result,
