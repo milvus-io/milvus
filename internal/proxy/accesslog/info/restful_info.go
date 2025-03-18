@@ -32,6 +32,7 @@ const (
 	ContextReturnCode    = "code"
 	ContextReturnMessage = "message"
 	ContextRequest       = "request"
+	ContextToken         = "token"
 )
 
 type RestfulInfo struct {
