@@ -47,10 +47,11 @@ func (pid *pulsarID) Serialize() []byte {
 }
 
 func (pid *pulsarID) AtEarliestPosition() bool {
-	if pid.messageID.PartitionIdx() <= 0 &&
-		pid.messageID.LedgerID() <= 0 &&
-		pid.messageID.EntryID() <= 0 &&
-		pid.messageID.BatchIdx() <= 0 {
+	eid := pulsar.EarliestMessageID()
+	if pid.messageID.PartitionIdx() == eid.PartitionIdx() &&
+		pid.messageID.LedgerID() == eid.LedgerID() &&
+		pid.messageID.EntryID() == eid.EntryID() &&
+		pid.messageID.BatchIdx() == eid.BatchIdx() {
 		return true
 	}
 	return false
