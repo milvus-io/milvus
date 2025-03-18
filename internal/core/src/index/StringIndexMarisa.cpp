@@ -253,16 +253,8 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load index");
     auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
-    AssembleIndexDatas(index_datas);
     BinarySet binary_set;
-    for (auto& [key, data] : index_datas) {
-        auto size = data->DataSize();
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-        auto buf = std::shared_ptr<uint8_t[]>(
-            (uint8_t*)const_cast<void*>(data->Data()), deleter);
-        binary_set.Append(key, buf, size);
-    }
-
+    AssembleIndexDatas(index_datas, binary_set);
     LoadWithoutAssemble(binary_set, config);
 }
 

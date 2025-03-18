@@ -27,8 +27,12 @@ namespace milvus::storage {
 // TODO :: indexParams storage in a single file
 class IndexData : public DataCodec {
  public:
-    explicit IndexData(FieldDataPtr data)
-        : DataCodec(data, CodecType::IndexDataType) {
+    explicit IndexData(std::shared_ptr<PayloadReader>& payload_reader)
+        : DataCodec(payload_reader, CodecType::IndexDataType) {
+    }
+
+    explicit IndexData(const uint8_t* payload_data, int64_t length)
+        : DataCodec(payload_data, length, CodecType::IndexDataType) {
     }
 
     std::vector<uint8_t>
