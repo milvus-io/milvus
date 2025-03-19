@@ -96,6 +96,7 @@ func (c *dispatcherManager) Remove(vchannel string) {
 			zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
 		return
 	}
+	c.removeTargetFromDispatcher(t)
 	t.close()
 }
 
@@ -143,8 +144,40 @@ func (c *dispatcherManager) Run() {
 	}
 }
 
-func (c *dispatcherManager) tryRemoveUnregisteredTargets() {
+func (c *dispatcherManager) removeTargetFromDispatcher(t *target) {
 	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, dispatcher := range c.deputyDispatchers {
+		if dispatcher.HasTarget(t.vchannel) {
+			dispatcher.Handle(pause)
+			dispatcher.RemoveTarget(t.vchannel)
+			if dispatcher.TargetNum() == 0 {
+				dispatcher.Handle(terminate)
+				delete(c.deputyDispatchers, dispatcher.ID())
+				log.Info("remove deputy dispatcher done", zap.Int64("id", dispatcher.ID()))
+			} else {
+				dispatcher.Handle(resume)
+			}
+			t.close()
+		}
+	}
+	if c.mainDispatcher != nil {
+		if c.mainDispatcher.HasTarget(t.vchannel) {
+			c.mainDispatcher.Handle(pause)
+			c.mainDispatcher.RemoveTarget(t.vchannel)
+			if c.mainDispatcher.TargetNum() == 0 && len(c.deputyDispatchers) == 0 {
+				c.mainDispatcher.Handle(terminate)
+				c.mainDispatcher = nil
+			} else {
+				c.mainDispatcher.Handle(resume)
+			}
+			t.close()
+		}
+	}
+}
+
+func (c *dispatcherManager) tryRemoveUnregisteredTargets() {
 	unregisteredTargets := make([]*target, 0)
 	c.mu.RLock()
 	for _, dispatcher := range c.deputyDispatchers {
@@ -163,38 +196,8 @@ func (c *dispatcherManager) tryRemoveUnregisteredTargets() {
 	}
 	c.mu.RUnlock()
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, dispatcher := range c.deputyDispatchers {
-		for _, t := range unregisteredTargets {
-			if dispatcher.HasTarget(t.vchannel) {
-				dispatcher.Handle(pause)
-				dispatcher.RemoveTarget(t.vchannel)
-				if dispatcher.TargetNum() == 0 {
-					dispatcher.Handle(terminate)
-					delete(c.deputyDispatchers, dispatcher.ID())
-					log.Info("remove deputy dispatcher done", zap.Int64("id", dispatcher.ID()))
-				} else {
-					dispatcher.Handle(resume)
-				}
-				t.close()
-			}
-		}
-	}
-	if c.mainDispatcher != nil {
-		for _, t := range unregisteredTargets {
-			if c.mainDispatcher.HasTarget(t.vchannel) {
-				c.mainDispatcher.Handle(pause)
-				c.mainDispatcher.RemoveTarget(t.vchannel)
-				if c.mainDispatcher.TargetNum() == 0 && len(c.deputyDispatchers) == 0 {
-					c.mainDispatcher.Handle(terminate)
-					c.mainDispatcher = nil
-				} else {
-					c.mainDispatcher.Handle(resume)
-				}
-				t.close()
-			}
-		}
+	for _, t := range unregisteredTargets {
+		c.removeTargetFromDispatcher(t)
 	}
 }
 
