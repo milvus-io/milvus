@@ -105,7 +105,7 @@ class Expr {
         PanicInfo(ErrorCode::NotImplemented, "not implemented");
     }
 
-    const std::vector<std::shared_ptr<Expr>>&
+    std::vector<std::shared_ptr<Expr>>&
     GetInputsRef() {
         return inputs_;
     }

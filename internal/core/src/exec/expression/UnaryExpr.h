@@ -380,6 +380,21 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         return expr_;
     }
 
+    proto::plan::OpType
+    GetOpType() {
+        return expr_->op_type_;
+    }
+
+    FieldId
+    GetFieldId() {
+        return expr_->column_.field_id_;
+    }
+
+    DataType
+    GetFieldType() {
+        return expr_->column_.data_type_;
+    }
+
  private:
     template <typename T>
     VectorPtr
