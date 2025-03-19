@@ -21,8 +21,9 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 func TestJsonPathIndex(t *testing.T) {
