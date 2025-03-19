@@ -25,6 +25,8 @@
 #include "exec/Task.h"
 #include "segcore/SegmentInterface.h"
 #include "common/Tracer.h"
+#include "storage/ThreadPools.h"
+
 namespace milvus::query {
 
 namespace impl {
@@ -75,6 +77,23 @@ empty_search_result(int64_t num_queries) {
     return final_result;
 }
 
+std::atomic<int> ExecPlanNodeVisitor::executing_task_count_(0);
+
+void
+ExecPlanNodeVisitor::MayThrottleLoad() {
+    if(executing_task_count_ >= CPU_NUM) {
+        LOG_INFO("too many executing task count:{}, exceeding cpu number, "
+                 "we throttle load pool to size:{} for query/search performance",
+                 executing_task_count_, CPU_NUM);
+        ThreadPools::GetThreadPool(HIGH).AdjustThreadPool(CPU_NUM);
+    } else if (executing_task_count_ < CPU_NUM / 2) {
+        ThreadPools::GetThreadPool(HIGH).ResetThreadPoolSize();
+        LOG_INFO("cpu is very idle, executing_task_count_ is just:{}, "
+                 "we reset load pool to size:{} for load/balance performance",
+                 executing_task_count_, CPU_NUM);
+    }
+}
+
 BitsetType
 ExecPlanNodeVisitor::ExecuteTask(
     plan::PlanFragment& plan,
@@ -87,6 +106,7 @@ ExecPlanNodeVisitor::ExecuteTask(
         milvus::exec::Task::Create(DEFAULT_TASK_ID, plan, 0, query_context);
     int64_t processed_num = 0;
     BitsetType bitset_holder;
+    executing_task_count_++;
     for (;;) {
         auto result = task->Next();
         if (!result) {
@@ -105,6 +125,8 @@ ExecPlanNodeVisitor::ExecuteTask(
             PanicInfo(UnexpectedError, "expr return type not matched");
         }
     }
+    executing_task_count_--;
+    ExecPlanNodeVisitor::MayThrottleLoad();
     return bitset_holder;
 }
 

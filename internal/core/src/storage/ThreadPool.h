@@ -49,6 +49,7 @@ class ThreadPool {
         if (max_threads_size_ > 16) {
             max_threads_size_ = 16;
         }
+        init_max_threads_size_ = max_threads_size_;
         LOG_INFO("Init thread pool:{}", name_)
             << " with min worker num:" << min_threads_size_
             << " and max worker num:" << max_threads_size_;
@@ -112,6 +113,23 @@ class ThreadPool {
     }
 
     void
+    AdjustThreadPool(int max_thread_size) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (max_thread_size < min_threads_size_) {
+            LOG_WARN("Invalid max thread size {} < min thread size {}", max_thread_size, min_threads_size_);
+            return;
+        }
+        LOG_INFO("Adjusted thread pool:{} to max_threads_size_: {}", name_, max_thread_size);
+        max_threads_size_ = max_thread_size;
+    }
+
+    void
+    ResetThreadPoolSize(){
+        std::lock_guard<std::mutex> lock(mutex_);
+        max_threads_size_ = init_max_threads_size_;
+    }
+
+    void
     Worker();
 
     void
@@ -122,6 +140,7 @@ class ThreadPool {
     int idle_threads_size_;
     int current_threads_size_;
     int max_threads_size_;
+    int init_max_threads_size_;
     bool shutdown_;
     static constexpr size_t WAIT_SECONDS = 2;
     SafeQueue<std::function<void()>> work_queue_;
@@ -130,33 +149,6 @@ class ThreadPool {
     std::mutex mutex_;
     std::condition_variable condition_lock_;
     std::string name_;
-};
-
-class Worker {
- private:
-    int id_;
-    ThreadPool* pool_;
-
- public:
-    Worker(ThreadPool* pool, const int id) : pool_(pool), id_(id) {
-    }
-
-    void
-    operator()() {
-        std::function<void()> func;
-        bool dequeue;
-        while (!pool_->shutdown_) {
-            std::unique_lock<std::mutex> lock(pool_->mutex_);
-            if (pool_->work_queue_.empty()) {
-                pool_->condition_lock_.wait(lock);
-            }
-            dequeue = pool_->work_queue_.dequeue(func);
-            lock.unlock();
-            if (dequeue) {
-                func();
-            }
-        }
-    }
 };
 
 }  // namespace milvus
