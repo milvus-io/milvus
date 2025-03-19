@@ -16372,7 +16372,8 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
         proto::plan::OpType::NotEqual,
-        val);
+        val,
+        std::vector<proto::plan::GenericValue>());
     auto plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
     auto final =
