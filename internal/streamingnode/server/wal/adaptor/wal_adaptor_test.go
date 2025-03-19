@@ -34,7 +34,6 @@ func TestWalAdaptorReadFail(t *testing.T) {
 	l := mock_walimpls.NewMockWALImpls(t)
 	expectedErr := errors.New("test")
 	l.EXPECT().WALName().Return("test")
-	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	cnt := atomic.NewInt64(2)
 	l.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, ro walimpls.ReadOption) (walimpls.ScannerImpls, error) {
@@ -46,7 +45,23 @@ func TestWalAdaptorReadFail(t *testing.T) {
 			}
 			return nil, expectedErr
 		}).Maybe()
+	l.EXPECT().Close().Return()
 
+	// Test adapt to a read-only wal.
+	l.EXPECT().Channel().Return(types.PChannelInfo{AccessMode: types.AccessModeRO})
+	lAdapted := adaptImplsToWAL(l, nil, func() {})
+	scanner, err := lAdapted.Read(context.Background(), wal.ReadOption{
+		VChannel: "test",
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, scanner)
+	time.Sleep(time.Second)
+	assert.True(t, lAdapted.IsAvailable())
+	lAdapted.Close()
+	assert.False(t, lAdapted.IsAvailable())
+	scanner.Close()
+
+	// A rw wal should use the write ahead buffer to sync time tick.
 	writeAheadBuffer := mock_wab.NewMockROWriteAheadBuffer(t)
 	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
 	operator.EXPECT().Channel().Return(types.PChannelInfo{}).Maybe()
@@ -56,14 +71,20 @@ func TestWalAdaptorReadFail(t *testing.T) {
 		operator,
 	)
 
-	lAdapted := adaptImplsToWAL(l, nil, func() {})
-	scanner, err := lAdapted.Read(context.Background(), wal.ReadOption{
+	// Test adapt to a read-write wal.
+	l.EXPECT().Channel().Unset()
+	l.EXPECT().Channel().Return(types.PChannelInfo{AccessMode: types.AccessModeRW})
+	lAdapted = adaptImplsToWAL(l, nil, func() {})
+	scanner, err = lAdapted.Read(context.Background(), wal.ReadOption{
 		VChannel: "test",
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, scanner)
 	time.Sleep(time.Second)
 	scanner.Close()
+	assert.True(t, lAdapted.IsAvailable())
+	lAdapted.Close()
+	assert.False(t, lAdapted.IsAvailable())
 }
 
 func TestWALAdaptor(t *testing.T) {
@@ -82,7 +103,6 @@ func TestWALAdaptor(t *testing.T) {
 	// Create a mock WAL implementation
 	l := mock_walimpls.NewMockWALImpls(t)
 	l.EXPECT().WALName().Return("test")
-	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
 			return walimplstest.NewTestMessageID(1), nil
@@ -99,7 +119,25 @@ func TestWALAdaptor(t *testing.T) {
 	})
 	l.EXPECT().Close().Return()
 
+	l.EXPECT().Channel().Return(types.PChannelInfo{AccessMode: types.AccessModeRO})
+
+	// Test read only wal
 	lAdapted := adaptImplsToWAL(l, nil, func() {})
+	assert.Panics(t, func() {
+		lAdapted.Append(context.Background(), nil)
+	})
+	assert.Panics(t, func() {
+		lAdapted.AppendAsync(context.Background(), nil, nil)
+	})
+	assert.Panics(t, func() {
+		lAdapted.GetLatestMVCCTimestamp(context.Background(), "test")
+	})
+	lAdapted.Close()
+
+	// Test read-write wal
+	l.EXPECT().Channel().Unset()
+	l.EXPECT().Channel().Return(types.PChannelInfo{AccessMode: types.AccessModeRW})
+	lAdapted = adaptImplsToWAL(l, nil, func() {})
 	assert.NotNil(t, lAdapted.Channel())
 
 	msg := mock_message.NewMockMutableMessage(t)

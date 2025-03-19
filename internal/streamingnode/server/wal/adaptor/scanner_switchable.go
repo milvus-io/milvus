@@ -26,7 +26,7 @@ var (
 func newSwithableScanner(
 	scannerName string,
 	logger *log.MLogger,
-	innerWAL walimpls.WALImpls,
+	innerWAL walimpls.ROWALImpls,
 	writeAheadBuffer wab.ROWriteAheadBuffer,
 	deliverPolicy options.DeliverPolicy,
 	msgChan chan<- message.ImmutableMessage,
@@ -55,7 +55,7 @@ type switchableScanner interface {
 type switchableScannerImpl struct {
 	scannerName      string
 	logger           *log.MLogger
-	innerWAL         walimpls.WALImpls
+	innerWAL         walimpls.ROWALImpls
 	msgChan          chan<- message.ImmutableMessage
 	writeAheadBuffer wab.ROWriteAheadBuffer
 }
@@ -144,7 +144,8 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 			if err := s.HandleMessage(ctx, msg); err != nil {
 				return nil, err
 			}
-			if msg.MessageType() != message.MessageTypeTimeTick {
+			if msg.MessageType() != message.MessageTypeTimeTick || s.writeAheadBuffer == nil {
+				// If there's no write ahead buffer, we cannot switch into tailing mode, so skip the checking.
 				continue
 			}
 			// Here's a timetick message from the scanner, make tailing read if we catch up the writeahead buffer.
