@@ -666,6 +666,343 @@ func TestQueryNestedJsonExpr(t *testing.T) {
 	}
 }
 
+func TestQueryNumberJsonExpr(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
+
+	// Generate test data with boundary values
+	pkColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeInt64, *hp.TNewDataOption())
+	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	jsonValues := make([][]byte, 0, common.DefaultNb)
+
+	// Define boundary values for different numeric types
+	boundaryValues := map[string]interface{}{
+		"int8_min":     int8(-128),
+		"int8_max":     int8(127),
+		"int16_min":    int16(-32768),
+		"int16_max":    int16(32767),
+		"int32_min":    int32(-2147483648),
+		"int32_max":    int32(2147483647),
+		"int64_min":    int64(-9223372036854775808),
+		"int64_max":    int64(9223372036854775807),
+		"float_min":    float32(-3.402823e+38),
+		"float_max":    float32(3.402823e+38),
+		"double_min":   float64(-1.7976931348623157e+308),
+		"double_max":   float64(1.7976931348623157e+308),
+		"array_int8":   []int8{-128, 127},
+		"array_int16":  []int16{-32768, 32767},
+		"array_int32":  []int32{-2147483648, 2147483647},
+		"array_int64":  []int64{-9223372036854775808, 9223372036854775807},
+		"array_float":  []float64{-3.402823e+38, 3.402823e+38},
+		"array_double": []float64{-1.7976931348623157e+308, 1.7976931348623157e+308},
+	}
+
+	// Generate JSON documents
+	expCount := 100
+	for i := 0; i < common.DefaultNb; i++ {
+		m := make(map[string]interface{})
+		if i < expCount {
+			for k, v := range boundaryValues {
+				m[k] = v
+			}
+		} else {
+			// Rest documents contain regular values
+			m["val1"] = 0e+1
+			m["val2"] = 1e22
+			m["val3"] = -0.000000000000000000000000000000000000000000000000000000000000000000000000000001
+			m["val4"] = -0
+			m["val5"] = -123
+			m["val6"] = 123.456e78
+			m["val7"] = 123.456789
+		}
+		bs, _ := json.Marshal(&m)
+		jsonValues = append(jsonValues, bs)
+	}
+	jsonColumn := column.NewColumnJSONBytes(common.DefaultJSONFieldName, jsonValues)
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumn, jsonColumn))
+	common.CheckErr(t, err, true)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// Test queries with boundary values
+	t.Log("https://github.com/milvus-io/milvus/issues/40707")
+	t.Log("https://github.com/milvus-io/milvus/issues/40729")
+	testCases := []struct {
+		expr  string
+		count int
+	}{
+		// Test int8 boundary values
+		{expr: fmt.Sprintf("%s['int8_min'] == -128", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['int8_max'] == 127", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['array_int8'][0] < 0", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['array_int8'][0] == -128", common.DefaultJSONFieldName), count: expCount},
+
+		// Test int16 boundary values
+		{expr: fmt.Sprintf("%s['int16_min'] == -32768", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['int16_max'] == 32767", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['array_int16'][0] == -32768", common.DefaultJSONFieldName), count: expCount},
+
+		// Test int32 boundary values
+		{expr: fmt.Sprintf("%s['int32_min'] == -2147483648", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['int32_max'] == 2147483647", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['array_int32'][0] == -2147483648", common.DefaultJSONFieldName), count: expCount},
+
+		// Test int64 boundary values
+		//{expr: fmt.Sprintf("%s['int64_min'] == -9223372036854775808", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['int64_max'] == 9223372036854775807", common.DefaultJSONFieldName), count: expCount},
+		//{expr: fmt.Sprintf("%s['array_int64'][0] == -9223372036854775808", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['array_int64'][1] == 9223372036854775807", common.DefaultJSONFieldName), count: expCount},
+
+		// Test float boundary values (approximate comparison due to floating point precision)
+		{expr: fmt.Sprintf("%s['float_min'] <= -3.402823e+38", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['float_max'] >= 3.402823e+38", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['array_float'][0] == -3.402823e+38", common.DefaultJSONFieldName), count: expCount},
+
+		// Test double boundary values (approximate comparison due to floating point precision)
+		{expr: fmt.Sprintf("%s['double_min'] <= -1.7976931348623157e+308", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['double_max'] >= 1.7976931348623157e+308", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['array_double'][0] == -1.7976931348623157e+308", common.DefaultJSONFieldName), count: expCount},
+		{expr: fmt.Sprintf("%s['array_double'][1] == 1.7976931348623157e+308", common.DefaultJSONFieldName), count: expCount},
+
+		// Test regular value queries
+		{expr: fmt.Sprintf("%s['val1'] == 0e+1", common.DefaultJSONFieldName), count: common.DefaultNb - expCount},
+		{expr: fmt.Sprintf("%s['val2'] == 1e22", common.DefaultJSONFieldName), count: common.DefaultNb - expCount},
+		{expr: fmt.Sprintf("%s['val3'] < 0", common.DefaultJSONFieldName), count: common.DefaultNb - expCount},
+		{expr: fmt.Sprintf("%s['val4'] == 0", common.DefaultJSONFieldName), count: common.DefaultNb - expCount},
+		{expr: fmt.Sprintf("%s['val5'] == -123", common.DefaultJSONFieldName), count: common.DefaultNb - expCount},
+		{expr: fmt.Sprintf("%s['val6'] == 123.456e78", common.DefaultJSONFieldName), count: common.DefaultNb - expCount},
+		{expr: fmt.Sprintf("%s['val7'] == 123.456789", common.DefaultJSONFieldName), count: common.DefaultNb - expCount},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.expr, func(t *testing.T) {
+			countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).
+				WithFilter(tc.expr).WithOutputFields(common.QueryCountFieldName))
+			common.CheckErr(t, err, true)
+			count, _ := countRes.Fields[0].GetAsInt64(0)
+			require.EqualValues(t, tc.count, count, "Query expression: %s", tc.expr)
+		})
+	}
+}
+
+func TestQueryObjectJsonExpr(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON), hp.TNewFieldsOption(), hp.TNewSchemaOption())
+
+	// Generate test data with boundary values
+	pkColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeInt64, *hp.TNewDataOption())
+	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	jsonValues := make([][]byte, 0, common.DefaultNb)
+
+	// Define boundary values for different numeric types
+	boundaryValues := map[string]interface{}{
+		"varchar": map[string]string{
+			"a":        "b",
+			"π":        "π",
+			"asd ":     " ",
+			"utf8":     "€𝄞",
+			"comments": "a/*b*/c/*d//e",
+			"unicode":  "\u041f\u043e\u043b\u0442\u043e\u0440\u0430", // "Полтора"
+		},
+		"escape": map[string]string{
+			"allowed_escape":   "\"\\/\b\f\n\n\t",
+			"double_escape":    "aa\n",
+			"null_escape":      "\u0000",
+			"uescaped_newline": "new\u000Aline",
+		},
+		"int64": map[string]int64{
+			"":             1,
+			"foo\u0000bar": 42,
+			"min":          -9223372036854775808,
+			"max":          9223372036854775807,
+		},
+		"interface": []map[string]interface{}{
+			{"string": []map[string]interface{}{{"id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}, "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+			{"int8": []int8{1, -128, 127}},
+			{"int16": []int16{-1, 1, -32768, 32767}},
+			{"int32": []int32{-1, 1, -2147483648, 2147483647}},
+			{"int64": []int64{-1, 1, -9223372036854775808, 9223372036854775807}},
+			{"float32": []float32{-1.0, 1.0, -3.402823e+38, 3.402823e+38}},
+			{"double": []float64{-1.0, 1.0, -1.7976931348623157e+308, 1.7976931348623157e+308}},
+			{"bool": []bool{true, false}},
+			{"empty_array": []float32{}},
+		},
+		"language": []map[string]interface{}{
+			{"中文": "月亮"}, {"English": "moon"}, {"중국인": "달"}, {"日本語": "シャオミン"},
+		},
+	}
+	// Generate JSON documents
+	for i := 0; i < common.DefaultNb; i++ {
+		m := make(map[string]interface{})
+		for k, v := range boundaryValues {
+			m[k] = v
+		}
+		bs, _ := json.Marshal(&m)
+		jsonValues = append(jsonValues, bs)
+	}
+	jsonColumn := column.NewColumnJSONBytes(common.DefaultJSONFieldName, jsonValues)
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumn, jsonColumn))
+	common.CheckErr(t, err, true)
+
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// Test queries with boundary values
+	t.Log("https://github.com/milvus-io/milvus/issues/40729")
+	testCases := []struct {
+		expr  string
+		count int
+	}{
+		// Test varchar
+		// Test varchar
+		{expr: fmt.Sprintf("%s['varchar']['a'] == 'b'", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['varchar']['π'] == 'π'", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['varchar']['asd '] == ' '", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['varchar']['utf8'] == '€𝄞'", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['varchar']['comments'] == 'a/*b*/c/*d//e'", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['varchar']['unicode'] == 'Полтора' ", common.DefaultJSONFieldName), count: common.DefaultNb},
+
+		// Test escape boundary values
+		{expr: fmt.Sprintf("%s['escape']['allowed_escape'] == '\\\"\\\\/\\b\\f\\n\\n\\t'", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['escape']['double_escape'] == 'aa\\n'", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['escape']['null_escape'] == '\u0000'", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['escape']['uescaped_newline'] == 'new\\nline'", common.DefaultJSONFieldName), count: common.DefaultNb},
+
+		// Test int64 boundary values
+		//{expr: fmt.Sprintf("%s['int64'][''] == 1", common.DefaultJSONFieldName), count: common.DefaultNb},
+		//{expr: fmt.Sprintf("%s['int64']['foo\\u0000bar'] == 42", common.DefaultJSONFieldName), count: common.DefaultNb},
+		//{expr: fmt.Sprintf("%s['int64']['min'] == -9223372036854775808", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['int64']['max'] == 9223372036854775807", common.DefaultJSONFieldName), count: common.DefaultNb},
+
+		// Test interface boundary values
+		{expr: fmt.Sprintf("%s['interface'][0]['id'] == 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][0]['string'][0]['id'] == 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][1]['int8'][0] == 1", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][1]['int8'][1] == -128", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][1]['int8'][2] == 127", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][2]['int16'][0] == -1", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][2]['int16'][1] == 1", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][2]['int16'][2] == -32768", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][2]['int16'][3] == 32767", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][3]['int32'][0] == -1", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][3]['int32'][1] == 1", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][3]['int32'][2] == -2147483648", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][3]['int32'][3] == 2147483647", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][4]['int64'][0] == -1", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][4]['int64'][1] == 1", common.DefaultJSONFieldName), count: common.DefaultNb},
+		//{expr: fmt.Sprintf("%s['interface'][4]['int64'][2] == -9223372036854775808", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][4]['int64'][3] == 9223372036854775807", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][5]['float32'][0] == -1.0", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][5]['float32'][1] == 1.0", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][5]['float32'][2] == -3.402823e+38", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][5]['float32'][3] == 3.402823e+38", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][6]['double'][0] == -1.0", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][6]['double'][1] == 1.0", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][6]['double'][2] == -1.7976931348623157e+308", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][6]['double'][3] == 1.7976931348623157e+308", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][7]['bool'][0] == true", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['interface'][7]['bool'][1] == false", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("array_length(%s['interface'][0]['empty_array']) == 0", common.DefaultJSONFieldName), count: common.DefaultNb},
+
+		// language
+		{expr: fmt.Sprintf("%s['language'][0]['中文'] == '月亮'", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['language'][1]['English'] == 'moon'", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['language'][2]['중국인'] == '달'", common.DefaultJSONFieldName), count: common.DefaultNb},
+		{expr: fmt.Sprintf("%s['language'][3]['日本語'] == 'シャオミン'", common.DefaultJSONFieldName), count: common.DefaultNb},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.expr, func(t *testing.T) {
+			countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).
+				WithFilter(tc.expr).WithOutputFields(common.QueryCountFieldName))
+			common.CheckErr(t, err, true)
+			count, _ := countRes.Fields[0].GetAsInt64(0)
+			require.EqualValues(t, tc.count, count, "Query expression: %s", tc.expr)
+		})
+	}
+}
+
+func TestQueryNullJsonExpr(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
+	jsonField := entity.NewField().WithName(common.DefaultJSONFieldName).WithDataType(entity.FieldTypeJSON).WithNullable(true)
+	schema := entity.NewSchema().WithName(common.GenRandomString("null_json", 10)).WithField(pkField).WithField(vecField).WithField(jsonField)
+	mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema))
+
+	prepare := hp.CollPrepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// Generate test data with boundary values
+	pkColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeInt64, *hp.TNewDataOption())
+	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	jsonValues := make([][]byte, 0, common.DefaultNb)
+	validData := make([]bool, 0, common.DefaultNb)
+
+	// Generate JSON documents
+	for i := 0; i < common.DefaultNb; i++ {
+		_mod := i % 3
+		var m interface{}
+		if _mod == 0 {
+			m = map[string][]float32{"value": {0.1, 0.1, 0.1, 0.1, 0.1}}
+			bs, _ := json.Marshal(&m)
+			jsonValues = append(jsonValues, bs)
+			validData = append(validData, true)
+		} else if _mod == 1 {
+			m = map[string][]string{"value": {"zz0", "zz0", "zz0", "zz0"}}
+			bs, _ := json.Marshal(&m)
+			jsonValues = append(jsonValues, bs)
+			validData = append(validData, true)
+		} else {
+			validData = append(validData, false)
+		}
+	}
+	nullColumn, err := column.NewNullableColumnJSONBytes(common.DefaultJSONFieldName, jsonValues, validData)
+	common.CheckErr(t, err, true)
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumn, nullColumn))
+	common.CheckErr(t, err, true)
+
+	// Test queries with boundary values
+	testCases := []struct {
+		expr  string
+		count int
+	}{
+		// Test null boundary values
+		{expr: fmt.Sprintf("%s is null", common.DefaultJSONFieldName), count: common.DefaultNb / 3},
+		{expr: fmt.Sprintf("%s IS NULL", common.DefaultJSONFieldName), count: common.DefaultNb / 3},
+		{expr: fmt.Sprintf("%s IS NOT NULL", common.DefaultJSONFieldName), count: common.DefaultNb * 2 / 3},
+		{expr: fmt.Sprintf("%s is not null", common.DefaultJSONFieldName), count: common.DefaultNb * 2 / 3},
+
+		{expr: fmt.Sprintf("%s['value'][0] == 'zz0' ", common.DefaultJSONFieldName), count: common.DefaultNb / 3},
+		{expr: fmt.Sprintf("%s['value'][0] == 0.1 ", common.DefaultJSONFieldName), count: common.DefaultNb / 3},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.expr, func(t *testing.T) {
+			countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).
+				WithFilter(tc.expr).WithOutputFields(common.QueryCountFieldName))
+			common.CheckErr(t, err, true)
+			count, _ := countRes.Fields[0].GetAsInt64(0)
+			require.EqualValues(t, tc.count, count, "Query expression: %s", tc.expr)
+		})
+	}
+
+	for _, invalidExpr := range []string{
+		fmt.Sprintf("%s is NOT NULL", common.DefaultJSONFieldName),
+		fmt.Sprintf("%s IS not NULL", common.DefaultJSONFieldName),
+	} {
+		_, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
+			WithConsistencyLevel(entity.ClStrong).
+			WithFilter(invalidExpr).
+			WithOutputFields(common.QueryCountFieldName))
+		common.CheckErr(t, err, false, "cannot parse expression")
+	}
+}
+
 // test query with all kinds of array expr
 func TestQueryArrayFieldExpr(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
