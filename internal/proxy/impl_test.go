@@ -2196,6 +2196,25 @@ func TestAlterCollectionReplicateProperty(t *testing.T) {
 	assert.True(t, merr.Ok(statusResp))
 }
 
+func TestRunAnalyzer(t *testing.T) {
+	p := &Proxy{}
+	// run analyzer with default params
+	resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
+		Placeholder: [][]byte{[]byte("test doc")},
+	})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	assert.Equal(t, len(resp.GetResults()[0].GetTokens()), 2)
+
+	// run analyzer with invalid params
+	resp, err = p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
+		Placeholder:    [][]byte{[]byte("test doc")},
+		AnalyzerParams: "invalid json",
+	})
+	require.NoError(t, err)
+	require.Error(t, merr.Error(resp.GetStatus()))
+}
+
 func Test_GetSegmentsInfo(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		mockDataCoord := mocks.NewMockDataCoordClient(t)
@@ -2292,23 +2311,4 @@ func Test_GetSegmentsInfo(t *testing.T) {
 		assert.ElementsMatch(t, []int64{3, 7}, resp.GetSegmentInfos()[0].GetInsertLogs()[2].GetLogIDs())
 		assert.ElementsMatch(t, []int64{4, 8}, resp.GetSegmentInfos()[0].GetInsertLogs()[3].GetLogIDs())
 	})
-}
-
-func TestRunAnalyzer(t *testing.T) {
-	p := &Proxy{}
-	// run analyzer with default params
-	resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequset{
-		Placeholder: [][]byte{[]byte("test doc")},
-	})
-	require.NoError(t, err)
-	require.NoError(t, merr.Error(resp.GetStatus()))
-	assert.Equal(t, len(resp.GetResults()[0].GetTokens()), 2)
-
-	// run analyzer with invalid params
-	resp, err = p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequset{
-		Placeholder:    [][]byte{[]byte("test doc")},
-		AnalyzerParams: "invalid json",
-	})
-	require.NoError(t, err)
-	require.Error(t, merr.Error(resp.GetStatus()))
 }

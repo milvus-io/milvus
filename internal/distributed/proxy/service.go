@@ -1159,10 +1159,10 @@ func (s *Server) DescribeDatabase(ctx context.Context, req *milvuspb.DescribeDat
 	return s.proxy.DescribeDatabase(ctx, req)
 }
 
-func (s *Server) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error) {
-	return s.proxy.GetSegmentsInfo(ctx, req)
+func (s *Server) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	return s.proxy.RunAnalyzer(ctx, req)
 }
 
-func (s *Server) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequset) (*milvuspb.RunAnalyzerResponse, error) {
-	return s.proxy.RunAnalyzer(ctx, req)
+func (s *Server) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error) {
+	return s.proxy.GetSegmentsInfo(ctx, req)
 }
