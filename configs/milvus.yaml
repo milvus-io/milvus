@@ -481,6 +481,7 @@ queryNode:
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
+  forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
   dataSync:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
