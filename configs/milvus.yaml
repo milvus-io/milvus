@@ -303,7 +303,10 @@ proxy:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
       query:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
-        methods: "Query,Search,Delete"
+        methods: "Query, Delete"
+      search:
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [anns_field: $anns_field] [expr: $method_expr]"
+        methods: "HybridSearch, Search"
     cacheSize: 0 # Size of log of write cache, in byte. (Close write cache if size was 0)
     cacheFlushInterval: 3 # time interval of auto flush write cache, in seconds. (Close auto flush if interval was 0)
   connectionCheckIntervalSeconds: 120 # the interval time(in seconds) for connection manager to scan inactive client info
@@ -473,6 +476,7 @@ queryNode:
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
+  forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
   dataSync:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
@@ -503,15 +507,8 @@ indexCoord:
 indexNode:
   scheduler:
     buildParallel: 1
-  enableDisk: true # enable index node build disk vector index
+  enableDisk: true # enable build disk vector index
   maxDiskUsagePercentage: 95
-  ip:  # TCP/IP address of indexNode. If not specified, use the first unicastable address
-  port: 21121 # TCP port of indexNode
-  grpc:
-    serverMaxSendSize: 536870912 # The maximum size of each RPC request that the indexNode can send, unit: byte
-    serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the indexNode can receive, unit: byte
-    clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on indexNode can send, unit: byte
-    clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on indexNode can receive, unit: byte
 
 dataCoord:
   channel:
@@ -550,6 +547,12 @@ dataCoord:
       # The size threshold in MB, if the total size of growing segments of each shard 
       # exceeds this threshold, the largest growing segment will be sealed.
       growingSegmentsMemSize: 4096
+      # If the total entry number of l0 logs of each shard 
+      # exceeds this threshold, the earliest growing segments will be sealed.
+      blockingL0EntryNum: 5000000
+      # The size threshold in MB, if the total entry number of l0 logs of each shard 
+      # exceeds this threshold, the earliest growing segments will be sealed.
+      blockingL0SizeInMB: 64
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
   # Switch value to control if to enable segment compaction. 
@@ -886,6 +889,7 @@ common:
   localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
+  enabledOptimizeExpr: true # Indicates whether to enable optimize expr
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
@@ -904,6 +908,7 @@ quotaAndLimits:
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)
   quotaCenterCollectInterval: 3
+  forceDenyAllDDL: false # true to force deny all DDL requests, false to allow.
   limits:
     allocRetryTimes: 15 # retry times when delete alloc forward data from rate limit failed
     allocWaitInterval: 1000 # retry wait duration when delete alloc forward data rate failed, in millisecond
@@ -952,6 +957,13 @@ quotaAndLimits:
     max: -1
     db:
       max: -1 # qps of db level, default no limit, rate for manualCompaction
+  dbRate:
+    enabled: false # Whether DB request throttling is enabled
+    # Maximum number of db-related requests per second.
+    # Setting this item to 10 indicates that Milvus processes no more than 10 db-related requests per second, including db creation/drop/alter requests.
+    # To use this setting, set quotaAndLimits.dbRate.enabled to true at the same time.
+    # 		
+    max: -1
   dml:
     enabled: false # Whether DML request throttling is enabled.
     insertRate:

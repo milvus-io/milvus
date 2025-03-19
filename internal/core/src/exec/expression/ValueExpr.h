@@ -59,6 +59,21 @@ class PhyValueExpr : public Expr {
         }
     }
 
+    std::string
+    ToString() const {
+        return fmt::format("{}", expr_->ToString());
+    }
+
+    bool
+    IsSource() const override {
+        return true;
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return std::nullopt;
+    }
+
  private:
     std::shared_ptr<const milvus::expr::ValueExpr> expr_;
     const int64_t active_count_;

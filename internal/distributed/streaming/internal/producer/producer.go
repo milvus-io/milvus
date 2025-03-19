@@ -152,7 +152,8 @@ func (p *ResumableProducer) waitUntilUnavailable(producer handler.Producer) erro
 func (p *ResumableProducer) createNewProducer() (producer.Producer, error) {
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 100 * time.Millisecond
-	backoff.MaxInterval = 2 * time.Second
+	backoff.MaxInterval = 10 * time.Second
+	backoff.MaxElapsedTime = 0
 	for {
 		// Create a new producer.
 		// a underlying stream producer life time should be equal to the resumable producer.

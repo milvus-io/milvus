@@ -340,7 +340,7 @@ class Checker:
         self.files = []
         self.word_freq = Counter()
         self.ms = MilvusSys()
-        self.bucket_name = self.ms.index_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
+        self.bucket_name = self.ms.data_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
         self.db_wrap = ApiDatabaseWrapper()
         self.c_wrap = ApiCollectionWrapper()
         self.p_wrap = ApiPartitionWrapper()

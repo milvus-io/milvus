@@ -1,6 +1,8 @@
 misc:
   - &source_code_files files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
   - &no_source_code_files -files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+  - &only_go_unittest_files -files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
+  - &morethan_go_unittest_files files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
   - when_build_and_test_status_successs: &Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 22.04'
@@ -133,10 +135,7 @@ pull_request_rules:
       - 'status-success=Code Checker MacOS 13'
       # - 'status-success=Code Checker Amazonlinux 2023'
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
-      - or:
-          - -files~=^(?!pkg\/.*_test\.go).*$
-          - -files~=^(?!internal\/.*_test\.go).*$
-          - -files~=^(?!client\/.*_test\.go).*$
+      - *only_go_unittest_files
     actions:
       label:
         add:
@@ -313,7 +312,9 @@ pull_request_rules:
           - *failed_on_ubuntu_20
           - *failed_on_ubuntu_22
           - 'status-success!=Code Checker AMD64 Ubuntu 22.04'
-          - 'status-success!=cpp-unit-test'
+          - and:
+            - 'status-success!=cpp-unit-test'
+            - *morethan_go_unittest_files
           - 'status-success!=UT for Go'
           - 'status-success!=Integration Test'
           - 'status-success!=Code Checker MacOS 13'
@@ -344,7 +345,7 @@ pull_request_rules:
         remove:
           - ci-passed
 
-  - name: Remove ci-passed label when  status for jenkins job is not success
+  - name: Remove ci-passed label when status for jenkins job is not success
     conditions:
       # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES

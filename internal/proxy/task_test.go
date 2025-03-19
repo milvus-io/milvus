@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -40,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -1025,7 +1025,8 @@ func TestCreateCollectionTask(t *testing.T) {
 	})
 
 	t.Run("collection with embedding function ", func(t *testing.T) {
-		fmt.Println(schema)
+		ts := function.CreateOpenAIEmbeddingServer()
+		defer ts.Close()
 		schema.Functions = []*schemapb.FunctionSchema{
 			{
 				Name:             "test",
@@ -1036,6 +1037,8 @@ func TestCreateCollectionTask(t *testing.T) {
 					{Key: "provider", Value: "openai"},
 					{Key: "model_name", Value: "text-embedding-ada-002"},
 					{Key: "api_key", Value: "mock"},
+					{Key: "url", Value: ts.URL},
+					{Key: "dim", Value: "128"},
 				},
 			},
 		}

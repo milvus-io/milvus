@@ -277,32 +277,12 @@ type ProxyInfos struct {
 	QuotaMetrics         *ProxyQuotaMetrics `json:"quota_metrics"`
 }
 
-// IndexNodeConfiguration records the configuration of IndexNode.
-type IndexNodeConfiguration struct {
+// DataNodeConfiguration records the configuration of DataNode.
+type DataNodeConfiguration struct {
 	MinioBucketName string `json:"minio_bucket_name"`
 
 	SimdType string `json:"simd_type"`
-}
 
-// IndexNodeInfos implements ComponentInfos
-type IndexNodeInfos struct {
-	BaseComponentInfos
-	SystemConfigurations IndexNodeConfiguration `json:"system_configurations"`
-}
-
-// IndexCoordConfiguration records the configuration of IndexCoord.
-type IndexCoordConfiguration struct {
-	MinioBucketName string `json:"minio_bucket_name"`
-}
-
-// IndexCoordInfos implements ComponentInfos
-type IndexCoordInfos struct {
-	BaseComponentInfos
-	SystemConfigurations IndexCoordConfiguration `json:"system_configurations"`
-}
-
-// DataNodeConfiguration records the configuration of DataNode.
-type DataNodeConfiguration struct {
 	FlushInsertBufferSize int64 `json:"flush_insert_buffer_size"`
 }
 

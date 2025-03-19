@@ -208,6 +208,10 @@ std::map<std::string, std::string> retrieveGetTargetEntryLatencyLabels{
     {"type", "retrieve_get_target_entry_latency"}};
 std::map<std::string, std::string> searchGetTargetEntryLatencyLabels{
     {"type", "search_get_target_entry_latency"}};
+std::map<std::string, std::string> randomSampleLatencyLabels{
+    {"type", "random_sample_latency"}};
+std::map<std::string, std::string> optimizeExprLatencyLabels{
+    {"type", "optimize_expr_latency"}};
 
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency,
                                    "[cpp]latency(us) of search on segment")
@@ -237,6 +241,12 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_core_retrieve_get_target_entry_latency,
 DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_get_target_entry_latency,
                             internal_core_search_latency,
                             searchGetTargetEntryLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_random_sample,
+                            internal_core_search_latency,
+                            randomSampleLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_optimize_expr_latency,
+                            internal_core_search_latency,
+                            optimizeExprLatencyLabels)
 // mmap metrics
 std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {
     {"type", "anon"}};

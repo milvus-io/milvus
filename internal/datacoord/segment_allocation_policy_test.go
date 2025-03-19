@@ -18,9 +18,11 @@ package datacoord
 
 import (
 	"math/rand"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -246,10 +248,10 @@ func Test_sealLongTimeIdlePolicy(t *testing.T) {
 	seg1 := &SegmentInfo{lastWrittenTime: time.Now().Add(idleTimeTolerance * 5)}
 	shouldSeal, _ := policy.ShouldSeal(seg1, 100)
 	assert.False(t, shouldSeal)
-	seg2 := &SegmentInfo{lastWrittenTime: getZeroTime(), currRows: 1, SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000}}
+	seg2 := &SegmentInfo{lastWrittenTime: getZeroTime(), SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000, NumOfRows: 1}}
 	shouldSeal, _ = policy.ShouldSeal(seg2, 100)
 	assert.False(t, shouldSeal)
-	seg3 := &SegmentInfo{lastWrittenTime: getZeroTime(), currRows: 1000, SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000}}
+	seg3 := &SegmentInfo{lastWrittenTime: getZeroTime(), SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000, NumOfRows: 1000}}
 	shouldSeal, _ = policy.ShouldSeal(seg3, 100)
 	assert.True(t, shouldSeal)
 }
@@ -288,18 +290,125 @@ func Test_sealByTotalGrowingSegmentsSize(t *testing.T) {
 	assert.Equal(t, seg2.GetID(), res[0].GetID())
 }
 
-func TestFlushPolicyWithZeroCurRows(t *testing.T) {
-	seg := &SegmentInfo{
-		currRows: 0,
-		// lastFlushTime unset because its a sealed segment
+func Test_sealByBlockingL0(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	type testCase struct {
+		tag             string
+		channel         string
+		sizeLimit       int64
+		entryNumLimit   int64
+		l0Segments      []*SegmentInfo
+		growingSegments []*SegmentInfo
+		expected        []int64
+	}
+
+	l0_1 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
-			NumOfRows:      1,
-			State:          commonpb.SegmentState_Sealed,
-			Level:          datapb.SegmentLevel_L1,
-			LastExpireTime: 456094911979061251,
+			ID:            1001,
+			InsertChannel: "channel_1",
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 50, MemorySize: 1 * 1024 * 1024},
+					},
+				},
+			},
+			Level:         datapb.SegmentLevel_L0,
+			StartPosition: &msgpb.MsgPosition{Timestamp: 10},
+			DmlPosition:   &msgpb.MsgPosition{Timestamp: 20},
+		},
+	}
+	l0_2 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1002,
+			InsertChannel: "channel_1",
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 60, MemorySize: 2 * 1024 * 1024},
+					},
+				},
+			},
+			Level:         datapb.SegmentLevel_L0,
+			StartPosition: &msgpb.MsgPosition{Timestamp: 30},
+			DmlPosition:   &msgpb.MsgPosition{Timestamp: 40},
+		},
+	}
+	growing_1 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            2001,
+			InsertChannel: "channel_1",
+			StartPosition: &msgpb.MsgPosition{Timestamp: 10},
+		},
+	}
+	growing_2 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            2002,
+			InsertChannel: "channel_1",
+			StartPosition: &msgpb.MsgPosition{Timestamp: 35},
 		},
 	}
 
-	flushed := flushPolicyL1(seg, tsoutil.GetCurrentTime())
-	assert.True(t, flushed)
+	testCases := []*testCase{
+		{
+			tag:             "seal_by_entrynum",
+			channel:         "channel_1",
+			sizeLimit:       -1,
+			entryNumLimit:   100,
+			l0Segments:      []*SegmentInfo{l0_1, l0_2},           // ts: [10,20] [30, 40], entryNum: 50, 60
+			growingSegments: []*SegmentInfo{growing_1, growing_2}, // ts: [10, 35]
+			expected:        []int64{2001},
+		},
+		{
+			tag:             "seal_by_size",
+			channel:         "channel_1",
+			sizeLimit:       1, // 1MB
+			entryNumLimit:   -1,
+			l0Segments:      []*SegmentInfo{l0_1, l0_2},           // ts: [10,20] [30, 40], entryNum: 1MB, 2MB
+			growingSegments: []*SegmentInfo{growing_1, growing_2}, // ts: [10, 35]
+			expected:        []int64{2001, 2002},
+		},
+		{
+			tag:             "empty_input",
+			channel:         "channel_1",
+			growingSegments: []*SegmentInfo{growing_1, growing_2},
+			sizeLimit:       1,
+			entryNumLimit:   50,
+			expected:        []int64{},
+		},
+		{
+			tag:             "all_disabled",
+			channel:         "channel_1",
+			l0Segments:      []*SegmentInfo{l0_1, l0_2},
+			growingSegments: []*SegmentInfo{growing_1, growing_2},
+			sizeLimit:       -1,
+			entryNumLimit:   -1,
+			expected:        []int64{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.tag, func(t *testing.T) {
+			pt.Save(pt.DataCoordCfg.BlockingL0SizeInMB.Key, strconv.FormatInt(tc.sizeLimit, 10))
+			defer pt.Reset(pt.DataCoordCfg.BlockingL0SizeInMB.Key)
+			pt.Save(pt.DataCoordCfg.BlockingL0EntryNum.Key, strconv.FormatInt(tc.entryNumLimit, 10))
+			defer pt.Reset(pt.DataCoordCfg.BlockingL0EntryNum.Key)
+
+			segments := NewSegmentsInfo()
+			for _, l0segment := range tc.l0Segments {
+				segments.SetSegment(l0segment.GetID(), l0segment)
+			}
+
+			meta := &meta{
+				segments: segments,
+			}
+
+			result, _ := sealByBlockingL0(meta)(tc.channel, tc.growingSegments, 0)
+			sealedIDs := lo.Map(result, func(segment *SegmentInfo, _ int) int64 {
+				return segment.GetID()
+			})
+			assert.ElementsMatch(t, tc.expected, sealedIDs)
+		})
+	}
 }

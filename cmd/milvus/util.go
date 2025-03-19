@@ -123,8 +123,8 @@ func removePidFile(lock *flock.Flock) {
 }
 
 func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
-	alias, enableRootCoord, enableQueryCoord, enableIndexCoord, enableDataCoord, enableQueryNode,
-		enableDataNode, enableIndexNode, enableProxy, enableStreamingNode := formatFlags(args, flags)
+	alias, enableRootCoord, enableQueryCoord, enableDataCoord, enableQueryNode,
+		enableDataNode, enableProxy, enableStreamingNode := formatFlags(args, flags)
 
 	serverType := args[2]
 	role := roles.NewMilvusRoles()
@@ -144,10 +144,6 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableDataCoord = true
 	case typeutil.DataNodeRole:
 		role.EnableDataNode = true
-	case typeutil.IndexCoordRole:
-		role.EnableIndexCoord = true
-	case typeutil.IndexNodeRole:
-		role.EnableIndexNode = true
 	case typeutil.StreamingNodeRole:
 		streamingutil.EnableEmbededQueryNode()
 		role.EnableStreamingNode = true
@@ -159,8 +155,6 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableQueryNode = true
 		role.EnableDataCoord = true
 		role.EnableDataNode = true
-		role.EnableIndexCoord = true
-		role.EnableIndexNode = true
 		if streamingutil.IsStreamingServiceEnabled() {
 			role.EnableStreamingNode = true
 		}
@@ -170,10 +164,8 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableRootCoord = enableRootCoord
 		role.EnableQueryCoord = enableQueryCoord
 		role.EnableDataCoord = enableDataCoord
-		role.EnableIndexCoord = enableIndexCoord
 		role.EnableQueryNode = enableQueryNode
 		role.EnableDataNode = enableDataNode
-		role.EnableIndexNode = enableIndexNode
 		role.EnableProxy = enableProxy
 		role.EnableStreamingNode = enableStreamingNode
 		if enableStreamingNode && !enableQueryNode {
@@ -189,11 +181,12 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 }
 
 func formatFlags(args []string, flags *flag.FlagSet) (alias string, enableRootCoord, enableQueryCoord,
-	enableIndexCoord, enableDataCoord, enableQueryNode, enableDataNode, enableIndexNode, enableProxy bool,
+	enableDataCoord, enableQueryNode, enableDataNode, enableProxy bool,
 	enableStreamingNode bool,
 ) {
 	flags.StringVar(&alias, "alias", "", "set alias")
 
+	var enableIndexCoord bool
 	flags.BoolVar(&enableRootCoord, typeutil.RootCoordRole, false, "enable root coordinator")
 	flags.BoolVar(&enableQueryCoord, typeutil.QueryCoordRole, false, "enable query coordinator")
 	flags.BoolVar(&enableIndexCoord, typeutil.IndexCoordRole, false, "enable index coordinator")
@@ -201,7 +194,6 @@ func formatFlags(args []string, flags *flag.FlagSet) (alias string, enableRootCo
 
 	flags.BoolVar(&enableQueryNode, typeutil.QueryNodeRole, false, "enable query node")
 	flags.BoolVar(&enableDataNode, typeutil.DataNodeRole, false, "enable data node")
-	flags.BoolVar(&enableIndexNode, typeutil.IndexNodeRole, false, "enable index node")
 	flags.BoolVar(&enableProxy, typeutil.ProxyRole, false, "enable proxy node")
 	flags.BoolVar(&enableStreamingNode, typeutil.StreamingNodeRole, false, "enable streaming node")
 
@@ -267,8 +259,7 @@ func addActiveKeySuffix(ctx context.Context, client *clientv3.Client, sessionPat
 
 	for _, suffix := range sessionSuffix {
 		if strings.Contains(suffix, "-") && (strings.HasPrefix(suffix, typeutil.RootCoordRole) ||
-			strings.HasPrefix(suffix, typeutil.QueryCoordRole) || strings.HasPrefix(suffix, typeutil.DataCoordRole) ||
-			strings.HasPrefix(suffix, typeutil.IndexCoordRole)) {
+			strings.HasPrefix(suffix, typeutil.QueryCoordRole) || strings.HasPrefix(suffix, typeutil.DataCoordRole)) {
 			res := strings.Split(suffix, "-")
 			if len(res) != 2 {
 				// skip illegal keys
@@ -293,11 +284,6 @@ func addActiveKeySuffix(ctx context.Context, client *clientv3.Client, sessionPat
 			if serverID == targetServerID {
 				log.Info("add active serverID key", zap.String("suffix", suffix), zap.String("key", key))
 				suffixSet[serverType] = struct{}{}
-			}
-
-			// also remove a faked indexcoord seesion if role is a datacoord
-			if strings.HasPrefix(suffix, typeutil.DataCoordRole) {
-				suffixSet[typeutil.IndexCoordRole] = struct{}{}
 			}
 		}
 	}

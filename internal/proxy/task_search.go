@@ -418,6 +418,9 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, internalSubReq.FieldId) {
+			metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.HybridSearchLabel, strconv.FormatInt(internalSubReq.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(internalSubReq.PlaceholderGroup, int(internalSubReq.GetNq()))))
+		}
 		t.SearchRequest.SubReqs[index] = internalSubReq
 		t.queryInfos[index] = queryInfo
 		log.Debug("proxy init search request",
@@ -427,13 +430,17 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 	var err error
 	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIds) {
+		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
+		defer sp.End()
 		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)
 		if err != nil {
 			return err
 		}
-		if err := exec.ProcessSearch(t.SearchRequest); err != nil {
+		sp.AddEvent("Create-function-udf")
+		if err := exec.ProcessSearch(ctx, t.SearchRequest); err != nil {
 			return err
 		}
+		sp.AddEvent("Call-function-udf")
 	}
 
 	t.SearchRequest.GroupByFieldId = t.rankParams.GetGroupByFieldId()
@@ -506,7 +513,9 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.PlaceholderGroup, int(t.request.GetNq()))))
+	if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, t.SearchRequest.FieldId) {
+		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.SearchRequest.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.PlaceholderGroup, int(t.request.GetNq()))))
+	}
 	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
 	t.SearchRequest.Topk = queryInfo.GetTopk()
 	t.SearchRequest.MetricType = queryInfo.GetMetricType()
@@ -516,13 +525,17 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.SearchRequest.GroupSize = queryInfo.GroupSize
 
 	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
+		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
+		defer sp.End()
 		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)
 		if err != nil {
 			return err
 		}
-		if err := exec.ProcessSearch(t.SearchRequest); err != nil {
+		sp.AddEvent("Create-function-udf")
+		if err := exec.ProcessSearch(ctx, t.SearchRequest); err != nil {
 			return err
 		}
+		sp.AddEvent("Call-function-udf")
 	}
 	log.Debug("proxy init search request",
 		zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),

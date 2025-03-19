@@ -720,8 +720,8 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
-func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
-	switch function.GetType() {
+func checkFunctionOutputField(fSchema *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
+	switch fSchema.GetType() {
 	case schemapb.FunctionType_BM25:
 		if len(fields) != 1 {
 			return fmt.Errorf("BM25 function only need 1 output field, but got %d", len(fields))
@@ -731,8 +731,8 @@ func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schem
 			return fmt.Errorf("BM25 function output field must be a SparseFloatVector field, but got %s", fields[0].DataType.String())
 		}
 	case schemapb.FunctionType_TextEmbedding:
-		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_FloatVector && fields[0].DataType != schemapb.DataType_Int8Vector) {
-			return fmt.Errorf("TextEmbedding function output field must be a FloatVector or Int8Vector field")
+		if err := function.TextEmbeddingOutputsCheck(fields); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("check output field for unknown function type")
@@ -2203,6 +2203,14 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		return dbInfo.dbID, map[int64][]int64{
 			r.GetCollectionID(): {},
 		}, internalpb.RateType_DDLCompaction, 1, nil
+	case *milvuspb.CreateDatabaseRequest:
+		log.Info("rate limiter CreateDatabaseRequest")
+		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLDB, 1, nil
+	case *milvuspb.DropDatabaseRequest:
+		log.Info("rate limiter DropDatabaseRequest")
+		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLDB, 1, nil
+	case *milvuspb.AlterDatabaseRequest:
+		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLDB, 1, nil
 	default: // TODO: support more request
 		if req == nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, fmt.Errorf("null request")
@@ -2233,7 +2241,9 @@ func GetFailedResponse(req any, err error) any {
 		*milvuspb.LoadCollectionRequest, *milvuspb.ReleaseCollectionRequest,
 		*milvuspb.CreatePartitionRequest, *milvuspb.DropPartitionRequest,
 		*milvuspb.LoadPartitionsRequest, *milvuspb.ReleasePartitionsRequest,
-		*milvuspb.CreateIndexRequest, *milvuspb.DropIndexRequest:
+		*milvuspb.CreateIndexRequest, *milvuspb.DropIndexRequest,
+		*milvuspb.CreateDatabaseRequest, *milvuspb.DropDatabaseRequest,
+		*milvuspb.AlterDatabaseRequest:
 		return merr.Status(err)
 	case *milvuspb.FlushRequest:
 		return &milvuspb.FlushResponse{

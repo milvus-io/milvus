@@ -19,7 +19,6 @@ package datacoord
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
@@ -37,7 +36,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestReloadFromKV(t *testing.T) {
@@ -442,12 +443,12 @@ func TestMeta_HasSameReq(t *testing.T) {
 
 func newSegmentIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 	return &indexMeta{
-		RWMutex:          sync.RWMutex{},
+		keyLock:          lock.NewKeyLock[UniqueID](),
 		ctx:              context.Background(),
 		catalog:          catalog,
 		indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
 		segmentBuildInfo: newSegmentIndexBuildInfo(),
-		segmentIndexes:   make(map[UniqueID]map[UniqueID]*model.SegmentIndex),
+		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 	}
 }
 
@@ -516,9 +517,8 @@ func TestMeta_AddSegmentIndex(t *testing.T) {
 	).Return(errors.New("fail"))
 
 	m := newSegmentIndexMeta(ec)
-	m.segmentIndexes = map[UniqueID]map[UniqueID]*model.SegmentIndex{
-		1: make(map[UniqueID]*model.SegmentIndex, 0),
-	}
+	m.segmentIndexes = typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	m.segmentIndexes.Insert(1, typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]())
 
 	segmentIndex := &model.SegmentIndex{
 		SegmentID:           1,
@@ -630,9 +630,8 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 	metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 
 	m := newSegmentIndexMeta(&datacoord.Catalog{MetaKv: metakv})
-	m.segmentIndexes = map[UniqueID]map[UniqueID]*model.SegmentIndex{
-		segID: make(map[UniqueID]*model.SegmentIndex, 0),
-	}
+	m.segmentIndexes = typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	m.segmentIndexes.Insert(1, typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]())
 
 	t.Run("collection has no index", func(t *testing.T) {
 		state := m.GetSegmentIndexState(collID, segID, indexID)
@@ -735,26 +734,25 @@ func TestMeta_GetIndexedSegment(t *testing.T) {
 	)
 
 	m := newSegmentIndexMeta(nil)
-	m.segmentIndexes = map[UniqueID]map[UniqueID]*model.SegmentIndex{
-		segID: {
-			indexID: {
-				SegmentID:           segID,
-				CollectionID:        collID,
-				PartitionID:         partID,
-				NumRows:             1025,
-				IndexID:             indexID,
-				BuildID:             buildID,
-				NodeID:              nodeID,
-				IndexVersion:        1,
-				IndexState:          commonpb.IndexState_Finished,
-				FailReason:          "",
-				IsDeleted:           false,
-				CreatedUTCTime:      10,
-				IndexFileKeys:       nil,
-				IndexSerializedSize: 0,
-			},
-		},
-	}
+	segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdxes.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1025,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              nodeID,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      10,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+	})
+
+	m.segmentIndexes.Insert(segID, segIdxes)
 	m.indexes = map[UniqueID]map[UniqueID]*model.Index{
 		collID: {
 			indexID: {
@@ -891,27 +889,17 @@ func TestMeta_GetSegmentIndexes(t *testing.T) {
 
 	t.Run("no index exist- field index empty", func(t *testing.T) {
 		m := newSegmentIndexMeta(nil)
-		m.segmentIndexes = map[UniqueID]map[UniqueID]*model.SegmentIndex{
-			1: {
-				1: &model.SegmentIndex{},
-			},
-		}
+		segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+		segIdxes.Insert(indexID, &model.SegmentIndex{})
+		m.segmentIndexes.Insert(segID, segIdxes)
+
 		segIndexes := m.GetSegmentIndexes(collID, 1)
 		assert.Equal(t, 0, len(segIndexes))
 	})
 
 	t.Run("index exists", func(t *testing.T) {
 		m := &indexMeta{
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-				segID: {
-					indexID: &model.SegmentIndex{
-						CollectionID: collID,
-						SegmentID:    segID,
-						IndexID:      indexID,
-						IndexState:   commonpb.IndexState_Finished,
-					},
-				},
-			},
+			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
 					indexID: {
@@ -930,6 +918,14 @@ func TestMeta_GetSegmentIndexes(t *testing.T) {
 				},
 			},
 		}
+		segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+		segIdxes.Insert(indexID, &model.SegmentIndex{
+			CollectionID: collID,
+			SegmentID:    segID,
+			IndexID:      indexID,
+			IndexState:   commonpb.IndexState_Finished,
+		})
+		m.segmentIndexes.Insert(segID, segIdxes)
 		segIndexes := m.GetSegmentIndexes(collID, segID)
 		assert.Equal(t, 1, len(segIndexes))
 
@@ -1200,28 +1196,10 @@ func updateSegmentIndexMeta(t *testing.T) *indexMeta {
 		IndexSerializedSize: 0,
 	})
 
-	return &indexMeta{
-		catalog: sc,
-		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-			segID: {
-				indexID: {
-					SegmentID:           segID,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             1025,
-					IndexID:             indexID,
-					BuildID:             buildID,
-					NodeID:              0,
-					IndexVersion:        0,
-					IndexState:          commonpb.IndexState_Unissued,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      0,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 0,
-				},
-			},
-		},
+	m := &indexMeta{
+		catalog:        sc,
+		keyLock:        lock.NewKeyLock[UniqueID](),
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
 			collID: {
 				indexID: {
@@ -1241,6 +1219,25 @@ func updateSegmentIndexMeta(t *testing.T) *indexMeta {
 		},
 		segmentBuildInfo: indexBuildInfo,
 	}
+	segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdxes.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             1025,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              0,
+		IndexVersion:        0,
+		IndexState:          commonpb.IndexState_Unissued,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+	})
+	m.segmentIndexes.Insert(segID, segIdxes)
+	return m
 }
 
 func TestMeta_UpdateVersion(t *testing.T) {
@@ -1346,10 +1343,11 @@ func TestUpdateSegmentIndexNotExists(t *testing.T) {
 		})
 	})
 
-	assert.Equal(t, 1, len(m.segmentIndexes))
-	segmentIdx := m.segmentIndexes[1]
-	assert.Equal(t, 1, len(segmentIdx))
-	_, ok := segmentIdx[2]
+	assert.Equal(t, 1, m.segmentIndexes.Len())
+	segmentIdx, ok := m.segmentIndexes.Get(1)
+	assert.True(t, ok)
+	assert.Equal(t, 1, segmentIdx.Len())
+	_, ok = segmentIdx.Get(2)
 	assert.True(t, ok)
 }
 
@@ -1488,19 +1486,67 @@ func TestRemoveSegmentIndex(t *testing.T) {
 			Return(nil)
 
 		m := &indexMeta{
-			catalog: catalog,
-			segmentIndexes: map[int64]map[int64]*model.SegmentIndex{
-				segID: {
-					indexID: &model.SegmentIndex{},
-				},
-			},
+			catalog:          catalog,
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
 		}
+		m.segmentIndexes.Insert(segID, typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]())
 
 		err := m.RemoveSegmentIndex(context.TODO(), collID, partID, segID, indexID, buildID)
 		assert.NoError(t, err)
 
-		assert.Equal(t, len(m.segmentIndexes), 0)
+		assert.Equal(t, 0, m.segmentIndexes.Len())
+		assert.Equal(t, len(m.segmentBuildInfo.List()), 0)
+	})
+}
+
+func TestRemoveSegmentIndexByID(t *testing.T) {
+	t.Run("drop segment index fail", func(t *testing.T) {
+		expectedErr := errors.New("error")
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().
+			DropSegmentIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(expectedErr)
+
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+
+		m := newSegmentIndexMeta(catalog)
+		err := m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+			SegmentID:    3,
+			CollectionID: 1,
+			PartitionID:  2,
+			NumRows:      1024,
+			IndexID:      1,
+			BuildID:      4,
+		})
+		assert.NoError(t, err)
+		err = m.RemoveSegmentIndexByID(context.TODO(), 4)
+		assert.Error(t, err)
+		assert.EqualError(t, err, "error")
+	})
+
+	t.Run("remove segment index ok", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().
+			DropSegmentIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil)
+
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+
+		m := newSegmentIndexMeta(catalog)
+		err := m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+			SegmentID:    3,
+			CollectionID: 1,
+			PartitionID:  2,
+			NumRows:      1024,
+			IndexID:      1,
+			BuildID:      4,
+		})
+		assert.NoError(t, err)
+
+		err = m.RemoveSegmentIndexByID(context.TODO(), 4)
+		assert.NoError(t, err)
+		assert.Equal(t, m.segmentIndexes.Len(), 0)
 		assert.Equal(t, len(m.segmentBuildInfo.List()), 0)
 	})
 }
@@ -1639,27 +1685,25 @@ func TestMeta_GetSegmentIndexStatus(t *testing.T) {
 			},
 		},
 	}
-	m.segmentIndexes = map[UniqueID]map[UniqueID]*model.SegmentIndex{
-		segID: {
-			indexID: {
-				SegmentID:           segID,
-				CollectionID:        collID,
-				PartitionID:         partID,
-				NumRows:             10250,
-				IndexID:             indexID,
-				BuildID:             buildID,
-				NodeID:              1,
-				IndexVersion:        0,
-				IndexState:          commonpb.IndexState_Finished,
-				FailReason:          "",
-				IsDeleted:           false,
-				CreatedUTCTime:      12,
-				IndexFileKeys:       nil,
-				IndexSerializedSize: 0,
-			},
-		},
-		segID + 1: {},
-	}
+	m.segmentIndexes = typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	segIdx := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10250,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              1,
+		IndexVersion:        0,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      12,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+	})
+	m.segmentIndexes.Insert(segID, segIdx)
 
 	t.Run("index exists", func(t *testing.T) {
 		isIndexed, segmentIndexes := m.GetSegmentIndexedFields(collID, segID)

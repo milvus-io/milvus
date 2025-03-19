@@ -52,8 +52,246 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
     ******************************************************************
     """
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_collection_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    def test_milvus_client_search_invalid_collection_name_string(self, invalid_collection_name):
+        """
+        target: test search with invalid collection name
+        method: create connection, collection, insert and search with invalid collection name
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. search
+        rng = np.random.default_rng(seed=19530)
+        vectors_to_search = rng.random((1, 8))
+        error = {ct.err_code: 100,
+                 ct.err_msg: f"collection not found[database=default][collection={invalid_collection_name}]"}
+        self.search(client, invalid_collection_name, vectors_to_search, limit=default_limit,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="pymilvus issue 2587")
+    @pytest.mark.parametrize("invalid_collection_name", [1])
+    def test_milvus_client_search_invalid_collection_name_non_string(self, invalid_collection_name):
+        """
+        target: test search with invalid collection name
+        method: create connection, collection, insert and search with invalid collection name
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. search
+        rng = np.random.default_rng(seed=19530)
+        vectors_to_search = rng.random((1, 8))
+        error = {ct.err_code: 100,
+                 ct.err_msg: f"collection not found[database=default][collection={invalid_collection_name}]"}
+        self.search(client, invalid_collection_name, vectors_to_search, limit=default_limit,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_data", [1, "12-s","中文", "% $#"])
+    def test_milvus_client_search_invalid_data(self, invalid_data):
+        """
+        target: test search with invalid data
+        method: create connection, collection, insert and search with invalid data
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. search
+        rng = np.random.default_rng(seed=19530)
+        vectors_to_search = rng.random((1, 8))
+        error = {ct.err_code: 100,
+                 ct.err_msg: f"`search_data` value {invalid_data} is illegal"}
+        self.search(client, collection_name, invalid_data, limit=default_limit,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_limit", [-1, ct.min_limit-1, "1", "12-s", "中文", "%$#"])
+    def test_milvus_client_search_invalid_limit(self, invalid_limit):
+        """
+        target: test search with invalid data
+        method: create connection, collection, insert and search with invalid data
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. search
+        rng = np.random.default_rng(seed=19530)
+        vectors_to_search = rng.random((1, 8))
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"`limit` value {invalid_limit} is illegal"}
+        self.search(client, collection_name, vectors_to_search, limit=invalid_limit,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_limit", [ct.max_limit+1])
+    def test_milvus_client_search_limit_out_of_range(self, invalid_limit):
+        """
+        target: test search with invalid data
+        method: create connection, collection, insert and search with invalid data
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. search
+        rng = np.random.default_rng(seed=19530)
+        vectors_to_search = rng.random((1, 8))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: "topk [16385] is invalid, it should be in range [1, 16384], but got 16385"}
+        self.search(client, collection_name, vectors_to_search, limit=invalid_limit,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_filter", ["12-s"])
+    def test_milvus_client_search_invalid_filter(self, invalid_filter):
+        """
+        target: test search with invalid data
+        method: create connection, collection, insert and search with invalid data
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. search
+        rng = np.random.default_rng(seed=19530)
+        vectors_to_search = rng.random((1, 8))
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create query plan: predicate is not a boolean expression: {invalid_filter}, "
+                             f"data type: Int64: invalid parameter"}
+        self.search(client, collection_name, vectors_to_search, filter=invalid_filter, limit=default_limit,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_output_fields", [1, "1"])
+    def test_milvus_client_search_invalid_output_fields(self, invalid_output_fields):
+        """
+        target: test search with invalid data
+        method: create connection, collection, insert and search with invalid data
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. search
+        rng = np.random.default_rng(seed=19530)
+        vectors_to_search = rng.random((1, 8))
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"`output_fields` value {invalid_output_fields} is illegal"}
+        self.search(client, collection_name, vectors_to_search, limit=default_limit, output_fields=invalid_output_fields,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="pymilvus issue 2588")
+    @pytest.mark.parametrize("invalid_search_params", [1, "1"])
+    def test_milvus_client_search_invalid_search_params(self, invalid_search_params):
+        """
+        target: test search with invalid data
+        method: create connection, collection, insert and search with invalid data
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. search
+        rng = np.random.default_rng(seed=19530)
+        vectors_to_search = rng.random((1, 8))
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"`search_params` value {invalid_search_params} is illegal"}
+        self.search(client, collection_name, vectors_to_search, limit=default_limit, search_params=invalid_search_params,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_partition_names", [1, "1"])
+    def test_milvus_client_search_invalid_partition_names(self, invalid_partition_names):
+        """
+        target: test search with invalid data
+        method: create connection, collection, insert and search with invalid data
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. search
+        rng = np.random.default_rng(seed=19530)
+        vectors_to_search = rng.random((1, 8))
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"`partition_name_array` value {invalid_partition_names} is illegal"}
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                    partition_names=invalid_partition_names,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_anns_field", [1])
+    def test_milvus_client_search_invalid_anns_field(self, invalid_anns_field):
+        """
+        target: test search with invalid data
+        method: create connection, collection, insert and search with invalid data
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. search
+        rng = np.random.default_rng(seed=19530)
+        vectors_to_search = rng.random((1, 8))
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"`anns_field` value {invalid_anns_field} is illegal"}
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                    anns_field=invalid_anns_field,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_anns_field", ["not_exist_field"])
+    def test_milvus_client_search_not_exist_anns_field(self, invalid_anns_field):
+        """
+        target: test search with invalid data
+        method: create connection, collection, insert and search with invalid data
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. search
+        rng = np.random.default_rng(seed=19530)
+        vectors_to_search = rng.random((1, 8))
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create query plan: failed to get field schema by name: "
+                             f"fieldName({invalid_anns_field}) not found: invalid parameter"}
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                    anns_field=invalid_anns_field,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="pymilvus issue 1554")
+    @pytest.mark.skip(reason="pymilvus issue 1554")
     def test_milvus_client_collection_invalid_primary_field(self):
         """
         target: test high level api: client.create_collection
@@ -65,6 +303,21 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         # 1. create collection
         error = {ct.err_code: 1, ct.err_msg: f"Param id_type must be int or string"}
         self.create_collection(client, collection_name, default_dim, id_type="invalid",
+                               check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_string_auto_id(self):
+        """
+        target: test high level api: client.create_collection
+        method: create collection with auto id on string primary key without mx length
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for the "
+                                                 f"field({default_primary_key_field_name}) of collection {collection_name}"}
+        self.create_collection(client, collection_name, default_dim, id_type="string", auto_id=True,
                                check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -126,6 +379,162 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
                     search_params=search_params,
                     check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_vector_field(self, null_expr_op):
+        """
+        target: test search with null expression on vector field
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        vectors_to_search = rng.random((1, dim))
+        null_expr = default_vector_field_name + " " + null_expr_op
+        log.info(null_expr)
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"unsupported data type: VECTOR_FLOAT"}
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_not_exist_field(self, null_expr_op):
+        """
+        target: test search with null expression on vector field
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        vectors_to_search = rng.random((1, dim))
+        not_exist_field_name = "not_exist_field"
+        null_expr = not_exist_field_name + " " + null_expr_op
+        log.info(null_expr)
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create query plan: cannot parse expression: "
+                             f"{null_expr}, error: field {not_exist_field_name} not exist: invalid parameter"}
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_json_key(self, nullable,  null_expr_op):
+        """
+        target: test search with null expression on each key of json
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(nullable_field_name, DataType.JSON, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        vectors = cf.gen_vectors(default_nb, dim)
+        if nullable:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: vectors[i],
+                    nullable_field_name: {'a': None}} for i in range(default_nb)]
+            null_expr = nullable_field_name + "['a']" + " " + null_expr_op
+        else:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: vectors[i],
+                    nullable_field_name: {'a': 1, 'b': None}} for i in range(default_nb)]
+            null_expr = nullable_field_name + "['b']" + " " + null_expr_op
+        self.insert(client, collection_name, rows)
+        # 3. search
+        log.info(null_expr)
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create query plan: cannot parse expression: {null_expr}, "
+                             f"error: invalid expression: {null_expr}: invalid parameter"}
+        self.search(client, collection_name, [vectors[0]],
+                    filter=null_expr,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_array_element(self, nullable, null_expr_op):
+        """
+        target: test search with null expression on each key of json
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(nullable_field_name, DataType.ARRAY, element_type=DataType.INT64, max_capacity=12,
+                         max_length=64, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        vectors = cf.gen_vectors(default_nb, dim)
+        if nullable:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: vectors[i],
+                    nullable_field_name: None} for i in range(default_nb)]
+        else:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: vectors[i],
+                    nullable_field_name: [1, 2, 3]} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        null_expr = nullable_field_name + "[0]" + " " + null_expr_op
+        log.info(null_expr)
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create query plan: cannot parse expression: {null_expr}, "
+                             f"error: invalid expression: {null_expr}: invalid parameter"}
+        self.search(client, collection_name, [vectors[0]],
+                    filter=null_expr,
+                    check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestMilvusClientSearchValid(TestMilvusClientV2Base):
@@ -538,3 +947,622 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                          'params': cf.get_search_params_params('IVF_FLAT')}
         self.search(client, collection_name, data=[search_vector], filter='id >= 10',
                     search_params=search_params, check_task=CheckTasks.err_res, check_items=error)
+
+
+class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
+    """ Test case of search interface """
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def auto_id(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["COSINE", "L2"])
+    def metric_type(self, request):
+        yield request.param
+
+    """
+    ******************************************************************
+    #  The following are valid base cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr(self, nullable, null_expr_op):
+        """
+        target: test search with null expression on int64 fields
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        schema.add_field(nullable_field_name, DataType.INT64, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        if nullable:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": None} for i in range(default_nb)]
+        else:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        vectors_to_search = rng.random((1, dim))
+        insert_ids = [str(i) for i in range(default_nb)]
+        null_expr = nullable_field_name + " " + null_expr_op
+        log.info(null_expr)
+        if nullable:
+            if "not" in null_expr or "NOT" in null_expr:
+                insert_ids = []
+                limit = 0
+
+            else:
+                limit = default_limit
+        else:
+            if "not" in null_expr or "NOT" in null_expr:
+                limit = default_limit
+            else:
+                insert_ids = []
+                limit = 0
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    consistency_level = "Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_int8(self, nullable, null_expr_op):
+        """
+        target: test search with null expression on int8 fields
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        schema.add_field(nullable_field_name, DataType.INT8, nullable=nullable)
+        # schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=12,
+        #                  max_length=64, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        if nullable:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": None} for i in range(default_nb)]
+        else:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": np.int8(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        vectors_to_search = rng.random((1, dim))
+        insert_ids = [str(i) for i in range(default_nb)]
+        null_expr = nullable_field_name + " " + null_expr_op
+        log.info(null_expr)
+        if nullable:
+            if "not" in null_expr or "NOT" in null_expr:
+                insert_ids = []
+                limit = 0
+
+            else:
+                limit = default_limit
+        else:
+            if "not" in null_expr or "NOT" in null_expr:
+                limit = default_limit
+            else:
+                insert_ids = []
+                limit = 0
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    consistency_level = "Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_int16(self, nullable, null_expr_op):
+        """
+        target: test search with null expression on int16 fields
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        schema.add_field(nullable_field_name, DataType.INT16, nullable=nullable)
+        # schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=12,
+        #                  max_length=64, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        if nullable:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": None} for i in range(default_nb)]
+        else:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": np.int16(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        vectors_to_search = rng.random((1, dim))
+        insert_ids = [str(i) for i in range(default_nb)]
+        null_expr = nullable_field_name + " " + null_expr_op
+        log.info(null_expr)
+        if nullable:
+            if "not" in null_expr or "NOT" in null_expr:
+                insert_ids = []
+                limit = 0
+
+            else:
+                limit = default_limit
+        else:
+            if "not" in null_expr or "NOT" in null_expr:
+                limit = default_limit
+            else:
+                insert_ids = []
+                limit = 0
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    consistency_level = "Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_int32(self, nullable, null_expr_op):
+        """
+        target: test search with null expression on int32 fields
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        schema.add_field(nullable_field_name, DataType.INT32, nullable=nullable)
+        # schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=12,
+        #                  max_length=64, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        if nullable:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": None} for i in range(default_nb)]
+        else:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": np.int32(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        vectors_to_search = rng.random((1, dim))
+        insert_ids = [str(i) for i in range(default_nb)]
+        null_expr = nullable_field_name + " " + null_expr_op
+        log.info(null_expr)
+        if nullable:
+            if "not" in null_expr or "NOT" in null_expr:
+                insert_ids = []
+                limit = 0
+
+            else:
+                limit = default_limit
+        else:
+            if "not" in null_expr or "NOT" in null_expr:
+                limit = default_limit
+            else:
+                insert_ids = []
+                limit = 0
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    consistency_level = "Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_float(self, nullable, null_expr_op):
+        """
+        target: test search with null expression on float fields
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        schema.add_field(nullable_field_name, DataType.FLOAT, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        if nullable:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": None} for i in range(default_nb)]
+        else:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": i*1.0} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        vectors_to_search = rng.random((1, dim))
+        insert_ids = [str(i) for i in range(default_nb)]
+        null_expr = nullable_field_name + " " + null_expr_op
+        log.info(null_expr)
+        if nullable:
+            if "not" in null_expr or "NOT" in null_expr:
+                insert_ids = []
+                limit = 0
+
+            else:
+                limit = default_limit
+        else:
+            if "not" in null_expr or "NOT" in null_expr:
+                limit = default_limit
+            else:
+                insert_ids = []
+                limit = 0
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    consistency_level = "Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_double(self, nullable, null_expr_op):
+        """
+        target: test search with null expression on double fields
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        schema.add_field(nullable_field_name, DataType.DOUBLE, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        if nullable:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": None} for i in range(default_nb)]
+        else:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": np.double(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        vectors_to_search = rng.random((1, dim))
+        insert_ids = [str(i) for i in range(default_nb)]
+        null_expr = nullable_field_name + " " + null_expr_op
+        log.info(null_expr)
+        if nullable:
+            if "not" in null_expr or "NOT" in null_expr:
+                insert_ids = []
+                limit = 0
+
+            else:
+                limit = default_limit
+        else:
+            if "not" in null_expr or "NOT" in null_expr:
+                limit = default_limit
+            else:
+                insert_ids = []
+                limit = 0
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    consistency_level = "Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_bool(self, nullable, null_expr_op):
+        """
+        target: test search with null expression on bool fields
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        schema.add_field(nullable_field_name, DataType.BOOL, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        if nullable:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": None} for i in range(default_nb)]
+        else:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": np.bool_(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        vectors_to_search = rng.random((1, dim))
+        insert_ids = [str(i) for i in range(default_nb)]
+        null_expr = nullable_field_name + " " + null_expr_op
+        log.info(null_expr)
+        if nullable:
+            if "not" in null_expr or "NOT" in null_expr:
+                insert_ids = []
+                limit = 0
+
+            else:
+                limit = default_limit
+        else:
+            if "not" in null_expr or "NOT" in null_expr:
+                limit = default_limit
+            else:
+                insert_ids = []
+                limit = 0
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    consistency_level = "Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_varchar(self, nullable, null_expr_op):
+        """
+        target: test search with null expression on varchar fields
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        schema.add_field(nullable_field_name, DataType.VARCHAR, nullable=nullable, max_length=128)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        if nullable:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": None} for i in range(default_nb)]
+        else:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        vectors_to_search = rng.random((1, dim))
+        insert_ids = [str(i) for i in range(default_nb)]
+        null_expr = nullable_field_name + " " + null_expr_op
+        log.info(null_expr)
+        if nullable:
+            if "not" in null_expr or "NOT" in null_expr:
+                insert_ids = []
+                limit = 0
+
+            else:
+                limit = default_limit
+        else:
+            if "not" in null_expr or "NOT" in null_expr:
+                limit = default_limit
+            else:
+                insert_ids = []
+                limit = 0
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    consistency_level = "Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_json(self, nullable, null_expr_op):
+        """
+        target: test search with null expression on json fields
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        schema.add_field(nullable_field_name, DataType.JSON, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        index_params.add_index(field_name=nullable_field_name, index_name="json_index", index_type="INVERTED",
+                               params={"json_cast_type": DataType.INT64, "json_path": f"{nullable_field_name}['a']['b']"})
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        if nullable:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), nullable_field_name: None} for i in range(default_nb)]
+        else:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), nullable_field_name: {'a': {'b': i, 'c': None}}} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        vectors_to_search = rng.random((1, dim))
+        insert_ids = [str(i) for i in range(default_nb)]
+        null_expr = nullable_field_name + " " + null_expr_op
+        log.info(null_expr)
+        if nullable:
+            if "not" in null_expr or "NOT" in null_expr:
+                insert_ids = []
+                limit = 0
+
+            else:
+                limit = default_limit
+        else:
+            if "not" in null_expr or "NOT" in null_expr:
+                limit = default_limit
+            else:
+                insert_ids = []
+                limit = 0
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    output_fields = [nullable_field_name],
+                    consistency_level = "Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "limit": limit})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
+    def test_milvus_client_search_null_expr_array(self, nullable, null_expr_op):
+        """
+        target: test search with null expression on array fields
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 5
+        # 1. create collection
+        nullable_field_name = "nullable_field"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        schema.add_field(nullable_field_name, DataType.ARRAY, element_type=DataType.INT64, max_capacity=12,
+                         max_length=64, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        if nullable:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": None} for i in range(default_nb)]
+        else:
+            rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                     default_string_field_name: str(i), "nullable_field": [1, 2]} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        vectors_to_search = rng.random((1, dim))
+        insert_ids = [str(i) for i in range(default_nb)]
+        null_expr = nullable_field_name + " " + null_expr_op
+        log.info(null_expr)
+        if nullable:
+            if "not" in null_expr or "NOT" in null_expr:
+                insert_ids = []
+                limit = 0
+
+            else:
+                limit = default_limit
+        else:
+            if "not" in null_expr or "NOT" in null_expr:
+                limit = default_limit
+            else:
+                insert_ids = []
+                limit = 0
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    output_fields=[nullable_field_name],
+                    consistency_level = "Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "limit": limit})

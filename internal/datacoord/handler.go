@@ -213,15 +213,22 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		zap.Any("partition stats", partStatsVersionsMap),
 	)
 
+	seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
+	// if no l0 segment exist, use checkpoint as delete checkpoint
+	if len(levelZeroIDs) == 0 {
+		deleteCheckPoint = seekPosition
+	}
+
 	return &datapb.VchannelInfo{
 		CollectionID:           channel.GetCollectionID(),
 		ChannelName:            channel.GetName(),
-		SeekPosition:           h.GetChannelSeekPosition(channel, partitionIDs...),
+		SeekPosition:           seekPosition,
 		FlushedSegmentIds:      flushedIDs.Collect(),
 		UnflushedSegmentIds:    growingIDs.Collect(),
 		DroppedSegmentIds:      droppedIDs.Collect(),
 		LevelZeroSegmentIds:    levelZeroIDs.Collect(),
 		PartitionStatsVersions: partStatsVersionsMap,
+		DeleteCheckpoint:       deleteCheckPoint,
 	}
 }
 

@@ -505,7 +505,7 @@ def gen_vectors(float_vector, rows, dim):
     return vectors
 
 
-def gen_sparse_vectors(rows, sparse_format="dok"):
+def gen_sparse_vectors(rows, sparse_format="dok", empty_percentage=10):
     # default sparse format is dok, dict of keys
     # another option is coo, coordinate List
 
@@ -513,6 +513,11 @@ def gen_sparse_vectors(rows, sparse_format="dok"):
     vectors = [{
         d: rng.random() for d in random.sample(range(1000), random.randint(20, 30))
     } for _ in range(rows)]
+    if empty_percentage > 0:
+        empty_nb = int(rows * empty_percentage / 100)
+        empty_ids = random.sample(range(rows), empty_nb)
+        for i in empty_ids:
+            vectors[i] = {}
     if sparse_format == "coo":
         vectors = [
             {"indices": list(x.keys()), "values": list(x.values())} for x in vectors

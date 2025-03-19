@@ -18,78 +18,22 @@ package storage
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"cloud.google.com/go/storage"
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
-	"golang.org/x/oauth2/google"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
-	"google.golang.org/api/option"
 
-	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 type GcpNativeObjectStorage struct {
 	client *storage.Client
 }
 
-func newGcpNativeObjectStorageWithConfig(ctx context.Context, c *config) (*GcpNativeObjectStorage, error) {
-	var client *storage.Client
-	var err error
-
-	var opts []option.ClientOption
-	var projectId string
-	if c.address != "" {
-		completeAddress := "http://"
-		if c.useSSL {
-			completeAddress = "https://"
-		}
-		completeAddress = completeAddress + c.address + "/storage/v1/"
-		opts = append(opts, option.WithEndpoint(completeAddress))
-	}
-	if c.gcpNativeWithoutAuth {
-		opts = append(opts, option.WithoutAuthentication())
-	} else {
-		creds, err := google.CredentialsFromJSON(ctx, []byte(c.gcpCredentialJSON), storage.ScopeReadWrite)
-		if err != nil {
-			return nil, err
-		}
-		projectId, err = getProjectId(c.gcpCredentialJSON)
-		if err != nil {
-			return nil, err
-		}
-		opts = append(opts, option.WithCredentials(creds))
-	}
-
-	client, err = storage.NewClient(ctx, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	if c.bucketName == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("invalid empty bucket name")
-	}
-	// Check bucket validity
-	checkBucketFn := func() error {
-		bucket := client.Bucket(c.bucketName)
-		_, err := bucket.Attrs(ctx)
-		if err == storage.ErrBucketNotExist && c.createBucket {
-			log.Info("gcs bucket does not exist, create bucket.", zap.String("bucket name", c.bucketName))
-			err = client.Bucket(c.bucketName).Create(ctx, projectId, nil)
-			if err != nil {
-				return err
-			}
-			return nil
-		}
-		return err
-	}
-	err = retry.Do(ctx, checkBucketFn, retry.Attempts(CheckBucketRetryAttempts))
+func newGcpNativeObjectStorageWithConfig(ctx context.Context, c *objectstorage.Config) (*GcpNativeObjectStorage, error) {
+	client, err := objectstorage.NewGcpObjectStorageClient(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -292,20 +236,4 @@ func (gcsReader *GcsReader) Seek(offset int64, whence int) (int64, error) {
 	gcsReader.reader = newReader
 	gcsReader.position = newOffset
 	return newOffset, nil
-}
-
-func getProjectId(gcpCredentialJSON string) (string, error) {
-	if gcpCredentialJSON == "" {
-		return "", errors.New("the JSON string is empty")
-	}
-	var data map[string]interface{}
-	if err := json.Unmarshal([]byte(gcpCredentialJSON), &data); err != nil {
-		return "", errors.New("failed to parse Google Cloud credentials as JSON")
-	}
-	propertyValue, ok := data["project_id"]
-	projectId := fmt.Sprintf("%v", propertyValue)
-	if !ok {
-		return "", errors.New("projectId doesn't exist")
-	}
-	return projectId, nil
 }

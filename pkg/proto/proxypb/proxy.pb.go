@@ -822,7 +822,7 @@ var file_proxy_proto_rawDesc = []byte{
 	0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x1f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
 	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x43, 0x6c,
 	0x69, 0x65, 0x6e, 0x74, 0x49, 0x6e, 0x66, 0x6f, 0x52, 0x0b, 0x63, 0x6c, 0x69, 0x65, 0x6e, 0x74,
-	0x49, 0x6e, 0x66, 0x6f, 0x73, 0x32, 0xd0, 0x0b, 0x0a, 0x05, 0x50, 0x72, 0x6f, 0x78, 0x79, 0x12,
+	0x49, 0x6e, 0x66, 0x6f, 0x73, 0x32, 0xc4, 0x0c, 0x0a, 0x05, 0x50, 0x72, 0x6f, 0x78, 0x79, 0x12,
 	0x6c, 0x0a, 0x12, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6d, 0x70, 0x6f, 0x6e, 0x65, 0x6e, 0x74, 0x53,
 	0x74, 0x61, 0x74, 0x65, 0x73, 0x12, 0x2e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
 	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x47, 0x65, 0x74, 0x43,
@@ -915,11 +915,18 @@ var file_proxy_proto_rawDesc = []byte{
 	0x74, 0x65, 0x53, 0x68, 0x61, 0x72, 0x64, 0x4c, 0x65, 0x61, 0x64, 0x65, 0x72, 0x43, 0x61, 0x63,
 	0x68, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
 	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e,
-	0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x42, 0x32, 0x5a, 0x30, 0x67, 0x69, 0x74, 0x68,
-	0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f,
-	0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x32, 0x2f, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x70, 0x72, 0x6f, 0x78, 0x79, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x33,
+	0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x72, 0x0a, 0x0f, 0x47, 0x65, 0x74, 0x53,
+	0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x2d, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72,
+	0x6e, 0x61, 0x6c, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x49,
+	0x6e, 0x66, 0x6f, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2e, 0x2e, 0x6d, 0x69, 0x6c,
+	0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e,
+	0x61, 0x6c, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x49, 0x6e,
+	0x66, 0x6f, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x42, 0x32, 0x5a, 0x30,
+	0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75,
+	0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f,
+	0x76, 0x32, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x70, 0x72, 0x6f, 0x78, 0x79, 0x70, 0x62,
+	0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -961,12 +968,14 @@ var file_proxy_proto_goTypes = []interface{}{
 	(*internalpb.ImportRequest)(nil),               // 22: milvus.proto.internal.ImportRequest
 	(*internalpb.GetImportProgressRequest)(nil),    // 23: milvus.proto.internal.GetImportProgressRequest
 	(*internalpb.ListImportsRequest)(nil),          // 24: milvus.proto.internal.ListImportsRequest
-	(*milvuspb.ComponentStates)(nil),               // 25: milvus.proto.milvus.ComponentStates
-	(*milvuspb.StringResponse)(nil),                // 26: milvus.proto.milvus.StringResponse
-	(*milvuspb.GetMetricsResponse)(nil),            // 27: milvus.proto.milvus.GetMetricsResponse
-	(*internalpb.ImportResponse)(nil),              // 28: milvus.proto.internal.ImportResponse
-	(*internalpb.GetImportProgressResponse)(nil),   // 29: milvus.proto.internal.GetImportProgressResponse
-	(*internalpb.ListImportsResponse)(nil),         // 30: milvus.proto.internal.ListImportsResponse
+	(*internalpb.GetSegmentsInfoRequest)(nil),      // 25: milvus.proto.internal.GetSegmentsInfoRequest
+	(*milvuspb.ComponentStates)(nil),               // 26: milvus.proto.milvus.ComponentStates
+	(*milvuspb.StringResponse)(nil),                // 27: milvus.proto.milvus.StringResponse
+	(*milvuspb.GetMetricsResponse)(nil),            // 28: milvus.proto.milvus.GetMetricsResponse
+	(*internalpb.ImportResponse)(nil),              // 29: milvus.proto.internal.ImportResponse
+	(*internalpb.GetImportProgressResponse)(nil),   // 30: milvus.proto.internal.GetImportProgressResponse
+	(*internalpb.ListImportsResponse)(nil),         // 31: milvus.proto.internal.ListImportsResponse
+	(*internalpb.GetSegmentsInfoResponse)(nil),     // 32: milvus.proto.internal.GetSegmentsInfoResponse
 }
 var file_proxy_proto_depIdxs = []int32{
 	12, // 0: milvus.proto.proxy.InvalidateCollMetaCacheRequest.base:type_name -> milvus.proto.common.MsgBase
@@ -1003,22 +1012,24 @@ var file_proxy_proto_depIdxs = []int32{
 	23, // 31: milvus.proto.proxy.Proxy.GetImportProgress:input_type -> milvus.proto.internal.GetImportProgressRequest
 	24, // 32: milvus.proto.proxy.Proxy.ListImports:input_type -> milvus.proto.internal.ListImportsRequest
 	1,  // 33: milvus.proto.proxy.Proxy.InvalidateShardLeaderCache:input_type -> milvus.proto.proxy.InvalidateShardLeaderCacheRequest
-	25, // 34: milvus.proto.proxy.Proxy.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
-	26, // 35: milvus.proto.proxy.Proxy.GetStatisticsChannel:output_type -> milvus.proto.milvus.StringResponse
-	16, // 36: milvus.proto.proxy.Proxy.InvalidateCollectionMetaCache:output_type -> milvus.proto.common.Status
-	26, // 37: milvus.proto.proxy.Proxy.GetDdChannel:output_type -> milvus.proto.milvus.StringResponse
-	16, // 38: milvus.proto.proxy.Proxy.InvalidateCredentialCache:output_type -> milvus.proto.common.Status
-	16, // 39: milvus.proto.proxy.Proxy.UpdateCredentialCache:output_type -> milvus.proto.common.Status
-	16, // 40: milvus.proto.proxy.Proxy.RefreshPolicyInfoCache:output_type -> milvus.proto.common.Status
-	27, // 41: milvus.proto.proxy.Proxy.GetProxyMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
-	16, // 42: milvus.proto.proxy.Proxy.SetRates:output_type -> milvus.proto.common.Status
-	10, // 43: milvus.proto.proxy.Proxy.ListClientInfos:output_type -> milvus.proto.proxy.ListClientInfosResponse
-	28, // 44: milvus.proto.proxy.Proxy.ImportV2:output_type -> milvus.proto.internal.ImportResponse
-	29, // 45: milvus.proto.proxy.Proxy.GetImportProgress:output_type -> milvus.proto.internal.GetImportProgressResponse
-	30, // 46: milvus.proto.proxy.Proxy.ListImports:output_type -> milvus.proto.internal.ListImportsResponse
-	16, // 47: milvus.proto.proxy.Proxy.InvalidateShardLeaderCache:output_type -> milvus.proto.common.Status
-	34, // [34:48] is the sub-list for method output_type
-	20, // [20:34] is the sub-list for method input_type
+	25, // 34: milvus.proto.proxy.Proxy.GetSegmentsInfo:input_type -> milvus.proto.internal.GetSegmentsInfoRequest
+	26, // 35: milvus.proto.proxy.Proxy.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
+	27, // 36: milvus.proto.proxy.Proxy.GetStatisticsChannel:output_type -> milvus.proto.milvus.StringResponse
+	16, // 37: milvus.proto.proxy.Proxy.InvalidateCollectionMetaCache:output_type -> milvus.proto.common.Status
+	27, // 38: milvus.proto.proxy.Proxy.GetDdChannel:output_type -> milvus.proto.milvus.StringResponse
+	16, // 39: milvus.proto.proxy.Proxy.InvalidateCredentialCache:output_type -> milvus.proto.common.Status
+	16, // 40: milvus.proto.proxy.Proxy.UpdateCredentialCache:output_type -> milvus.proto.common.Status
+	16, // 41: milvus.proto.proxy.Proxy.RefreshPolicyInfoCache:output_type -> milvus.proto.common.Status
+	28, // 42: milvus.proto.proxy.Proxy.GetProxyMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
+	16, // 43: milvus.proto.proxy.Proxy.SetRates:output_type -> milvus.proto.common.Status
+	10, // 44: milvus.proto.proxy.Proxy.ListClientInfos:output_type -> milvus.proto.proxy.ListClientInfosResponse
+	29, // 45: milvus.proto.proxy.Proxy.ImportV2:output_type -> milvus.proto.internal.ImportResponse
+	30, // 46: milvus.proto.proxy.Proxy.GetImportProgress:output_type -> milvus.proto.internal.GetImportProgressResponse
+	31, // 47: milvus.proto.proxy.Proxy.ListImports:output_type -> milvus.proto.internal.ListImportsResponse
+	16, // 48: milvus.proto.proxy.Proxy.InvalidateShardLeaderCache:output_type -> milvus.proto.common.Status
+	32, // 49: milvus.proto.proxy.Proxy.GetSegmentsInfo:output_type -> milvus.proto.internal.GetSegmentsInfoResponse
+	35, // [35:50] is the sub-list for method output_type
+	20, // [20:35] is the sub-list for method input_type
 	20, // [20:20] is the sub-list for extension type_name
 	20, // [20:20] is the sub-list for extension extendee
 	0,  // [0:20] is the sub-list for field type_name

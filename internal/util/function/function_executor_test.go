@@ -19,6 +19,7 @@
 package function
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -148,7 +149,7 @@ func (s *FunctionExecutorSuite) TestExecutor() {
 	exec, err := NewFunctionExecutor(schema)
 	s.NoError(err)
 	msg := s.createMsg([]string{"sentence", "sentence"})
-	exec.ProcessInsert(msg)
+	exec.ProcessInsert(context.Background(), msg)
 	s.Equal(len(msg.FieldsData), 3)
 }
 
@@ -183,7 +184,7 @@ func (s *FunctionExecutorSuite) TestErrorEmbedding() {
 	exec, err := NewFunctionExecutor(schema)
 	s.NoError(err)
 	msg := s.createMsg([]string{"sentence", "sentence"})
-	err = exec.ProcessInsert(msg)
+	err = exec.ProcessInsert(context.Background(), msg)
 	s.Error(err)
 }
 
@@ -225,7 +226,7 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearch() {
 			IsAdvanced:       false,
 			FieldId:          102,
 		}
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.NoError(err)
 
 		// No function found
@@ -235,7 +236,7 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearch() {
 			IsAdvanced:       false,
 			FieldId:          111,
 		}
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.Error(err)
 
 		// Large search nq
@@ -245,7 +246,7 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearch() {
 			IsAdvanced:       false,
 			FieldId:          102,
 		}
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.Error(err)
 	}
 
@@ -277,12 +278,12 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearch() {
 			IsAdvanced: true,
 			SubReqs:    []*internalpb.SubSearchRequest{subReq},
 		}
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.NoError(err)
 
 		// Large nq
 		subReq.Nq = 1000
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.Error(err)
 	}
 }
@@ -318,7 +319,7 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearchFailed() {
 			IsAdvanced:       false,
 			FieldId:          102,
 		}
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.Error(err)
 	}
 	// AdvanceSearch
@@ -332,7 +333,7 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearchFailed() {
 			IsAdvanced: true,
 			SubReqs:    []*internalpb.SubSearchRequest{subReq},
 		}
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.Error(err)
 	}
 }

@@ -48,7 +48,7 @@ func (c *Client) MetadataUnaryInterceptor() grpc.UnaryClientInterceptor {
 }
 
 func (c *Client) metadata(ctx context.Context) context.Context {
-	for k, v := range c.config.metadataHeaders {
+	for k, v := range c.metadataHeaders {
 		ctx = metadata.AppendToOutgoingContext(ctx, k, v)
 	}
 	return ctx

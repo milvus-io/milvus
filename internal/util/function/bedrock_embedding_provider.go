@@ -98,9 +98,13 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 				return nil, err
 			}
 		case awsAKIdParamKey:
-			awsAccessKeyId = param.Value
+			if strings.ToLower(os.Getenv(enableConfigAKAndURL)) != "false" {
+				awsAccessKeyId = param.Value
+			}
 		case awsSAKParamKey:
-			awsSecretAccessKey = param.Value
+			if strings.ToLower(os.Getenv(enableConfigAKAndURL)) != "false" {
+				awsSecretAccessKey = param.Value
+			}
 		case regionParamKey:
 			region = param.Value
 		case normalizeParamKey:
@@ -116,10 +120,6 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 		}
 	}
 
-	if modelName != BedRockTitanTextEmbeddingsV2 {
-		return nil, fmt.Errorf("Unsupported model: %s, only support [%s]",
-			modelName, BedRockTitanTextEmbeddingsV2)
-	}
 	var client BedrockClient
 	if c == nil {
 		client, err = createBedRockEmbeddingClient(awsAccessKeyId, awsSecretAccessKey, region)

@@ -78,7 +78,6 @@ type ComponentParam struct {
 	QueryNodeCfg   queryNodeConfig
 	DataCoordCfg   dataCoordConfig
 	DataNodeCfg    dataNodeConfig
-	IndexNodeCfg   indexNodeConfig
 	KnowhereConfig knowhereConfig
 	HTTPCfg        httpConfig
 	LogCfg         logConfig
@@ -94,7 +93,6 @@ type ComponentParam struct {
 	QueryNodeGrpcServerCfg     GrpcServerConfig
 	DataCoordGrpcServerCfg     GrpcServerConfig
 	DataNodeGrpcServerCfg      GrpcServerConfig
-	IndexNodeGrpcServerCfg     GrpcServerConfig
 	StreamingNodeGrpcServerCfg GrpcServerConfig
 
 	RootCoordGrpcClientCfg      GrpcClientConfig
@@ -103,7 +101,6 @@ type ComponentParam struct {
 	QueryNodeGrpcClientCfg      GrpcClientConfig
 	DataCoordGrpcClientCfg      GrpcClientConfig
 	DataNodeGrpcClientCfg       GrpcClientConfig
-	IndexNodeGrpcClientCfg      GrpcClientConfig
 	StreamingCoordGrpcClientCfg GrpcClientConfig
 	StreamingNodeGrpcClientCfg  GrpcClientConfig
 	IntegrationTestCfg          integrationTestConfig
@@ -134,7 +131,6 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QueryNodeCfg.init(bt)
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
-	p.IndexNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
@@ -152,7 +148,6 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QueryNodeGrpcServerCfg.Init("queryNode", bt)
 	p.DataCoordGrpcServerCfg.Init("dataCoord", bt)
 	p.DataNodeGrpcServerCfg.Init("dataNode", bt)
-	p.IndexNodeGrpcServerCfg.Init("indexNode", bt)
 	p.StreamingNodeGrpcServerCfg.Init("streamingNode", bt)
 
 	p.RootCoordGrpcClientCfg.Init("rootCoord", bt)
@@ -161,7 +156,6 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QueryNodeGrpcClientCfg.Init("queryNode", bt)
 	p.DataCoordGrpcClientCfg.Init("dataCoord", bt)
 	p.DataNodeGrpcClientCfg.Init("dataNode", bt)
-	p.IndexNodeGrpcClientCfg.Init("indexNode", bt)
 	p.StreamingCoordGrpcClientCfg.Init("streamingCoord", bt)
 	p.StreamingNodeGrpcClientCfg.Init("streamingNode", bt)
 
@@ -298,6 +292,8 @@ type commonConfig struct {
 	LocalRPCEnabled ParamItem `refreshable:"false"`
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
+
+	EnabledOptimizeExpr ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1000,6 +996,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.SyncTaskPoolReleaseTimeoutSeconds.Init(base.mgr)
+
+	p.EnabledOptimizeExpr = ParamItem{
+		Key:          "common.enabledOptimizeExpr",
+		Version:      "2.5.6",
+		DefaultValue: "true",
+		Doc:          "Indicates whether to enable optimize expr",
+		Export:       true,
+	}
+	p.EnabledOptimizeExpr.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -2675,6 +2680,7 @@ type queryNodeConfig struct {
 	// delta forward
 	LevelZeroForwardPolicy      ParamItem `refreshable:"true"`
 	StreamingDeltaForwardPolicy ParamItem `refreshable:"true"`
+	ForwardBatchSize            ParamItem `refreshable:"true"`
 
 	// loader
 	IoPoolSize             ParamItem `refreshable:"false"`
@@ -3283,6 +3289,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.StreamingDeltaForwardPolicy.Init(base.mgr)
 
+	p.ForwardBatchSize = ParamItem{
+		Key:          "queryNode.forwardBatchSize",
+		Version:      "2.5.7",
+		Doc:          "the batch size delegator uses for forwarding stream delete in loading procedure",
+		DefaultValue: "4194304", // 4MB
+		Export:       true,
+	}
+	p.ForwardBatchSize.Init(base.mgr)
+
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",
 		Version:      "2.3.0",
@@ -3482,6 +3497,8 @@ type dataCoordConfig struct {
 	GrowingSegmentsMemSizeInMB     ParamItem `refreshable:"true"`
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
+	BlockingL0EntryNum             ParamItem `refreshable:"true"`
+	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
 
 	// compaction
 	EnableCompaction            ParamItem `refreshable:"false"`
@@ -3744,6 +3761,26 @@ exceeds this threshold, the largest growing segment will be sealed.`,
 		Export: true,
 	}
 	p.GrowingSegmentsMemSizeInMB.Init(base.mgr)
+
+	p.BlockingL0EntryNum = ParamItem{
+		Key:          "dataCoord.sealPolicy.channel.blockingL0EntryNum",
+		Version:      "2.5.7",
+		DefaultValue: "5000000",
+		Doc: `If the total entry number of l0 logs of each shard 
+exceeds this threshold, the earliest growing segments will be sealed.`,
+		Export: true,
+	}
+	p.BlockingL0EntryNum.Init(base.mgr)
+
+	p.BlockingL0SizeInMB = ParamItem{
+		Key:          "dataCoord.sealPolicy.channel.blockingL0SizeInMB",
+		Version:      "2.5.7",
+		DefaultValue: "64",
+		Doc: `The size threshold in MB, if the total entry number of l0 logs of each shard 
+exceeds this threshold, the earliest growing segments will be sealed.`,
+		Export: true,
+	}
+	p.BlockingL0SizeInMB.Init(base.mgr)
 
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",
@@ -4563,6 +4600,12 @@ type dataNodeConfig struct {
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
 	DeltalogFormat ParamItem `refreshable:"false"`
+
+	// index services config
+	BuildParallel          ParamItem `refreshable:"false"`
+	EnableDisk             ParamItem `refreshable:"false"`
+	DiskCapacityLimit      ParamItem `refreshable:"true"`
+	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -4955,21 +4998,7 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.DeltalogFormat.Init(base.mgr)
-}
 
-// /////////////////////////////////////////////////////////////////////////////
-// --- indexnode ---
-type indexNodeConfig struct {
-	BuildParallel ParamItem `refreshable:"false"`
-	// enable disk
-	EnableDisk             ParamItem `refreshable:"false"`
-	DiskCapacityLimit      ParamItem `refreshable:"true"`
-	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
-
-	GracefulStopTimeout ParamItem `refreshable:"true"`
-}
-
-func (p *indexNodeConfig) init(base *BaseTable) {
 	p.BuildParallel = ParamItem{
 		Key:          "indexNode.scheduler.buildParallel",
 		Version:      "2.0.0",
@@ -4983,7 +5012,7 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Version:      "2.2.0",
 		DefaultValue: "false",
 		PanicIfEmpty: true,
-		Doc:          "enable index node build disk vector index",
+		Doc:          "enable build disk vector index",
 		Export:       true,
 	}
 	p.EnableDisk.Init(base.mgr)
@@ -5023,14 +5052,6 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Export: true,
 	}
 	p.MaxDiskUsagePercentage.Init(base.mgr)
-
-	p.GracefulStopTimeout = ParamItem{
-		Key:          "indexNode.gracefulStopTimeout",
-		Version:      "2.2.1",
-		FallbackKeys: []string{"common.gracefulStopTimeout"},
-		Doc:          "seconds. force stop node without graceful stop",
-	}
-	p.GracefulStopTimeout.Init(base.mgr)
 }
 
 type streamingConfig struct {

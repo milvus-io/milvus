@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -50,21 +49,26 @@ type ChunkedBlobsReader func() ([]*Blob, error)
 
 type CompositeBinlogRecordReader struct {
 	BlobsReader ChunkedBlobsReader
+	schema      *schemapb.CollectionSchema
+	index       map[FieldID]int16
 
 	brs []*BinlogReader
 	rrs []array.RecordReader
-
-	schema *schemapb.CollectionSchema
-	index  map[FieldID]int16
 }
 
 func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
 	if crr.brs != nil {
 		for _, er := range crr.brs {
-			er.Close()
+			if er != nil {
+				er.Close()
+			}
 		}
+	}
+	if crr.rrs != nil {
 		for _, rr := range crr.rrs {
-			rr.Release()
+			if rr != nil {
+				rr.Release()
+			}
 		}
 	}
 
@@ -73,13 +77,10 @@ func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
 		return err
 	}
 
-	if crr.rrs == nil {
-		crr.rrs = make([]array.RecordReader, len(blobs))
-		crr.brs = make([]*BinlogReader, len(blobs))
-		crr.index = make(map[FieldID]int16, len(blobs))
-	}
+	crr.rrs = make([]array.RecordReader, len(crr.schema.Fields))
+	crr.brs = make([]*BinlogReader, len(crr.schema.Fields))
 
-	for i, b := range blobs {
+	for _, b := range blobs {
 		reader, err := NewBinlogReader(b.Value)
 		if err != nil {
 			return err
@@ -89,12 +90,12 @@ func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
 		if err != nil {
 			return err
 		}
+		i := crr.index[reader.FieldID]
 		rr, err := er.GetArrowRecordReader()
 		if err != nil {
 			return err
 		}
 		crr.rrs[i] = rr
-		crr.index[reader.FieldID] = int16(i)
 		crr.brs[i] = reader
 	}
 	return nil
@@ -107,36 +108,45 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 		}
 	}
 
-	composeRecord := func() (Record, bool) {
-		recs := make([]arrow.Array, len(crr.rrs))
-		for i, rr := range crr.rrs {
-			if ok := rr.Next(); !ok {
-				return nil, false
+	composeRecord := func() (Record, error) {
+		recs := make([]arrow.Array, len(crr.schema.Fields))
+
+		for i, f := range crr.schema.Fields {
+			if crr.rrs[i] != nil {
+				if ok := crr.rrs[i].Next(); !ok {
+					return nil, io.EOF
+				}
+				recs[i] = crr.rrs[i].Record().Column(0)
+			} else {
+				// If the field is not in the current batch, fill with null array
+				// Note that we're intentionally not filling default value here, because the
+				// deserializer will fill them later.
+				if !f.Nullable {
+					return nil, merr.WrapErrServiceInternal(fmt.Sprintf("missing field data %s", f.Name))
+				}
+				dim, _ := typeutil.GetDim(f)
+				builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[f.DataType].arrowType(int(dim)))
+				builder.AppendNulls(int(crr.rrs[0].Record().NumRows()))
+				recs[i] = builder.NewArray()
 			}
-			recs[i] = rr.Record().Column(0)
 		}
 		return &compositeRecord{
 			index: crr.index,
 			recs:  recs,
-		}, true
+		}, nil
 	}
 
 	// Try compose records
-	var (
-		r  Record
-		ok bool
-	)
-	r, ok = composeRecord()
-	if !ok {
-		// If failed the first time, try iterate next batch (blob), the error may be io.EOF
+	r, err := composeRecord()
+	if err == io.EOF {
+		// if EOF, try iterate next batch (blob)
 		if err := crr.iterateNextBatch(); err != nil {
 			return nil, err
 		}
-		// If iterate next batch success, try compose again
-		if r, ok = composeRecord(); !ok {
-			// If the next blob is empty, return io.EOF (it's rare).
-			return nil, io.EOF
-		}
+		r, err = composeRecord() // try compose again
+	}
+	if err != nil {
+		return nil, err
 	}
 	return r, nil
 }
@@ -171,43 +181,45 @@ func parseBlobKey(blobKey string) (colId FieldID, logId UniqueID) {
 }
 
 func MakeBlobsReader(blobs []*Blob) ChunkedBlobsReader {
-	blobMap := make(map[FieldID][]*Blob)
-	for _, blob := range blobs {
-		colId, _ := parseBlobKey(blob.Key)
-		if _, exists := blobMap[colId]; !exists {
-			blobMap[colId] = []*Blob{blob}
-		} else {
-			blobMap[colId] = append(blobMap[colId], blob)
+	// sort blobs by log id
+	sort.Slice(blobs, func(i, j int) bool {
+		_, iLog := parseBlobKey(blobs[i].Key)
+		_, jLog := parseBlobKey(blobs[j].Key)
+		return iLog < jLog
+	})
+	var field0 FieldID
+	pivots := make([]int, 0)
+	for i, blob := range blobs {
+		if i == 0 {
+			field0, _ = parseBlobKey(blob.Key)
+			pivots = append(pivots, 0)
+			continue
+		}
+		if fieldID, _ := parseBlobKey(blob.Key); fieldID == field0 {
+			pivots = append(pivots, i)
 		}
 	}
-	sortedBlobs := make([][]*Blob, 0, len(blobMap))
-	for _, blobsForField := range blobMap {
-		sort.Slice(blobsForField, func(i, j int) bool {
-			_, iLog := parseBlobKey(blobsForField[i].Key)
-			_, jLog := parseBlobKey(blobsForField[j].Key)
-
-			return iLog < jLog
-		})
-		sortedBlobs = append(sortedBlobs, blobsForField)
-	}
+	pivots = append(pivots, len(blobs)) // append a pivot to the end of the slice
 	chunkPos := 0
 	return func() ([]*Blob, error) {
-		if len(sortedBlobs) == 0 || chunkPos >= len(sortedBlobs[0]) {
+		if chunkPos >= len(pivots)-1 {
 			return nil, io.EOF
 		}
-		blobs := make([]*Blob, len(sortedBlobs))
-		for fieldPos := range blobs {
-			blobs[fieldPos] = sortedBlobs[fieldPos][chunkPos]
-		}
+		chunk := blobs[pivots[chunkPos]:pivots[chunkPos+1]]
 		chunkPos++
-		return blobs, nil
+		return chunk, nil
 	}
 }
 
 func newCompositeBinlogRecordReader(schema *schemapb.CollectionSchema, blobsReader ChunkedBlobsReader) (*CompositeBinlogRecordReader, error) {
+	index := make(map[FieldID]int16)
+	for i, f := range schema.Fields {
+		index[f.FieldID] = int16(i)
+	}
 	return &CompositeBinlogRecordReader{
 		schema:      schema,
 		BlobsReader: blobsReader,
+		index:       index,
 	}, nil
 }
 
@@ -236,16 +248,12 @@ func ValueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema
 		for _, f := range fieldSchema {
 			j := f.FieldID
 			dt := f.DataType
-			if r.Column(j) == nil {
+			if r.Column(j).IsNull(i) {
 				if f.GetDefaultValue() != nil {
 					m[j] = getDefaultValue(f)
 				} else {
 					m[j] = nil
 				}
-				continue
-			}
-			if r.Column(j).IsNull(i) {
-				m[j] = nil
 			} else {
 				d, ok := serdeMap[dt].deserialize(r.Column(j), i)
 				if ok {
@@ -275,7 +283,7 @@ func ValueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema
 	return nil
 }
 
-func NewBinlogDeserializeReader(schema *schemapb.CollectionSchema, blobsReader ChunkedBlobsReader) (*DeserializeReader[*Value], error) {
+func NewBinlogDeserializeReader(schema *schemapb.CollectionSchema, blobsReader ChunkedBlobsReader) (*DeserializeReaderImpl[*Value], error) {
 	reader, err := newCompositeBinlogRecordReader(schema, blobsReader)
 	if err != nil {
 		return nil, err
@@ -286,8 +294,16 @@ func NewBinlogDeserializeReader(schema *schemapb.CollectionSchema, blobsReader C
 	}), nil
 }
 
-func newDeltalogOneFieldReader(blobs []*Blob) (*DeserializeReader[*DeleteLog], error) {
-	reader, err := newCompositeBinlogRecordReader(nil, MakeBlobsReader(blobs))
+func newDeltalogOneFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog], error) {
+	reader, err := newCompositeBinlogRecordReader(
+		&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_VarChar,
+				},
+			},
+		},
+		MakeBlobsReader(blobs))
 	if err != nil {
 		return nil, err
 	}
@@ -445,6 +461,9 @@ type BinlogRecordWriter interface {
 		bm25StatsLog map[FieldID]*datapb.FieldBinlog,
 	)
 	GetRowNum() int64
+	FlushChunk() error
+	GetBufferUncompressed() uint64
+	Schema() *schemapb.CollectionSchema
 }
 
 type ChunkedBlobsWriter func([]*Blob) error
@@ -474,6 +493,8 @@ type CompositeBinlogRecordWriter struct {
 	fieldBinlogs map[FieldID]*datapb.FieldBinlog
 	statsLog     *datapb.FieldBinlog
 	bm25StatsLog map[FieldID]*datapb.FieldBinlog
+
+	flushedUncompressed uint64
 }
 
 var _ BinlogRecordWriter = (*CompositeBinlogRecordWriter)(nil)
@@ -527,7 +548,7 @@ func (c *CompositeBinlogRecordWriter) Write(r Record) error {
 
 	// flush if size exceeds chunk size
 	if c.rw.GetWrittenUncompressed() >= c.chunkSize {
-		return c.flushChunk()
+		return c.FlushChunk()
 	}
 
 	return nil
@@ -565,18 +586,25 @@ func (c *CompositeBinlogRecordWriter) Close() error {
 	}
 	if c.rw != nil {
 		// if rw is not nil, it means there is data to be flushed
-		if err := c.flushChunk(); err != nil {
+		if err := c.FlushChunk(); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *CompositeBinlogRecordWriter) GetWrittenUncompressed() uint64 {
-	return 0
+func (c *CompositeBinlogRecordWriter) GetBufferUncompressed() uint64 {
+	if c.rw == nil {
+		return 0
+	}
+	return c.rw.GetWrittenUncompressed()
 }
 
-func (c *CompositeBinlogRecordWriter) flushChunk() error {
+func (c *CompositeBinlogRecordWriter) GetWrittenUncompressed() uint64 {
+	return c.flushedUncompressed + c.GetBufferUncompressed()
+}
+
+func (c *CompositeBinlogRecordWriter) FlushChunk() error {
 	if c.fieldWriters == nil {
 		return nil
 	}
@@ -621,9 +649,15 @@ func (c *CompositeBinlogRecordWriter) flushChunk() error {
 		})
 	}
 
+	c.flushedUncompressed += c.rw.GetWrittenUncompressed()
+
 	// reset writers
 	c.resetWriters()
 	return nil
+}
+
+func (c *CompositeBinlogRecordWriter) Schema() *schemapb.CollectionSchema {
+	return c.schema
 }
 
 func (c *CompositeBinlogRecordWriter) writeStats() error {
@@ -731,7 +765,6 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 ) (*CompositeBinlogRecordWriter, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		log.Warn("failed to get pk field from schema")
 		return nil, err
 	}
 	stats, err := NewPrimaryKeyStats(pkField.GetFieldID(), int64(pkField.GetDataType()), maxRowNum)
@@ -764,21 +797,39 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 	}, nil
 }
 
-func NewChunkedBinlogSerializeWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
-	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64, batchSize int,
-) (*SerializeWriter[*Value], error) {
-	rw, err := newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema, blobsWriter, allocator, chunkSize, rootPath, maxRowNum)
-	if err != nil {
-		return nil, err
+// BinlogValueWriter is a BinlogRecordWriter with SerializeWriter[*Value] mixin.
+type BinlogValueWriter struct {
+	BinlogRecordWriter
+	SerializeWriter[*Value]
+}
+
+func (b *BinlogValueWriter) Close() error {
+	return b.SerializeWriter.Close()
+}
+
+func NewBinlogValueWriter(rw BinlogRecordWriter, batchSize int,
+) *BinlogValueWriter {
+	return &BinlogValueWriter{
+		BinlogRecordWriter: rw,
+		SerializeWriter: NewSerializeRecordWriter[*Value](rw, func(v []*Value) (Record, error) {
+			return ValueSerializer(v, rw.Schema().Fields)
+		}, batchSize),
 	}
-	return NewSerializeRecordWriter[*Value](rw, func(v []*Value) (Record, error) {
-		return ValueSerializer(v, schema.Fields)
-	}, batchSize), nil
+}
+
+// deprecated, use NewBinlogValueWriter instead
+type BinlogSerializeWriter struct {
+	RecordWriter
+	SerializeWriter[*Value]
+}
+
+func (b *BinlogSerializeWriter) Close() error {
+	return b.SerializeWriter.Close()
 }
 
 func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, segmentID UniqueID,
 	eventWriters map[FieldID]*BinlogStreamWriter, batchSize int,
-) (*SerializeWriter[*Value], error) {
+) (*BinlogSerializeWriter, error) {
 	rws := make(map[FieldID]RecordWriter, len(eventWriters))
 	for fid := range eventWriters {
 		w := eventWriters[fid]
@@ -789,9 +840,12 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 		rws[fid] = rw
 	}
 	compositeRecordWriter := NewCompositeRecordWriter(rws)
-	return NewSerializeRecordWriter[*Value](compositeRecordWriter, func(v []*Value) (Record, error) {
-		return ValueSerializer(v, schema.Fields)
-	}, batchSize), nil
+	return &BinlogSerializeWriter{
+		RecordWriter: compositeRecordWriter,
+		SerializeWriter: NewSerializeRecordWriter[*Value](compositeRecordWriter, func(v []*Value) (Record, error) {
+			return ValueSerializer(v, schema.Fields)
+		}, batchSize),
+	}, nil
 }
 
 type DeltalogStreamWriter struct {
@@ -878,7 +932,7 @@ func newDeltalogStreamWriter(collectionID, partitionID, segmentID UniqueID) *Del
 	}
 }
 
-func newDeltalogSerializeWriter(eventWriter *DeltalogStreamWriter, batchSize int) (*SerializeWriter[*DeleteLog], error) {
+func newDeltalogSerializeWriter(eventWriter *DeltalogStreamWriter, batchSize int) (*SerializeWriterImpl[*DeleteLog], error) {
 	rws := make(map[FieldID]RecordWriter, 1)
 	rw, err := eventWriter.GetRecordWriter()
 	if err != nil {
@@ -886,7 +940,7 @@ func newDeltalogSerializeWriter(eventWriter *DeltalogStreamWriter, batchSize int
 	}
 	rws[0] = rw
 	compositeRecordWriter := NewCompositeRecordWriter(rws)
-	return NewSerializeRecordWriter[*DeleteLog](compositeRecordWriter, func(v []*DeleteLog) (Record, error) {
+	return NewSerializeRecordWriter(compositeRecordWriter, func(v []*DeleteLog) (Record, error) {
 		builder := array.NewBuilder(memory.DefaultAllocator, arrow.BinaryTypes.String)
 
 		for _, vv := range v {
@@ -1101,7 +1155,7 @@ func (dsw *MultiFieldDeltalogStreamWriter) writeDeltalogHeaders(w io.Writer) err
 	return nil
 }
 
-func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, batchSize int) (*SerializeWriter[*DeleteLog], error) {
+func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, batchSize int) (*SerializeWriterImpl[*DeleteLog], error) {
 	rw, err := eventWriter.GetRecordWriter()
 	if err != nil {
 		return nil, err
@@ -1155,7 +1209,7 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 	}, batchSize), nil
 }
 
-func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReader[*DeleteLog], error) {
+func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog], error) {
 	reader, err := newSimpleArrowRecordReader(blobs)
 	if err != nil {
 		return nil, err
@@ -1198,7 +1252,7 @@ func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReader[*DeleteLog],
 // NewDeltalogDeserializeReader is the entry point for the delta log reader.
 // It includes NewDeltalogOneFieldReader, which uses the existing log format with only one column in a log file,
 // and NewDeltalogMultiFieldReader, which uses the new format and supports multiple fields in a log file.
-func newDeltalogDeserializeReader(blobs []*Blob) (*DeserializeReader[*DeleteLog], error) {
+func newDeltalogDeserializeReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog], error) {
 	if supportMultiFieldFormat(blobs) {
 		return newDeltalogMultiFieldReader(blobs)
 	}
@@ -1220,11 +1274,12 @@ func supportMultiFieldFormat(blobs []*Blob) bool {
 	return false
 }
 
-func CreateDeltalogReader(blobs []*Blob) (*DeserializeReader[*DeleteLog], error) {
+func CreateDeltalogReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog], error) {
 	return newDeltalogDeserializeReader(blobs)
 }
 
-func CreateDeltalogWriter(collectionID, partitionID, segmentID UniqueID, pkType schemapb.DataType, batchSize int) (*SerializeWriter[*DeleteLog], func() (*Blob, error), error) {
+func CreateDeltalogWriter(collectionID, partitionID, segmentID UniqueID, pkType schemapb.DataType, batchSize int,
+) (*SerializeWriterImpl[*DeleteLog], func() (*Blob, error), error) {
 	format := paramtable.Get().DataNodeCfg.DeltalogFormat.GetValue()
 	if format == "json" {
 		eventWriter := newDeltalogStreamWriter(collectionID, partitionID, segmentID)

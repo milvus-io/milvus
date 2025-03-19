@@ -2274,62 +2274,6 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	})
 }
 
-func TestDataCoord_SegmentStatistics(t *testing.T) {
-	t.Run("test update imported segment stat", func(t *testing.T) {
-		svr := newTestServer(t)
-
-		seg1 := &datapb.SegmentInfo{
-			ID:        100,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(101, 1, 1)},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 3)},
-			State:     commonpb.SegmentState_Importing,
-		}
-
-		info := NewSegmentInfo(seg1)
-		svr.meta.AddSegment(context.TODO(), info)
-
-		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-			Stats: []*commonpb.SegmentStats{{
-				SegmentID: 100,
-				NumRows:   int64(1),
-			}},
-		})
-		assert.NoError(t, err)
-
-		assert.Equal(t, svr.meta.GetHealthySegment(context.TODO(), 100).currRows, int64(1))
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-		closeTestServer(t, svr)
-	})
-
-	t.Run("test update flushed segment stat", func(t *testing.T) {
-		svr := newTestServer(t)
-
-		seg1 := &datapb.SegmentInfo{
-			ID:        100,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(101, 1, 1)},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 3)},
-			State:     commonpb.SegmentState_Flushed,
-		}
-
-		info := NewSegmentInfo(seg1)
-		svr.meta.AddSegment(context.TODO(), info)
-
-		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-			Stats: []*commonpb.SegmentStats{{
-				SegmentID: 100,
-				NumRows:   int64(1),
-			}},
-		})
-		assert.NoError(t, err)
-
-		assert.Equal(t, svr.meta.GetHealthySegment(context.TODO(), 100).currRows, int64(0))
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-		closeTestServer(t, svr)
-	})
-}
-
 func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 	mockVChannel := "fake-by-dev-rootcoord-dml-1-testchannelcp-v0"
 
@@ -2462,7 +2406,7 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 	svr.SetTiKVClient(globalTestTikv)
 
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		return newMockDataNodeClient(0, nil)
+		return mocks.NewMockDataNodeClient(t), nil
 	}
 	svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 		return newMockRootCoordClient(), nil
@@ -2513,20 +2457,19 @@ func closeTestServer(t *testing.T, svr *Server) {
 
 func Test_CheckHealth(t *testing.T) {
 	getSessionManager := func(isHealthy bool) *session.DataNodeManagerImpl {
-		var client *mockDataNodeClient
-		if isHealthy {
-			client = &mockDataNodeClient{
-				id:    1,
-				state: commonpb.StateCode_Healthy,
-			}
-		} else {
-			client = &mockDataNodeClient{
-				id:    1,
-				state: commonpb.StateCode_Abnormal,
-			}
-		}
-
 		sm := session.NewDataNodeManagerImpl(session.WithDataNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+			var client *mocks.MockDataNodeClient
+			if isHealthy {
+				client = mocks.NewMockDataNodeClient(t)
+				client.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+					State: &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
+				}, nil)
+			} else {
+				client = mocks.NewMockDataNodeClient(t)
+				client.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+					State: &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
+				}, nil)
+			}
 			return client, nil
 		}))
 		sm.AddSession(&session.NodeInfo{

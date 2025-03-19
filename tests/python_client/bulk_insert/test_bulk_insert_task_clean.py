@@ -65,7 +65,7 @@ class TestcaseBaseBulkInsert(TestcaseBase):
         minio_ip = list(minio_ip_pod_pair.keys())[0]
         minio_port = "9000"
         self.minio_endpoint = f"{minio_ip}:{minio_port}"
-        self.bucket_name = ms.index_nodes[0]["infos"]["system_configurations"][
+        self.bucket_name = ms.data_nodes[0]["infos"]["system_configurations"][
             "minio_bucket_name"
         ]
 

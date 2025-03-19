@@ -426,7 +426,7 @@ var (
 			Name:      "search_sparse_num_non_zeros",
 			Help:      "the number of non-zeros in each sparse search task",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, collectionName})
+		}, []string{nodeIDLabelName, collectionName, queryTypeLabelName, fieldIDLabelName})
 
 	// ProxyQueueTaskNum records task number of queue in Proxy.
 	ProxyQueueTaskNum = prometheus.NewGaugeVec(
@@ -435,7 +435,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "queue_task_num",
 			Help:      "",
-		}, []string{nodeIDLabelName, queueTypeLabelName, taskStateLabel})
+		}, []string{nodeIDLabelName, queueTypeLabelName, TaskStateLabel})
 
 	ProxyParseExpressionLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -445,6 +445,15 @@ var (
 			Help:      "the latency of parse expression",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, functionLabelName, statusLabelName})
+	// ProxyFunctionlatency records the latency of function
+	ProxyFunctionlatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "function_udf_call_latency",
+			Help:      "latency of function call",
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, collectionName, functionTypeName, functionProvider, functionName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -511,6 +520,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyQueueTaskNum)
 
 	registry.MustRegister(ProxyParseExpressionLatency)
+
+	registry.MustRegister(ProxyFunctionlatency)
 
 	RegisterStreamingServiceClient(registry)
 }

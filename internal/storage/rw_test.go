@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
@@ -138,11 +139,9 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	defer reader.Close()
 
 	for i := 1; i <= rows; i++ {
-		err = reader.Next()
+		value, err := reader.NextValue()
 		s.NoError(err)
-
-		value := reader.Value()
-		rec, err := ValueSerializer([]*Value{value}, s.schema.Fields)
+		rec, err := ValueSerializer([]*Value{*value}, s.schema.Fields)
 		s.NoError(err)
 		err = w.Write(rec)
 		s.NoError(err)
@@ -174,6 +173,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	}
 	r, err := NewBinlogRecordReader(s.ctx, binlogs, s.schema, rOption...)
 	s.NoError(err)
+	defer r.Close()
 	for i := 0; i < rows/readBatchSize+1; i++ {
 		rec, err := r.Next()
 		s.NoError(err)
@@ -304,11 +304,10 @@ func (s *PackedBinlogRecordSuite) TestAllocIDExhausedError() {
 	defer reader.Close()
 
 	for i := 0; i < size; i++ {
-		err = reader.Next()
+		value, err := reader.NextValue()
 		s.NoError(err)
 
-		value := reader.Value()
-		rec, err := ValueSerializer([]*Value{value}, s.schema.Fields)
+		rec, err := ValueSerializer([]*Value{*value}, s.schema.Fields)
 		s.NoError(err)
 		err = w.Write(rec)
 		s.Error(err)
@@ -378,4 +377,166 @@ func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
 
 func getMilvusBirthday() time.Time {
 	return time.Date(2019, time.Month(5), 30, 0, 0, 0, 0, time.UTC)
+}
+
+func Test_makeBlobsReader(t *testing.T) {
+	ctx := context.Background()
+	downloader := func(ctx context.Context, paths []string) ([][]byte, error) {
+		return lo.Map(paths, func(item string, index int) []byte {
+			return []byte{}
+		}), nil
+	}
+
+	tests := []struct {
+		name    string
+		binlogs []*datapb.FieldBinlog
+		want    [][]*Blob
+		wantErr bool
+	}{
+		{
+			name: "test full",
+			binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{LogPath: "x/1/1/1/100/1"},
+					},
+				},
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{LogPath: "x/1/1/1/101/2"},
+					},
+				},
+				{
+					FieldID: 102,
+					Binlogs: []*datapb.Binlog{
+						{LogPath: "x/1/1/1/102/3"},
+					},
+				},
+			},
+			want: [][]*Blob{
+				{
+					{
+						Key:   "x/1/1/1/100/1",
+						Value: []byte{},
+					},
+					{
+						Key:   "x/1/1/1/101/2",
+						Value: []byte{},
+					},
+					{
+						Key:   "x/1/1/1/102/3",
+						Value: []byte{},
+					},
+				},
+			},
+			wantErr: false,
+		},
+
+		{
+			name: "test added field",
+			binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{LogPath: "x/1/1/1/100/1"},
+						{LogPath: "x/1/1/1/100/3"},
+					},
+				},
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{LogPath: "x/1/1/1/101/2"},
+						{LogPath: "x/1/1/1/101/4"},
+					},
+				},
+				{
+					FieldID: 102,
+					Binlogs: []*datapb.Binlog{
+						{LogPath: "x/1/1/1/102/5"},
+					},
+				},
+			},
+			want: [][]*Blob{
+				{
+					{
+						Key:   "x/1/1/1/100/1",
+						Value: []byte{},
+					},
+					{
+						Key:   "x/1/1/1/101/2",
+						Value: []byte{},
+					},
+				},
+				{
+					{
+						Key:   "x/1/1/1/100/3",
+						Value: []byte{},
+					},
+					{
+						Key:   "x/1/1/1/101/4",
+						Value: []byte{},
+					},
+					{
+						Key:   "x/1/1/1/102/5",
+						Value: []byte{},
+					},
+				},
+			},
+			wantErr: false,
+		},
+
+		// {
+		// 	name: "test error",
+		// 	binlogs: []*datapb.FieldBinlog{
+		// 		{
+		// 			FieldID: 100,
+		// 			Binlogs: []*datapb.Binlog{
+		// 				{LogPath: "x/1/1/1/100/1"},
+		// 				{LogPath: "x/1/1/1/100/3"},
+		// 			},
+		// 		},
+		// 		{
+		// 			FieldID: 101,
+		// 			Binlogs: []*datapb.Binlog{
+		// 				{LogPath: "x/1/1/1/101/2"},
+		// 				{LogPath: "x/1/1/1/101/4"},
+		// 			},
+		// 		},
+		// 		{
+		// 			FieldID: 102,
+		// 			Binlogs: []*datapb.Binlog{
+		// 				{LogPath: "x/1/1/1/102/5"},
+		// 				{LogPath: "x/1/1/1/102/6"},
+		// 			},
+		// 		},
+		// 	},
+		// 	want:    nil,
+		// 	wantErr: true,
+		// },
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader, err := makeBlobsReader(ctx, tt.binlogs, downloader)
+			if err != nil {
+				if !tt.wantErr {
+					t.Errorf("makeBlobsReader() error = %v, wantErr %v", err, tt.wantErr)
+				}
+				return
+			}
+			got := make([][]*Blob, 0)
+			for {
+				bs, err := reader()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					assert.Fail(t, err.Error())
+				}
+				got = append(got, bs)
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
