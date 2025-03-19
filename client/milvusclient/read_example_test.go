@@ -19,8 +19,10 @@ package milvusclient_test
 
 import (
 	"context"
+	"fmt"
 	"log"
 
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 )
@@ -199,6 +201,87 @@ func ExampleClient_Search_offsetLimit() {
 	}
 }
 
-// func ExampleClient_Search_useLevel() {
+func ExampleClient_Get() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-// }
+	milvusAddr := "127.0.0.1:19530"
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		log.Fatal("failed to connect to milvus server: ", err.Error())
+	}
+
+	defer cli.Close(ctx)
+
+	rs, err := cli.Get(ctx, milvusclient.NewQueryOption("quick_setup").
+		WithIDs(column.NewColumnInt64("id", []int64{1, 2, 3})))
+	if err != nil {
+		// handle error
+	}
+
+	fmt.Println(rs.GetColumn("id"))
+}
+
+func ExampleClient_Query() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	milvusAddr := "127.0.0.1:19530"
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		log.Fatal("failed to connect to milvus server: ", err.Error())
+	}
+
+	defer cli.Close(ctx)
+
+	rs, err := cli.Query(ctx, milvusclient.NewQueryOption("quick_setup").
+		WithFilter("emb_type == 3").
+		WithOutputFields("id", "emb_type"))
+	if err != nil {
+		// handle error
+	}
+
+	fmt.Println(rs.GetColumn("id"))
+}
+
+func ExampleClient_HybridSearch() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	milvusAddr := "127.0.0.1:19530"
+	token := "root:Milvus"
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+		APIKey:  token,
+	})
+	if err != nil {
+		log.Fatal("failed to connect to milvus server: ", err.Error())
+	}
+
+	defer cli.Close(ctx)
+
+	queryVector := []float32{0.3580376395471989, -0.6023495712049978, 0.18414012509913835, -0.26286205330961354, 0.9029438446296592}
+	sparseVector, _ := entity.NewSliceSparseEmbedding([]uint32{1, 21, 100}, []float32{0.1, 0.2, 0.3})
+
+	resultSets, err := cli.HybridSearch(ctx, milvusclient.NewHybridSearchOption(
+		"quick_setup",
+		3,
+		milvusclient.NewAnnRequest("dense_vector", 10, entity.FloatVector(queryVector)),
+		milvusclient.NewAnnRequest("sparse_vector", 10, sparseVector),
+	).WithReranker(milvusclient.NewRRFReranker()))
+	if err != nil {
+		log.Fatal("failed to perform basic ANN search collection: ", err.Error())
+	}
+
+	for _, resultSet := range resultSets {
+		log.Println("IDs: ", resultSet.IDs)
+		log.Println("Scores: ", resultSet.Scores)
+	}
+}
