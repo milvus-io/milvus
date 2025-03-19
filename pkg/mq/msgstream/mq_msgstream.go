@@ -221,9 +221,9 @@ func (ms *mqMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 }
 
 func (ms *mqMsgStream) Close() {
-	log.Ctx(ms.ctx).Info("start to close mq msg stream",
-		zap.Int("producer num", len(ms.producers)),
-		zap.Int("consumer num", len(ms.consumers)))
+	log := log.Ctx(ms.ctx).With(zap.Strings("producers", ms.producerChannels),
+		zap.Strings("consumers", ms.consumerChannels))
+	log.Info("start to close mq msg stream")
 	ms.streamCancel()
 	ms.closeRWMutex.Lock()
 	defer ms.closeRWMutex.Unlock()
@@ -244,7 +244,7 @@ func (ms *mqMsgStream) Close() {
 	ms.client.Close()
 	close(ms.receiveBuf)
 	paramtable.Get().Unwatch(paramtable.Get().CommonCfg.TTMsgEnabled.Key, ms.configEvent)
-	log.Ctx(ms.ctx).Info("mq msg stream closed")
+	log.Info("mq msg stream closed")
 }
 
 func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {

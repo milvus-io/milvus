@@ -105,7 +105,8 @@ KmeansClustering::SampleTrainData(
             }
         }
         // shuffle files
-        std::shuffle(files.begin(), files.end(), std::mt19937());
+        std::mt19937 rng(static_cast<unsigned int>(std::time(nullptr)));
+        std::shuffle(files.begin(), files.end(), rng);
         FetchDataFiles<T>(
             buf, expected_train_size, expected_train_size, files, dim, offset);
         return;
@@ -325,11 +326,6 @@ KmeansClustering::StreamingAssignandUpload(
     }
     if (IsDataSkew<T>(config, dim, num_vectors_each_centroid)) {
         LOG_INFO(msg_header_ + "data skew! skip clustering");
-        // remove uploaded files
-        remote_paths_to_size[cluster_result_.centroid_path] =
-            cluster_result_.centroid_file_size;
-        RemoveClusteringResultFiles(file_manager_->GetChunkManager().get(),
-                                    remote_paths_to_size);
         // skip clustering, nothing takes affect
         throw SegcoreError(ErrorCode::ClusterSkip,
                            "data skew! skip clustering");

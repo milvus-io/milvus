@@ -318,8 +318,8 @@ github.com/matttproud/golang_protobuf_extensions v1.0.4/go.mod h1:BSXmuO+STAnVfr
 github.com/mediocregopher/radix/v3 v3.4.2/go.mod h1:8FL3F6UQRXHXIBSPUs5h0RybMF8i4n7wVopoX3x7Bv8=
 github.com/microcosm-cc/bluemonday v1.0.2/go.mod h1:iVP4YcDBq+n/5fb23BhYFvIMq/leAFZyRl6bYmGDlGc=
 github.com/miekg/dns v1.0.14/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
-github.com/milvus-io/milvus-proto/go-api/v2 v2.5.6 h1:JzVl41sHrxUXLTUaJi7soHHAdXxawxTphridAiVQZcY=
-github.com/milvus-io/milvus-proto/go-api/v2 v2.5.6/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
+github.com/milvus-io/milvus-proto/go-api/v2 v2.5.7 h1:trg9Lri1K2JxluLXK7AR4iCLfXucPhWPVwAF6eMXNrg=
+github.com/milvus-io/milvus-proto/go-api/v2 v2.5.7/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
 github.com/milvus-io/milvus/pkg/v2 v2.5.5 h1:/wO3xzhgrCDoDeSa553OV1/jtUrSyJyNyGguFrFmiak=
 github.com/milvus-io/milvus/pkg/v2 v2.5.5/go.mod h1:4U9b8GUiPJVkJwm65L5x1JOo1p1SZfO/Zt0v3sHiezU=
 github.com/mitchellh/cli v1.0.0/go.mod h1:hNIlj7HEI86fIcpObd7a0FcrxTWetlwJDGcceTlRvqc=
