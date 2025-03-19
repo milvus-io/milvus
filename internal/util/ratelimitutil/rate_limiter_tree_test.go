@@ -143,6 +143,15 @@ func TestRateLimiterNodeGetQuotaExceededError(t *testing.T) {
 		assert.True(t, strings.Contains(err.Error(), "disabled"))
 	})
 
+	t.Run("ddl", func(t *testing.T) {
+		limitNode := NewRateLimiterNode(internalpb.RateScope_Database)
+		limitNode.quotaStates.Insert(milvuspb.QuotaState_DenyToDDL, commonpb.ErrorCode_ForceDeny)
+		err := limitNode.GetQuotaExceededError(internalpb.RateType_DDLCollection)
+		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
+		// reference: ratelimitutil.GetQuotaErrorString(errCode)
+		assert.True(t, strings.Contains(err.Error(), "disabled"))
+	})
+
 	t.Run("unknown", func(t *testing.T) {
 		limitNode := NewRateLimiterNode(internalpb.RateScope_Cluster)
 		err := limitNode.GetQuotaExceededError(internalpb.RateType_DDLCompaction)
