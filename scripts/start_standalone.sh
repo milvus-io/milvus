@@ -21,6 +21,7 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
 	if test -f "$LIBJEMALLOC"; then
 		#echo "Found $LIBJEMALLOC"
 		export LD_PRELOAD="$LIBJEMALLOC"
+		export MALLOC_CONF=background_thread:true,prof:true
 	else
 		echo "WARN: Cannot find $LIBJEMALLOC"
 	fi
@@ -28,4 +29,4 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
 fi
 
 echo "Starting standalone..."
-nohup ./bin/milvus run standalone --run-with-subprocess > /tmp/standalone.log 2>&1 &
+nohup ./bin/milvus run standalone --run-with-subprocess >/tmp/standalone.log 2>&1 &
