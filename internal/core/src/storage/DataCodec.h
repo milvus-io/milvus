@@ -107,6 +107,29 @@ class DataCodec {
         return payload_slice_.value();
     }
 
+    const uint8_t*
+    PayloadData() const {
+        if (HasPayloadSlice()) {
+            return payload_slice_.value().Data();
+        }
+        AssertInfo(
+            field_data_ != nullptr,
+            "Neither field_data nor payload_slice is inside the DataCodec");
+        return reinterpret_cast<const uint8_t*>(
+            const_cast<void*>(field_data_->Data()));
+    }
+
+    int64_t
+    PayloadSize() const {
+        if (HasPayloadSlice()) {
+            return payload_slice_.value().Size();
+        }
+        AssertInfo(
+            field_data_ != nullptr,
+            "Neither field_data nor payload_slice is inside the DataCodec");
+        return field_data_->Size();
+    }
+
  protected:
     CodecType codec_type_;
     std::pair<Timestamp, Timestamp> time_range_;

@@ -152,11 +152,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                                                         index_files->end());
 
     LOG_INFO("load index files: {}", index_files.value().size());
-
-    auto parallel_degree =
-        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-    std::map<std::string, FieldDataPtr> index_datas{};
-
+    std::map<std::string, IndexCodecInfo> index_datas{};
     // try to read slice meta first
     std::string slice_meta_filepath;
     for (auto& file : pending_index_files) {
@@ -183,17 +179,14 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
             auto result =
                 file_manager_->LoadIndexToMemory({slice_meta_filepath});
-            auto raw_slice_meta = result[INDEX_FILE_SLICE_META];
-            Config meta_data = Config::parse(
-                std::string(static_cast<const char*>(raw_slice_meta->Data()),
-                            raw_slice_meta->Size()));
-
+            auto raw_slice_meta = std::move(result[INDEX_FILE_SLICE_META]);
+            Config meta_data = Config::parse(std::string(
+                reinterpret_cast<const char*>(raw_slice_meta->PayloadData()),
+                raw_slice_meta->PayloadSize()));
             for (auto& item : meta_data[META]) {
                 std::string prefix = item[NAME];
                 int slice_num = item[SLICE_NUM];
                 auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-                auto new_field_data = milvus::storage::CreateFieldData(
-                    DataType::INT8, false, 1, total_len);
 
                 std::vector<std::string> batch;
                 batch.reserve(slice_num);
@@ -203,23 +196,24 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                 }
 
                 auto batch_data = file_manager_->LoadIndexToMemory(batch);
+                int64_t payload_size = 0;
                 for (const auto& file_path : batch) {
                     const std::string file_name =
                         file_path.substr(file_path.find_last_of('/') + 1);
                     AssertInfo(batch_data.find(file_name) != batch_data.end(),
                                "lost index slice data: {}",
                                file_name);
-                    auto data = batch_data[file_name];
-                    new_field_data->FillFieldData(data->Data(), data->Size());
+                    payload_size += batch_data[file_name]->PayloadSize();
+                    index_datas[prefix].first.push_back(
+                        std::move(batch_data[file_name]));
                 }
                 for (auto& file : batch) {
                     pending_index_files.erase(file);
                 }
-
                 AssertInfo(
-                    new_field_data->IsFull(),
+                    payload_size == total_len,
                     "index len is inconsistent after disassemble and assemble");
-                index_datas[prefix] = new_field_data;
+                index_datas[prefix].second = payload_size;
             }
         }
 
@@ -228,7 +222,10 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                 file_manager_->LoadIndexToMemory(std::vector<std::string>(
                     pending_index_files.begin(), pending_index_files.end()));
             for (auto&& index_data : result) {
-                index_datas.insert(std::move(index_data));
+                auto prefix = index_data.first;
+                index_datas[prefix].second = index_data.second->PayloadSize();
+                index_datas[prefix].first.push_back(
+                    std::move(index_data.second));
             }
         }
 
@@ -237,14 +234,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
     LOG_INFO("construct binary set...");
     BinarySet binary_set;
-    for (auto& [key, data] : index_datas) {
-        LOG_INFO("add index data to binary set: {}", key);
-        auto size = data->Size();
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-        auto buf = std::shared_ptr<uint8_t[]>(
-            (uint8_t*)const_cast<void*>(data->Data()), deleter);
-        binary_set.Append(key, buf, size);
-    }
+    AssembleIndexDatas(index_datas, binary_set);
 
     // start engine load index span
     auto span_load_engine =
@@ -534,10 +524,10 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         batch.reserve(parallel_degree);
 
         auto result = file_manager_->LoadIndexToMemory({slice_meta_filepath});
-        auto raw_slice_meta = result[INDEX_FILE_SLICE_META];
-        Config meta_data = Config::parse(
-            std::string(static_cast<const char*>(raw_slice_meta->Data()),
-                        raw_slice_meta->Size()));
+        auto raw_slice_meta = std::move(result[INDEX_FILE_SLICE_META]);
+        Config meta_data = Config::parse(std::string(
+            reinterpret_cast<const char*>(raw_slice_meta->PayloadData()),
+            raw_slice_meta->PayloadSize()));
 
         for (auto& item : meta_data[META]) {
             std::string prefix = item[NAME];
@@ -552,13 +542,14 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                     std::string file_name = GenSlicedFileName(prefix, j);
                     AssertInfo(batch_data.find(file_name) != batch_data.end(),
                                "lost index slice data");
-                    auto data = batch_data[file_name];
+                    auto&& data = batch_data[file_name];
                     auto start_write_file = std::chrono::system_clock::now();
-                    auto written = file.Write(data->Data(), data->Size());
+                    auto written =
+                        file.Write(data->PayloadData(), data->PayloadSize());
                     write_disk_duration_sum +=
                         (std::chrono::system_clock::now() - start_write_file);
                     AssertInfo(
-                        written == data->Size(),
+                        written == data->PayloadSize(),
                         fmt::format("failed to write index data to disk {}: {}",
                                     filepath->data(),
                                     strerror(errno)));
@@ -590,7 +581,7 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         //2. write data into files
         auto start_write_file = std::chrono::system_clock::now();
         for (auto& [_, index_data] : result) {
-            file.Write(index_data->Data(), index_data->Size());
+            file.Write(index_data->PayloadData(), index_data->PayloadSize());
         }
         write_disk_duration_sum +=
             (std::chrono::system_clock::now() - start_write_file);

@@ -580,11 +580,10 @@ std::unique_ptr<DataCodec>
 DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
                             const std::string& file,
                             bool is_field_data) {
-    //hc==need prune this size cost
+    // TODO remove this Size() cost
     auto fileSize = chunk_manager->Size(file);
     auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
     chunk_manager->Read(file, buf.get(), fileSize);
-
     auto res = DeserializeFileData(buf, fileSize, is_field_data);
     res->SetData(buf);
     // DataCodec must keep the buf alive for zero-copy usage, otherwise segmentation violation will occur
@@ -643,7 +642,7 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     futures.reserve(remote_files.size());
     for (auto& file : remote_files) {
         futures.emplace_back(pool.Submit(
-            DownloadAndDecodeRemoteFile, remote_chunk_manager, file, true));
+                DownloadAndDecodeRemoteFile, remote_chunk_manager, file, true));
     }
     return futures;
 }

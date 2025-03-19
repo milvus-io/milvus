@@ -279,21 +279,11 @@ DiskFileManagerImpl::CacheIndexToDisk(
             uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
 
         auto appendIndexFiles = [&]() {
-            auto index_chunks = GetObjectData(rcm_.get(), batch_remote_files);
-            for (auto& chunk : index_chunks) {
-                const uint8_t* chunk_data = nullptr;
-                int64_t index_size = 0;
-                if (chunk.get()->HasPayloadSlice()) {
-                    auto& payload_slice = chunk.get()->PayloadSlice();
-                    index_size = payload_slice.Size();
-                    chunk_data = payload_slice.Data();
-                } else {
-                    auto index_data = chunk.get()->GetFieldData();
-                    index_size = index_data->DataSize();
-                    chunk_data = reinterpret_cast<const uint8_t*>(
-                        const_cast<void*>(index_data->Data()));
-                }
-                file.Write(chunk_data, index_size);
+            auto index_chunks_futures = GetObjectData(rcm_.get(), batch_remote_files);
+            for (auto& chunk_future : index_chunks_futures) {
+                auto chunk_codec = chunk_future.get();
+                file.Write(chunk_codec->PayloadData(),
+                           chunk_codec->PayloadSize());
             }
             batch_remote_files.clear();
         };
