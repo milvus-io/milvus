@@ -233,6 +233,7 @@ IsPrimaryKeyDataType(DataType data_type) {
 inline bool
 IsIntegerDataType(DataType data_type) {
     switch (data_type) {
+        case DataType::BOOL:
         case DataType::INT8:
         case DataType::INT16:
         case DataType::INT32:
