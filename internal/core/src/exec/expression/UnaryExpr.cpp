@@ -946,24 +946,31 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
 
 #define UnaryJSONTypeCompare(cmp)                                              \
     do {                                                                       \
-        if (type == uint8_t(milvus::index::JSONType::STRING)) {                \
-            if constexpr (std::is_same_v<GetType, std::string_view>) {         \
+        if constexpr (std::is_same_v<GetType, std::string_view>) {             \
+            if (type == uint8_t(milvus::index::JSONType::STRING)) {            \
                 auto x = json.at_string(offset, size);                         \
                 return (cmp);                                                  \
             } else {                                                           \
                 return false;                                                  \
             }                                                                  \
-        } else if (type == uint8_t(milvus::index::JSONType::DOUBLE)) {         \
-            if constexpr (std::is_same_v<GetType, double>) {                   \
+        } else if constexpr (std::is_same_v<GetType, double>) {                \
+            if (type == uint8_t(milvus::index::JSONType::INT64)) {             \
+                auto x =                                                       \
+                    std::stoll(std::string(json.at_string(offset, size)));     \
+                return (cmp);                                                  \
+            } else if (type == uint8_t(milvus::index::JSONType::DOUBLE)) {     \
                 auto x = std::stod(std::string(json.at_string(offset, size))); \
                 return (cmp);                                                  \
             } else {                                                           \
                 return false;                                                  \
             }                                                                  \
-        } else if (type == uint8_t(milvus::index::JSONType::INT64)) {          \
-            if constexpr (std::is_same_v<GetType, int64_t>) {                  \
+        } else if constexpr (std::is_same_v<GetType, int64_t>) {               \
+            if (type == uint8_t(milvus::index::JSONType::INT64)) {             \
                 auto x =                                                       \
                     std::stoll(std::string(json.at_string(offset, size)));     \
+                return (cmp);                                                  \
+            } else if (type == uint8_t(milvus::index::JSONType::DOUBLE)) {     \
+                auto x = std::stod(std::string(json.at_string(offset, size))); \
                 return (cmp);                                                  \
             } else {                                                           \
                 return false;                                                  \
