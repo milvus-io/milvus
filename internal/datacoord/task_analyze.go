@@ -69,7 +69,6 @@ func (at *analyzeTask) GetNodeID() int64 {
 }
 
 func (at *analyzeTask) ResetTask(mt *meta) {
-	at.nodeID = 0
 }
 
 func (at *analyzeTask) SetQueueTime(t time.Time) {
@@ -116,6 +115,10 @@ func (at *analyzeTask) GetState() indexpb.JobState {
 
 func (at *analyzeTask) GetFailReason() string {
 	return at.taskInfo.GetFailReason()
+}
+
+func (at *analyzeTask) GetTaskSlot() int64 {
+	return Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
 }
 
 func (at *analyzeTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
@@ -223,6 +226,8 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 	at.req.MinClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMinClusterSizeRatio.GetAsFloat()
 	at.req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
 	at.req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
+	taskSlot := Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
+	at.req.TaskSlot = taskSlot
 
 	return true
 }

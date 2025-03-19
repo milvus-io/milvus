@@ -41,4 +41,5 @@ type task interface {
 	Execute(context.Context) error
 	PostExecute(context.Context) error
 	Reset()
+	GetSlot() int64
 }

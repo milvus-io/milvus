@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/atomic"
+
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -88,6 +90,7 @@ func (s *statsTaskSuite) SetupSuite() {
 						MaxRowNum:     65535,
 						Level:         datapb.SegmentLevel_L2,
 					},
+					size: *atomic.NewInt64(512 * 1024 * 1024),
 				},
 			},
 			secondaryIndexes: segmentInfoIndexes{
@@ -138,7 +141,7 @@ func (s *statsTaskSuite) SetupSuite() {
 }
 
 func (s *statsTaskSuite) TestTaskStats_PreCheck() {
-	st := newStatsTask(s.taskID, s.segID, s.targetID, indexpb.StatsSubJob_Sort)
+	st := newStatsTask(s.taskID, s.segID, s.targetID, indexpb.StatsSubJob_Sort, 1)
 
 	s.Equal(s.taskID, st.GetTaskID())
 

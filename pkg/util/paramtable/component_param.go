@@ -3561,6 +3561,9 @@ type dataCoordConfig struct {
 	ClusteringCompactionSlotUsage ParamItem `refreshable:"true"`
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
+	IndexTaskSlotUsage            ParamItem `refreshable:"true"`
+	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
+	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
 
 	EnableStatsTask                   ParamItem `refreshable:"true"`
 	TaskCheckInterval                 ParamItem `refreshable:"true"`
@@ -4454,6 +4457,36 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.L0DeleteCompactionSlotUsage.Init(base.mgr)
 
+	p.IndexTaskSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.indexTaskSlotUsage",
+		Version:      "2.5.3",
+		Doc:          "slot usage of index task",
+		DefaultValue: "8",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.IndexTaskSlotUsage.Init(base.mgr)
+
+	p.StatsTaskSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.statsTaskSlotUsage",
+		Version:      "2.5.3",
+		Doc:          "slot usage of stats task",
+		DefaultValue: "1",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.StatsTaskSlotUsage.Init(base.mgr)
+
+	p.AnalyzeTaskSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.analyzeTaskSlotUsage",
+		Version:      "2.5.3",
+		Doc:          "slot usage of analyze task",
+		DefaultValue: "65535",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.AnalyzeTaskSlotUsage.Init(base.mgr)
+
 	p.EnableStatsTask = ParamItem{
 		Key:          "dataCoord.statsTask.enable",
 		Version:      "2.5.0",
@@ -5009,6 +5042,8 @@ type indexNodeConfig struct {
 	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
+
+	WorkerSlotUnit ParamItem `refreshable:"true"`
 }
 
 func (p *indexNodeConfig) init(base *BaseTable) {
@@ -5073,6 +5108,14 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Doc:          "seconds. force stop node without graceful stop",
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.WorkerSlotUnit = ParamItem{
+		Key:          "indexNode.workerSlotUnit",
+		Version:      "2.5.7",
+		DefaultValue: "16",
+		Doc:          "Indicates how many slots each worker occupies per 2c8g",
+	}
+	p.WorkerSlotUnit.Init(base.mgr)
 }
 
 type streamingConfig struct {
