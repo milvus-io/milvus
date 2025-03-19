@@ -72,6 +72,7 @@ message CreateJobRequest {
   schema.FieldSchema field = 25;
   bool partition_key_isolation = 26;
   int32 current_scalar_index_version = 27;
+  int64 task_slot = 28;
 }
 
 message QueryJobsRequest {
@@ -98,9 +99,10 @@ message GetJobStatsResponse {
   int64 total_job_num = 2;
   int64 in_progress_job_num = 3;
   int64 enqueue_job_num = 4;
-  int64 task_slots = 5;
+  int64 available_slots = 5;
   repeated index.JobInfo job_infos = 6;
   bool enable_disk = 7;
+  int64 total_slots = 8;
 }
 
 message AnalyzeRequest {
@@ -121,6 +123,7 @@ message AnalyzeRequest {
   double min_cluster_size_ratio = 15;
   double max_cluster_size_ratio = 16;
   int64 max_cluster_size = 17;
+  int64 task_slot = 18;
 }
 
 message CreateStatsRequest {
@@ -147,6 +150,7 @@ message CreateStatsRequest {
   int64 json_key_stats_tantivy_memory = 21;
   int64 json_key_stats_data_format = 22;
   bool enable_json_key_stats_in_sort = 23;
+  int64 task_slot = 24;
 }
 
 message CreateJobV2Request {
