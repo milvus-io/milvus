@@ -1400,8 +1400,17 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	}
 
 	pks := storage.ParseIDs2PrimaryKeysBatch(req.GetPrimaryKeys())
+	var err error
 	for _, segment := range segments {
-		err := segment.Delete(ctx, pks, req.GetTimestamps())
+		if req.GetUseLoad() {
+			var dd *storage.DeltaData
+			dd, err = storage.NewDeltaDataWithData(pks, req.GetTimestamps())
+			if err == nil {
+				err = segment.LoadDeltaData(ctx, dd)
+			}
+		} else {
+			err = segment.Delete(ctx, pks, req.GetTimestamps())
+		}
 		if err != nil {
 			log.Warn("segment delete failed", zap.Error(err))
 			return merr.Status(err), nil

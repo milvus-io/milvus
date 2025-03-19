@@ -2231,6 +2231,38 @@ func (suite *ServiceSuite) TestDelete_Int64() {
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 }
 
+func (suite *ServiceSuite) TestDelete_Int64_UseLoad() {
+	ctx := context.Background()
+	// prepare
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+	// data
+	req := &querypb.DeleteRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionId: suite.collectionID,
+		PartitionId:  suite.partitionIDs[0],
+		SegmentId:    suite.validSegmentIDs[0],
+		VchannelName: suite.vchannel,
+		Timestamps:   []uint64{0},
+		Scope:        querypb.DataScope_Historical,
+		UseLoad:      true,
+	}
+
+	// type int
+	req.PrimaryKeys = &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: []int64{111},
+			},
+		},
+	}
+	status, err := suite.node.Delete(ctx, req)
+	suite.NoError(merr.CheckRPCCall(status, err))
+}
+
 func (suite *ServiceSuite) TestDelete_VarChar() {
 	ctx := context.Background()
 	// prepare

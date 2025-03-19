@@ -64,7 +64,7 @@ func (b *listDeleteBuffer[T]) Put(entry T) {
 	tail := b.list[len(b.list)-1]
 	err := tail.Put(entry)
 	if errors.Is(err, errBufferFull) {
-		b.list = append(b.list, newCacheBlock[T](entry.Timestamp(), b.sizePerBlock, entry))
+		b.list = append(b.list, newCacheBlock(entry.Timestamp(), b.sizePerBlock, entry))
 	}
 
 	// update metrics
