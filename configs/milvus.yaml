@@ -889,6 +889,7 @@ common:
   localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
+  enabledOptimizeExpr: true # Indicates whether to enable optimize expr
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
