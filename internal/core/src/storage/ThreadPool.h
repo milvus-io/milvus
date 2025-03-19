@@ -114,13 +114,14 @@ class ThreadPool {
 
     void
     AdjustThreadPool(int max_thread_size) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (max_thread_size < min_threads_size_) {
-            LOG_WARN("Invalid max thread size {} < min thread size {}", max_thread_size, min_threads_size_);
-            return;
+        if (mutex_.try_lock()) {
+            if (max_thread_size < min_threads_size_) {
+                LOG_WARN("Invalid max thread size {} < min thread size {}", max_thread_size, min_threads_size_);
+                return;
+            }
+            LOG_INFO("Adjusted thread pool:{} to max_threads_size_: {}", name_, max_thread_size);
+            max_threads_size_ = max_thread_size;
         }
-        LOG_INFO("Adjusted thread pool:{} to max_threads_size_: {}", name_, max_thread_size);
-        max_threads_size_ = max_thread_size;
     }
 
     void

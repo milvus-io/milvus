@@ -86,11 +86,6 @@ ExecPlanNodeVisitor::MayThrottleLoad() {
                  "we throttle load pool to size:{} for query/search performance",
                  executing_task_count_, CPU_NUM);
         ThreadPools::GetThreadPool(HIGH).AdjustThreadPool(CPU_NUM);
-    } else if (executing_task_count_ < CPU_NUM / 2) {
-        ThreadPools::GetThreadPool(HIGH).ResetThreadPoolSize();
-        LOG_INFO("cpu is very idle, executing_task_count_ is just:{}, "
-                 "we reset load pool to size:{} for load/balance performance",
-                 executing_task_count_, CPU_NUM);
     }
 }
 
