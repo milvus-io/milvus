@@ -93,6 +93,7 @@ message LoadTextIndexInfo {
   schema.FieldSchema schema = 5;
   int64 collectionID = 6;
   int64 partitionID = 7;
+  bool recovering = 8;
 }
 
 message LoadJsonKeyIndexInfo {
@@ -103,4 +104,5 @@ message LoadJsonKeyIndexInfo {
   schema.FieldSchema schema = 5;
   int64 collectionID = 6;
   int64 partitionID = 7;
+  bool recovering = 8;
 }

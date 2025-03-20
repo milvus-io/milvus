@@ -40,6 +40,7 @@ struct LoadFieldDataInfo {
     std::string mmap_dir_path = "";
     std::string url;
     int64_t storage_version = 0;
+    bool recovering = false;
 };
 
 struct LoadDeletedRecordInfo {

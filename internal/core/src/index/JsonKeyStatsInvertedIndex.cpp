@@ -383,7 +383,8 @@ JsonKeyStatsInvertedIndex::Load(milvus::tracer::TraceContext ctx,
             index_file = remote_prefix + "/" + index_file;
         }
     }
-    disk_file_manager_->CacheJsonKeyIndexToDisk(index_files.value());
+    disk_file_manager_->CacheJsonKeyIndexToDisk(
+        index_files.value(), config[milvus::THREAD_POOL_PRIORITY]);
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(path_.c_str());

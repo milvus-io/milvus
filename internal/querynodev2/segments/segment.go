@@ -822,7 +822,8 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 			Field:      field,
 			EnableMMap: mmapEnabled,
 		}},
-		RowCount: rowCount,
+		RowCount:   rowCount,
+		Recovering: s.loadInfo.Load().GetRecovering(),
 	}
 
 	GetLoadPool().Submit(func() (any, error) {
@@ -951,7 +952,7 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 
 func GetCLoadInfoWithFunc(ctx context.Context,
 	fieldSchema *schemapb.FieldSchema,
-	s *querypb.SegmentLoadInfo,
+	loadInfo *querypb.SegmentLoadInfo,
 	indexInfo *querypb.FieldIndexInfo,
 	f func(c *LoadIndexInfo) error,
 ) error {
@@ -985,9 +986,9 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	enableMmap := isIndexMmapEnable(fieldSchema, indexInfo)
 
 	indexInfoProto := &cgopb.LoadIndexInfo{
-		CollectionID:       s.GetCollectionID(),
-		PartitionID:        s.GetPartitionID(),
-		SegmentID:          s.GetSegmentID(),
+		CollectionID:       loadInfo.GetCollectionID(),
+		PartitionID:        loadInfo.GetPartitionID(),
+		SegmentID:          loadInfo.GetSegmentID(),
 		Field:              fieldSchema,
 		EnableMmap:         enableMmap,
 		MmapDirPath:        paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
@@ -999,6 +1000,7 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		IndexEngineVersion: indexInfo.GetCurrentIndexVersion(),
 		IndexStoreVersion:  indexInfo.GetIndexStoreVersion(),
 		IndexFileSize:      indexInfo.GetIndexSize(),
+		Recovering:         loadInfo.GetRecovering(),
 	}
 
 	// 2.
@@ -1139,6 +1141,7 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 		Schema:       f,
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
+		Recovering:   s.LoadInfo().GetRecovering(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
@@ -1185,6 +1188,7 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		Schema:       f,
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
+		Recovering:   s.loadInfo.Load().GetRecovering(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)

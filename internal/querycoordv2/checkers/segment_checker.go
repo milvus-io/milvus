@@ -92,7 +92,11 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 		if c.readyToCheck(ctx, cid) {
 			replicas := c.meta.ReplicaManager.GetByCollection(ctx, cid)
 			for _, r := range replicas {
-				results = append(results, c.checkReplica(ctx, r)...)
+				replicaTasks, finishRecover := c.checkReplica(ctx, r)
+				results = append(results, replicaTasks...)
+				if r.IsRecovering() && finishRecover {
+					c.meta.ReplicaManager.FinishRecoverReplica(r.GetID())
+				}
 			}
 		}
 	}
@@ -124,13 +128,13 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	return results
 }
 
-func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {
+func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica) ([]task.Task, bool) {
 	ret := make([]task.Task, 0)
 
 	// compare with targets to find the lack and redundancy of segments
-	lacks, redundancies := c.getSealedSegmentDiff(ctx, replica.GetCollectionID(), replica.GetID())
+	lacks, recovering, redundancies, finishRecover := c.getSealedSegmentDiff(ctx, replica.GetCollectionID(), replica)
 	// loadCtx := trace.ContextWithSpan(context.Background(), c.meta.GetCollection(replica.CollectionID).LoadSpan)
-	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, replica)
+	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, recovering, replica)
 	task.SetReason("lacks of segment", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
@@ -157,7 +161,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 
-	return ret
+	return ret, finishRecover
 }
 
 // GetGrowingSegmentDiff get streaming segment diff between leader view and target
@@ -229,9 +233,8 @@ func (c *SegmentChecker) getGrowingSegmentDiff(ctx context.Context, collectionID
 func (c *SegmentChecker) getSealedSegmentDiff(
 	ctx context.Context,
 	collectionID int64,
-	replicaID int64,
-) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
-	replica := c.meta.Get(ctx, replicaID)
+	replica *meta.Replica,
+) (toLoad []*datapb.SegmentInfo, recovering []bool, toRelease []*meta.Segment, finishRecover bool) {
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
 		return
@@ -282,26 +285,31 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
 	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTarget)
 	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
+	finishRecover = currentTargetMap != nil || nextTargetMap != nil
+	// l0 Segment which exist on current target, but not on dist
+	for _, segment := range currentTargetMap {
+		if isSegmentLack(segment) {
+			toLoad = append(toLoad, segment)
+			recovering = append(recovering, true)
+			finishRecover = false
+			// for segments lacked due to node down, we need to load it under recovering mode
+		}
+	}
 
 	// Segment which exist on next target, but not on dist
 	for _, segment := range nextTargetMap {
-		if isSegmentLack(segment) {
-			toLoad = append(toLoad, segment)
-		}
-	}
-
-	// l0 Segment which exist on current target, but not on dist
-	for _, segment := range currentTargetMap {
 		// to avoid generate duplicate segment task
-		if nextTargetMap[segment.ID] != nil {
+		if currentTargetMap[segment.ID] != nil {
 			continue
 		}
-
 		if isSegmentLack(segment) {
 			toLoad = append(toLoad, segment)
+			recovering = append(recovering, replica.IsRecovering())
+			finishRecover = finishRecover && !replica.IsRecovering()
+			// for segments lacked due to normal target advance, we load them under normal mode
+			// for segments lacked due to whole instance restart, we load them under recover mode
 		}
 	}
-
 	// get segment which exist on dist, but not on current target and next target
 	for _, segment := range dist {
 		_, existOnCurrent := currentTargetMap[segment.GetID()]
@@ -321,8 +329,9 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	// to make sure all L0 delta logs will be delivered to the other segments.
 	if len(level0Segments) > 0 {
 		toLoad = level0Segments
+		recovering = nil
+		// for any l0 segments, we try to load them as soon as possible
 	}
-
 	return
 }
 
@@ -409,9 +418,25 @@ func (c *SegmentChecker) filterSegmentInUse(ctx context.Context, replica *meta.R
 	return filtered
 }
 
-func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, replica *meta.Replica) []task.Task {
+func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, recovering []bool, replica *meta.Replica) []task.Task {
 	if len(segments) == 0 {
 		return nil
+	}
+	// set up recover map
+	if recovering != nil && len(recovering) != len(segments) {
+		// this branch should never be reached
+		log.Warn("Recovering slice has different size with segment size, this should never happen",
+			zap.Int("recover_len", len(recovering)),
+			zap.Int("segments_len", len(segments)))
+		return nil
+	}
+	recoverMap := make(map[int64]bool, len(segments))
+	for i, segment := range segments {
+		if recovering == nil {
+			recoverMap[segment.GetID()] = true
+		} else {
+			recoverMap[segment.GetID()] = recovering[i]
+		}
 	}
 
 	isLevel0 := segments[0].GetLevel() == datapb.SegmentLevel_L0
@@ -445,6 +470,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		shardPlans := c.getBalancerFunc().AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, rwNodes, true)
 		for i := range shardPlans {
 			shardPlans[i].Replica = replica
+			shardPlans[i].Recovering = recoverMap[shardPlans[i].Segment.GetID()]
 		}
 		plans = append(plans, shardPlans...)
 	}
@@ -462,6 +488,7 @@ func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments 
 			c.ID(),
 			s.GetCollectionID(),
 			replica,
+			false,
 			action,
 		)
 		if err != nil {

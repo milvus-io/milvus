@@ -30,6 +30,7 @@
 #include "pb/cgo_msg.pb.h"
 #include "knowhere/index/index_static.h"
 #include "knowhere/comp/knowhere_check.h"
+#include "storage/ThreadPools.h"
 
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {
@@ -268,12 +269,14 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         milvus::tracer::SetRootSpan(span);
 
         LOG_INFO(
-            "[collection={}][segment={}][field={}][enable_mmap={}] load index "
+            "[collection={}][segment={}][field={}][enable_mmap={}][recovering={"
+            "}] load index "
             "{}",
             load_index_info->collection_id,
             load_index_info->segment_id,
             load_index_info->field_id,
             load_index_info->enable_mmap,
+            load_index_info->recovering,
             load_index_info->index_id);
 
         // get index type
@@ -333,6 +336,9 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
             config[milvus::index::ENABLE_MMAP] = "true";
             config[milvus::index::MMAP_FILE_PATH] = filepath.string();
         }
+        config[milvus::THREAD_POOL_PRIORITY] =
+            load_index_info->recovering ? milvus::ThreadPoolPriority::HIGH
+                                        : milvus::ThreadPoolPriority::LOW;
 
         LOG_DEBUG("load index with configs: {}", config.dump());
         load_index_info->index->Load(ctx, config);
@@ -341,12 +347,14 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         milvus::tracer::CloseRootSpan();
 
         LOG_INFO(
-            "[collection={}][segment={}][field={}][enable_mmap={}] load index "
+            "[collection={}][segment={}][field={}][enable_mmap={}][recovering={"
+            "}] load index "
             "{} done",
             load_index_info->collection_id,
             load_index_info->segment_id,
             load_index_info->field_id,
             load_index_info->enable_mmap,
+            load_index_info->recovering,
             load_index_info->index_id);
 
         auto status = CStatus();
@@ -494,6 +502,7 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
                 info_proto->index_engine_version();
             load_index_info->schema = info_proto->field();
             load_index_info->index_size = info_proto->index_file_size();
+            load_index_info->recovering = info_proto->recovering();
         }
         auto status = CStatus();
         status.error_code = milvus::Success;

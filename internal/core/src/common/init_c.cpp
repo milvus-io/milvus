@@ -46,16 +46,6 @@ InitHighPriorityThreadCoreCoefficient(const int64_t value) {
 }
 
 void
-InitMiddlePriorityThreadCoreCoefficient(const int64_t value) {
-    std::call_once(
-        flag4,
-        [](int64_t value) {
-            milvus::SetMiddlePriorityThreadCoreCoefficient(value);
-        },
-        value);
-}
-
-void
 InitLowPriorityThreadCoreCoefficient(const int64_t value) {
     std::call_once(
         flag5,
