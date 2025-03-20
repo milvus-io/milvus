@@ -96,10 +96,6 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 			log.Warn("collection released during check index", zap.Int64("collection", collectionID))
 			continue
 		}
-		if schema == nil {
-			log.Warn("schema released during check index", zap.Int64("collection", collectionID))
-			continue
-		}
 		replicas := c.meta.ReplicaManager.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			tasks = append(tasks, c.checkReplica(ctx, collection, replica, indexInfos, schema)...)
@@ -235,6 +231,10 @@ func (c *IndexChecker) checkSegmentStats(segment *meta.Segment, schema *schemapb
 	var result []int64
 
 	if paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
+		if schema == nil {
+			log.Warn("schema released during check index", zap.Int64("collection", segment.GetCollectionID()))
+			return result
+		}
 		loadFieldMap := make(map[int64]struct{})
 		for _, v := range loadField {
 			loadFieldMap[v] = struct{}{}
