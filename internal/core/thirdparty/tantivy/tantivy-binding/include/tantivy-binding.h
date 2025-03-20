@@ -179,11 +179,13 @@ RustResult tantivy_create_index(const char *field_name,
                                 TantivyDataType data_type,
                                 const char *path,
                                 uintptr_t num_threads,
-                                uintptr_t overall_memory_budget_in_bytes);
+                                uintptr_t overall_memory_budget_in_bytes,
+                                uint32_t tantivy_index_version);
 
 RustResult tantivy_create_index_with_single_segment(const char *field_name,
                                                     TantivyDataType data_type,
-                                                    const char *path);
+                                                    const char *path,
+                                                    uint32_t tantivy_index_version);
 
 void tantivy_free_index_writer(void *ptr);
 

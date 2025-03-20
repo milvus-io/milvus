@@ -5,8 +5,8 @@ use crate::array::RustResult;
 use crate::cstr_to_str;
 use crate::index_writer::IndexWriterWrapper;
 use crate::log::init_log;
-use crate::analyzer::create_analyzer;
 use crate::util::create_binding;
+use crate::TantivyIndexVersion;
 
 #[no_mangle]
 pub extern "C" fn tantivy_create_text_writer(
@@ -23,20 +23,17 @@ pub extern "C" fn tantivy_create_text_writer(
     let path_str = cstr_to_str!(path);
     let tokenizer_name_str = cstr_to_str!(tokenizer_name);
     let params = cstr_to_str!(analyzer_params);
-    let analyzer = create_analyzer(params);
-    match analyzer {
-        Ok(text_analyzer) => {
-            let wrapper = IndexWriterWrapper::create_text_writer(
-                String::from(field_name_str),
-                String::from(path_str),
-                String::from(tokenizer_name_str),
-                text_analyzer,
-                num_threads,
-                overall_memory_budget_in_bytes,
-                in_ram,
-            );
-            RustResult::from_ptr(create_binding(wrapper))
-        }
+    match IndexWriterWrapper::create_text_writer(
+        String::from(field_name_str),
+        String::from(path_str),
+        String::from(tokenizer_name_str),
+        params,
+        num_threads,
+        overall_memory_budget_in_bytes,
+        in_ram,
+        TantivyIndexVersion::default_version(),
+    ) {
+        Ok(wrapper) => RustResult::from_ptr(create_binding(wrapper)),
         Err(err) => RustResult::from_error(format!(
             "create tokenizer failed with error: {} param: {}",
             err.to_string(),

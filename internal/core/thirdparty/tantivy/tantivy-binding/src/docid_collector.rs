@@ -65,7 +65,7 @@ impl SegmentCollector for DocIdChildCollector<u32> {
         self.collect_block(&[doc]);
     }
 
-    fn harvest(mut self) -> Self::Fruit {
+    fn harvest(self) -> Self::Fruit {
         self.milvus_doc_ids
     }
 }
@@ -117,7 +117,7 @@ impl SegmentCollector for DocIdChildCollector<i64> {
         self.collect_block(&[doc]);
     }
 
-    fn harvest(mut self) -> Self::Fruit {
+    fn harvest(self) -> Self::Fruit {
         self.milvus_doc_ids
     }
 }
