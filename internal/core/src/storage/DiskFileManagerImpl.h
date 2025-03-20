@@ -26,6 +26,7 @@
 #include "storage/FileManager.h"
 #include "storage/ChunkManager.h"
 #include "common/Consts.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
@@ -102,13 +103,19 @@ class DiskFileManagerImpl : public FileManagerImpl {
     }
 
     void
-    CacheIndexToDisk(const std::vector<std::string>& remote_files);
+    CacheIndexToDisk(
+        const std::vector<std::string>& remote_files,
+        milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::LOW);
 
     void
-    CacheTextLogToDisk(const std::vector<std::string>& remote_files);
+    CacheTextLogToDisk(
+        const std::vector<std::string>& remote_files,
+        milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::LOW);
 
     void
-    CacheJsonKeyIndexToDisk(const std::vector<std::string>& remote_files);
+    CacheJsonKeyIndexToDisk(
+        const std::vector<std::string>& remote_files,
+        milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::LOW);
 
     void
     AddBatchIndexFiles(const std::string& local_file_name,
@@ -118,7 +125,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     template <typename DataType>
     std::string
-    CacheRawDataToDisk(std::vector<std::string> remote_files);
+    CacheRawDataToDisk(
+        std::vector<std::string> remote_files,
+        milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::LOW);
 
     std::string
     CacheOptFieldToDisk(OptFieldT& fields_map);
@@ -159,7 +168,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
     void
     CacheIndexToDiskInternal(
         const std::vector<std::string>& remote_files,
-        const std::function<std::string()>& get_local_index_prefix) noexcept;
+        const std::function<std::string()>& get_local_index_prefix,
+        milvus::ThreadPoolPriority priority =
+            milvus::ThreadPoolPriority::LOW) noexcept;
 
  private:
     // local file path (abs path)

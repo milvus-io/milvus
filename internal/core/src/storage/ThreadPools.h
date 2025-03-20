@@ -22,6 +22,8 @@
 
 namespace milvus {
 
+constexpr const char* THREAD_POOL_PRIORITY = "priority";
+
 enum ThreadPoolPriority {
     HIGH = 0,
     MIDDLE = 1,
