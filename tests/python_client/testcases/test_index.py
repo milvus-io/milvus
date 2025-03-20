@@ -85,7 +85,7 @@ class TestIndexParams(TestcaseBase):
         self.index_wrap.init_index(collection_w.collection, fieldname, default_index_params,
                                    check_task=CheckTasks.err_res,
                                    check_items={ct.err_code: 999,
-                                                ct.err_msg: "cannot create index on non-existed field"})
+                                                ct.err_msg: f"cannot create index on non-exist field: {fieldname}"})
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("index_type", ["non_exiting_type", 100])
@@ -460,7 +460,7 @@ class TestNewIndexBase(TestcaseBase):
                                   index_name=ct.default_index_name,
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 999,
-                                               ct.err_msg: "cannot create index on non-existed field: int8"})
+                                               ct.err_msg: "cannot create index on non-exist field: int8"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_index_partition(self):
