@@ -94,7 +94,9 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 		}
 
 		if collectionSet.Contain(replica.GetCollectionID()) {
-			m.putReplicaInMemory(newReplica(replica))
+			rep := newReplica(replica)
+			rep.Recover()
+			m.putReplicaInMemory(rep)
 			log.Info("recover replica",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replica.GetID()),

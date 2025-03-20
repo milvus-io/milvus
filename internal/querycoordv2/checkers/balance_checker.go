@@ -183,7 +183,7 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		segmentPlans, channelPlans = b.balanceReplicas(ctx, replicasToBalance)
 	}
 
-	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), segmentPlans)
+	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), segmentPlans, false)
 	task.SetPriority(task.TaskPriorityLow, tasks...)
 	task.SetReason("segment unbalanced", tasks...)
 	ret = append(ret, tasks...)

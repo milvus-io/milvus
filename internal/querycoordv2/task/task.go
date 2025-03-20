@@ -324,7 +324,8 @@ func (task *baseTask) Name() string {
 type SegmentTask struct {
 	*baseTask
 
-	segmentID typeutil.UniqueID
+	segmentID  typeutil.UniqueID
+	recovering bool
 }
 
 // NewSegmentTask creates a SegmentTask with actions,
@@ -335,6 +336,7 @@ func NewSegmentTask(ctx context.Context,
 	source Source,
 	collectionID typeutil.UniqueID,
 	replica *meta.Replica,
+	recovering bool,
 	actions ...Action,
 ) (*SegmentTask, error) {
 	if len(actions) == 0 {
