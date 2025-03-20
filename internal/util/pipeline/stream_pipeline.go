@@ -158,12 +158,15 @@ func (p *streamPipeline) Start() error {
 
 func (p *streamPipeline) Close() {
 	p.closeOnce.Do(func() {
+		// close datasource first
+		p.dispatcher.Deregister(p.vChannel)
+		// close stream input
 		close(p.closeCh)
 		p.closeWg.Wait()
 		if p.scanner != nil {
 			p.scanner.Close()
 		}
-		p.dispatcher.Deregister(p.vChannel)
+		// close the underline pipeline
 		p.pipeline.Close()
 	})
 }
