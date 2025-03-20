@@ -36,7 +36,7 @@ func TestJsonPathIndex(t *testing.T) {
 	indexType := indexTypes[rand.Intn(len(indexTypes))]
 	castType := jsonCastTypes[rand.Intn(len(jsonCastTypes))]
 
-	idx := NewJsonPathIndex(indexType, castType, jsonPath).WithIndexName(indexName)
+	idx := NewJSONPathIndex(indexType, castType, jsonPath).WithIndexName(indexName)
 	assert.Equal(t, indexType, idx.IndexType())
 	assert.Equal(t, indexName, idx.Name())
 
