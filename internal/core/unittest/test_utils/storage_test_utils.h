@@ -124,7 +124,7 @@ PutFieldData(milvus::storage::ChunkManager* remote_chunk_manager,
              FieldDataMeta& field_data_meta,
              milvus::FieldMeta& field_meta) {
     auto& pool =
-        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
     std::vector<std::future<std::pair<std::string, size_t>>> futures;
     AssertInfo(buffers.size() == element_counts.size(),
                "inconsistent size of data slices with slice sizes!");

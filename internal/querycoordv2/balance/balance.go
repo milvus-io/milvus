@@ -38,6 +38,7 @@ type SegmentAssignPlan struct {
 	FromScore    int64
 	ToScore      int64
 	SegmentScore int64
+	Recovering   bool
 }
 
 func (segPlan *SegmentAssignPlan) String() string {

@@ -31,6 +31,7 @@
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/Types.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
@@ -139,8 +140,10 @@ EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
                           std::string object_key);
 
 std::vector<std::future<std::unique_ptr<DataCodec>>>
-GetObjectData(ChunkManager* remote_chunk_manager,
-              const std::vector<std::string>& remote_files);
+GetObjectData(
+    ChunkManager* remote_chunk_manager,
+    const std::vector<std::string>& remote_files,
+    milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::LOW);
 
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,
@@ -173,6 +176,15 @@ CreateFieldData(const DataType& type,
 
 int64_t
 GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas);
+
+struct LoadedFieldDatasInfo {
+    std::vector<FieldDataPtr> loaded_field_datas_;
+    int64_t data_size_;
+    int64_t data_rows_;
+};
+
+LoadedFieldDatasInfo
+CollectFieldDataChannelWithInfos(FieldDataChannelPtr& channel);
 
 std::vector<FieldDataPtr>
 CollectFieldDataChannel(FieldDataChannelPtr& channel);

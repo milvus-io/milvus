@@ -167,6 +167,7 @@ class BitmapIndexTest : public testing::Test {
                                                   field_id);
             ;
         }
+        config[milvus::THREAD_POOL_PRIORITY] = milvus::ThreadPoolPriority::HIGH;
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
         index_->Load(milvus::tracer::TraceContext{}, config);
