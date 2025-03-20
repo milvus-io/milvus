@@ -160,7 +160,7 @@ func (s *SyncManagerSuite) TestSubmit() {
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 	manager := NewSyncManager(s.chunkManager)
@@ -200,7 +200,7 @@ func (s *SyncManagerSuite) TestCompacted() {
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 	manager := NewSyncManager(s.chunkManager)
