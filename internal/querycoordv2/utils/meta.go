@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -148,13 +149,15 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 }
 
 // SpawnReplicasWithRG spawns replicas in rgs one by one for given collection.
-func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, resourceGroups []string, replicaNumber int32, channels []string) ([]*meta.Replica, error) {
+func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, resourceGroups []string,
+	replicaNumber int32, channels []string, loadPriority commonpb.LoadPriority,
+) ([]*meta.Replica, error) {
 	replicaNumInRG, err := AssignReplica(ctx, m, resourceGroups, replicaNumber, true)
 	if err != nil {
 		return nil, err
 	}
 	// Spawn it in replica manager.
-	replicas, err := m.ReplicaManager.Spawn(ctx, collection, replicaNumInRG, channels)
+	replicas, err := m.ReplicaManager.Spawn(ctx, collection, replicaNumInRG, channels, loadPriority)
 	if err != nil {
 		return nil, err
 	}
