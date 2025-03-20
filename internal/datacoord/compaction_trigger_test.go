@@ -316,7 +316,6 @@ func Test_compactionTrigger_force(t *testing.T) {
 			common.CollectionTTLConfigKey: "0",
 		},
 	})
-	collections.Insert(2, &collectionInfo{})
 	collections.Insert(1111, &collectionInfo{
 		ID: 1111,
 		Schema: &schemapb.CollectionSchema{

@@ -509,7 +509,8 @@ func withStatsTaskMeta(stm *statsTaskMeta) testMetaOption {
 
 func createMeta(catalog metastore.DataCoordCatalog, opts ...testMetaOption) *meta {
 	mt := &meta{
-		catalog: catalog,
+		catalog:     catalog,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
 				1000: {
