@@ -801,7 +801,7 @@ func TestQueryObjectJsonExpr(t *testing.T) {
 		"varchar": map[string]string{
 			"a":        "b",
 			"π":        "π",
-			"asd ":     " ",
+			"asd ":     " ", //nolint
 			"utf8":     "€𝄞",
 			"comments": "a/*b*/c/*d//e",
 			"unicode":  "\u041f\u043e\u043b\u0442\u043e\u0440\u0430", // "Полтора"
