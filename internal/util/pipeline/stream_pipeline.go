@@ -70,6 +70,7 @@ func (p *streamPipeline) work() {
 		case msg, ok := <-p.input:
 			if !ok {
 				log.Ctx(context.TODO()).Debug("stream pipeline input closed")
+				return
 			}
 			p.lastAccessTime.Store(time.Now())
 			log.Ctx(context.TODO()).RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
