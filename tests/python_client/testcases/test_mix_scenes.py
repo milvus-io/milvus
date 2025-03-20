@@ -34,7 +34,7 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
         self._connect(self)
 
         # init params
-        self.primary_field, self.nb = "int64_pk", 3000
+        self.primary_field, self.nb = "int64_pk", 10000
 
         # create a collection with fields
         self.collection_wrap.init_collection(
@@ -244,7 +244,7 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         self._connect(self)
 
         # init params
-        self.primary_field, self.nb = "int64_pk", 3000
+        self.primary_field, self.nb = "int64_pk", 10000
         self.all_fields = [self.primary_field, DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
                            DataType.SPARSE_FLOAT_VECTOR.name, DataType.BINARY_VECTOR.name, *self().all_scalar_fields]
 
@@ -546,7 +546,7 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         self._connect(self)
 
         # init params
-        self.primary_field, self.nb = "int64_pk", 3000
+        self.primary_field, self.nb = "int64_pk", 10000
         self.all_fields = [self.primary_field, DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
                            DataType.SPARSE_FLOAT_VECTOR.name, DataType.BINARY_VECTOR.name, *self().all_scalar_fields]
 
@@ -813,7 +813,7 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         self._connect(self)
 
         # init params
-        self.primary_field, self.nb = "int64_pk", 3000
+        self.primary_field, self.nb = "int64_pk", 10000
         self.all_fields = [self.primary_field, DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
                            DataType.SPARSE_FLOAT_VECTOR.name, DataType.BINARY_VECTOR.name, *self().all_scalar_fields]
 

@@ -360,6 +360,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			collectionIDLabelName,
+			fieldIDLabelName,
 		})
 
 	QueryNodeSearchGroupSize = prometheus.NewHistogramVec(

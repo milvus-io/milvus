@@ -169,15 +169,15 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[in
 }
 
 func composePaths(segments []*datapb.CompactionSegmentBinlogs) (
-	deltaPaths map[typeutil.UniqueID][]string, insertPaths map[typeutil.UniqueID][]string, err error,
+	deltaPaths map[typeutil.UniqueID][]string, insertPaths map[typeutil.UniqueID][][]string, err error,
 ) {
 	if err := binlog.DecompressCompactionBinlogs(segments); err != nil {
 		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
 		return nil, nil, err
 	}
 
-	deltaPaths = make(map[typeutil.UniqueID][]string)     // segmentID to deltalog paths
-	insertPaths = make(map[typeutil.UniqueID][]string, 0) // segmentID to binlog paths
+	deltaPaths = make(map[typeutil.UniqueID][]string)       // segmentID to deltalog paths
+	insertPaths = make(map[typeutil.UniqueID][][]string, 0) // segmentID to binlog paths
 	for _, s := range segments {
 		segId := s.GetSegmentID()
 		// Get the batch count of field binlog files from non-empty segment
@@ -199,7 +199,7 @@ func composePaths(segments []*datapb.CompactionSegmentBinlogs) (
 			for _, f := range s.GetFieldBinlogs() {
 				batchPaths = append(batchPaths, f.GetBinlogs()[idx].GetLogPath())
 			}
-			insertPaths[segId] = append(insertPaths[segId], batchPaths...)
+			insertPaths[segId] = append(insertPaths[segId], batchPaths)
 		}
 
 		deltaPaths[s.GetSegmentID()] = []string{}

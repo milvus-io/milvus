@@ -248,10 +248,10 @@ func Test_sealLongTimeIdlePolicy(t *testing.T) {
 	seg1 := &SegmentInfo{lastWrittenTime: time.Now().Add(idleTimeTolerance * 5)}
 	shouldSeal, _ := policy.ShouldSeal(seg1, 100)
 	assert.False(t, shouldSeal)
-	seg2 := &SegmentInfo{lastWrittenTime: getZeroTime(), currRows: 1, SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000}}
+	seg2 := &SegmentInfo{lastWrittenTime: getZeroTime(), SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000, NumOfRows: 1}}
 	shouldSeal, _ = policy.ShouldSeal(seg2, 100)
 	assert.False(t, shouldSeal)
-	seg3 := &SegmentInfo{lastWrittenTime: getZeroTime(), currRows: 1000, SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000}}
+	seg3 := &SegmentInfo{lastWrittenTime: getZeroTime(), SegmentInfo: &datapb.SegmentInfo{MaxRowNum: 10000, NumOfRows: 1000}}
 	shouldSeal, _ = policy.ShouldSeal(seg3, 100)
 	assert.True(t, shouldSeal)
 }
@@ -288,22 +288,6 @@ func Test_sealByTotalGrowingSegmentsSize(t *testing.T) {
 	res, _ = fn("ch-0", []*SegmentInfo{seg0, seg1, seg2, seg3}, 0)
 	assert.Equal(t, 1, len(res))
 	assert.Equal(t, seg2.GetID(), res[0].GetID())
-}
-
-func TestFlushPolicyWithZeroCurRows(t *testing.T) {
-	seg := &SegmentInfo{
-		currRows: 0,
-		// lastFlushTime unset because its a sealed segment
-		SegmentInfo: &datapb.SegmentInfo{
-			NumOfRows:      1,
-			State:          commonpb.SegmentState_Sealed,
-			Level:          datapb.SegmentLevel_L1,
-			LastExpireTime: 456094911979061251,
-		},
-	}
-
-	flushed := flushPolicyL1(seg, tsoutil.GetCurrentTime())
-	assert.True(t, flushed)
 }
 
 func Test_sealByBlockingL0(t *testing.T) {

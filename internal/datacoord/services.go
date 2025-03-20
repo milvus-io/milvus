@@ -566,6 +566,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
+
+	s.meta.SetLastWrittenTime(req.GetSegmentID())
 	log.Info("SaveBinlogPaths sync segment with meta",
 		zap.Any("binlogs", req.GetField2BinlogPaths()),
 		zap.Any("deltalogs", req.GetDeltalogs()),
@@ -1404,12 +1406,12 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 	return resp, nil
 }
 
+// Deprecated
 // UpdateSegmentStatistics updates a segment's stats.
 func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	s.updateSegmentStatistics(ctx, req.GetStats())
 	return merr.Success(), nil
 }
 
@@ -1488,10 +1490,9 @@ func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 
 func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeTtMsg) error {
 	var (
-		channel      = ttMsg.GetChannelName()
-		ts           = ttMsg.GetTimestamp()
-		sourceID     = ttMsg.GetBase().GetSourceID()
-		segmentStats = ttMsg.GetSegmentsStats()
+		channel  = ttMsg.GetChannelName()
+		ts       = ttMsg.GetTimestamp()
+		sourceID = ttMsg.GetBase().GetSourceID()
 	)
 
 	physical, _ := tsoutil.ParseTS(ts)
@@ -1515,8 +1516,6 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 	metrics.DataCoordConsumeDataNodeTimeTickLag.
 		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pChannelName).
 		Set(float64(sub))
-
-	s.updateSegmentStatistics(ctx, segmentStats)
 
 	s.segmentManager.ExpireAllocations(ctx, channel, ts)
 
