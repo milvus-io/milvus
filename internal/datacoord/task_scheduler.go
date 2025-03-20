@@ -633,7 +633,7 @@ func (s *taskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, tas
 			ws.AvailableSlots -= taskSlot
 			return nodeID
 		}
-		if ws.AvailableSlots > maxAvailable {
+		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
 			maxAvailable = ws.AvailableSlots
 			fallbackNodeID = nodeID
 		}
