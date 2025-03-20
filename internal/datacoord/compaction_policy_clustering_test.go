@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestClusteringCompactionPolicySuite(t *testing.T) {
@@ -67,7 +68,7 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 
 	meta := &meta{
 		segments:           NewSegmentsInfo(),
-		collections:        make(map[UniqueID]*collectionInfo, 0),
+		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		compactionTaskMeta: compactionTaskMeta,
 		partitionStatsMeta: partitionStatsMeta,
 		indexMeta:          indexMeta,
@@ -109,22 +110,22 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerWithNoCollecitons() {
 
 func (s *ClusteringCompactionPolicySuite) TestTriggerWithCollections() {
 	// valid collection
-	s.meta.collections[1] = &collectionInfo{
+	s.meta.collections.Insert(1, &collectionInfo{
 		ID:     1,
 		Schema: newTestScalarClusteringKeySchema(),
-	}
+	})
 	// deleted collection
-	s.meta.collections[2] = &collectionInfo{
+	s.meta.collections.Insert(2, &collectionInfo{
 		ID:     2,
 		Schema: newTestScalarClusteringKeySchema(),
-	}
+	})
 	s.clusteringCompactionPolicy.meta = s.meta
 
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
 		if collectionID == 2 {
 			return nil, errors.New("mock get collection fail error")
 		}
-		coll, exist := s.meta.collections[collectionID]
+		coll, exist := s.meta.collections.Get(collectionID)
 		if exist {
 			return coll, nil
 		}
@@ -308,10 +309,10 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 		Channel:      "ch-1",
 	}
 
-	s.meta.collections[testLabel.CollectionID] = &collectionInfo{
+	s.meta.collections.Insert(testLabel.CollectionID, &collectionInfo{
 		ID:     testLabel.CollectionID,
 		Schema: newTestScalarClusteringKeySchema(),
-	}
+	})
 
 	segments := genSegmentsForMeta(testLabel)
 	for id, segment := range segments {
@@ -319,7 +320,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 	}
 
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
-		coll, exist := s.meta.collections[collectionID]
+		coll, exist := s.meta.collections.Get(collectionID)
 		if exist {
 			return coll, nil
 		}

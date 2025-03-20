@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ServerSuite struct {
@@ -725,7 +726,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 	})
 
 	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: &meta{collections: make(map[UniqueID]*collectionInfo, 1)}}
+		s := &Server{meta: &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -736,13 +737,13 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		resp, err := s.BroadcastAlteredCollection(ctx, req)
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
-		assert.Equal(t, 1, len(s.meta.collections))
+		assert.Equal(t, 1, s.meta.collections.Len())
 	})
 
 	t.Run("test update meta", func(t *testing.T) {
-		s := &Server{meta: &meta{collections: map[UniqueID]*collectionInfo{
-			1: {ID: 1},
-		}}}
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(1, &collectionInfo{ID: 1})
+		s := &Server{meta: &meta{collections: collections}}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -751,11 +752,15 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
 		}
 
-		assert.Nil(t, s.meta.collections[1].Properties)
+		coll, ok := s.meta.collections.Get(1)
+		assert.True(t, ok)
+		assert.Nil(t, coll.Properties)
 		resp, err := s.BroadcastAlteredCollection(ctx, req)
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
-		assert.NotNil(t, s.meta.collections[1].Properties)
+		coll, ok = s.meta.collections.Get(1)
+		assert.True(t, ok)
+		assert.NotNil(t, coll.Properties)
 	})
 }
 

@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type SyncSegmentsSchedulerSuite struct {
@@ -45,35 +45,34 @@ func Test_SyncSegmentsSchedulerSuite(t *testing.T) {
 }
 
 func (s *SyncSegmentsSchedulerSuite) initParams() {
-	s.m = &meta{
-		RWMutex: lock.RWMutex{},
-		collections: map[UniqueID]*collectionInfo{
-			1: {
-				ID: 1,
-				Schema: &schemapb.CollectionSchema{
-					Name: "coll1",
-					Fields: []*schemapb.FieldSchema{
-						{
-							FieldID:      100,
-							Name:         "pk",
-							IsPrimaryKey: true,
-							Description:  "",
-							DataType:     schemapb.DataType_Int64,
-						},
-						{
-							FieldID:      101,
-							Name:         "vec",
-							IsPrimaryKey: false,
-							Description:  "",
-							DataType:     schemapb.DataType_FloatVector,
-						},
-					},
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(1, &collectionInfo{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Name: "coll1",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					IsPrimaryKey: true,
+					Description:  "",
+					DataType:     schemapb.DataType_Int64,
 				},
-				Partitions:    []int64{2, 3},
-				VChannelNames: []string{"channel1", "channel2"},
+				{
+					FieldID:      101,
+					Name:         "vec",
+					IsPrimaryKey: false,
+					Description:  "",
+					DataType:     schemapb.DataType_FloatVector,
+				},
 			},
-			2: nil,
 		},
+		Partitions:    []int64{2, 3},
+		VChannelNames: []string{"channel1", "channel2"},
+	})
+	collections.Insert(2, nil)
+	s.m = &meta{
+		collections: collections,
 		segments: &SegmentsInfo{
 			secondaryIndexes: segmentInfoIndexes{
 				channel2Segments: map[string]map[UniqueID]*SegmentInfo{
@@ -356,9 +355,13 @@ func (s *SyncSegmentsSchedulerSuite) Test_SyncSegmentsFail() {
 	ctx := context.Background()
 
 	s.Run("pk not found", func() {
-		sss.meta.collections[1].Schema.Fields[0].IsPrimaryKey = false
+		coll, ok := sss.meta.collections.Get(1)
+		s.True(ok)
+		coll.Schema.Fields[0].IsPrimaryKey = false
 		sss.SyncSegmentsForCollections(ctx)
-		sss.meta.collections[1].Schema.Fields[0].IsPrimaryKey = true
+		coll, ok = sss.meta.collections.Get(1)
+		s.True(ok)
+		coll.Schema.Fields[0].IsPrimaryKey = true
 	})
 
 	s.Run("find watcher failed", func() {
