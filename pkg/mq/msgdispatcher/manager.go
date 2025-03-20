@@ -292,6 +292,19 @@ OUTER:
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	d.Handle(pause)
+	for _, candidate := range candidateTargets {
+		vchannel := candidate.vchannel
+		t, ok := c.registeredTargets.Get(vchannel)
+		// During the build process, the target may undergo repeated deregister and register,
+		// causing the channel object to change. Here, validate whether the channel is the
+		// same as before the build. If inconsistent, remove the target.
+		if !ok || t.ch != candidate.ch {
+			d.RemoveTarget(vchannel)
+		}
+	}
+	c.mainDispatcher.Handle(resume)
 	if c.mainDispatcher == nil {
 		c.mainDispatcher = d
 		log.Info("add main dispatcher", zap.Int64("id", d.ID()))
