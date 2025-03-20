@@ -17,7 +17,6 @@
 package storage
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
@@ -41,7 +40,6 @@ type Record interface {
 	Len() int
 	Release()
 	Retain()
-	Slice(start, end int) Record
 }
 
 type RecordReader interface {
@@ -91,18 +89,6 @@ func (r *compositeRecord) Release() {
 func (r *compositeRecord) Retain() {
 	for _, rec := range r.recs {
 		rec.Retain()
-	}
-}
-
-func (r *compositeRecord) Slice(start, end int) Record {
-	slices := make([]arrow.Array, len(r.recs))
-	for i, rec := range r.recs {
-		d := array.NewSliceData(rec.Data(), int64(start), int64(end))
-		slices[i] = array.MakeFromData(d)
-	}
-	return &compositeRecord{
-		index: r.index,
-		recs:  slices,
 	}
 }
 
@@ -592,56 +578,6 @@ func (r *selectiveRecord) Retain() {
 	// do nothing
 }
 
-func (r *selectiveRecord) Slice(start, end int) Record {
-	panic("not implemented")
-}
-
-func CalculateArraySize(a arrow.Array) int {
-	if a == nil || a.Data() == nil || a.Data().Buffers() == nil {
-		return 0
-	}
-
-	var totalSize int
-	offset := a.Data().Offset()
-	length := a.Len()
-
-	if len(a.NullBitmapBytes()) > 0 {
-		totalSize += (length + 7) / 8
-	}
-
-	for i, buf := range a.Data().Buffers() {
-		if buf == nil {
-			continue
-		}
-
-		switch i {
-		case 0:
-			// Handle bitmap buffer, already handled
-		case 1:
-			switch a.DataType().ID() {
-			case arrow.STRING, arrow.BINARY:
-				// Handle variable-length types like STRING/BINARY
-				startOffset := int(binary.LittleEndian.Uint32(buf.Bytes()[offset*4:]))
-				endOffset := int(binary.LittleEndian.Uint32(buf.Bytes()[(offset+length)*4:]))
-				totalSize += endOffset - startOffset
-			case arrow.LIST:
-				// Handle nest types like list
-				for i := 0; i < length; i++ {
-					startOffset := int(binary.LittleEndian.Uint32(buf.Bytes()[(offset+i)*4:]))
-					endOffset := int(binary.LittleEndian.Uint32(buf.Bytes()[(offset+i+1)*4:]))
-					elementSize := a.DataType().(*arrow.ListType).Elem().(arrow.FixedWidthDataType).Bytes()
-					totalSize += (endOffset - startOffset) * elementSize
-				}
-			default:
-				// Handle fixed-length types
-				elementSize := a.DataType().(arrow.FixedWidthDataType).Bytes()
-				totalSize += elementSize * length
-			}
-		}
-	}
-	return totalSize
-}
-
 func newSelectiveRecord(r Record, selectedFieldId FieldID) Record {
 	return &selectiveRecord{
 		r:       r,
@@ -717,7 +653,7 @@ func (sfw *singleFieldRecordWriter) Write(r Record) error {
 	sfw.numRows += r.Len()
 	a := r.Column(sfw.fieldId)
 
-	sfw.writtenUncompressed += uint64(CalculateArraySize(a))
+	sfw.writtenUncompressed += a.Data().SizeInBytes()
 	rec := array.NewRecord(sfw.schema, []arrow.Array{a}, int64(r.Len()))
 	defer rec.Release()
 	return sfw.fw.WriteBuffered(rec)
@@ -791,7 +727,7 @@ func (mfw *multiFieldRecordWriter) Write(r Record) error {
 	columns := make([]arrow.Array, len(mfw.fieldIds))
 	for i, fieldId := range mfw.fieldIds {
 		columns[i] = r.Column(fieldId)
-		mfw.writtenUncompressed += uint64(CalculateArraySize(columns[i]))
+		mfw.writtenUncompressed += columns[i].Data().SizeInBytes()
 	}
 	rec := array.NewRecord(mfw.schema, columns, int64(r.Len()))
 	defer rec.Release()
@@ -912,11 +848,6 @@ func (sr *simpleArrowRecord) Retain() {
 
 func (sr *simpleArrowRecord) ArrowSchema() *arrow.Schema {
 	return sr.r.Schema()
-}
-
-func (sr *simpleArrowRecord) Slice(start, end int) Record {
-	s := sr.r.NewSlice(int64(start), int64(end))
-	return NewSimpleArrowRecord(s, sr.field2Col)
 }
 
 func NewSimpleArrowRecord(r arrow.Record, field2Col map[FieldID]int) *simpleArrowRecord {
