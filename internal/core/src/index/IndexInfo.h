@@ -27,6 +27,7 @@ struct CreateIndexInfo {
     std::string field_name;
     int64_t dim;
     int32_t scalar_index_engine_version;
+    uint32_t tantivy_index_version;
     DataType json_cast_type;
     std::string json_path;
 };

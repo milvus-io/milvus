@@ -61,9 +61,12 @@ InvertedIndexTantivy<T>::InitForBuildIndex() {
 
 template <typename T>
 InvertedIndexTantivy<T>::InvertedIndexTantivy(
-    const storage::FileManagerContext& ctx, bool inverted_index_single_segment)
+    const storage::FileManagerContext& ctx,
+    uint32_t tantivy_index_version,
+    bool inverted_index_single_segment)
     : ScalarIndex<T>(INVERTED_INDEX_TYPE),
       schema_(ctx.fieldDataMeta.field_schema),
+      tantivy_index_version_(tantivy_index_version),
       inverted_index_single_segment_(inverted_index_single_segment) {
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);

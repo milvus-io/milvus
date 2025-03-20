@@ -82,8 +82,8 @@ mod tests {
             false,
         );
 
-        writer.add_string("网球和滑雪", 0).unwrap();
-        writer.add_string("网球以及滑雪", 1).unwrap();
+        writer.add("网球和滑雪", Some(0)).unwrap();
+        writer.add("网球以及滑雪", Some(1)).unwrap();
 
         writer.commit().unwrap();
 
@@ -113,7 +113,7 @@ mod tests {
         );
 
         for i in 0..10000 {
-            writer.add_string("hello world", i).unwrap();
+            writer.add("hello world", Some(i)).unwrap();
         }
         writer.commit().unwrap();
 
