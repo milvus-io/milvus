@@ -117,7 +117,7 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name="vector")
         # 3. create index
         error = {ct.err_code: 100,
-                 ct.err_msg: f"can't find collection[database=default][collection={not_existed_collection_name}]"}
+                 ct.err_msg: f"collection not found[database=default][collection={not_existed_collection_name}]"}
         self.create_index(client, not_existed_collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
