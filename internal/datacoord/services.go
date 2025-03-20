@@ -371,7 +371,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	resp := &datapb.GetCollectionStatisticsResponse{
 		Status: merr.Success(),
 	}
-	nums := s.meta.GetNumRowsOfCollection(req.CollectionID)
+	nums := s.meta.GetNumRowsOfCollection(ctx, req.CollectionID)
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
 	log.Info("success to get collection statistics", zap.Any("response", resp))
 	return resp, nil
@@ -395,7 +395,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 	}
 	nums := int64(0)
 	if len(req.GetPartitionIDs()) == 0 {
-		nums = s.meta.GetNumRowsOfCollection(req.CollectionID)
+		nums = s.meta.GetNumRowsOfCollection(ctx, req.CollectionID)
 	}
 	for _, partID := range req.GetPartitionIDs() {
 		num := s.meta.GetNumRowsOfPartition(ctx, req.CollectionID, partID)
