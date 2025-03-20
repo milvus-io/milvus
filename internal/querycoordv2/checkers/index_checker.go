@@ -238,7 +238,7 @@ func (c *IndexChecker) checkSegmentStats(segment *meta.Segment, schema *schemapb
 	var result []int64
 	if paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
 		if schema == nil {
-			log.Warn("schema released during check checkSegmentStats", zap.Int64("collection", segment.CollectionID))
+			log.Warn("schema released during check checkSegmentStats", zap.Int64("collection", segment.GetCollectionID()))
 			return result
 		}
 		loadFieldMap := make(map[int64]struct{})
