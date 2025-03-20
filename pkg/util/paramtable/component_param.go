@@ -1472,6 +1472,7 @@ type proxyConfig struct {
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
+	SlowLogSpanInSeconds   ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 }
 
@@ -1925,6 +1926,16 @@ please adjust in embedded Milvus: false`,
 		Export:       true,
 	}
 	p.SlowQuerySpanInSeconds.Init(base.mgr)
+
+	p.SlowLogSpanInSeconds = ParamItem{
+		Key:          "proxy.slowLogSpanInSeconds",
+		Version:      "2.5.8",
+		Doc:          "query whose executed time exceeds the `slowLogSpanInSeconds` will have slow log, in seconds.",
+		DefaultValue: "1",
+		FallbackKeys: []string{"proxy.slowQuerySpanInSeconds"},
+		Export:       false,
+	}
+	p.SlowLogSpanInSeconds.Init(base.mgr)
 
 	p.QueryNodePoolingSize = ParamItem{
 		Key:          "proxy.queryNodePooling.size",

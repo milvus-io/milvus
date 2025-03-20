@@ -2230,7 +2230,7 @@ func TestAlterCollectionReplicateProperty(t *testing.T) {
 func TestRunAnalyzer(t *testing.T) {
 	p := &Proxy{}
 	// run analyzer with default params
-	resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequset{
+	resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
 		Placeholder: [][]byte{[]byte("test doc")},
 	})
 	require.NoError(t, err)
@@ -2238,7 +2238,7 @@ func TestRunAnalyzer(t *testing.T) {
 	assert.Equal(t, len(resp.GetResults()[0].GetTokens()), 2)
 
 	// run analyzer with invalid params
-	resp, err = p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequset{
+	resp, err = p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
 		Placeholder:    [][]byte{[]byte("test doc")},
 		AnalyzerParams: "invalid json",
 	})
