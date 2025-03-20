@@ -132,6 +132,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 			utils.ManualBalance,
 			collectionID,
 			plan.Replica,
+			commonpb.LoadPriority_LOW, // always balance segments at low priority to reduce influencing frontend requests
 			actions...,
 		)
 		if err != nil {

@@ -43,7 +43,7 @@ const (
 	DefaultCoordGracefulStopTimeout            = 5    // s，for coord
 	DefaultHighPriorityThreadCoreCoefficient   = 10
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
-	DefaultLowPriorityThreadCoreCoefficient    = 1
+	DefaultLowPriorityThreadCoreCoefficient    = 3
 
 	DefaultSessionTTL        = 30 // s
 	DefaultSessionRetryTimes = 30

@@ -22,8 +22,6 @@ namespace milvus {
 int64_t FILE_SLICE_SIZE = DEFAULT_INDEX_FILE_SLICE_SIZE;
 float HIGH_PRIORITY_THREAD_CORE_COEFFICIENT =
     DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
-float MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT =
-    DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
 float LOW_PRIORITY_THREAD_CORE_COEFFICIENT =
     DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 int CPU_NUM = DEFAULT_CPU_NUM;
@@ -45,13 +43,6 @@ SetHighPriorityThreadCoreCoefficient(const float coefficient) {
     HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
     LOG_INFO("set high priority thread pool core coefficient: {}",
              HIGH_PRIORITY_THREAD_CORE_COEFFICIENT);
-}
-
-void
-SetMiddlePriorityThreadCoreCoefficient(const float coefficient) {
-    MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
-    LOG_INFO("set middle priority thread pool core coefficient: {}",
-             MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT);
 }
 
 void

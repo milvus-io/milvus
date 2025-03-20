@@ -22,6 +22,7 @@
 
 #include "Types.h"
 #include "common/CDataType.h"
+#include "pb/common.pb.h"
 
 // NOTE: field_id can be system field
 // NOTE: Refer to common/SystemProperty.cpp for details
@@ -40,6 +41,8 @@ struct LoadFieldDataInfo {
     std::string mmap_dir_path = "";
     std::string url;
     int64_t storage_version = 0;
+    milvus::proto::common::LoadPriority load_priority =
+        milvus::proto::common::LoadPriority::LOW;
 };
 
 struct LoadDeletedRecordInfo {

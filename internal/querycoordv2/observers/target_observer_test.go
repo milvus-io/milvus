@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -106,7 +107,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 	suite.NoError(err)
 	err = suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	replicas[0].AddRWNode(2)
 	err = suite.meta.ReplicaManager.Put(suite.ctx, replicas...)
@@ -317,7 +318,7 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 	suite.NoError(err)
 	err = suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	replicas[0].AddRWNode(2)
 	err = suite.meta.ReplicaManager.Put(suite.ctx, replicas...)
