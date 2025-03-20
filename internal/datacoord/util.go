@@ -363,3 +363,27 @@ func getSortStatus(sorted bool) string {
 	}
 	return "unsorted"
 }
+
+func calculateIndexTaskSlot(segmentSize int64) int64 {
+	if segmentSize > 1000*1024*1024 {
+		return max(Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64(), 1)
+	} else if segmentSize > 500*1024*1024 {
+		return max(Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()/4, 1)
+	} else if segmentSize > 100*1024*1024 {
+		return max(Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()/16, 1)
+	} else if segmentSize > 10*1024*1024 {
+		return max(Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()/64, 1)
+	}
+	return max(Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()/256, 1)
+}
+
+func calculateStatsTaskSlot(segmentSize int64) int64 {
+	if segmentSize > 500*1024*1024 {
+		return max(Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64(), 1)
+	} else if segmentSize > 100*1024*1024 {
+		return max(Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()/2, 1)
+	} else if segmentSize > 10*1024*1024 {
+		return max(Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()/4, 1)
+	}
+	return max(Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()/8, 1)
+}
