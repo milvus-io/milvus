@@ -54,7 +54,7 @@ numpy==1.26.4
 tenacity==8.1.0
 rich==13.7.0
 # for standby test
-etcd-sdk-python==0.0.4
+etcd-sdk-python==0.0.5
 deepdiff==6.7.1
 
 # for test result analyzer
