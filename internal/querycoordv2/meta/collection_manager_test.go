@@ -217,7 +217,19 @@ func (suite *CollectionManagerSuite) TestUpdate() {
 		err = mgr.PutPartition(ctx, partition)
 		suite.NoError(err)
 	}
-
+	for _, collection := range suite.collections {
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(),
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: common.RowIDField},
+					{FieldID: common.TimeStampField},
+					{FieldID: 100, Name: "pk"},
+					{FieldID: 101, Name: "vector"},
+				},
+			},
+		}, nil)
+	}
 	suite.clearMemory()
 	err := mgr.Recover(ctx, suite.broker)
 	suite.NoError(err)
@@ -276,6 +288,19 @@ func (suite *CollectionManagerSuite) TestRemove() {
 			suite.Empty(partitions)
 		}
 	}
+	// set expectations
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(102)).Return(&milvuspb.DescribeCollectionResponse{
+		Status: merr.Success(),
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: common.RowIDField},
+				{FieldID: common.TimeStampField},
+				{FieldID: 100, Name: "pk"},
+				{FieldID: 101, Name: "vector"},
+			},
+		},
+	}, nil)
 
 	// Make sure the removes applied to meta store
 	err := mgr.Recover(ctx, suite.broker)
@@ -319,6 +344,18 @@ func (suite *CollectionManagerSuite) TestRemove() {
 func (suite *CollectionManagerSuite) TestRecover_normal() {
 	mgr := suite.mgr
 	ctx := suite.ctx
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(102)).Return(&milvuspb.DescribeCollectionResponse{
+		Status: merr.Success(),
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: common.RowIDField},
+				{FieldID: common.TimeStampField},
+				{FieldID: 100, Name: "pk"},
+				{FieldID: 101, Name: "vector"},
+			},
+		},
+	}, nil)
 
 	suite.clearMemory()
 	err := mgr.Recover(ctx, suite.broker)
@@ -603,7 +640,7 @@ func (suite *CollectionManagerSuite) TestUpgradeLoadFieldsFail() {
 		// do recovery
 		suite.clearMemory()
 		err := mgr.Recover(ctx, suite.broker)
-		suite.NoError(err)
+		suite.Error(err)
 	})
 }
 
