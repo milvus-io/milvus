@@ -148,12 +148,13 @@ func (f segmentSealPolicyFunc) ShouldSeal(segment *SegmentInfo, ts Timestamp) (b
 }
 
 // sealL1SegmentByCapacity get segmentSealPolicy with segment size factor policy
+// TODO: change numOfRows to size
 func sealL1SegmentByCapacity(sizeFactor float64) segmentSealPolicyFunc {
 	return func(segment *SegmentInfo, ts Timestamp) (bool, string) {
 		jitter := paramtable.Get().DataCoordCfg.SegmentSealProportionJitter.GetAsFloat()
 		ratio := (1 - jitter*rand.Float64())
-		return float64(segment.currRows) >= sizeFactor*float64(segment.GetMaxRowNum())*ratio,
-			fmt.Sprintf("Row count capacity full, current rows: %d, max row: %d, seal factor: %f, jitter ratio: %f", segment.currRows, segment.GetMaxRowNum(), sizeFactor, ratio)
+		return float64(segment.GetNumOfRows()) >= sizeFactor*float64(segment.GetMaxRowNum())*ratio,
+			fmt.Sprintf("Row count capacity full, current rows: %d, max row: %d, seal factor: %f, jitter ratio: %f", segment.GetNumOfRows(), segment.GetMaxRowNum(), sizeFactor, ratio)
 	}
 }
 
@@ -197,12 +198,13 @@ func sealL1SegmentByBinlogFileNumber(maxBinlogFileNumber int) segmentSealPolicyF
 // into this segment anymore, so sealLongTimeIdlePolicy will seal these segments to trigger handoff of query cluster.
 // Q: Why we don't decrease the expiry time directly?
 // A: We don't want to influence segments which are accepting `frequent small` batch entities.
+// TODO: replace rowNum with segment size
 func sealL1SegmentByIdleTime(idleTimeTolerance time.Duration, minSizeToSealIdleSegment float64, maxSizeOfSegment float64) segmentSealPolicyFunc {
 	return func(segment *SegmentInfo, ts Timestamp) (bool, string) {
 		limit := (minSizeToSealIdleSegment / maxSizeOfSegment) * float64(segment.GetMaxRowNum())
 		return time.Since(segment.lastWrittenTime) > idleTimeTolerance &&
-				float64(segment.currRows) > limit,
-			fmt.Sprintf("segment idle, segment row number :%d, last written time: %v, max idle duration: %v", segment.currRows, segment.lastWrittenTime, idleTimeTolerance)
+				float64(segment.GetNumOfRows()) > limit,
+			fmt.Sprintf("segment idle, segment row number :%d, last written time: %v, max idle duration: %v", segment.GetNumOfRows(), segment.lastWrittenTime, idleTimeTolerance)
 	}
 }
 
@@ -347,10 +349,7 @@ func flushPolicyL1(segment *SegmentInfo, t Timestamp) bool {
 		segment.Level != datapb.SegmentLevel_L0 &&
 		time.Since(segment.lastFlushTime) >= paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second) &&
 		segment.GetLastExpireTime() <= t &&
-		// A corner case when there's only 1 row in the segment, and the segment is synced
-		// before report currRows to DC. When DN recovered at this moment,
-		// it'll never report this segment's numRows again, leaving segment.currRows == 0 forever.
-		(segment.currRows != 0 || segment.GetNumOfRows() != 0) &&
+		segment.GetNumOfRows() != 0 &&
 		// Decoupling the importing segment from the flush process,
 		// This check avoids notifying the datanode to flush the
 		// importing segment which may not exist.

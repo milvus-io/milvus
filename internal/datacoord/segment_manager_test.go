@@ -242,9 +242,12 @@ func TestLastExpireReset(t *testing.T) {
 	segmentID3, expire3 := allocs[0].SegmentID, allocs[0].ExpireTime
 
 	// simulate handleTimeTick op on dataCoord
-	meta.SetCurrentRows(segmentID1, bigRows)
-	meta.SetCurrentRows(segmentID2, bigRows)
-	meta.SetCurrentRows(segmentID3, smallRows)
+	// meta.SetLastWrittenTime(segmentID1, bigRows)
+	// meta.SetLastWrittenTime(segmentID2, bigRows)
+	// meta.SetLastWrittenTime(segmentID3, smallRows)
+	meta.SetRowCount(segmentID1, bigRows)
+	meta.SetRowCount(segmentID2, bigRows)
+	meta.SetRowCount(segmentID3, smallRows)
 	err = segmentManager.tryToSealSegment(context.TODO(), expire1, channelName)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.SegmentState_Sealed, meta.GetSegment(context.TODO(), segmentID1).GetState())
@@ -267,9 +270,9 @@ func TestLastExpireReset(t *testing.T) {
 	assert.Nil(t, err)
 	newSegmentManager, _ := newSegmentManager(restartedMeta, mockAllocator)
 	// reset row number to avoid being cleaned by empty segment
-	restartedMeta.SetCurrentRows(segmentID1, bigRows)
-	restartedMeta.SetCurrentRows(segmentID2, bigRows)
-	restartedMeta.SetCurrentRows(segmentID3, smallRows)
+	restartedMeta.SetRowCount(segmentID1, bigRows)
+	restartedMeta.SetRowCount(segmentID2, bigRows)
+	restartedMeta.SetRowCount(segmentID3, smallRows)
 
 	// verify lastExpire of growing and sealed segments
 	segment1, segment2, segment3 := restartedMeta.GetSegment(context.TODO(), segmentID1), restartedMeta.GetSegment(context.TODO(), segmentID2), restartedMeta.GetSegment(context.TODO(), segmentID3)
@@ -497,7 +500,7 @@ func TestGetFlushableSegments(t *testing.T) {
 		assert.EqualValues(t, 1, len(ids))
 		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
 
-		meta.SetCurrentRows(allocations[0].SegmentID, 1)
+		meta.SetRowCount(allocations[0].SegmentID, 1)
 		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocations[0].ExpireTime)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(ids))
@@ -514,7 +517,7 @@ func TestGetFlushableSegments(t *testing.T) {
 		assert.EqualValues(t, 1, len(ids))
 		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
 
-		meta.SetCurrentRows(allocations[0].SegmentID, 0)
+		meta.SetRowCount(allocations[0].SegmentID, 0)
 		postions := make([]*msgpb.MsgPosition, 0)
 		cpTs := allocations[0].ExpireTime + 1
 		postions = append(postions, &msgpb.MsgPosition{
@@ -948,7 +951,6 @@ func TestSegmentManager_CleanZeroSealedSegmentsOfChannel(t *testing.T) {
 			NumOfRows:      1,
 			LastExpireTime: 100,
 		},
-		currRows: 1,
 	}
 	seg2 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -959,7 +961,6 @@ func TestSegmentManager_CleanZeroSealedSegmentsOfChannel(t *testing.T) {
 			NumOfRows:      0,
 			LastExpireTime: 100,
 		},
-		currRows: 0,
 	}
 	seg3 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -979,7 +980,6 @@ func TestSegmentManager_CleanZeroSealedSegmentsOfChannel(t *testing.T) {
 			NumOfRows:      1,
 			LastExpireTime: 100,
 		},
-		currRows: 1,
 	}
 
 	newMetaFunc := func() *meta {
