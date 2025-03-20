@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -94,7 +95,8 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 		}
 
 		if collectionSet.Contain(replica.GetCollectionID()) {
-			m.putReplicaInMemory(newReplica(replica))
+			rep := NewReplicaWithPriority(replica, commonpb.LoadPriority_HIGH)
+			m.putReplicaInMemory(rep)
 			log.Info("recover replica",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replica.GetID()),
@@ -125,7 +127,9 @@ func (m *ReplicaManager) Get(ctx context.Context, id typeutil.UniqueID) *Replica
 }
 
 // Spawn spawns N replicas at resource group for given collection in ReplicaManager.
-func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNumInRG map[string]int, channels []string) ([]*Replica, error) {
+func (m *ReplicaManager) Spawn(ctx context.Context, collection int64,
+	replicaNumInRG map[string]int, channels []string, loadPriority commonpb.LoadPriority,
+) ([]*Replica, error) {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -146,12 +150,12 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 					channelExclusiveNodeInfo[channel] = &querypb.ChannelNodeInfo{}
 				}
 			}
-			replicas = append(replicas, newReplica(&querypb.Replica{
+			replicas = append(replicas, NewReplicaWithPriority(&querypb.Replica{
 				ID:               id,
 				CollectionID:     collection,
 				ResourceGroup:    rgName,
 				ChannelNodeInfos: channelExclusiveNodeInfo,
-			}))
+			}, loadPriority))
 		}
 	}
 	if err := m.put(ctx, replicas...); err != nil {

@@ -128,6 +128,8 @@ class JsonKeyStatsIndexTest : public ::testing::TestWithParam<bool> {
 
         index::CreateIndexInfo index_info{};
         config["index_files"] = index_files;
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
 
         index_ = std::make_shared<JsonKeyStatsInvertedIndex>(ctx, true);
         index_->Load(milvus::tracer::TraceContext{}, config);

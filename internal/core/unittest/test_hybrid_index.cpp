@@ -164,6 +164,8 @@ class HybridIndexTestV1 : public testing::Test {
         index_info.field_type = type_;
 
         config["index_files"] = index_files;
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
 
         ctx.set_for_loading_index(true);
         index_ =

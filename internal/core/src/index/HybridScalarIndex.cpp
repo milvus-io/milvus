@@ -361,7 +361,8 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
     auto index_type_file = GetRemoteIndexTypeFile(index_files.value());
 
     auto index_datas = mem_file_manager_->LoadIndexToMemory(
-        std::vector<std::string>{index_type_file});
+        std::vector<std::string>{index_type_file},
+        config[milvus::LOAD_PRIORITY]);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
     DeserializeIndexType(binary_set);

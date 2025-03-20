@@ -98,14 +98,16 @@ MemFileManagerImpl::LoadFile(const std::string& filename) noexcept {
 
 std::map<std::string, std::unique_ptr<DataCodec>>
 MemFileManagerImpl::LoadIndexToMemory(
-    const std::vector<std::string>& remote_files) {
+    const std::vector<std::string>& remote_files,
+    milvus::proto::common::LoadPriority priority) {
     std::map<std::string, std::unique_ptr<DataCodec>> file_to_index_data;
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::vector<std::string> batch_files;
 
     auto LoadBatchIndexFiles = [&]() {
-        auto index_datas = GetObjectData(rcm_.get(), batch_files);
+        auto index_datas = GetObjectData(
+            rcm_.get(), batch_files, milvus::PriorityForLoad(priority));
         for (size_t idx = 0; idx < batch_files.size(); ++idx) {
             auto file_name =
                 batch_files[idx].substr(batch_files[idx].find_last_of('/') + 1);

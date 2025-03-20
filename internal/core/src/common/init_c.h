@@ -31,9 +31,6 @@ void
 InitHighPriorityThreadCoreCoefficient(const float);
 
 void
-InitMiddlePriorityThreadCoreCoefficient(const float);
-
-void
 InitLowPriorityThreadCoreCoefficient(const float);
 
 void

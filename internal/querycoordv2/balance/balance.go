@@ -24,6 +24,7 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -38,6 +39,7 @@ type SegmentAssignPlan struct {
 	FromScore    int64
 	ToScore      int64
 	SegmentScore int64
+	LoadPriority commonpb.LoadPriority
 }
 
 func (segPlan *SegmentAssignPlan) String() string {

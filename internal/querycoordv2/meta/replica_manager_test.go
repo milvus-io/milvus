@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -120,14 +121,14 @@ func (suite *ReplicaManagerSuite) TestSpawn() {
 	ctx := suite.ctx
 
 	mgr.idAllocator = ErrorIDAllocator()
-	_, err := mgr.Spawn(ctx, 1, map[string]int{DefaultResourceGroupName: 1}, nil)
+	_, err := mgr.Spawn(ctx, 1, map[string]int{DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.Error(err)
 
 	replicas := mgr.GetByCollection(ctx, 1)
 	suite.Len(replicas, 0)
 
 	mgr.idAllocator = suite.idAllocator
-	replicas, err = mgr.Spawn(ctx, 1, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	replicas, err = mgr.Spawn(ctx, 1, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"}, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	for _, replica := range replicas {
 		suite.Len(replica.replicaPB.GetChannelNodeInfos(), 0)
@@ -135,7 +136,7 @@ func (suite *ReplicaManagerSuite) TestSpawn() {
 
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
 	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
-	replicas, err = mgr.Spawn(ctx, 2, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	replicas, err = mgr.Spawn(ctx, 2, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"}, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	for _, replica := range replicas {
 		suite.Len(replica.replicaPB.GetChannelNodeInfos(), 2)
@@ -292,7 +293,7 @@ func (suite *ReplicaManagerSuite) spawnAll() {
 	ctx := suite.ctx
 
 	for id, cfg := range suite.collections {
-		replicas, err := mgr.Spawn(ctx, id, cfg.spawnConfig, nil)
+		replicas, err := mgr.Spawn(ctx, id, cfg.spawnConfig, nil, commonpb.LoadPriority_LOW)
 		suite.NoError(err)
 		totalSpawn := 0
 		rgsOfCollection := make(map[string]typeutil.UniqueSet)
@@ -308,12 +309,12 @@ func (suite *ReplicaManagerSuite) spawnAll() {
 func (suite *ReplicaManagerSuite) TestResourceGroup() {
 	mgr := NewReplicaManager(suite.idAllocator, suite.catalog)
 	ctx := suite.ctx
-	replicas1, err := mgr.Spawn(ctx, int64(1000), map[string]int{DefaultResourceGroupName: 1}, nil)
+	replicas1, err := mgr.Spawn(ctx, int64(1000), map[string]int{DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	suite.NotNil(replicas1)
 	suite.Len(replicas1, 1)
 
-	replica2, err := mgr.Spawn(ctx, int64(2000), map[string]int{DefaultResourceGroupName: 1}, nil)
+	replica2, err := mgr.Spawn(ctx, int64(2000), map[string]int{DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	suite.NotNil(replica2)
 	suite.Len(replica2, 1)
@@ -399,7 +400,7 @@ func (suite *ReplicaManagerV2Suite) TestSpawn() {
 	ctx := suite.ctx
 
 	for id, cfg := range suite.collections {
-		replicas, err := mgr.Spawn(ctx, id, cfg.spawnConfig, nil)
+		replicas, err := mgr.Spawn(ctx, id, cfg.spawnConfig, nil, commonpb.LoadPriority_LOW)
 		suite.NoError(err)
 		rgsOfCollection := make(map[string]typeutil.UniqueSet)
 		for rg := range cfg.spawnConfig {

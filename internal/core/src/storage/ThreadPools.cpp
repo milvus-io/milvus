@@ -43,9 +43,6 @@ ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
             case milvus::ThreadPoolPriority::HIGH:
                 coefficient = HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
                 break;
-            case milvus::ThreadPoolPriority::MIDDLE:
-                coefficient = MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
-                break;
             default:
                 coefficient = LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
                 break;

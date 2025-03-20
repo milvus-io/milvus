@@ -1779,6 +1779,17 @@ func (t *loadCollectionTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+const LoadPriorityName = "load_priority"
+
+func (t *loadCollectionTask) GetLoadPriority() commonpb.LoadPriority {
+	loadPriority := commonpb.LoadPriority_HIGH
+	loadPriorityStr, ok := t.LoadCollectionRequest.LoadParams[LoadPriorityName]
+	if ok && loadPriorityStr == "low" {
+		loadPriority = commonpb.LoadPriority_LOW
+	}
+	return loadPriority
+}
+
 func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 
@@ -1851,9 +1862,11 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		Refresh:        t.Refresh,
 		ResourceGroups: t.ResourceGroups,
 		LoadFields:     loadFields,
+		Priority:       t.GetLoadPriority(),
 	}
-	log.Debug("send LoadCollectionRequest to query coordinator",
-		zap.Any("schema", request.Schema))
+	log.Info("send LoadCollectionRequest to query coordinator",
+		zap.Any("schema", request.Schema),
+		zap.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.queryCoord.LoadCollection(ctx, request)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return fmt.Errorf("call query coordinator LoadCollection: %s", err)
@@ -2036,6 +2049,15 @@ func (t *loadPartitionsTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+func (t *loadPartitionsTask) GetLoadPriority() commonpb.LoadPriority {
+	loadPriority := commonpb.LoadPriority_HIGH
+	loadPriorityStr, ok := t.LoadPartitionsRequest.LoadParams[LoadPriorityName]
+	if ok && loadPriorityStr == "low" {
+		loadPriority = commonpb.LoadPriority_LOW
+	}
+	return loadPriority
+}
+
 func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	var partitionIDs []int64
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
@@ -2113,7 +2135,11 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		Refresh:        t.Refresh,
 		ResourceGroups: t.ResourceGroups,
 		LoadFields:     loadFields,
+		Priority:       t.GetLoadPriority(),
 	}
+	log.Info("send LoadPartitionRequest to query coordinator",
+		zap.Any("schema", request.Schema),
+		zap.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.queryCoord.LoadPartitions(ctx, request)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err

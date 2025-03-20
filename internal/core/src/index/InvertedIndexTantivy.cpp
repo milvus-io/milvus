@@ -222,8 +222,8 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
             }
         }
 
-        auto index_datas =
-            mem_file_manager_->LoadIndexToMemory(null_offset_files);
+        auto index_datas = mem_file_manager_->LoadIndexToMemory(
+            null_offset_files, config[milvus::LOAD_PRIORITY]);
 
         auto null_offsets_data = CompactIndexDatas(index_datas);
         auto null_offsets_data_codecs =
@@ -236,7 +236,8 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                it != inverted_index_files.end()) {
         // null offset file is not sliced
         null_offset_files.push_back(*it);
-        auto index_datas = mem_file_manager_->LoadIndexToMemory({*it});
+        auto index_datas = mem_file_manager_->LoadIndexToMemory(
+            {*it}, config[milvus::LOAD_PRIORITY]);
         auto null_offset_data =
             std::move(index_datas.at(INDEX_NULL_OFFSET_FILE_NAME));
         fill_null_offsets(null_offset_data->PayloadData(),
@@ -252,7 +253,8 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                                             file) != null_offset_files.end();
                        }),
         inverted_index_files.end());
-    disk_file_manager_->CacheIndexToDisk(inverted_index_files);
+    disk_file_manager_->CacheIndexToDisk(inverted_index_files,
+                                         config[milvus::LOAD_PRIORITY]);
     path_ = prefix;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
 }

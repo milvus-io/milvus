@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -876,7 +877,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Cha
 	collection.Status = querypb.LoadStatus_Loaded
 	balancer.meta.CollectionManager.PutCollection(ctx, collection)
 	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
-	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1},
+		[]string{"channel1", "channel2"}, commonpb.LoadPriority_LOW)
 	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
@@ -951,7 +953,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 	collection.Status = querypb.LoadStatus_Loaded
 	balancer.meta.CollectionManager.PutCollection(ctx, collection)
 	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
-	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1},
+		[]string{"channel1", "channel2"}, commonpb.LoadPriority_LOW)
 	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
@@ -1049,7 +1052,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Nod
 	collection.Status = querypb.LoadStatus_Loaded
 	balancer.meta.CollectionManager.PutCollection(ctx, collection)
 	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
-	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1},
+		[]string{"channel1", "channel2"}, commonpb.LoadPriority_LOW)
 	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
@@ -1174,7 +1178,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 	collection.Status = querypb.LoadStatus_Loaded
 	balancer.meta.CollectionManager.PutCollection(ctx, collection)
 	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
-	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1},
+		[]string{"channel1", "channel2"}, commonpb.LoadPriority_LOW)
 	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 

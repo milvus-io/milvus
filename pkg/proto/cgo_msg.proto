@@ -4,6 +4,7 @@ package milvus.proto.cgo;
 option go_package="github.com/milvus-io/milvus/pkg/v2/proto/cgopb";
 
 import "schema.proto";
+import "common.proto";
 
 message LoadIndexInfo {
   int64 collectionID = 1;
@@ -21,6 +22,7 @@ message LoadIndexInfo {
   int64 index_store_version = 14;
   int32 index_engine_version = 15;
   int64 index_file_size = 16;
+  common.LoadPriority load_priority = 17;
 }
 
 message IndexStats {

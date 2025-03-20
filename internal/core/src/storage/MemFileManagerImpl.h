@@ -26,6 +26,7 @@
 #include "storage/IndexData.h"
 #include "storage/FileManager.h"
 #include "storage/ChunkManager.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
@@ -52,7 +53,8 @@ class MemFileManagerImpl : public FileManagerImpl {
     }
 
     std::map<std::string, std::unique_ptr<DataCodec>>
-    LoadIndexToMemory(const std::vector<std::string>& remote_files);
+    LoadIndexToMemory(const std::vector<std::string>& remote_files,
+                      milvus::proto::common::LoadPriority priority);
 
     std::vector<FieldDataPtr>
     CacheRawDataToMemory(std::vector<std::string> remote_files);

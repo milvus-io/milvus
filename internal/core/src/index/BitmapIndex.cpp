@@ -569,12 +569,13 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
 template <typename T>
 void
 BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
-    LOG_DEBUG("load bitmap index with config {}", config.dump());
+    LOG_INFO("load bitmap index with config {}", config.dump());
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load bitmap index");
-    auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
+    auto index_datas = file_manager_->LoadIndexToMemory(
+        index_files.value(), config[milvus::LOAD_PRIORITY]);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
     LoadWithoutAssemble(binary_set, config);

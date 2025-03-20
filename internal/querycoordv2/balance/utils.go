@@ -52,6 +52,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 			source,
 			p.Segment.GetCollectionID(),
 			p.Replica,
+			p.LoadPriority,
 			actions...,
 		)
 		if err != nil {
@@ -73,6 +74,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 			zap.Int64("replica", p.Replica.GetID()),
 			zap.String("channel", p.Segment.GetInsertChannel()),
 			zap.String("level", p.Segment.GetLevel().String()),
+			zap.Int32("loadPriority", int32(p.LoadPriority)),
 			zap.Int64("from", p.From),
 			zap.Int64("to", p.To))
 		if task.GetTaskType(t) == task.TaskTypeMove {

@@ -25,7 +25,6 @@ namespace milvus {
 
 extern int64_t FILE_SLICE_SIZE;
 extern float HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
-extern float MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern float LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern int CPU_NUM;
 extern int64_t EXEC_EVAL_EXPR_BATCH_SIZE;
@@ -39,9 +38,6 @@ SetIndexSliceSize(const int64_t size);
 
 void
 SetHighPriorityThreadCoreCoefficient(const float coefficient);
-
-void
-SetMiddlePriorityThreadCoreCoefficient(const float coefficient);
 
 void
 SetLowPriorityThreadCoreCoefficient(const float coefficient);

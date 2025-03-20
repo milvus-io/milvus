@@ -251,6 +251,8 @@ class ArrayBitmapIndexTest : public testing::Test {
         index_info.field_type = DataType::ARRAY;
 
         config["index_files"] = index_files;
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
 
         ctx.set_for_loading_index(true);
         index_ =
