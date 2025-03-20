@@ -277,21 +277,3 @@ message ResourceKey {
     ResourceDomain domain = 1;
     string key = 2;
 }
-
-// BroadcastEvent is the event of broadcast message.
-message BroadcastEvent {
-    oneof event {
-        BroadcastResourceKeyAckAll resource_key_ack_all = 1;
-        BroadcastResourceKeyAckOne resource_key_ack_one = 2;
-    }
-}
-
-// The resource key is acked by all vchannels.
-message BroadcastResourceKeyAckAll {
-    messages.ResourceKey resource_key = 1;
-}
-
-// The resource key is acked by any vchannel.
-message BroadcastResourceKeyAckOne {
-    messages.ResourceKey resource_key = 1;
-}
