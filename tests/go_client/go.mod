@@ -6,7 +6,7 @@ toolchain go1.21.11
 
 require (
 	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
-	github.com/milvus-io/milvus/pkg/v2 v2.5.5
+	github.com/milvus-io/milvus/pkg/v2 v2.5.7
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/stretchr/testify v1.9.0
 	github.com/x448/float16 v0.8.4
