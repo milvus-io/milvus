@@ -158,6 +158,16 @@ class PhyConjunctFilterExpr : public Expr {
         context.clear_bitmap_input();
     }
 
+    bool
+    IsAnd() {
+        return is_and_;
+    }
+
+    bool
+    IsOr() {
+        return !is_and_;
+    }
+
  private:
     int64_t
     UpdateResult(ColumnVectorPtr& input_result,

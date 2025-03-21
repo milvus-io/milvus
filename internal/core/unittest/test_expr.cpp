@@ -3852,6 +3852,91 @@ TEST_P(ExprTest, TestCompareExprNullable2) {
     std::cout << "end compare test" << std::endl;
 }
 
+TEST_P(ExprTest, TestMutiInConvert) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
+    auto bool_1_fid = schema->AddDebugField("bool1", DataType::BOOL);
+    auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
+    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
+    auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
+    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
+    auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
+    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
+    auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
+    auto float_1_fid = schema->AddDebugField("float1", DataType::FLOAT);
+    auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
+    auto double_1_fid = schema->AddDebugField("double1", DataType::DOUBLE);
+    auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, false);
+    auto str_array_fid =
+        schema->AddDebugField("str_array", DataType::ARRAY, DataType::VARCHAR);
+    schema->set_primary_field_id(pk);
+
+    auto seg = CreateSealedSegment(schema);
+    size_t N = 1000;
+    auto raw_data = DataGen(schema, N);
+    auto fields = schema->get_fields();
+    for (auto field_data : raw_data.raw_->fields_data()) {
+        int64_t field_id = field_data.field_id();
+
+        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
+        auto field_meta = fields.at(FieldId(field_id));
+        info.channel->push(
+            CreateFieldDataFromDataArray(N, &field_data, field_meta));
+        info.channel->close();
+
+        seg->LoadFieldData(FieldId(field_id), info);
+    }
+
+    query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
+
+    auto build_expr = [&](int index) -> expr::TypedExprPtr {
+        switch (index) {
+            case 0: {
+                proto::plan::GenericValue val1;
+                val1.set_int64_val(100);
+                auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+                    expr::ColumnInfo(int64_fid, DataType::INT64),
+                    proto::plan::OpType::Equal,
+                    val1);
+                proto::plan::GenericValue val2;
+                val2.set_int64_val(200);
+                auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
+                    expr::ColumnInfo(int64_fid, DataType::INT64),
+                    proto::plan::OpType::Equal,
+                    val2);
+                auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+                    expr::LogicalBinaryExpr::OpType::Or, expr1, expr2);
+                proto::plan::GenericValue val3;
+                val3.set_int64_val(300);
+                auto expr4 = std::make_shared<expr::UnaryRangeFilterExpr>(
+                    expr::ColumnInfo(int64_fid, DataType::INT64),
+                    proto::plan::OpType::Equal,
+                    val3);
+                return std::make_shared<expr::LogicalBinaryExpr>(
+                    expr::LogicalBinaryExpr::OpType::Or, expr3, expr4);
+            };
+            default:
+                PanicInfo(ErrorCode::UnexpectedError, "not implement");
+        }
+    };
+
+    auto expr = build_expr(0);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    auto final1 = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    OPTIMIZE_EXPR_ENABLED = false;
+    auto final2 = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final1.size(), final2.size());
+    for (auto i = 0; i < final1.size(); i++) {
+        EXPECT_EQ(final1[i], final2[i]);
+    }
+}
+
 TEST(Expr, TestExprPerformance) {
     GTEST_SKIP() << "Skip performance test, open it when test performance";
     auto schema = std::make_shared<Schema>();
