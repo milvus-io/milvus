@@ -31,6 +31,10 @@ class IndexData : public DataCodec {
         : DataCodec(data, CodecType::IndexDataType) {
     }
 
+    explicit IndexData(const Slice& slice)
+        : DataCodec(slice, CodecType::IndexDataType) {
+    }
+
     std::vector<uint8_t>
     Serialize(StorageType medium) override;
 

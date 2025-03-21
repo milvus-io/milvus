@@ -30,6 +30,19 @@ class BinlogReader {
         : data_(binlog_data), size_(length), tell_(0) {
     }
 
+    template <typename T>
+    SegcoreError
+    ReadSingleValue(T& val) {
+        auto needed_size = sizeof(T);
+        if (needed_size > size_ - tell_) {
+            return SegcoreError(milvus::UnexpectedError,
+                                "out range of binlog data");
+        }
+        val = *reinterpret_cast<T*>(data_.get() + tell_);
+        tell_ += needed_size;
+        return SegcoreError(milvus::Success, "");
+    }
+
     SegcoreError
     Read(int64_t nbytes, void* out);
 
