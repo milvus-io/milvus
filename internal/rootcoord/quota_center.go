@@ -112,6 +112,7 @@ var dqlRateTypes = typeutil.NewSet(
 type LimiterRange struct {
 	RateScope        internalpb.RateScope
 	OpType           opType
+	IncludeRateTypes typeutil.Set[internalpb.RateType]
 	ExcludeRateTypes typeutil.Set[internalpb.RateType]
 }
 
@@ -235,8 +236,14 @@ func updateLimiter(node *rlinternal.RateLimiterNode, limiter *ratelimitutil.Limi
 		return
 	}
 	limiters := node.GetLimiters()
-	getRateTypes(limiterRange.RateScope, limiterRange.OpType).
-		Complement(limiterRange.ExcludeRateTypes).Range(func(rt internalpb.RateType) bool {
+	rateTypes := getRateTypes(limiterRange.RateScope, limiterRange.OpType)
+	if limiterRange.IncludeRateTypes.Len() > 0 {
+		rateTypes = rateTypes.Intersection(limiterRange.IncludeRateTypes)
+	}
+	if limiterRange.ExcludeRateTypes.Len() > 0 {
+		rateTypes = rateTypes.Complement(limiterRange.ExcludeRateTypes)
+	}
+	rateTypes.Range(func(rt internalpb.RateType) bool {
 		originLimiter, ok := limiters.Get(rt)
 		if !ok {
 			log.Warn("update limiter failed, limiter not found",
@@ -555,6 +562,54 @@ func (q *QuotaCenter) collectMetrics() error {
 		metrics.RootCoordTtDelay.DeleteLabelValues(typeutil.QueryNodeRole, strconv.FormatInt(oldQN, 10))
 	}
 	return nil
+}
+
+func getDbPropertyWithAction(db *model.Database, property string, actionFunc func(bool)) {
+	if db == nil || property == "" || actionFunc == nil {
+		return
+	}
+	if v := db.GetProperty(property); v != "" {
+		if dbForceDenyDDLEnabled, err := strconv.ParseBool(v); err == nil {
+			actionFunc(dbForceDenyDDLEnabled)
+		} else {
+			log.Warn("invalid configuration for database force deny DDL",
+				zap.String("config item", property),
+				zap.String("config value", v))
+		}
+	}
+}
+
+func (q *QuotaCenter) calculateDBDDLRates() {
+	dbs, err := q.meta.ListDatabases(q.ctx, typeutil.MaxTimestamp)
+	if err != nil {
+		log.Warn("get databases failed", zap.Error(err))
+		return
+	}
+	for _, db := range dbs {
+		dbDDLKeysWithRatesType := map[string]typeutil.Set[internalpb.RateType]{
+			common.DatabaseForceDenyDDLKey:           ddlRateTypes,
+			common.DatabaseForceDenyCollectionDDLKey: typeutil.NewSet(internalpb.RateType_DDLCollection),
+			common.DatabaseForceDenyPartitionDDLKey:  typeutil.NewSet(internalpb.RateType_DDLPartition),
+			common.DatabaseForceDenyIndexDDLKey:      typeutil.NewSet(internalpb.RateType_DDLIndex),
+			common.DatabaseForceDenyFlushDDLKey:      typeutil.NewSet(internalpb.RateType_DDLFlush),
+			common.DatabaseForceDenyCompactionDDLKey: typeutil.NewSet(internalpb.RateType_DDLCompaction),
+		}
+
+		for ddlKey, rateTypes := range dbDDLKeysWithRatesType {
+			getDbPropertyWithAction(db, ddlKey, func(enabled bool) {
+				if enabled {
+					dbLimiters := q.rateLimiter.GetOrCreateDatabaseLimiters(db.ID,
+						newParamLimiterFunc(internalpb.RateScope_Database, allOps))
+					updateLimiter(dbLimiters, GetEarliestLimiter(), &LimiterRange{
+						RateScope:        internalpb.RateScope_Database,
+						OpType:           ddl,
+						IncludeRateTypes: rateTypes,
+					})
+					dbLimiters.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToDDL, commonpb.ErrorCode_ForceDeny)
+				}
+			})
+		}
+	}
 }
 
 // forceDenyWriting sets dml rates to 0 to reject all dml requests.
@@ -1175,6 +1230,8 @@ func (q *QuotaCenter) calculateRates() error {
 		log.Warn("QuotaCenter calculateReadRates failed", zap.Error(err))
 		return err
 	}
+
+	q.calculateDBDDLRates()
 
 	// log.Debug("QuotaCenter calculates rate done", zap.Any("rates", q.currentRates))
 	return nil
