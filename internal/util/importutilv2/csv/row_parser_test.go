@@ -249,7 +249,13 @@ func TestRowParser_Parse_Invalid(t *testing.T) {
 				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
 			},
 			{
-				FieldID:   3,
+				FieldID:    3,
+				Name:       "text",
+				DataType:   schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "16"}},
+			},
+			{
+				FieldID:   4,
 				Name:      "$meta",
 				IsDynamic: true,
 				DataType:  schemapb.DataType_JSON,
@@ -264,9 +270,10 @@ func TestRowParser_Parse_Invalid(t *testing.T) {
 	}
 
 	cases := []testCase{
-		{header: []string{"id", "vector", "x", "$meta"}, row: []string{"1", "[1, 2]", "6", "{\"x\": 8}"}, expectErr: "duplicated key in dynamic field, key=x"},
-		{header: []string{"id", "vector", "x", "$meta"}, row: []string{"1", "[1, 2]", "8", "{*&%%&$*(&}"}, expectErr: "illegal value for dynamic field, not a JSON format string"},
-		{header: []string{"id", "vector", "x", "$meta"}, row: []string{"1", "[1, 2]", "8"}, expectErr: "the number of fields in the row is not equal to the header"},
+		{header: []string{"id", "vector", "text", "x", "$meta"}, row: []string{"1", "[1, 2]", "aaa", "6", "{\"x\": 8}"}, expectErr: "duplicated key in dynamic field, key=x"},
+		{header: []string{"id", "vector", "text", "x", "$meta"}, row: []string{"1", "[1, 2]", "aaa", "8", "{*&%%&$*(&}"}, expectErr: "illegal value for dynamic field, not a JSON format string"},
+		{header: []string{"id", "vector", "text", "x", "$meta"}, row: []string{"1", "[1, 2]", "aaa", "8"}, expectErr: "the number of fields in the row is not equal to the header"},
+		{header: []string{"id", "vector", "text", "x", "$meta"}, row: []string{"1", "[1, 2]", "\xc3\x28", "6", "{\"y\": 8}"}, expectErr: "contains invalid UTF-8 data"},
 	}
 
 	nullkey := ""
