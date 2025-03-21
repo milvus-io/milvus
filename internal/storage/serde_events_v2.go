@@ -157,7 +157,7 @@ func (pw *packedRecordWriter) Write(r Record) error {
 	}
 	pw.rowNum += int64(r.Len())
 	for col, arr := range rec.Columns() {
-		size := uint64(CalculateArraySize(arr))
+		size := arr.Data().SizeInBytes()
 		pw.writtenUncompressed += size
 		for columnGroup, group := range pw.columnGroups {
 			if lo.Contains(group.Columns, col) {

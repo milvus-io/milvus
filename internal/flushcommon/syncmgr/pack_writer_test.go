@@ -151,7 +151,7 @@ func TestBulkPackWriter_Write(t *testing.T) {
 						EntriesNum: 10,
 						LogPath:    "files/delta_log/123/456/789/10000",
 						LogSize:    592,
-						MemorySize: 283,
+						MemorySize: 327,
 					},
 				},
 			},

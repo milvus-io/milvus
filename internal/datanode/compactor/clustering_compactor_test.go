@@ -228,7 +228,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	// 8+8+8+4+7+4*4=51
 	// 51*1024 = 52224
 	// writer will automatically flush after 1024 rows.
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "52223")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "60000")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
 
 	compactionResult, err := s.task.Compact()
@@ -315,7 +315,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 	// 8+8+8+4+7+4*4=51
 	// 51*1024 = 52224
 	// writer will automatically flush after 1024 rows.
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "52223")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "60000")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key)
@@ -391,9 +391,9 @@ func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() 
 func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 	// 8 + 8 + 8 + 7 + 8 = 39
 	// 39*1024 = 39936
-	// plus buffer on null bitsets etc., let's make it 45000
+	// plus buffer on null bitsets etc., let's make it 50000
 	// writer will automatically flush after 1024 rows.
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "45000")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "50000")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
 	s.prepareCompactionWithBM25FunctionTask()
 
