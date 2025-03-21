@@ -26,9 +26,9 @@ pub extern "C" fn tantivy_create_index(
     field_name: *const c_char,
     data_type: TantivyDataType,
     path: *const c_char,
+    tantivy_index_version: u32,
     num_threads: usize,
     overall_memory_budget_in_bytes: usize,
-    tantivy_index_version: u32,
 ) -> RustResult {
     let field_name_str = cstr_to_str!(field_name);
     let path_str = cstr_to_str!(path);

@@ -42,7 +42,7 @@ template <typename T>
 class HybridScalarIndex : public ScalarIndex<T> {
  public:
     explicit HybridScalarIndex(
-        uint32_t index_engine_version,
+        uint32_t tantivy_index_version,
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
@@ -200,7 +200,7 @@ class HybridScalarIndex : public ScalarIndex<T> {
     // may not be upgraded to a higher version in a predictable time), so we are using a lower version of tantivy to read index
     // built from a higher version of tantivy which is not supported.
     // Therefore, we should provide a way to allow higher version of milvus to build tantivy index with low version.
-    uint32_t index_engine_version_{0};
+    uint32_t tantivy_index_version_{0};
 };
 
 }  // namespace index

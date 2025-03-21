@@ -45,11 +45,11 @@ IndexFactory::CreatePrimitiveScalarIndex(
     const storage::FileManagerContext& file_manager_context) {
     auto index_type = create_index_info.index_type;
     if (index_type == INVERTED_INDEX_TYPE) {
-        assert(create_index_info.index_engine_version != 0);
+        assert(create_index_info.tantivy_index_version != 0);
         // scalar_index_engine_version 0 means we should built tantivy index within single segment
         return std::make_unique<InvertedIndexTantivy<T>>(
             file_manager_context,
-            create_index_info.index_engine_version,
+            create_index_info.tantivy_index_version,
             create_index_info.scalar_index_engine_version == 0);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
@@ -57,7 +57,7 @@ IndexFactory::CreatePrimitiveScalarIndex(
     }
     if (index_type == HYBRID_INDEX_TYPE) {
         return std::make_unique<HybridScalarIndex<T>>(
-            create_index_info.index_engine_version, file_manager_context);
+            create_index_info.tantivy_index_version, file_manager_context);
     }
     return CreateScalarIndexSort<T>(file_manager_context);
 }
@@ -77,11 +77,11 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     auto index_type = create_index_info.index_type;
 #if defined(__linux__) || defined(__APPLE__)
     if (index_type == INVERTED_INDEX_TYPE) {
-        assert(create_index_info.index_engine_version != 0);
+        assert(create_index_info.tantivy_index_version != 0);
         // scalar_index_engine_version 0 means we should built tantivy index within single segment
         return std::make_unique<InvertedIndexTantivy<std::string>>(
             file_manager_context,
-            create_index_info.index_engine_version,
+            create_index_info.tantivy_index_version,
             create_index_info.scalar_index_engine_version == 0);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
@@ -89,7 +89,7 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     }
     if (index_type == HYBRID_INDEX_TYPE) {
         return std::make_unique<HybridScalarIndex<std::string>>(
-            create_index_info.index_engine_version, file_manager_context);
+            create_index_info.tantivy_index_version, file_manager_context);
     }
     return CreateStringIndexMarisa(file_manager_context);
 #else

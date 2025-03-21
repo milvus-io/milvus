@@ -29,11 +29,11 @@ namespace index {
 
 template <typename T>
 HybridScalarIndex<T>::HybridScalarIndex(
-    uint32_t index_engine_version,
+    uint32_t tantivy_index_version,
     const storage::FileManagerContext& file_manager_context)
     : ScalarIndex<T>(HYBRID_INDEX_TYPE),
       is_built_(false),
-      index_engine_version_(index_engine_version),
+      tantivy_index_version_(tantivy_index_version),
       bitmap_index_cardinality_limit_(
           DEFAULT_HYBRID_INDEX_BITMAP_CARDINALITY_LIMIT),
       file_manager_context_(file_manager_context) {
@@ -194,7 +194,7 @@ HybridScalarIndex<T>::GetInternalIndex() {
             std::make_shared<ScalarIndexSort<T>>(file_manager_context_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
         internal_index_ = std::make_shared<InvertedIndexTantivy<T>>(
-            file_manager_context_, index_engine_version_);
+            file_manager_context_, tantivy_index_version_);
     } else {
         PanicInfo(UnexpectedError,
                   "unknown index type when get internal index");
@@ -217,7 +217,7 @@ HybridScalarIndex<std::string>::GetInternalIndex() {
             std::make_shared<StringIndexMarisa>(file_manager_context_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
         internal_index_ = std::make_shared<InvertedIndexTantivy<std::string>>(
-            file_manager_context_, index_engine_version_);
+            file_manager_context_, tantivy_index_version_);
     } else {
         PanicInfo(UnexpectedError,
                   "unknown index type when get internal index");

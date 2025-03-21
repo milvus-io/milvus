@@ -40,7 +40,6 @@ ScalarIndexCreator::ScalarIndexCreator(
             config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
 
-    // tantivy index version 7 means the most update to date version
     index_info.tantivy_index_version =
         milvus::index::GetValueFromConfig<int32_t>(
             config, milvus::index::TANTIVY_INDEX_VERSION)
