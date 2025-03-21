@@ -4278,7 +4278,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.IndexTaskSchedulerInterval = ParamItem{
 		Key:          "indexCoord.scheduler.interval",
 		Version:      "2.0.0",
-		DefaultValue: "1000",
+		DefaultValue: "100",
 	}
 	p.IndexTaskSchedulerInterval.Init(base.mgr)
 
@@ -4470,9 +4470,9 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.IndexTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.indexTaskSlotUsage",
-		Version:      "2.5.3",
+		Version:      "2.5.8",
 		Doc:          "slot usage of index task",
-		DefaultValue: "8",
+		DefaultValue: "256",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -4480,9 +4480,9 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.StatsTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.statsTaskSlotUsage",
-		Version:      "2.5.3",
+		Version:      "2.5.8",
 		Doc:          "slot usage of stats task",
-		DefaultValue: "1",
+		DefaultValue: "8",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -4490,7 +4490,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.AnalyzeTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.analyzeTaskSlotUsage",
-		Version:      "2.5.3",
+		Version:      "2.5.8",
 		Doc:          "slot usage of analyze task",
 		DefaultValue: "65535",
 		PanicIfEmpty: false,
