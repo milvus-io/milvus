@@ -459,6 +459,11 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
                   "failed to get vector, index is sparse");
     }
 
+    // if dataset is empty, return empty vector
+    if (dataset->GetRows() == 0) {
+        return {};
+    }
+
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
         PanicInfo(ErrorCode::UnexpectedError,
