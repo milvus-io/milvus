@@ -12,6 +12,7 @@
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "common/Consts.h"
 #include "common/FieldDataInterface.h"
+#include "common/JsonCastType.h"
 #include "common/Types.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
@@ -43,8 +44,8 @@ ScalarIndexCreator::ScalarIndexCreator(
     index_info.field_type = dtype_;
     index_info.index_type = index_type();
     if (dtype == DataType::JSON) {
-        index_info.json_cast_type = static_cast<DataType>(
-            std::stoi(config.at(JSON_CAST_TYPE).get<std::string>()));
+        index_info.json_cast_type =
+            ConvertToJsonCastType(config.at(JSON_CAST_TYPE).get<std::string>());
         index_info.json_path = config.at(JSON_PATH).get<std::string>();
     }
     index_ = index::IndexFactory::GetInstance().CreateIndex(

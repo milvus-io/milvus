@@ -2,7 +2,6 @@ package indexparamcheck
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/samber/lo"
 
@@ -17,7 +16,7 @@ type INVERTEDChecker struct {
 	scalarIndexChecker
 }
 
-var validJSONCastTypes = []int{int(schemapb.DataType_Bool), int(schemapb.DataType_Int8), int(schemapb.DataType_Int16), int(schemapb.DataType_Int32), int(schemapb.DataType_Int64), int(schemapb.DataType_Float), int(schemapb.DataType_Double), int(schemapb.DataType_String), int(schemapb.DataType_VarChar)}
+var validJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR"}
 
 func (c *INVERTEDChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
 	// check json index params
@@ -27,11 +26,8 @@ func (c *INVERTEDChecker) CheckTrain(dataType schemapb.DataType, params map[stri
 		if !exist {
 			return merr.WrapErrParameterMissing(common.JSONCastTypeKey, "json index must specify cast type")
 		}
-		castTypeInt, err := strconv.Atoi(castType)
-		if err != nil {
-			return merr.WrapErrParameterInvalid(common.JSONCastTypeKey, "json_cast_type must be DataType")
-		}
-		if !lo.Contains(validJSONCastTypes, castTypeInt) {
+
+		if !lo.Contains(validJSONCastTypes, castType) {
 			return merr.WrapErrParameterInvalidMsg("json_cast_type %v is not supported", castType)
 		}
 	}

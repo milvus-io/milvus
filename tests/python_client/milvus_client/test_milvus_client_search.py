@@ -1467,7 +1467,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         index_params.add_index(field_name=nullable_field_name, index_name="json_index", index_type="INVERTED",
-                               params={"json_cast_type": DataType.INT64, "json_path": f"{nullable_field_name}['a']['b']"})
+                               params={"json_cast_type": "double", "json_path": f"{nullable_field_name}['a']['b']"})
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)

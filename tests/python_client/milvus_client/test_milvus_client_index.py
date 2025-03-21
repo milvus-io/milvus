@@ -695,7 +695,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         # 6. prepare index params with no json_path
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name="my_json", index_type="INVERTED", params={"json_cast_type": DataType.VARCHAR})
+        index_params.add_index(field_name="my_json", index_type="INVERTED", params={"json_cast_type": "varchar"})
         # 7. create index
         self.create_index(client, collection_name, index_params)
         self.drop_collection(client, collection_name)
@@ -717,7 +717,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         # 2. prepare index params with invalid index type
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name="my_json", index_type=invalid_index_type, params={"json_cast_type": DataType.INT64,
+        index_params.add_index(field_name="my_json", index_type=invalid_index_type, params={"json_cast_type": "double",
                                                                                     "json_path": "my_json['a']['b']"})
         # 3. create index
         error = {ct.err_code: 1100, ct.err_msg: f"invalid parameter[expected=valid index]"
@@ -750,7 +750,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=json_field_name, index_type=not_supported_varchar_scalar_index,
-                               params={"json_cast_type": DataType.INT64, "json_path": "my_json['a']['b']"})
+                               params={"json_cast_type": "double", "json_path": "my_json['a']['b']"})
         # 3. create index
         if not_supported_varchar_scalar_index == "TRIE":
             supported_field_type = "varchar"
@@ -861,7 +861,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=json_field_name, index_name="json_index",
                                index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": DataType.INT64, "json_path": invalid_json_path})
+                               params={"json_cast_type": "double", "json_path": invalid_json_path})
         # 3. create index
         error = {ct.err_code: 1100, ct.err_msg: f"index params][actual=invalid index params]"}
         self.create_index(client, collection_name, index_params,
@@ -885,7 +885,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": DataType.INT64, "json_path": f"{json_field_name}['a']"})
+                               params={"json_cast_type": "double", "json_path": f"{json_field_name}['a']"})
         error = {ct.err_code: 65535, ct.err_msg: f"cannot create index on non-exist field: {json_field_name}"}
         self.create_collection(client, collection_name, schema=schema, index_params=index_params,
                                check_task = CheckTasks.err_res, check_items = error)
@@ -916,13 +916,13 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=json_field_name, index_name="json_index",
                                index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": DataType.INT64, "json_path": f"{json_field_name}['a']"})
+                               params={"json_cast_type": "double", "json_path": f"{json_field_name}['a']"})
         self.create_index(client, collection_name, index_params)
         # 4. prepare another index params
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=json_field_name, index_name="json_index",
                                index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": DataType.VARCHAR, "json_path": f"{json_field_name}['a']"})
+                               params={"json_cast_type": "varchar", "json_path": f"{json_field_name}['a']"})
         # 5. create index
         error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
         self.create_index(client, collection_name, index_params,
@@ -940,8 +940,7 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
     def supported_varchar_scalar_index(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[DataType.BOOL, DataType.INT8, DataType.INT16, DataType.INT32,
-                                              DataType.INT64, DataType.FLOAT, DataType.DOUBLE, DataType.VARCHAR])
+    @pytest.fixture(scope="function", params=["bool", "double", "varchar"])
     def supported_json_cast_type(self, request):
         yield request.param
 

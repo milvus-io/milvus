@@ -1141,7 +1141,7 @@ func Test_parseIndexParams(t *testing.T) {
 				ExtraParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.JSONCastTypeKey,
-						Value: "1",
+						Value: "double",
 					},
 					{
 						Key:   common.IndexTypeKey,
@@ -1170,7 +1170,7 @@ func Test_parseIndexParams(t *testing.T) {
 				ExtraParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.JSONCastTypeKey,
-						Value: "1",
+						Value: "double",
 					},
 					{
 						Key:   common.IndexTypeKey,
