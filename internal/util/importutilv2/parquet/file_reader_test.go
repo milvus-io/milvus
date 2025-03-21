@@ -3,6 +3,9 @@ package parquet
 import (
 	"testing"
 
+	"github.com/apache/arrow/go/v12/arrow"
+	"github.com/apache/arrow/go/v12/arrow/array"
+	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -89,4 +92,23 @@ func TestParseSparseFloatRowVector(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseSparseFloatVectorStructs(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	builder := array.NewInt32Builder(mem)
+	int32Data := make([]int32, 0)
+	int32Data = append(int32Data, 1)
+	validData := make([]bool, 0)
+	validData = append(validData, true)
+	builder.AppendValues(int32Data, validData)
+	arr := builder.NewInt32Array()
+
+	st := make(map[string]arrow.Array)
+	st["indices"] = arr
+	structs := make([]map[string]arrow.Array, 0)
+	structs = append(structs, st)
+
+	_, _, err := parseSparseFloatVectorStructs(structs)
+	assert.Error(t, err)
 }
