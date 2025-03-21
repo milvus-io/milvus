@@ -363,7 +363,6 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta
 		indexID = UniqueID(400)
 	)
 	return &meta{
-		RWMutex:      lock.RWMutex{},
 		ctx:          ctx,
 		catalog:      catalog,
 		collections:  nil,
@@ -517,7 +516,6 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 	segIndexes.Insert(segID, segIdx0)
 	segIndexes.Insert(segID+1, segIdx1)
 	meta := &meta{
-		RWMutex:     lock.RWMutex{},
 		ctx:         ctx,
 		catalog:     catalog,
 		collections: nil,
@@ -682,7 +680,6 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 	segIndexes.Insert(segID, segIdx0)
 	segIndexes.Insert(segID+1, segIdx1)
 	meta := &meta{
-		RWMutex:     lock.RWMutex{},
 		ctx:         ctx,
 		catalog:     catalog,
 		collections: nil,
@@ -1044,6 +1041,33 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			},
 		},
 	}
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, &collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name:        "",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      fieldID,
+					Name:         "",
+					IsPrimaryKey: false,
+					Description:  "",
+					DataType:     schemapb.DataType_FloatVector,
+					TypeParams:   nil,
+					IndexParams:  nil,
+					AutoID:       false,
+					State:        0,
+				},
+			},
+		},
+		Partitions:     nil,
+		StartPositions: nil,
+		Properties:     nil,
+	})
+
 	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 	segIdx0 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segIdx0.Insert(indexID, &model.SegmentIndex{
@@ -1111,32 +1135,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			},
 		},
 
-		collections: map[UniqueID]*collectionInfo{
-			collID: {
-				ID: collID,
-				Schema: &schemapb.CollectionSchema{
-					Name:        "",
-					Description: "",
-					AutoID:      false,
-					Fields: []*schemapb.FieldSchema{
-						{
-							FieldID:      fieldID,
-							Name:         "",
-							IsPrimaryKey: false,
-							Description:  "",
-							DataType:     schemapb.DataType_FloatVector,
-							TypeParams:   nil,
-							IndexParams:  nil,
-							AutoID:       false,
-							State:        0,
-						},
-					},
-				},
-				Partitions:     nil,
-				StartPositions: nil,
-				Properties:     nil,
-			},
-		},
+		collections: collections,
 	}
 
 	m.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{

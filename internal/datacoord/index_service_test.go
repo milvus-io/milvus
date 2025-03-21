@@ -91,21 +91,21 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	mock0Allocator := newMockAllocator(t)
 
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, &collectionInfo{
+		ID:             collID,
+		Partitions:     nil,
+		StartPositions: nil,
+		Properties:     nil,
+		CreatedAt:      0,
+	})
+
 	indexMeta := newSegmentIndexMeta(catalog)
 	s := &Server{
 		meta: &meta{
-			catalog: catalog,
-			collections: map[UniqueID]*collectionInfo{
-				collID: {
-					ID: collID,
-
-					Partitions:     nil,
-					StartPositions: nil,
-					Properties:     nil,
-					CreatedAt:      0,
-				},
-			},
-			indexMeta: indexMeta,
+			catalog:     catalog,
+			collections: collections,
+			indexMeta:   indexMeta,
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -2664,15 +2664,16 @@ func TestJsonIndex(t *testing.T) {
 		},
 	}, nil)
 
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, &collectionInfo{
+		ID: collID,
+	})
+
 	s := &Server{
 		meta: &meta{
-			catalog: catalog,
-			collections: map[UniqueID]*collectionInfo{
-				collID: {
-					ID: collID,
-				},
-			},
-			indexMeta: indexMeta,
+			catalog:     catalog,
+			collections: collections,
+			indexMeta:   indexMeta,
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),

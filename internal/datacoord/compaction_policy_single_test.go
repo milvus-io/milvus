@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestSingleCompactionPolicySuite(t *testing.T) {
@@ -53,7 +54,7 @@ func (s *SingleCompactionPolicySuite) SetupTest() {
 	}
 
 	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{segments: NewSegmentsInfo()}
+	meta := &meta{segments: NewSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
