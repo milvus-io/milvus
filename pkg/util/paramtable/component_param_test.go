@@ -379,6 +379,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Len(t, Params.ClusterLevelLoadResourceGroups.GetAsStrings(), 0)
 
 		assert.Equal(t, 10, Params.CollectionChannelCountFactor.GetAsInt())
+		assert.Equal(t, 3000, Params.AutoBalanceInterval.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
