@@ -777,7 +777,7 @@ var _ RecordWriter = (*multiFieldRecordWriter)(nil)
 
 type multiFieldRecordWriter struct {
 	fw       *pqarrow.FileWriter
-	fieldIds []FieldID
+	fieldIDs []FieldID
 	schema   *arrow.Schema
 
 	numRows             int
@@ -786,8 +786,8 @@ type multiFieldRecordWriter struct {
 
 func (mfw *multiFieldRecordWriter) Write(r Record) error {
 	mfw.numRows += r.Len()
-	columns := make([]arrow.Array, len(mfw.fieldIds))
-	for i, fieldId := range mfw.fieldIds {
+	columns := make([]arrow.Array, len(mfw.fieldIDs))
+	for i, fieldId := range mfw.fieldIDs {
 		columns[i] = r.Column(fieldId)
 		mfw.writtenUncompressed += uint64(calculateArraySize(columns[i]))
 	}
@@ -804,7 +804,7 @@ func (mfw *multiFieldRecordWriter) Close() error {
 	return mfw.fw.Close()
 }
 
-func newMultiFieldRecordWriter(fieldIds []FieldID, fields []arrow.Field, writer io.Writer) (*multiFieldRecordWriter, error) {
+func newMultiFieldRecordWriter(fieldIDs []FieldID, fields []arrow.Field, writer io.Writer) (*multiFieldRecordWriter, error) {
 	schema := arrow.NewSchema(fields, nil)
 	fw, err := pqarrow.NewFileWriter(schema, writer,
 		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(math.MaxInt64)), // No additional grouping for now.
@@ -814,7 +814,7 @@ func newMultiFieldRecordWriter(fieldIds []FieldID, fields []arrow.Field, writer 
 	}
 	return &multiFieldRecordWriter{
 		fw:       fw,
-		fieldIds: fieldIds,
+		fieldIDs: fieldIDs,
 		schema:   schema,
 	}, nil
 }
