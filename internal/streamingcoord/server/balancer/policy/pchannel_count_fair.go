@@ -26,23 +26,23 @@ func (p *pchannelCountFairPolicy) Balance(currentLayout balancer.CurrentLayout) 
 	avgChannelCount := currentLayout.TotalChannels() / currentLayout.TotalNodes()
 	remainingChannelCount := currentLayout.TotalChannels() % currentLayout.TotalNodes()
 
-	assignments := make(map[string]types.StreamingNodeInfo, currentLayout.TotalChannels())
+	assignments := make(map[types.ChannelID]types.StreamingNodeInfo, currentLayout.TotalChannels())
 	nodesChannelCount := make(map[int64]int, currentLayout.TotalNodes())
 	needAssignChannel := currentLayout.IncomingChannels
 
 	// keep the channel already on the node.
 	for serverID, nodeInfo := range currentLayout.AllNodesInfo {
 		nodesChannelCount[serverID] = 0
-		for i, channelInfo := range currentLayout.AssignedChannels[serverID] {
+		for i, channelID := range currentLayout.AssignedChannels[serverID] {
 			if i < avgChannelCount {
-				assignments[channelInfo.Name] = nodeInfo
+				assignments[channelID] = nodeInfo
 				nodesChannelCount[serverID]++
 			} else if i == avgChannelCount && remainingChannelCount > 0 {
-				assignments[channelInfo.Name] = nodeInfo
+				assignments[channelID] = nodeInfo
 				nodesChannelCount[serverID]++
 				remainingChannelCount--
 			} else {
-				needAssignChannel = append(needAssignChannel, channelInfo.Name)
+				needAssignChannel = append(needAssignChannel, channelID)
 			}
 		}
 	}

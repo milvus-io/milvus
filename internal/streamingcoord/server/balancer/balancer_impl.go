@@ -211,7 +211,7 @@ func (b *balancerImpl) balance(ctx context.Context) error {
 }
 
 // applyBalanceResultToStreamingNode apply the balance result to streaming node.
-func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, modifiedChannels map[string]*channel.PChannelMeta) error {
+func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, modifiedChannels map[types.ChannelID]*channel.PChannelMeta) error {
 	b.logger.Info("balance result need to be applied...", zap.Int("modifiedChannelCount", len(modifiedChannels)))
 
 	// different channel can be execute concurrently.
@@ -237,7 +237,7 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 			b.logger.Info("assign channel success", zap.Any("assignment", channel.CurrentAssignment()))
 
 			// bookkeeping the meta assignment done.
-			if err := b.channelMetaManager.AssignPChannelsDone(ctx, []string{channel.Name()}); err != nil {
+			if err := b.channelMetaManager.AssignPChannelsDone(ctx, []types.ChannelID{channel.ChannelID()}); err != nil {
 				b.logger.Warn("fail to bookkeep pchannel assignment done", zap.Any("assignment", channel.CurrentAssignment()))
 				return err
 			}
@@ -248,17 +248,17 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 }
 
 // generateCurrentLayout generate layout from all nodes info and meta.
-func generateCurrentLayout(channelsInMeta map[string]*channel.PChannelMeta, allNodesStatus map[int64]*types.StreamingNodeStatus) (layout CurrentLayout) {
-	activeRelations := make(map[int64][]types.PChannelInfo, len(allNodesStatus))
-	incomingChannels := make([]string, 0)
-	channelsToNodes := make(map[string]int64, len(channelsInMeta))
-	assigned := make(map[int64][]types.PChannelInfo, len(allNodesStatus))
-	for _, meta := range channelsInMeta {
+func generateCurrentLayout(view *channel.PChannelView, allNodesStatus map[int64]*types.StreamingNodeStatus) (layout CurrentLayout) {
+	incomingChannels := make([]types.ChannelID, 0)
+	channelsToNodes := make(map[types.ChannelID]int64, view.Count())
+	assigned := make(map[int64][]types.ChannelID, len(allNodesStatus))
+
+	for id, meta := range view.Channels {
 		if !meta.IsAssigned() {
-			incomingChannels = append(incomingChannels, meta.Name())
+			incomingChannels = append(incomingChannels, id)
 			// dead or expired relationship.
 			log.Warn("channel is not assigned to any server",
-				zap.String("channel", meta.Name()),
+				zap.Stringer("channel", id),
 				zap.Int64("term", meta.CurrentTerm()),
 				zap.Int64("serverID", meta.CurrentServerID()),
 				zap.String("state", meta.State().String()),
@@ -266,25 +266,19 @@ func generateCurrentLayout(channelsInMeta map[string]*channel.PChannelMeta, allN
 			continue
 		}
 		if nodeStatus, ok := allNodesStatus[meta.CurrentServerID()]; ok && nodeStatus.IsHealthy() {
-			// active relationship.
-			activeRelations[meta.CurrentServerID()] = append(activeRelations[meta.CurrentServerID()], types.PChannelInfo{
-				Name: meta.Name(),
-				Term: meta.CurrentTerm(),
-			})
-			channelsToNodes[meta.Name()] = meta.CurrentServerID()
-			assigned[meta.CurrentServerID()] = append(assigned[meta.CurrentServerID()], meta.ChannelInfo())
+			channelsToNodes[id] = meta.CurrentServerID()
+			assigned[meta.CurrentServerID()] = append(assigned[meta.CurrentServerID()], id)
 		} else {
-			incomingChannels = append(incomingChannels, meta.Name())
+			incomingChannels = append(incomingChannels, id)
 			// dead or expired relationship.
 			log.Warn("channel of current server id is not healthy or not alive",
-				zap.String("channel", meta.Name()),
+				zap.Stringer("channel", id),
 				zap.Int64("term", meta.CurrentTerm()),
 				zap.Int64("serverID", meta.CurrentServerID()),
 				zap.Error(nodeStatus.ErrorOfNode()),
 			)
 		}
 	}
-
 	allNodesInfo := make(map[int64]types.StreamingNodeInfo, len(allNodesStatus))
 	for serverID, nodeStatus := range allNodesStatus {
 		// filter out the unhealthy nodes.
@@ -292,8 +286,8 @@ func generateCurrentLayout(channelsInMeta map[string]*channel.PChannelMeta, allN
 			allNodesInfo[serverID] = nodeStatus.StreamingNodeInfo
 		}
 	}
-
 	return CurrentLayout{
+		View:             view,
 		IncomingChannels: incomingChannels,
 		ChannelsToNodes:  channelsToNodes,
 		AssignedChannels: assigned,

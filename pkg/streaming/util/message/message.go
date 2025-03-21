@@ -65,10 +65,6 @@ type MutableMessage interface {
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithBarrierTimeTick(tt uint64) MutableMessage
 
-	// WithWALTerm sets the wal term of current message.
-	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
-	WithWALTerm(term int64) MutableMessage
-
 	// WithLastConfirmed sets the last confirmed message id of current message.
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithLastConfirmed(id MessageID) MutableMessage

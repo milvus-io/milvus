@@ -1,6 +1,7 @@
 package balancer
 
 import (
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -10,15 +11,16 @@ var policies typeutil.ConcurrentMap[string, Policy]
 
 // CurrentLayout is the full topology of streaming node and pChannel.
 type CurrentLayout struct {
-	IncomingChannels []string                          // IncomingChannels is the channels that are waiting for assignment (not assigned in AllNodesInfo).
+	View             *channel.PChannelView
+	IncomingChannels []types.ChannelID                 // IncomingChannels is the channels that are waiting for assignment (not assigned in AllNodesInfo).
 	AllNodesInfo     map[int64]types.StreamingNodeInfo // AllNodesInfo is the full information of all available streaming nodes and related pchannels (contain the node not assign anything on it).
-	AssignedChannels map[int64][]types.PChannelInfo    // AssignedChannels maps the node id to assigned channels.
-	ChannelsToNodes  map[string]int64                  // ChannelsToNodes maps assigned channel name to node id.
+	AssignedChannels map[int64][]types.ChannelID       // AssignedChannels maps the node id to assigned channels.
+	ChannelsToNodes  map[types.ChannelID]int64         // ChannelsToNodes maps assigned channel name to node id.
 }
 
 // TotalChannels returns the total number of channels in the layout.
 func (layout *CurrentLayout) TotalChannels() int {
-	return len(layout.IncomingChannels) + len(layout.ChannelsToNodes)
+	return layout.View.Count()
 }
 
 // TotalNodes returns the total number of nodes in the layout.
@@ -28,7 +30,7 @@ func (layout *CurrentLayout) TotalNodes() int {
 
 // ExpectedLayout is the expected layout of streaming node and pChannel.
 type ExpectedLayout struct {
-	ChannelAssignment map[string]types.StreamingNodeInfo // ChannelAssignment is the assignment of channel to node.
+	ChannelAssignment map[types.ChannelID]types.StreamingNodeInfo // ChannelAssignment is the assignment of channel to node.
 }
 
 // Policy is a interface to define the policy of rebalance.

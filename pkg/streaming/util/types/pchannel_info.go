@@ -37,6 +37,7 @@ func NewPChannelInfoFromProto(pchannel *streamingpb.PChannelInfo) PChannelInfo {
 	_ = accessMode.String() // assertion.
 	return PChannelInfo{
 		Name:       pchannel.GetName(),
+		ReplicaID:  pchannel.GetReplicaId(),
 		Term:       pchannel.GetTerm(),
 		AccessMode: accessMode,
 	}
@@ -52,22 +53,41 @@ func NewProtoFromPChannelInfo(pchannel PChannelInfo) *streamingpb.PChannelInfo {
 	}
 	return &streamingpb.PChannelInfo{
 		Name:       pchannel.Name,
+		ReplicaId:  pchannel.ReplicaID,
 		Term:       pchannel.Term,
 		AccessMode: streamingpb.PChannelAccessMode(pchannel.AccessMode),
 	}
 }
 
+// ChannelID is the unique identifier of a pchannel.
+type ChannelID struct {
+	Name      string
+	ReplicaID int64
+}
+
+func (id ChannelID) String() string {
+	return fmt.Sprintf("%s:%d", id.Name, id.ReplicaID)
+}
+
 // PChannelInfo is the struct for pchannel info.
 type PChannelInfo struct {
 	Name       string     // name of pchannel.
+	ReplicaID  int64      // replica id of pchannel.
 	Term       int64      // term of pchannel.
 	AccessMode AccessMode // Access mode, if AccessModeRO, the wal impls should be read-only, the append operation will panics.
 	// If accessMode is AccessModeRW, the wal impls should be read-write,
 	// and it will fence the old rw wal impls or wait the old rw wal impls close.
 }
 
+func (c PChannelInfo) ChannelID() ChannelID {
+	return ChannelID{
+		Name:      c.Name,
+		ReplicaID: c.ReplicaID,
+	}
+}
+
 func (c PChannelInfo) String() string {
-	return fmt.Sprintf("%s:%s@%d", c.Name, c.AccessMode, c.Term)
+	return fmt.Sprintf("%s:%d:%s@%d", c.Name, c.ReplicaID, c.AccessMode, c.Term)
 }
 
 type PChannelInfoAssigned struct {
