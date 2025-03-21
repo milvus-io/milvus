@@ -70,8 +70,8 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     }
 
     // Default, we build tantivy index with version 7 (newest version now).
-    explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx,
-                                  uint32_t tantivy_index_version,
+    explicit InvertedIndexTantivy(uint32_t tantivy_index_version,
+                                  const storage::FileManagerContext& ctx,
                                   bool inverted_index_single_segment = false);
 
     ~InvertedIndexTantivy();

@@ -194,7 +194,7 @@ HybridScalarIndex<T>::GetInternalIndex() {
             std::make_shared<ScalarIndexSort<T>>(file_manager_context_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
         internal_index_ = std::make_shared<InvertedIndexTantivy<T>>(
-            file_manager_context_, tantivy_index_version_);
+            tantivy_index_version_, file_manager_context_);
     } else {
         PanicInfo(UnexpectedError,
                   "unknown index type when get internal index");
@@ -217,7 +217,7 @@ HybridScalarIndex<std::string>::GetInternalIndex() {
             std::make_shared<StringIndexMarisa>(file_manager_context_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
         internal_index_ = std::make_shared<InvertedIndexTantivy<std::string>>(
-            file_manager_context_, tantivy_index_version_);
+            tantivy_index_version_, file_manager_context_);
     } else {
         PanicInfo(UnexpectedError,
                   "unknown index type when get internal index");

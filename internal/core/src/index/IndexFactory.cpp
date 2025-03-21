@@ -48,8 +48,8 @@ IndexFactory::CreatePrimitiveScalarIndex(
         assert(create_index_info.tantivy_index_version != 0);
         // scalar_index_engine_version 0 means we should built tantivy index within single segment
         return std::make_unique<InvertedIndexTantivy<T>>(
-            file_manager_context,
             create_index_info.tantivy_index_version,
+            file_manager_context,
             create_index_info.scalar_index_engine_version == 0);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
@@ -80,8 +80,8 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
         assert(create_index_info.tantivy_index_version != 0);
         // scalar_index_engine_version 0 means we should built tantivy index within single segment
         return std::make_unique<InvertedIndexTantivy<std::string>>(
-            file_manager_context,
             create_index_info.tantivy_index_version,
+            file_manager_context,
             create_index_info.scalar_index_engine_version == 0);
     }
     if (index_type == BITMAP_INDEX_TYPE) {

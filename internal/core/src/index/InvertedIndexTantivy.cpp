@@ -61,8 +61,8 @@ InvertedIndexTantivy<T>::InitForBuildIndex() {
 
 template <typename T>
 InvertedIndexTantivy<T>::InvertedIndexTantivy(
-    const storage::FileManagerContext& ctx,
     uint32_t tantivy_index_version,
+    const storage::FileManagerContext& ctx,
     bool inverted_index_single_segment)
     : ScalarIndex<T>(INVERTED_INDEX_TYPE),
       schema_(ctx.fieldDataMeta.field_schema),
