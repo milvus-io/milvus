@@ -25,9 +25,11 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -50,6 +52,7 @@ type importChecker struct {
 	imeta               ImportMeta
 	sjm                 StatsJobManager
 	l0CompactionTrigger TriggerManager
+	compactionHandler   compactionPlanContext
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -62,6 +65,7 @@ func NewImportChecker(meta *meta,
 	imeta ImportMeta,
 	sjm StatsJobManager,
 	l0CompactionTrigger TriggerManager,
+	compactionHandler compactionPlanContext,
 ) ImportChecker {
 	return &importChecker{
 		meta:                meta,
@@ -71,6 +75,7 @@ func NewImportChecker(meta *meta,
 		imeta:               imeta,
 		sjm:                 sjm,
 		l0CompactionTrigger: l0CompactionTrigger,
+		compactionHandler:   compactionHandler,
 		closeChan:           make(chan struct{}),
 	}
 }
@@ -115,7 +120,8 @@ func (c *importChecker) Start() {
 				}
 			}
 		case <-ticker2.C:
-			jobs := c.imeta.GetJobBy(context.TODO())
+			ctx := context.TODO()
+			jobs := c.imeta.GetJobBy(ctx)
 			for _, job := range jobs {
 				c.tryTimeoutJob(job)
 				c.checkGC(job)
@@ -128,6 +134,52 @@ func (c *importChecker) Start() {
 			}
 			c.LogJobStats(jobs)
 			c.LogTaskStats()
+			c.updateSegmentStateForInvisible(jobs)
+		}
+	}
+}
+
+func (c *importChecker) updateSegmentStateForInvisible(jobs []ImportJob) {
+	ctx := context.TODO()
+	// update segment state to the dropped for the invisible segments
+	collectionsWithImport := make(map[int64]struct{})
+	for _, job := range jobs {
+		if job.GetState() != internalpb.ImportJobState_Completed &&
+			job.GetState() != internalpb.ImportJobState_Failed {
+			collectionsWithImport[job.GetCollectionID()] = struct{}{}
+		}
+	}
+
+	l0SegmentsWithImport := make(map[int64]struct{})
+	compactionTasks := c.meta.GetCompactionTasks(ctx)
+	for _, tasks := range compactionTasks {
+		for _, task := range tasks {
+			if task.GetType() != datapb.CompactionType_Level0DeleteCompaction {
+				continue
+			}
+			if len(task.GetResultSegments()) == 0 {
+				continue
+			}
+			for _, segmentID := range task.GetInputSegments() {
+				l0SegmentsWithImport[segmentID] = struct{}{}
+			}
+		}
+	}
+
+	allInvisibleSegments := c.meta.SelectSegments(ctx, SegmentFilterFunc(func(si *SegmentInfo) bool {
+		_, importing := collectionsWithImport[si.GetCollectionID()]
+		_, compacting := l0SegmentsWithImport[si.GetID()]
+		return si.GetLevel() == datapb.SegmentLevel_L0 && si.IsInvisible && !importing && !compacting
+	}))
+	var operators []UpdateOperator
+	for _, si := range allInvisibleSegments {
+		segID := si.GetID()
+		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
+	}
+	if len(operators) > 0 {
+		err := c.meta.UpdateSegmentsInfo(ctx, operators...)
+		if err != nil {
+			log.Warn("update invisible segments failed", zap.Error(err))
 		}
 	}
 }
@@ -292,7 +344,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 
 func (c *importChecker) checkImportingJob(job ImportJob) {
 	log := log.With(zap.Int64("jobID", job.GetJobID()))
-	tasks := c.imeta.GetTaskBy(context.TODO(), WithType(ImportTaskType), WithJob(job.GetJobID()), WithRequestSource())
+	tasks := c.imeta.GetTaskBy(context.TODO(), WithType(ImportTaskType), WithJob(job.GetJobID()))
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportTaskStateV2_Completed {
 			return
@@ -396,18 +448,6 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageBuildIndex).Observe(float64(buildIndexDuration.Milliseconds()))
 	log.Info("import job build index done", zap.Duration("jobTimeCost/buildIndex", buildIndexDuration))
 
-	// wait l0 segment import and block l0 compaction
-	log.Info("start to pause l0 segment compacting", zap.Int64("jobID", job.GetJobID()))
-	<-c.l0CompactionTrigger.GetPauseCompactionChan(job.GetJobID(), job.GetCollectionID())
-	log.Info("l0 segment compacting paused", zap.Int64("jobID", job.GetJobID()))
-
-	if c.waitL0ImortTaskDone(job) {
-		return
-	}
-	waitL0ImportDuration := job.GetTR().RecordSpan()
-	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageWaitL0Import).Observe(float64(buildIndexDuration.Milliseconds()))
-	log.Info("import job l0 import done", zap.Duration("jobTimeCost/l0Import", waitL0ImportDuration))
-
 	if c.updateSegmentState(job, originSegmentIDs, statsSegmentIDs) {
 		return
 	}
@@ -420,23 +460,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	}
 	totalDuration := job.GetTR().ElapseSpan()
 	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
-	<-c.l0CompactionTrigger.GetResumeCompactionChan(job.GetJobID(), job.GetCollectionID())
 	log.Info("import job all completed", zap.Duration("jobTimeCost/total", totalDuration))
-}
-
-func (c *importChecker) waitL0ImortTaskDone(job ImportJob) bool {
-	// wait all lo import tasks to be completed
-	l0ImportTasks := c.imeta.GetTaskBy(context.TODO(), WithType(ImportTaskType), WithJob(job.GetJobID()), WithL0CompactionSource())
-	for _, t := range l0ImportTasks {
-		if t.GetState() != datapb.ImportTaskStateV2_Completed {
-			log.Info("waiting for l0 import task...",
-				zap.Int64s("taskIDs", lo.Map(l0ImportTasks, func(t ImportTask, _ int) int64 {
-					return t.GetTaskID()
-				})))
-			return true
-		}
-	}
-	return false
 }
 
 func (c *importChecker) updateSegmentState(job ImportJob, originSegmentIDs, statsSegmentIDs []int64) bool {
@@ -469,7 +493,96 @@ func (c *importChecker) updateSegmentState(job ImportJob, originSegmentIDs, stat
 			return true
 		}
 	}
+
+	if !importutilv2.IsL0Import(job.GetOptions()) {
+		channelToSegments := lo.GroupBy(isImportingSegments, func(segmentID int64) string {
+			return channels[segmentID]
+		})
+		err := c.createL0CompactionTaskForImport(job, channelToSegments)
+		if err != nil {
+			log.Warn("failed to create L0 compaction task", zap.Error(err))
+			return true
+		}
+	}
+
 	return false
+}
+
+func (c *importChecker) createL0CompactionTaskForImport(job ImportJob, importSegments map[string][]int64) error {
+	ctx := context.TODO()
+	l0SegmentFilter := SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		if segment.GetLevel() != datapb.SegmentLevel_L0 {
+			return false
+		}
+		importTs := job.GetDataTs()
+		// startTs := segment.GetStartPosition().GetTimestamp()
+		endTs := segment.GetDmlPosition().GetTimestamp()
+		return endTs > importTs
+	})
+	collectionSchema := job.GetSchema()
+	for channel, targetSegments := range importSegments {
+		l0Segments := c.meta.SelectSegments(ctx, WithCollection(job.GetCollectionID()), WithChannel(channel), l0SegmentFilter)
+		l0SegmentsForPartition := lo.GroupBy(l0Segments, func(segment *SegmentInfo) int64 {
+			return segment.GetPartitionID()
+		})
+
+		importSegmentsForPartition := lo.GroupBy(targetSegments, func(segmentID int64) int64 {
+			segment := c.meta.GetSegment(ctx, segmentID)
+			if segment == nil {
+				log.Warn("cannot find segment", zap.Int64("segmentID", segmentID))
+				return 0
+			}
+			return segment.GetPartitionID()
+		})
+
+		for partitionID, targetSegments := range importSegmentsForPartition {
+			if partitionID == 0 {
+				log.Warn("partitionID is 0", zap.Int64s("targetSegments", targetSegments))
+				continue
+			}
+			l0SegmentInfos := l0SegmentsForPartition[partitionID]
+			if l0SegmentInfos == nil {
+				l0SegmentInfos = make([]*SegmentInfo, 0)
+			}
+			allPartitionSegmentInfos := l0SegmentsForPartition[common.AllPartitionsID]
+			if allPartitionSegmentInfos != nil {
+				l0SegmentInfos = append(l0SegmentInfos, allPartitionSegmentInfos...)
+			}
+			if len(l0SegmentInfos) == 0 {
+				continue
+			}
+			l0Segments := lo.Map(l0SegmentInfos, func(segment *SegmentInfo, _ int) int64 {
+				return segment.GetID()
+			})
+
+			task := &datapb.CompactionTask{
+				TriggerID:        job.GetJobID(), // inner trigger, use import job id as trigger id
+				PlanID:           targetSegments[0],
+				Type:             datapb.CompactionType_Level0DeleteCompaction,
+				StartTime:        time.Now().Unix(),
+				InputSegments:    l0Segments,
+				ResultSegments:   targetSegments,
+				State:            datapb.CompactionTaskState_pipelining,
+				Channel:          channel,
+				CollectionID:     job.GetCollectionID(),
+				PartitionID:      partitionID,
+				Pos:              l0SegmentInfos[0].GetDmlPosition(),
+				TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
+				Schema:           collectionSchema,
+			}
+
+			err := c.compactionHandler.enqueueCompaction(task)
+			if err != nil {
+				log.Warn("enqueue compaction task failed for import",
+					zap.Int64("triggerID", task.GetTriggerID()),
+					zap.Int64("planID", task.GetPlanID()),
+					zap.Int64s("segmentIDs", task.GetInputSegments()),
+					zap.Error(err))
+				continue
+			}
+		}
+	}
+	return nil
 }
 
 func (c *importChecker) checkFailedJob(job ImportJob) {
