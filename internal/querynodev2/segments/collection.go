@@ -257,7 +257,6 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 
 	var loadFieldIDs typeutil.Set[int64]
 	loadSchema := typeutil.Clone(schema)
-
 	// if load fields is specified, do filtering logic
 	// otherwise use all fields for backward compatibility
 	if len(loadMetaInfo.GetLoadFields()) > 0 {

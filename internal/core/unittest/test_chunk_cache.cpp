@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <iostream>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -72,14 +73,16 @@ class ChunkCacheTest
                                              milvus::DataType::VECTOR_FLOAT,
                                              dim,
                                              dense_metric_type,
-                                             false);
+                                             false,
+                                             std::nullopt);
         sparse_field_meta =
             milvus::FieldMeta(milvus::FieldName("fakevec_sparse"),
                               fake_sparse_vec_id,
                               milvus::DataType::VECTOR_SPARSE_FLOAT,
                               dim,
                               sparse_metric_type,
-                              false);
+                              false,
+                              std::nullopt);
 
         lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
                   .GetChunkManager();

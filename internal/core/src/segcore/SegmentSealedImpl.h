@@ -216,6 +216,12 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     ClearData() override;
 
+    bool
+    is_field_exist(FieldId field_id) const override {
+        return schema_->get_fields().find(field_id) !=
+               schema_->get_fields().end();
+    }
+
  protected:
     // blob and row_count
     SpanBase

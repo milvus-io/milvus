@@ -59,7 +59,6 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 
 	for _, field := range req.Fields {
 		cFieldID := C.int64_t(field.Field.GetFieldID())
-
 		status = C.AppendLoadFieldInfo(cLoadFieldDataInfo, cFieldID, rowCount)
 		if err := ConsumeCStatusIntoError(&status); err != nil {
 			return nil, errors.Wrapf(err, "AppendLoadFieldInfo failed at fieldID, %d", field.Field.GetFieldID())
@@ -77,6 +76,7 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 
 		C.EnableMmap(cLoadFieldDataInfo, cFieldID, C.bool(field.EnableMMap))
 	}
+
 	if len(req.MMapDir) > 0 {
 		mmapDir := C.CString(req.MMapDir)
 		defer C.free(unsafe.Pointer(mmapDir))
