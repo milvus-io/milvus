@@ -4524,7 +4524,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.IndexTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.indexTaskSlotUsage",
-		Version:      "2.5.3",
+		Version:      "2.5.8",
 		Doc:          "slot usage of index task",
 		DefaultValue: "256",
 		PanicIfEmpty: false,
@@ -4534,7 +4534,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.StatsTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.statsTaskSlotUsage",
-		Version:      "2.5.3",
+		Version:      "2.5.8",
 		Doc:          "slot usage of stats task",
 		DefaultValue: "8",
 		PanicIfEmpty: false,
@@ -4544,7 +4544,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 
 	p.AnalyzeTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.analyzeTaskSlotUsage",
-		Version:      "2.5.3",
+		Version:      "2.5.8",
 		Doc:          "slot usage of analyze task",
 		DefaultValue: "65535",
 		PanicIfEmpty: false,
