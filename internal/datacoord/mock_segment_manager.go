@@ -21,9 +21,9 @@ func (_m *MockManager) EXPECT() *MockManager_Expecter {
 	return &MockManager_Expecter{mock: &_m.Mock}
 }
 
-// AllocNewGrowingSegment provides a mock function with given fields: ctx, collectionID, partitionID, segmentID, channelName, storageVersion
-func (_m *MockManager) AllocNewGrowingSegment(ctx context.Context, collectionID int64, partitionID int64, segmentID int64, channelName string, storageVersion int64) (*SegmentInfo, error) {
-	ret := _m.Called(ctx, collectionID, partitionID, segmentID, channelName, storageVersion)
+// AllocNewGrowingSegment provides a mock function with given fields: ctx, req
+func (_m *MockManager) AllocNewGrowingSegment(ctx context.Context, req AllocNewGrowingSegmentRequest) (*SegmentInfo, error) {
+	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AllocNewGrowingSegment")
@@ -31,19 +31,19 @@ func (_m *MockManager) AllocNewGrowingSegment(ctx context.Context, collectionID 
 
 	var r0 *SegmentInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, string, int64) (*SegmentInfo, error)); ok {
-		return rf(ctx, collectionID, partitionID, segmentID, channelName, storageVersion)
+	if rf, ok := ret.Get(0).(func(context.Context, AllocNewGrowingSegmentRequest) (*SegmentInfo, error)); ok {
+		return rf(ctx, req)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, string, int64) *SegmentInfo); ok {
-		r0 = rf(ctx, collectionID, partitionID, segmentID, channelName, storageVersion)
+	if rf, ok := ret.Get(0).(func(context.Context, AllocNewGrowingSegmentRequest) *SegmentInfo); ok {
+		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*SegmentInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, int64, int64, string, int64) error); ok {
-		r1 = rf(ctx, collectionID, partitionID, segmentID, channelName, storageVersion)
+	if rf, ok := ret.Get(1).(func(context.Context, AllocNewGrowingSegmentRequest) error); ok {
+		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -58,18 +58,14 @@ type MockManager_AllocNewGrowingSegment_Call struct {
 
 // AllocNewGrowingSegment is a helper method to define mock.On call
 //   - ctx context.Context
-//   - collectionID int64
-//   - partitionID int64
-//   - segmentID int64
-//   - channelName string
-//   - storageVersion int64
-func (_e *MockManager_Expecter) AllocNewGrowingSegment(ctx interface{}, collectionID interface{}, partitionID interface{}, segmentID interface{}, channelName interface{}, storageVersion interface{}) *MockManager_AllocNewGrowingSegment_Call {
-	return &MockManager_AllocNewGrowingSegment_Call{Call: _e.mock.On("AllocNewGrowingSegment", ctx, collectionID, partitionID, segmentID, channelName, storageVersion)}
+//   - req AllocNewGrowingSegmentRequest
+func (_e *MockManager_Expecter) AllocNewGrowingSegment(ctx interface{}, req interface{}) *MockManager_AllocNewGrowingSegment_Call {
+	return &MockManager_AllocNewGrowingSegment_Call{Call: _e.mock.On("AllocNewGrowingSegment", ctx, req)}
 }
 
-func (_c *MockManager_AllocNewGrowingSegment_Call) Run(run func(ctx context.Context, collectionID int64, partitionID int64, segmentID int64, channelName string, storageVersion int64)) *MockManager_AllocNewGrowingSegment_Call {
+func (_c *MockManager_AllocNewGrowingSegment_Call) Run(run func(ctx context.Context, req AllocNewGrowingSegmentRequest)) *MockManager_AllocNewGrowingSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(int64), args[4].(string), args[5].(int64))
+		run(args[0].(context.Context), args[1].(AllocNewGrowingSegmentRequest))
 	})
 	return _c
 }
@@ -79,7 +75,7 @@ func (_c *MockManager_AllocNewGrowingSegment_Call) Return(_a0 *SegmentInfo, _a1 
 	return _c
 }
 
-func (_c *MockManager_AllocNewGrowingSegment_Call) RunAndReturn(run func(context.Context, int64, int64, int64, string, int64) (*SegmentInfo, error)) *MockManager_AllocNewGrowingSegment_Call {
+func (_c *MockManager_AllocNewGrowingSegment_Call) RunAndReturn(run func(context.Context, AllocNewGrowingSegmentRequest) (*SegmentInfo, error)) *MockManager_AllocNewGrowingSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }

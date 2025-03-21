@@ -257,6 +257,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 }
 
 // AllocSegment alloc a new growing segment, add it into segment meta.
+// Only used by Streamingnode, should be deprecated in the future after growing segment fully managed by streaming node.
 func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentRequest) (*datapb.AllocSegmentResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.AllocSegmentResponse{Status: merr.Status(err)}, nil
@@ -273,7 +274,17 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 	}
 
 	// Alloc new growing segment and return the segment info.
-	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(ctx, req.GetCollectionId(), req.GetPartitionId(), req.GetSegmentId(), req.GetVchannel(), req.GetStorageVersion())
+	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(
+		ctx,
+		AllocNewGrowingSegmentRequest{
+			CollectionID:         req.GetCollectionId(),
+			PartitionID:          req.GetPartitionId(),
+			SegmentID:            req.GetSegmentId(),
+			ChannelName:          req.GetVchannel(),
+			StorageVersion:       req.GetStorageVersion(),
+			IsCreatedByStreaming: req.GetIsCreatedByStreaming(),
+		},
+	)
 	if err != nil {
 		return &datapb.AllocSegmentResponse{Status: merr.Status(err)}, nil
 	}
