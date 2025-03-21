@@ -2728,7 +2728,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.InterimIndexRefineQuantType = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.refineQuantType",
 		Version:      "2.5.6",
-		DefaultValue: "DATA_VIEW",
+		DefaultValue: "NONE",
 		Doc:          `Data representation of SCANN_DVR index, options: 'NONE', 'FLOAT16', 'BFLOAT16' and 'UINT8'`,
 		Export:       true,
 	}

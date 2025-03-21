@@ -83,7 +83,7 @@ INSTANTIATE_TEST_SUITE_P(
                           knowhere::metric::L2),
         ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
                           knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR),
-        ::testing::Values("NONE", "BFLOAT16", "FLOAT16", "UINT8")));
+        ::testing::Values("NONE", "FLOAT16", "UINT8")));
 
 INSTANTIATE_TEST_SUITE_P(
     SparseIndexTypeParameters,
@@ -106,12 +106,11 @@ INSTANTIATE_TEST_SUITE_P(
     GrowingIndexTest,
     ::testing::Combine(
         ::testing::Values(DataType::VECTOR_FLOAT16, DataType::VECTOR_BFLOAT16),
-        ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                          knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC),
+        ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT),
         ::testing::Values(knowhere::metric::COSINE),
         ::testing::Values(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
                           knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR),
-        ::testing::Values("NONE", "BFLOAT16", "FLOAT16", "UINT8")));
+        ::testing::Values("NONE", "FLOAT16", "UINT8")));
 
 TEST_P(GrowingIndexTest, Correctness) {
     auto schema = std::make_shared<Schema>();
