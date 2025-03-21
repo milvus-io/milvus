@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"sync"
-	"time"
 )
 
 // schedulePolicy is the policy of scheduler.
@@ -54,7 +53,6 @@ func (fqp *fairQueuePolicy) Push(t Task) {
 	fqp.lock.Lock()
 	defer fqp.lock.Unlock()
 	if _, ok := fqp.tasks[t.GetTaskID()]; !ok {
-		t.SetQueueTime(time.Now())
 		fqp.tasks[t.GetTaskID()] = t
 		fqp.taskIDs = append(fqp.taskIDs, t.GetTaskID())
 	}

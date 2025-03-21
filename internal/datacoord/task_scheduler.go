@@ -243,6 +243,7 @@ func (s *taskScheduler) enqueue(task Task) {
 	taskID := task.GetTaskID()
 	_, ok := s.runningTasks.Get(taskID)
 	if !ok {
+		task.SetQueueTime(time.Now())
 		s.pendingTasks.Push(task)
 		log.Ctx(s.ctx).Info("taskScheduler enqueue task", zap.Int64("taskID", taskID))
 	}
