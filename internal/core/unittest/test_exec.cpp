@@ -157,6 +157,7 @@ TEST_P(TaskTest, CallExprEmpty) {
         segment_.get(),
         100000,
         MAX_TIMESTAMP,
+        0,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
 
@@ -194,6 +195,7 @@ TEST_P(TaskTest, UnaryExpr) {
         segment_.get(),
         100000,
         MAX_TIMESTAMP,
+        0,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
 
@@ -240,6 +242,7 @@ TEST_P(TaskTest, LogicalExpr) {
         segment_.get(),
         100000,
         MAX_TIMESTAMP,
+        0,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
 

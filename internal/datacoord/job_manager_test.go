@@ -64,6 +64,11 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 								},
 							},
 						},
+						{
+							FieldID:  102,
+							Name:     "json",
+							DataType: schemapb.DataType_JSON,
+						},
 					},
 				},
 			},
