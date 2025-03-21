@@ -30,7 +30,8 @@ var (
 	runtimeParam = runtimeConfig{
 		components: typeutil.ConcurrentSet[string]{},
 	}
-	hookParams hookConfig
+	hookParams   hookConfig
+	cipherParams cipherConfig
 )
 
 func Init() {
@@ -39,6 +40,9 @@ func Init() {
 		params.Init(baseTable)
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
+
+		cipherBaseTable := NewBaseTableFromYamlOnly(cipherYamlFile)
+		cipherParams.init(cipherBaseTable)
 	})
 }
 
@@ -47,6 +51,8 @@ func InitWithBaseTable(baseTable *BaseTable) {
 		params.Init(baseTable)
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
+		cipherBaseTable := NewBaseTableFromYamlOnly(cipherYamlFile)
+		cipherParams.init(cipherBaseTable)
 	})
 }
 
@@ -60,6 +66,10 @@ func GetBaseTable() *BaseTable {
 
 func GetHookParams() *hookConfig {
 	return &hookParams
+}
+
+func GetCipherParams() *cipherConfig {
+	return &cipherParams
 }
 
 func SetNodeID(newID UniqueID) {

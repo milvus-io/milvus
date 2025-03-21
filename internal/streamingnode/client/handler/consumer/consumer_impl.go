@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -241,7 +242,7 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 			c.logger.Warn("failed to convert message to begin txn message", zap.Any("messageID", beginMsg.MessageID()), zap.Error(err))
 			return nil
 		}
-		c.txnBuilder = message.NewImmutableTxnMessageBuilder(beginMsg)
+		c.txnBuilder = message.NewImmutableTxnMessageBuilder(beginMsg).WithCipher(hookutil.GetCipher())
 	case message.MessageTypeCommitTxn:
 		if c.txnBuilder == nil {
 			panic("unreachable code: txn builder should not be nil if we receive a commit txn message")

@@ -201,6 +201,8 @@ const (
 	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
 	ReplicateIDKey             = "replicate.id"
 	ReplicateEndTSKey          = "replicate.endTS"
+	CripherEnableKey           = "cripher.enable"
+	CripherEZIDKey             = "cripher.ezid"
 )
 
 const (

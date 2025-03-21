@@ -7,12 +7,16 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -38,6 +42,7 @@ func (it *insertTaskByStreamingService) Execute(ctx context.Context) error {
 	}
 	it.insertMsg.CollectionID = collID
 
+	ezID, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.CripherEZIDKey, it.schema.Properties)
 	getCacheDur := tr.RecordSpan()
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
@@ -57,9 +62,9 @@ func (it *insertTaskByStreamingService) Execute(ctx context.Context) error {
 	// start to repack insert data
 	var msgs []message.MutableMessage
 	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result)
+		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ezID)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ezID)
 	}
 	if err != nil {
 		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))
@@ -76,13 +81,32 @@ func (it *insertTaskByStreamingService) Execute(ctx context.Context) error {
 	return nil
 }
 
+func getCipher(ezID string) (hook.Cipher, error) {
+	if ezID == "" {
+		return nil, nil
+	}
+
+	cihper := hookutil.GetCipher()
+	if cihper == nil {
+		log.Warn("insert failed, can't use encrypted collection without cipher plugin")
+		return nil, fmt.Errorf("can't use encrypted collection without cipher plugin")
+	}
+	return cihper, nil
+}
+
 func repackInsertDataForStreamingService(
 	ctx context.Context,
 	channelNames []string,
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
+	ezID string,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
+
+	cipher, err := getCipher(ezID)
+	if err != nil {
+		return nil, err
+	}
 
 	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
 	for channel, rowOffsets := range channel2RowOffsets {
@@ -111,6 +135,7 @@ func repackInsertDataForStreamingService(
 					},
 				}).
 				WithBody(insertRequest).
+				WithCipher(cipher, ezID).
 				BuildMutable()
 			if err != nil {
 				return nil, err
@@ -127,8 +152,13 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	insertMsg *msgstream.InsertMsg,
 	result *milvuspb.MutationResult,
 	partitionKeys *schemapb.FieldData,
+	ezID string,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
+	cipher, err := getCipher(ezID)
+	if err != nil {
+		return nil, err
+	}
 
 	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
 	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, insertMsg.GetDbName(), insertMsg.CollectionName)
@@ -190,6 +220,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 						},
 					}).
 					WithBody(insertRequest).
+					WithCipher(cipher, ezID).
 					BuildMutable()
 				if err != nil {
 					return nil, err
