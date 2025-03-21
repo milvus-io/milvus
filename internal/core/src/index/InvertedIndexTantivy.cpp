@@ -55,8 +55,12 @@ InvertedIndexTantivy<T>::InitForBuildIndex() {
                   "build inverted index temp dir:{} not empty",
                   path_);
     }
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        field.c_str(), d_type_, path_.c_str(), inverted_index_single_segment_);
+    wrapper_ =
+        std::make_shared<TantivyIndexWrapper>(field.c_str(),
+                                              d_type_,
+                                              path_.c_str(),
+                                              tantivy_index_version_,
+                                              inverted_index_single_segment_);
 }
 
 template <typename T>
@@ -450,8 +454,12 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
         GetValueFromConfig<int32_t>(config,
                                     milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1) == 0;
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        field.c_str(), d_type_, path_.c_str(), inverted_index_single_segment_);
+    wrapper_ =
+        std::make_shared<TantivyIndexWrapper>(field.c_str(),
+                                              d_type_,
+                                              path_.c_str(),
+                                              tantivy_index_version_,
+                                              inverted_index_single_segment_);
     if (!inverted_index_single_segment_) {
         if (config.find("is_array") != config.end()) {
             // only used in ut.
