@@ -27,12 +27,12 @@ var Params = paramtable.Get()
 func TestMain(m *testing.M) {
 	paramtable.Init()
 	mockCluster, err := kafka.NewMockCluster(1)
-	defer mockCluster.Close()
 	if err != nil {
 		// nolint
 		fmt.Printf("Failed to create MockCluster: %s\n", err)
 		os.Exit(1)
 	}
+	defer mockCluster.Close()
 
 	broker := mockCluster.BootstrapServers()
 	Params.Save("kafka.brokerList", broker)
