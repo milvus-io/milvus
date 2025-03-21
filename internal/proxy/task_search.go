@@ -355,7 +355,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	// fetch search_growing from search param
 	t.SearchRequest.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
-	queryFieldIds := []int64{}
+	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		plan, queryInfo, offset, _, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
@@ -386,7 +386,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
-		queryFieldIds = append(queryFieldIds, internalSubReq.FieldId)
+		queryFieldIDs = append(queryFieldIDs, internalSubReq.FieldId)
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
 			// isolation has tighter constraint, check first
@@ -429,7 +429,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	}
 
 	var err error
-	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIds) {
+	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
 		defer sp.End()
 		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)

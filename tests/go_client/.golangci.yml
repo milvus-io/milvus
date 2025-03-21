@@ -167,7 +167,6 @@ issues:
     - ifElseChain
     - elseif
     - commentFormatting
-    - var-naming
     - exitAfterDefer
     - captLocal
     - singleCaseSwitch
@@ -178,9 +177,6 @@ issues:
     - SA9009
     - SA1006
     - S1009
-    - unlambda
-    - dupCase
-    - dupArg
     - offBy1
     - unslice    
     # Integer overflow conversion

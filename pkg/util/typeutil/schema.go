@@ -1558,11 +1558,11 @@ func ComparePKInSlice(data *schemapb.IDs, i, j int) bool {
 
 // ComparePK returns if i-th PK of dataA > j-th PK of dataB
 func ComparePK(pkA, pkB interface{}) bool {
-	switch pkA.(type) {
+	switch v := pkA.(type) {
 	case int64:
-		return pkA.(int64) < pkB.(int64)
+		return v < pkB.(int64)
 	case string:
-		return pkA.(string) < pkB.(string)
+		return v < pkB.(string)
 	}
 	return false
 }

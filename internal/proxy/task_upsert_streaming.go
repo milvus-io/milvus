@@ -96,7 +96,7 @@ func (ut *upsertTaskByStreamingService) packInsertMessage(ctx context.Context) (
 func (it *upsertTaskByStreamingService) packDeleteMessage(ctx context.Context) ([]message.MutableMessage, error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", it.ID()))
 	collID := it.upsertMsg.DeleteMsg.CollectionID
-	it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIds
+	it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIDs
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collID))
 	// hash primary keys to channels

@@ -35,33 +35,36 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	paramtable.Init()
-	pt := paramtable.Get()
-	pt.Save(pt.ServiceParam.MQCfg.EnablePursuitMode.Key, "false")
+	exitCode := func() int {
+		paramtable.Init()
+		pt := paramtable.Get()
+		pt.Save(pt.ServiceParam.MQCfg.EnablePursuitMode.Key, "false")
 
-	rand.Seed(time.Now().UnixNano())
-	path := "/tmp/milvus/rdb_data"
-	defer os.RemoveAll(path)
-	paramtable.Get().Save("rocksmq.compressionTypes", "0,0,0,0,0")
-	_ = server2.InitRocksMQ(path)
-	exitCode := m.Run()
-	defer server2.CloseRocksMQ()
+		rand.Seed(time.Now().UnixNano())
+		path := "/tmp/milvus/rdb_data"
+		defer os.RemoveAll(path)
+		paramtable.Get().Save("rocksmq.compressionTypes", "0,0,0,0,0")
+		_ = server2.InitRocksMQ(path)
+		defer server2.CloseRocksMQ()
+		return m.Run()
+	}()
+
 	os.Exit(exitCode)
 }
 
 func Test_NewRmqClient(t *testing.T) {
 	client, err := createRmqClient()
-	defer client.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
+	client.Close()
 }
 
 func TestRmqClient_CreateProducer(t *testing.T) {
 	opts := client3.Options{}
 	client, err := NewClient(opts)
-	defer client.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
+	defer client.Close()
 
 	topic := "TestRmqClient_CreateProducer"
 	proOpts := common.ProducerOptions{Topic: topic}
@@ -143,9 +146,9 @@ func TestRmqClient_GetLatestMsg(t *testing.T) {
 
 func TestRmqClient_Subscribe(t *testing.T) {
 	client, err := createRmqClient()
-	defer client.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
+	defer client.Close()
 
 	topic := "TestRmqClient_Subscribe"
 	proOpts := common.ProducerOptions{Topic: topic}
@@ -178,9 +181,9 @@ func TestRmqClient_Subscribe(t *testing.T) {
 
 	consumerOpts.Topic = topic
 	consumer, err = client.Subscribe(context.TODO(), consumerOpts)
-	defer consumer.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
+	defer consumer.Close()
 	assert.Equal(t, consumer.Subscription(), subName)
 
 	msg := &common.ProducerMessage{

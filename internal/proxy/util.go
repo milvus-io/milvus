@@ -1709,12 +1709,12 @@ func checkUpsertPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *m
 	if !primaryFieldSchema.GetAutoID() {
 		return ids, ids, nil
 	}
-	newIds, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
+	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
 	if err != nil {
 		log.Warn("parse primary field data to IDs failed", zap.Error(err))
 		return nil, nil, err
 	}
-	return newIds, ids, nil
+	return newIDs, ids, nil
 }
 
 func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) (*schemapb.FieldData, error) {
