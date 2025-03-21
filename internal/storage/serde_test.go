@@ -234,4 +234,3 @@ func TestCalculateArraySize(t *testing.T) {
 		})
 	}
 }
-
