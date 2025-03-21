@@ -53,7 +53,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	segmentReaders := make([]storage.RecordReader, len(binlogs))
 	segmentFilters := make([]compaction.EntityFilter, len(binlogs))
 	for i, s := range binlogs {
-		reader, err := storage.NewBinlogRecordReader(ctx, s.GetFieldBinlogs(), plan.GetSchema(), storage.WithDownloader(binlogIO.Download))
+		reader, err := storage.NewBinlogRecordReader(ctx, s.GetFieldBinlogs(), plan.GetSchema(), storage.WithDownloader(binlogIO.Download), storage.WithVersion(s.StorageVersion))
 		if err != nil {
 			return nil, err
 		}
