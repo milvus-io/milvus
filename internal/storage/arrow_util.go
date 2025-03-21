@@ -18,7 +18,6 @@ package storage
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -245,11 +244,12 @@ func (b *RecordBuilder) Build() Record {
 	field2Col := make(map[FieldID]int, len(b.builders))
 	for c, builder := range b.builders {
 		arrays[c] = builder.NewArray()
-		fid := b.fields[c].FieldID
+		f := b.fields[c]
+		fid := f.FieldID
 		fields[c] = arrow.Field{
-			Name:     strconv.Itoa(int(fid)),
+			Name:     f.GetName(),
 			Type:     arrays[c].DataType(),
-			Nullable: true, // No nullable check here.
+			Nullable: f.Nullable,
 		}
 		field2Col[fid] = c
 	}
