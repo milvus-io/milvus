@@ -1330,7 +1330,11 @@ func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResul
 //	output_fields=["*"] 	 ==> [A,B,C,D]
 //	output_fields=["*",A] 	 ==> [A,B,C,D]
 //	output_fields=["*",C]    ==> [A,B,C,D]
-func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary bool) ([]string, []string, []string, error) {
+//
+// 4th return value is true if user requested pk field explicitly or using wildcard.
+// if removePkField is true, pk field will not be include in the first(resultFieldNames)/second(userOutputFields)
+// return value.
+func translateOutputFields(outputFields []string, schema *schemaInfo, removePkField bool) ([]string, []string, []string, bool, error) {
 	var primaryFieldName string
 	var dynamicField *schemapb.FieldSchema
 	allFieldNameMap := make(map[string]*schemapb.FieldSchema)
@@ -1351,9 +1355,15 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 		allFieldNameMap[field.Name] = field
 	}
 
+	userRequestedPkFieldExplicitly := false
+
 	for _, outputFieldName := range outputFields {
 		outputFieldName = strings.TrimSpace(outputFieldName)
+		if outputFieldName == primaryFieldName {
+			userRequestedPkFieldExplicitly = true
+		}
 		if outputFieldName == "*" {
+			userRequestedPkFieldExplicitly = true
 			for fieldName, field := range allFieldNameMap {
 				// skip Cold field and fields that can't be output
 				if schema.IsFieldLoaded(field.GetFieldID()) && schema.CanRetrieveRawFieldData(field) {
@@ -1365,20 +1375,20 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 		} else {
 			if field, ok := allFieldNameMap[outputFieldName]; ok {
 				if !schema.CanRetrieveRawFieldData(field) {
-					return nil, nil, nil, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
+					return nil, nil, nil, false, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
 				}
 				if schema.IsFieldLoaded(field.GetFieldID()) {
 					resultFieldNameMap[outputFieldName] = true
 					userOutputFieldsMap[outputFieldName] = true
 				} else {
-					return nil, nil, nil, fmt.Errorf("field %s is not loaded", outputFieldName)
+					return nil, nil, nil, false, fmt.Errorf("field %s is not loaded", outputFieldName)
 				}
 			} else {
 				if schema.EnableDynamicField {
 					if schema.IsFieldLoaded(dynamicField.GetFieldID()) {
 						schemaH, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
 						if err != nil {
-							return nil, nil, nil, err
+							return nil, nil, nil, false, err
 						}
 						err = planparserv2.ParseIdentifier(schemaH, outputFieldName, func(expr *planpb.Expr) error {
 							if len(expr.GetColumnExpr().GetInfo().GetNestedPath()) == 1 &&
@@ -1389,25 +1399,25 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 						})
 						if err != nil {
 							log.Info("parse output field name failed", zap.String("field name", outputFieldName))
-							return nil, nil, nil, fmt.Errorf("parse output field name failed: %s", outputFieldName)
+							return nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
 						}
 						resultFieldNameMap[common.MetaFieldName] = true
 						userOutputFieldsMap[outputFieldName] = true
 						userDynamicFieldsMap[outputFieldName] = true
 					} else {
 						// TODO after cold field be able to fetched with chunk cache, this check shall be removed
-						return nil, nil, nil, fmt.Errorf("field %s cannot be returned since dynamic field not loaded", outputFieldName)
+						return nil, nil, nil, false, fmt.Errorf("field %s cannot be returned since dynamic field not loaded", outputFieldName)
 					}
 				} else {
-					return nil, nil, nil, fmt.Errorf("field %s not exist", outputFieldName)
+					return nil, nil, nil, false, fmt.Errorf("field %s not exist", outputFieldName)
 				}
 			}
 		}
 	}
 
-	if addPrimary {
-		resultFieldNameMap[primaryFieldName] = true
-		userOutputFieldsMap[primaryFieldName] = true
+	if removePkField {
+		delete(resultFieldNameMap, primaryFieldName)
+		delete(userOutputFieldsMap, primaryFieldName)
 	}
 
 	for fieldName := range resultFieldNameMap {
@@ -1422,7 +1432,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 		}
 	}
 
-	return resultFieldNames, userOutputFields, userDynamicFields, nil
+	return resultFieldNames, userOutputFields, userDynamicFields, userRequestedPkFieldExplicitly, nil
 }
 
 func validateIndexName(indexName string) error {
