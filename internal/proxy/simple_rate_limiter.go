@@ -69,6 +69,9 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	if !Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 		return nil
 	}
+	if n <= 0 {
+		return nil
+	}
 
 	m.quotaStatesMu.RLock()
 	defer m.quotaStatesMu.RUnlock()
