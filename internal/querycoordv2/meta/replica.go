@@ -25,6 +25,7 @@ type Replica struct {
 	// always keep consistent with replicaPB.RoNodes.
 	// node used by replica but cannot add more channel or segment ont it.
 	// include rebalance node or node out of resource group.
+	recovering bool
 }
 
 // Deprecated: may break the consistency of ReplicaManager, use `Spawn` of `ReplicaManager` or `newReplica` instead.
@@ -45,6 +46,18 @@ func newReplica(replica *querypb.Replica) *Replica {
 		rwNodes:   typeutil.NewUniqueSet(replica.Nodes...),
 		roNodes:   typeutil.NewUniqueSet(replica.RoNodes...),
 	}
+}
+
+func (replica *Replica) Recover() {
+	replica.recovering = true
+}
+
+func (replica *Replica) FinishRecover() {
+	replica.recovering = false
+}
+
+func (replica *Replica) IsRecovering() bool {
+	return replica.recovering
 }
 
 // GetID returns the id of the replica.

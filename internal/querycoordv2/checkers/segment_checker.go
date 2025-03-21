@@ -449,7 +449,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		plans = append(plans, shardPlans...)
 	}
 
-	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
+	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans, replica.IsRecovering())
 }
 
 func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments []*meta.Segment, replica *meta.Replica, scope querypb.DataScope) []task.Task {
@@ -462,6 +462,7 @@ func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments 
 			c.ID(),
 			s.GetCollectionID(),
 			replica,
+			false,
 			action,
 		)
 		if err != nil {

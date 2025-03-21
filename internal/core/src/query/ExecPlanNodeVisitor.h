@@ -97,6 +97,11 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     ExecuteTask(plan::PlanFragment& plan,
                 std::shared_ptr<milvus::exec::QueryContext> query_context);
 
+    static void
+    MayThrottleLoad();
+
+    static std::atomic<int> executing_task_count_;
+
  private:
     template <typename VectorType>
     void

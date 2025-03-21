@@ -34,7 +34,7 @@ const (
 	DistInfoPrefix = "Balance-Dists:"
 )
 
-func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeout time.Duration, plans []SegmentAssignPlan) []task.Task {
+func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeout time.Duration, plans []SegmentAssignPlan, recovering bool) []task.Task {
 	ret := make([]task.Task, 0)
 	for _, p := range plans {
 		actions := make([]task.Action, 0)
@@ -52,6 +52,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 			source,
 			p.Segment.GetCollectionID(),
 			p.Replica,
+			recovering,
 			actions...,
 		)
 		if err != nil {

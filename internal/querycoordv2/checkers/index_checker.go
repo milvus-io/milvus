@@ -217,6 +217,7 @@ func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *met
 		c.ID(),
 		segment.GetCollectionID(),
 		replica,
+		false,
 		action,
 	)
 	if err != nil {
@@ -272,6 +273,7 @@ func (c *IndexChecker) createSegmentStatsUpdateTask(ctx context.Context, segment
 		c.ID(),
 		segment.GetCollectionID(),
 		replica,
+		false,
 		action,
 	)
 	if err != nil {
