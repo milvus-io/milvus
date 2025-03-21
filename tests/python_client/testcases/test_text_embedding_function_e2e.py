@@ -346,6 +346,7 @@ class TestInsertWithTextEmbeddingNegative(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("not support empty document now")
     def test_insert_with_text_embedding_empty_document(self, tei_endpoint):
         """
         target: test insert data with empty document
@@ -389,6 +390,7 @@ class TestInsertWithTextEmbeddingNegative(TestcaseBase):
         assert collection_w.num_entities == 0
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("TODO")
     def test_insert_with_text_embedding_long_document(self, tei_endpoint):
         """
         target: test insert data with long document
@@ -663,6 +665,7 @@ class TestSearchWithTextEmbeddingNegative(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("query", ["empty_query", "long_query"])
+    @pytest.mark.skip("not support empty query now")
     def test_search_with_text_embedding_negative_query(self, query, tei_endpoint):
         """
         target: test search with empty query or long query

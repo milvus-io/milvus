@@ -45,11 +45,12 @@ const (
 
 // common params
 const (
-	modelNameParamKey    string = "model_name"
-	dimParamKey          string = "dim"
-	embeddingURLParamKey string = "url"
-	apiKeyParamKey       string = "api_key"
-	truncateParamKey     string = "truncate"
+	modelNameParamKey           string = "model_name"
+	dimParamKey                 string = "dim"
+	embeddingURLParamKey        string = "url"
+	apiKeyParamKey              string = "api_key"
+	truncateParamKey            string = "truncate"
+	enableVerifiInfoInParamsKey string = "enableVerifiInfoInParams"
 )
 
 // ali text embedding
@@ -73,7 +74,7 @@ const (
 const (
 	awsAKIdParamKey   string = "aws_access_key_id"
 	awsSAKParamKey    string = "aws_secret_access_key"
-	regionParamKey    string = "regin"
+	regionParamKey    string = "region"
 	normalizeParamKey string = "normalize"
 
 	bedrockAccessKeyId string = "MILVUSAI_BEDROCK_ACCESS_KEY_ID"
@@ -120,11 +121,28 @@ const (
 	enableTeiEnvStr string = "MILVUSAI_ENABLE_TEI"
 )
 
-const enableConfigAKAndURL string = "ENABLE_CONFIG_AK_AND_URL"
+const enableVerifiInfoInParams string = "ENABLE_VERIFI_INFO_IN_PARAMS"
 
-func parseAKAndURL(params []*commonpb.KeyValuePair) (string, string) {
+func isEnableVerifiInfoInParamsKey(confParams map[string]string) bool {
+	enable := true
+	if strings.ToLower(confParams[enableVerifiInfoInParamsKey]) != "" {
+		// If enableVerifiInfoInParamsKey is configured in milvus.yaml, the configuration in milvus.yaml will be used.
+		enable, _ = strconv.ParseBool(confParams[enableVerifiInfoInParamsKey])
+	} else {
+		// If enableVerifiInfoInParamsKey is not configured in milvus.yaml, the configuration in env will be used.
+		if strings.ToLower(os.Getenv(enableVerifiInfoInParams)) != "" {
+			enable, _ = strconv.ParseBool(confParams[enableVerifiInfoInParamsKey])
+		}
+	}
+	return enable
+}
+
+func parseAKAndURL(params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string) (string, string) {
+	// function param > env > yaml
 	var apiKey, url string
-	if strings.ToLower(os.Getenv(enableConfigAKAndURL)) != "false" {
+
+	// from function params
+	if isEnableVerifiInfoInParamsKey(confParams) {
 		for _, param := range params {
 			switch strings.ToLower(param.Key) {
 			case apiKeyParamKey:
@@ -133,6 +151,20 @@ func parseAKAndURL(params []*commonpb.KeyValuePair) (string, string) {
 				url = param.Value
 			}
 		}
+	}
+
+	// from milvus.yaml
+	if apiKey == "" {
+		apiKey = confParams[apiKeyParamKey]
+	}
+
+	if url == "" {
+		url = confParams[embeddingURLParamKey]
+	}
+
+	// from env, url doesn't support configuration in in env
+	if apiKey == "" {
+		url = os.Getenv(apiKeyEnv)
 	}
 	return apiKey, url
 }

@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -76,7 +75,7 @@ func createSiliconflowProvider(url string, schema *schemapb.FieldSchema, provide
 	}
 	switch providerName {
 	case siliconflowProvider:
-		return NewSiliconflowEmbeddingProvider(schema, functionSchema)
+		return NewSiliconflowEmbeddingProvider(schema, functionSchema, map[string]string{})
 	default:
 		return nil, fmt.Errorf("Unknow provider")
 	}
@@ -171,11 +170,6 @@ func (s *SiliconflowTextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 func (s *SiliconflowTextEmbeddingProviderSuite) TestCreateSiliconflowEmbeddingClient() {
 	_, err := createSiliconflowEmbeddingClient("", "")
 	s.Error(err)
-
-	os.Setenv(siliconflowAKEnvStr, "mockKey")
-	defer os.Unsetenv(siliconflowAKEnvStr)
-	_, err = createSiliconflowEmbeddingClient("", "")
-	s.NoError(err)
 }
 
 func (s *SiliconflowTextEmbeddingProviderSuite) TestNewSiliconflowEmbeddingProvider() {
@@ -192,7 +186,7 @@ func (s *SiliconflowTextEmbeddingProviderSuite) TestNewSiliconflowEmbeddingProvi
 			{Key: embeddingURLParamKey, Value: "mock"},
 		},
 	}
-	provider, err := NewSiliconflowEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	provider, err := NewSiliconflowEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
 	s.True(provider.MaxBatch() > 0)

@@ -71,7 +71,7 @@ func createBedrockProvider(schema *schemapb.FieldSchema, providerName string, di
 	}
 	switch providerName {
 	case bedrockProvider:
-		return NewBedrockEmbeddingProvider(schema, functionSchema, &MockBedrockClient{dim: dim})
+		return NewBedrockEmbeddingProvider(schema, functionSchema, &MockBedrockClient{dim: dim}, map[string]string{})
 	default:
 		return nil, fmt.Errorf("Unknow provider")
 	}
@@ -151,22 +151,25 @@ func (s *BedrockTextEmbeddingProviderSuite) TestNewBedrockEmbeddingProvider() {
 			{Key: normalizeParamKey, Value: "false"},
 		},
 	}
-	provider, err := NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil)
+	provider, err := NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{})
 	s.NoError(err)
 	s.True(provider.MaxBatch() > 0)
 	s.Equal(provider.FieldDim(), int64(4))
 
+	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{awsAKIdParamKey: "mock", awsSAKParamKey: "mock"})
+	s.NoError(err)
+
 	functionSchema.Params[5] = &commonpb.KeyValuePair{Key: normalizeParamKey, Value: "true"}
-	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil)
+	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{})
 	s.NoError(err)
 
 	functionSchema.Params[5] = &commonpb.KeyValuePair{Key: normalizeParamKey, Value: "invalid"}
-	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil)
+	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{})
 	s.Error(err)
 
 	// invalid dim
 	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: TestModel}
 	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalid"}
-	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil)
+	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{})
 	s.Error(err)
 }
