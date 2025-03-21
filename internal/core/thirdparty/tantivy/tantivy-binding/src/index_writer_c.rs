@@ -39,7 +39,7 @@ pub extern "C" fn tantivy_create_index(
     };
 
     match IndexWriterWrapper::new(
-        String::from(field_name_str),
+        field_name_str,
         data_type,
         String::from(path_str),
         num_threads,
@@ -67,7 +67,7 @@ pub extern "C" fn tantivy_create_index_with_single_segment(
     };
 
     match IndexWriterWrapper::new_with_single_segment(
-        String::from(field_name_str),
+        field_name_str,
         data_type,
         String::from(path_str),
         tantivy_index_version,

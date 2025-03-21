@@ -336,6 +336,7 @@ RustResult tantivy_index_add_array_keywords_by_single_segment_writer(void *ptr,
 
 RustResult tantivy_create_text_writer(const char *field_name,
                                       const char *path,
+                                      uint32_t tantivy_index_version,
                                       const char *tokenizer_name,
                                       const char *analyzer_params,
                                       uintptr_t num_threads,

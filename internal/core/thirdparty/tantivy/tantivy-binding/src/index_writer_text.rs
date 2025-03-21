@@ -7,9 +7,9 @@ impl IndexWriterWrapper {
     // version 7 is the latest version and is what we should use in most cases.
     // We may also build with version 5 for compatibility for reader nodes with older versions.
     pub(crate) fn create_text_writer(
-        field_name: String,
-        path: String,
-        tokenizer_name: String,
+        field_name: &str,
+        path: &str,
+        tokenizer_name: &str,
         tokenizer_params: &str,
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,

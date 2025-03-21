@@ -79,7 +79,7 @@ pub struct IndexWriterWrapperImpl {
 
 impl IndexWriterWrapperImpl {
     pub fn new(
-        field_name: String,
+        field_name: &str,
         data_type: TantivyDataType,
         path: String,
         num_threads: usize,
@@ -90,7 +90,7 @@ impl IndexWriterWrapperImpl {
             field_name, data_type
         );
         let mut schema_builder = Schema::builder();
-        let field = schema_builder_add_field(&mut schema_builder, &field_name, data_type);
+        let field = schema_builder_add_field(&mut schema_builder, field_name, data_type);
         // We cannot build direct connection from rows in multi-segments to milvus row data. So we have this doc_id field.
         let id_field = schema_builder.add_i64_field("doc_id", FAST);
         let schema = schema_builder.build();
@@ -106,7 +106,7 @@ impl IndexWriterWrapperImpl {
     }
 
     pub fn new_with_single_segment(
-        field_name: String,
+        field_name: &str,
         data_type: TantivyDataType,
         path: String,
     ) -> Result<IndexWriterWrapperImpl> {
@@ -116,7 +116,7 @@ impl IndexWriterWrapperImpl {
             field_name, data_type
         );
         let mut schema_builder = Schema::builder();
-        let field = schema_builder_add_field(&mut schema_builder, &field_name, data_type);
+        let field = schema_builder_add_field(&mut schema_builder, field_name, data_type);
         let schema = schema_builder.build();
         let index = Index::create_in_dir(path.clone(), schema)?;
         let index_writer = SingleSegmentIndexWriter::new(index.clone(), 15 * 1024 * 1024)?;

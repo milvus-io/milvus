@@ -44,7 +44,7 @@ ScalarIndexCreator::ScalarIndexCreator(
     index_info.tantivy_index_version =
         milvus::index::GetValueFromConfig<int32_t>(
             config, milvus::index::TANTIVY_INDEX_VERSION)
-            .value_or(7);
+            .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
 
     index_info.field_type = dtype_;
     index_info.index_type = index_type();

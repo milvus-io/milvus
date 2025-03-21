@@ -10,23 +10,23 @@ use crate::log::init_log;
 use super::analyzer::create_analyzer;
 use super::IndexWriterWrapperImpl;
 
-fn build_text_schema(field_name: &String, tokenizer_name: &String) -> (Schema, Field, Field) {
+fn build_text_schema(field_name: &str, tokenizer_name: &str) -> (Schema, Field, Field) {
     let mut schema_builder = Schema::builder();
     // positions is required for matching phase.
     let indexing = TextFieldIndexing::default()
-        .set_tokenizer(&tokenizer_name)
+        .set_tokenizer(tokenizer_name)
         .set_index_option(IndexRecordOption::WithFreqsAndPositions);
     let option = TextOptions::default().set_indexing_options(indexing);
-    let field = schema_builder.add_text_field(&field_name, option);
+    let field = schema_builder.add_text_field(field_name, option);
     let id_field = schema_builder.add_i64_field("doc_id", FAST);
     (schema_builder.build(), field, id_field)
 }
 
 impl IndexWriterWrapperImpl {
     pub(crate) fn create_text_writer(
-        field_name: String,
-        path: String,
-        tokenizer_name: String,
+        field_name: &str,
+        path: &str,
+        tokenizer_name: &str,
         tokenizer_params: &str,
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
@@ -36,12 +36,12 @@ impl IndexWriterWrapperImpl {
 
         let tokenizer = create_analyzer(tokenizer_params)?;
 
-        let (schema, field, id_field) = build_text_schema(&field_name, &tokenizer_name);
+        let (schema, field, id_field) = build_text_schema(field_name, tokenizer_name);
         let index: Index;
         if in_ram {
             index = Index::create_in_ram(schema);
         } else {
-            index = Index::create_in_dir(path.clone(), schema).unwrap();
+            index = Index::create_in_dir(path.to_string(), schema).unwrap();
         }
         index.tokenizers().register(&tokenizer_name, tokenizer);
         let index_writer = index

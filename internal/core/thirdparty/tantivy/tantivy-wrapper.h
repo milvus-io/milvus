@@ -82,6 +82,7 @@ struct TantivyIndexWrapper {
     TantivyIndexWrapper(const char* field_name,
                         TantivyDataType data_type,
                         const char* path,
+                        uint32_t tantivy_index_version,
                         bool inverted_single_semgnent = false,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
@@ -89,12 +90,13 @@ struct TantivyIndexWrapper {
         RustResultWrapper res;
         if (inverted_single_semgnent) {
             res = RustResultWrapper(tantivy_create_index_with_single_segment(
-                field_name, data_type, path));
+                field_name, data_type, path, tantivy_index_version));
         } else {
             res = RustResultWrapper(
                 tantivy_create_index(field_name,
                                      data_type,
                                      path,
+                                     tantivy_index_version,
                                      num_threads,
                                      overall_memory_budget_in_bytes));
         }
@@ -120,6 +122,7 @@ struct TantivyIndexWrapper {
     TantivyIndexWrapper(const char* field_name,
                         bool in_ram,
                         const char* path,
+                        uint32_t tantivy_index_version,
                         const char* tokenizer_name = DEFAULT_TOKENIZER_NAME,
                         const char* analyzer_params = DEFAULT_analyzer_params,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
@@ -128,6 +131,7 @@ struct TantivyIndexWrapper {
         auto res = RustResultWrapper(
             tantivy_create_text_writer(field_name,
                                        path,
+                                       tantivy_index_version,
                                        tokenizer_name,
                                        analyzer_params,
                                        num_threads,

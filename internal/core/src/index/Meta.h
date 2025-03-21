@@ -47,9 +47,9 @@ constexpr const char* INVERTED_INDEX_TYPE = "INVERTED";
 constexpr const char* BITMAP_INDEX_TYPE = "BITMAP";
 constexpr const char* HYBRID_INDEX_TYPE = "HYBRID";
 constexpr const char* SCALAR_INDEX_ENGINE_VERSION =
-        "scalar_index_engine_version";
-constexpr const char* TANTIVY_INDEX_VERSION =
-    "tantivy_index_version";
+    "scalar_index_engine_version";
+constexpr const char* TANTIVY_INDEX_VERSION = "tantivy_index_version";
+constexpr uint32_t TANTIVY_INDEX_LATEST_VERSION = 7;
 
 // index meta
 constexpr const char* COLLECTION_ID = "collection_id";

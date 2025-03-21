@@ -72,9 +72,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         let mut writer = IndexWriterWrapper::create_text_writer(
-            "text".to_string(),
-            dir.path().to_str().unwrap().to_string(),
-            "jieba".to_string(),
+            "text",
+            dir.path().to_str().unwrap(),
+            "jieba",
             &params,
             1,
             50_000_000,
@@ -103,9 +103,9 @@ mod tests {
     fn test_read() {
         let dir = TempDir::new().unwrap();
         let mut writer = IndexWriterWrapper::create_text_writer(
-            "text".to_string(),
-            dir.path().to_str().unwrap().to_string(),
-            "default".to_string(),
+            "text",
+            dir.path().to_str().unwrap(),
+            "default",
             "",
             1,
             50_000_000,

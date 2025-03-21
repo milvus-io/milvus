@@ -56,7 +56,8 @@ IndexFactory::CreatePrimitiveScalarIndex(
         return std::make_unique<BitmapIndex<T>>(file_manager_context);
     }
     if (index_type == HYBRID_INDEX_TYPE) {
-        return std::make_unique<HybridScalarIndex<T>>(file_manager_context);
+        return std::make_unique<HybridScalarIndex<T>>(
+            create_index_info.index_engine_version, file_manager_context);
     }
     return CreateScalarIndexSort<T>(file_manager_context);
 }
@@ -88,7 +89,7 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     }
     if (index_type == HYBRID_INDEX_TYPE) {
         return std::make_unique<HybridScalarIndex<std::string>>(
-            file_manager_context);
+            create_index_info.index_engine_version, file_manager_context);
     }
     return CreateStringIndexMarisa(file_manager_context);
 #else
