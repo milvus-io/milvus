@@ -21,18 +21,17 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	iTypeutil "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -43,7 +42,7 @@ import (
 
 type BulkPackWriterV2 struct {
 	*BulkPackWriter
-	arrowSchema         *arrow.Schema
+	schema              *schemapb.CollectionSchema
 	bufferSize          int64
 	multiPartUploadSize int64
 }
@@ -51,10 +50,6 @@ type BulkPackWriterV2 struct {
 func NewBulkPackWriterV2(metaCache metacache.MetaCache, chunkManager storage.ChunkManager,
 	allocator allocator.Interface, bufferSize, multiPartUploadSize int64, writeRetryOpts ...retry.Option,
 ) *BulkPackWriterV2 {
-	arrowSchema, err := storage.ConvertToArrowSchema(metaCache.Schema().Fields)
-	if err != nil {
-		return nil
-	}
 	return &BulkPackWriterV2{
 		BulkPackWriter: &BulkPackWriter{
 			metaCache:      metaCache,
@@ -62,7 +57,7 @@ func NewBulkPackWriterV2(metaCache metacache.MetaCache, chunkManager storage.Chu
 			allocator:      allocator,
 			writeRetryOpts: writeRetryOpts,
 		},
-		arrowSchema:         arrowSchema,
+		schema:              metaCache.Schema(),
 		bufferSize:          bufferSize,
 		multiPartUploadSize: multiPartUploadSize,
 	}
@@ -139,7 +134,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		}
 	}
 
-	w, err := storage.NewPackedRecordWriter(paths, bw.arrowSchema, bw.bufferSize, bw.multiPartUploadSize, columnGroups)
+	w, err := storage.NewPackedRecordWriter(paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups)
 	if err != nil {
 		return nil, err
 	}
@@ -208,11 +203,15 @@ func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack)
 	if len(pack.insertData) == 0 {
 		return nil, nil
 	}
-	builder := array.NewRecordBuilder(memory.DefaultAllocator, bw.arrowSchema)
+	arrowSchema, err := storage.ConvertToArrowSchema(bw.schema.Fields)
+	if err != nil {
+		return nil, err
+	}
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
 	defer builder.Release()
 
 	for _, chunk := range pack.insertData {
-		if err := iTypeutil.BuildRecord(builder, chunk, bw.metaCache.Schema().GetFields()); err != nil {
+		if err := storage.BuildRecord(builder, chunk, bw.metaCache.Schema().GetFields()); err != nil {
 			return nil, err
 		}
 	}

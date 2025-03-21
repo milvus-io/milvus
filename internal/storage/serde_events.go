@@ -443,11 +443,7 @@ func ValueSerializer(v []*Value, fieldSchema []*schemapb.FieldSchema) (Record, e
 		builder := builders[field.FieldID]
 		arrays[i] = builder.NewArray()
 		builder.Release()
-		fields[i] = arrow.Field{
-			Name:     field.Name,
-			Type:     arrays[i].DataType(),
-			Metadata: arrow.NewMetadata([]string{"FieldID"}, []string{strconv.Itoa(int(field.FieldID))}),
-		}
+		fields[i] = ConvertToArrowField(field, arrays[i].DataType())
 		field2Col[field.FieldID] = i
 	}
 	return NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(len(v))), field2Col), nil

@@ -18,6 +18,7 @@ package storage
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math"
 	"strconv"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -594,7 +596,7 @@ func (r *selectiveRecord) Slice(start, end int) Record {
 	panic("not implemented")
 }
 
-func calculateArraySize(a arrow.Array) int {
+func CalculateArraySize(a arrow.Array) int {
 	if a == nil || a.Data() == nil || a.Data().Buffers() == nil {
 		return 0
 	}
@@ -715,7 +717,7 @@ func (sfw *singleFieldRecordWriter) Write(r Record) error {
 	sfw.numRows += r.Len()
 	a := r.Column(sfw.fieldId)
 
-	sfw.writtenUncompressed += uint64(calculateArraySize(a))
+	sfw.writtenUncompressed += uint64(CalculateArraySize(a))
 	rec := array.NewRecord(sfw.schema, []arrow.Array{a}, int64(r.Len()))
 	defer rec.Release()
 	return sfw.fw.WriteBuffered(rec)
@@ -789,7 +791,7 @@ func (mfw *multiFieldRecordWriter) Write(r Record) error {
 	columns := make([]arrow.Array, len(mfw.fieldIds))
 	for i, fieldId := range mfw.fieldIds {
 		columns[i] = r.Column(fieldId)
-		mfw.writtenUncompressed += uint64(calculateArraySize(columns[i]))
+		mfw.writtenUncompressed += uint64(CalculateArraySize(columns[i]))
 	}
 	rec := array.NewRecord(mfw.schema, columns, int64(r.Len()))
 	defer rec.Release()
@@ -922,4 +924,24 @@ func NewSimpleArrowRecord(r arrow.Record, field2Col map[FieldID]int) *simpleArro
 		r:         r,
 		field2Col: field2Col,
 	}
+}
+
+func BuildRecord(b *array.RecordBuilder, data *InsertData, fields []*schemapb.FieldSchema) error {
+	if data == nil {
+		return nil
+	}
+	for i, field := range fields {
+		fBuilder := b.Field(i)
+		typeEntry, ok := serdeMap[field.DataType]
+		if !ok {
+			panic("unknown type")
+		}
+		for j := 0; j < data.Data[field.FieldID].RowNum(); j++ {
+			ok = typeEntry.serialize(fBuilder, data.Data[field.FieldID].GetRow(j))
+			if !ok {
+				return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", field.DataType.String()))
+			}
+		}
+	}
+	return nil
 }
