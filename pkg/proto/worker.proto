@@ -5,8 +5,6 @@ package milvus.proto.index;
 option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/workerpb";
 
 import "common.proto";
-import "internal.proto";
-import "milvus.proto";
 import "schema.proto";
 import "data_coord.proto";
 import "index_coord.proto";
