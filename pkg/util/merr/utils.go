@@ -764,6 +764,30 @@ func WrapErrSegmentLoadFailed(id int64, msg ...string) error {
 	return err
 }
 
+func WrapErrSegmentRequestResourceFailed(
+	resourceType string,
+	request any,
+	curResourceUsage any,
+	predictResourceUsage any,
+	resourceLimit any,
+	thresholdFactor float64,
+	msg ...string,
+) error {
+	err := wrapFields(ErrSegmentRequestResourceFailed,
+		value("resourceType", resourceType),
+		value("request", request),
+		value("curResourceUsage", curResourceUsage),
+		value("predictResourceUsage", predictResourceUsage),
+		value("resourceLimit", resourceLimit),
+		value("thresholdFactor", thresholdFactor),
+	)
+
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 func WrapErrSegmentNotLoaded(id int64, msg ...string) error {
 	err := wrapFields(ErrSegmentNotLoaded, value("segment", id))
 	if len(msg) > 0 {
