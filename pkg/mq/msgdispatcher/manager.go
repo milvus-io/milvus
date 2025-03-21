@@ -304,7 +304,7 @@ OUTER:
 			d.RemoveTarget(vchannel)
 		}
 	}
-	c.mainDispatcher.Handle(resume)
+	d.Handle(resume)
 	if c.mainDispatcher == nil {
 		c.mainDispatcher = d
 		log.Info("add main dispatcher", zap.Int64("id", d.ID()))
