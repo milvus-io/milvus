@@ -42,3 +42,8 @@ packages:
       StreamingCoordBroadcastService_WatchServer:
       StreamingCoordBroadcastServiceClient:
       StreamingCoordBroadcastService_WatchClient:
+  github.com/milvus-io/milvus-proto/go-api/v2/hook:
+    interfaces:
+      Cipher:
+      Encryptor:
+      Decryptor:

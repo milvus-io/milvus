@@ -277,3 +277,10 @@ message ResourceKey {
     ResourceDomain domain = 1;
     string key = 2;
 }
+
+// CipherHeader is the header of a message that is encrypted.
+message CipherHeader {
+    int64 ez_id = 1; // related to the encryption zone id
+    bytes safe_key = 2; // the safe key
+    int64 payload_bytes = 3; // the size of the payload before encryption
+}
