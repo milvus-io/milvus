@@ -1626,10 +1626,12 @@ func checkVarcharFormat(schema *schemapb.CollectionSchema, insertMsg *msgstream.
 			continue
 		}
 
-		for row, data := range fieldData.GetScalars().GetStringData().GetData() {
+		strData := fieldData.GetScalars().GetStringData()
+		for row, data := range strData.GetData() {
 			ok := utf8.ValidString(data)
 			if !ok {
-				return merr.WrapErrAsInputError(fmt.Errorf("varchar with analyzer should be utf-8 format, but row: %d not utf-8 varchar. data: %s", row, data))
+				log.Warn("string field data not utf-8 format", zap.String("messageVersion", strData.ProtoReflect().Descriptor().Syntax().GoString()))
+				return merr.WrapErrAsInputError(fmt.Errorf("input with analyzer should be utf-8 format, but row: %d not utf-8 format. data: %s", row, data))
 			}
 		}
 	}
