@@ -94,7 +94,14 @@ const (
 	DatabaseDiskQuotaMb      = "database.diskQuota.mb"
 )
 
-// const for full text search
+// DefaultTextLang const for full text search
 const (
 	DefaultTextLang = "en"
+)
+
+const (
+	RootUser   = "root"
+	RootPwd    = "Milvus"
+	AdminRole  = "admin"
+	PublicRole = "public"
 )
