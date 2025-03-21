@@ -30,10 +30,12 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     // for sealed segment.
     explicit TextMatchIndex(const std::string& path,
                             const char* unique_id,
+                            uint32_t tantivy_index_version,
                             const char* tokenizer_name,
                             const char* analyzer_params);
     // for building index.
     explicit TextMatchIndex(const storage::FileManagerContext& ctx,
+                            uint32_t tantivy_index_version,
                             const char* tokenizer_name,
                             const char* analyzer_params);
     // for loading index

@@ -45,7 +45,10 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         std::string field_name = std::to_string(
             this->disk_file_manager_->GetFieldDataMeta().field_id);
         this->wrapper_ = std::make_shared<index::TantivyIndexWrapper>(
-            field_name.c_str(), this->d_type_, this->path_.c_str());
+            field_name.c_str(),
+            this->d_type_,
+            this->path_.c_str(),
+            TANTIVY_INDEX_LATEST_VERSION /* json index is not supported in old version */);
     }
 
     void

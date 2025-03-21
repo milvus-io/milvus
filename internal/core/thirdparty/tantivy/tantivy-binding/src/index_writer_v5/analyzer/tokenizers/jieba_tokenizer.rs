@@ -1,6 +1,6 @@
 use jieba_rs;
-use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 use lazy_static::lazy_static;
+use tantivy_5::tokenizer::{Token, TokenStream, Tokenizer};
 
 lazy_static! {
     static ref JIEBA: jieba_rs::Jieba = jieba_rs::Jieba::new();
@@ -14,7 +14,7 @@ pub enum JiebaMode {
 }
 
 #[derive(Clone)]
-pub struct JiebaTokenizer{
+pub struct JiebaTokenizer {
     mode: JiebaMode,
     hmm: bool,
 }
@@ -44,20 +44,19 @@ impl TokenStream for JiebaTokenStream {
 }
 
 impl JiebaTokenizer {
-    pub fn new() -> JiebaTokenizer{
-        JiebaTokenizer{mode: JiebaMode::Search, hmm: true}
+    pub fn new() -> JiebaTokenizer {
+        JiebaTokenizer {
+            mode: JiebaMode::Search,
+            hmm: true,
+        }
     }
 
-    fn tokenize(&self, text: &str) -> Vec<Token>{
+    fn tokenize(&self, text: &str) -> Vec<Token> {
         let mut indices = text.char_indices().collect::<Vec<_>>();
         indices.push((text.len(), '\0'));
-        let ori_tokens = match self.mode{
-            JiebaMode::Exact => {
-                JIEBA.tokenize(text, jieba_rs::TokenizeMode::Default, self.hmm)
-            },
-            JiebaMode::Search => {
-                JIEBA.tokenize(text, jieba_rs::TokenizeMode::Search, self.hmm)
-            },
+        let ori_tokens = match self.mode {
+            JiebaMode::Exact => JIEBA.tokenize(text, jieba_rs::TokenizeMode::Default, self.hmm),
+            JiebaMode::Search => JIEBA.tokenize(text, jieba_rs::TokenizeMode::Search, self.hmm),
         };
 
         let mut tokens = Vec::with_capacity(ori_tokens.len());

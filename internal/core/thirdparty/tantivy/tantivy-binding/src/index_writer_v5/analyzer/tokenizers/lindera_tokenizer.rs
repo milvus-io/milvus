@@ -5,7 +5,7 @@ use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
 use lindera::token::Token as LToken;
 use lindera::tokenizer::Tokenizer as LTokenizer;
-use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
+use tantivy_5::tokenizer::{Token, TokenStream, Tokenizer};
 
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
@@ -122,10 +122,7 @@ fn fetch_lindera_kind(params: &json::Map<String, json::Value>) -> Result<Diction
 
 #[cfg(test)]
 mod tests {
-    use serde_json as json;
-
-    use crate::analyzer::tokenizers::lindera_tokenizer::LinderaTokenizer;
-
+    use super::*;
     #[test]
     fn test_lindera_tokenizer() {
         let params = r#"{
