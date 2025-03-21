@@ -66,9 +66,7 @@ struct ConjunctElementFunc {
 class PhyConjunctFilterExpr : public Expr {
  public:
     PhyConjunctFilterExpr(std::vector<ExprPtr>&& inputs, bool is_and)
-        : Expr(DataType::BOOL,
-               std::move(inputs),
-               is_and ? "PhyConjunctFilterExpr" : "PhyConjunctFilterExpr"),
+        : Expr(DataType::BOOL, std::move(inputs), "PhyConjunctFilterExpr"),
           is_and_(is_and) {
         std::vector<DataType> input_types;
         input_types.reserve(inputs_.size());
@@ -158,6 +156,16 @@ class PhyConjunctFilterExpr : public Expr {
     void
     ClearBitmapInput(EvalCtx& context) {
         context.clear_bitmap_input();
+    }
+
+    bool
+    IsAnd() {
+        return is_and_;
+    }
+
+    bool
+    IsOr() {
+        return !is_and_;
     }
 
  private:
