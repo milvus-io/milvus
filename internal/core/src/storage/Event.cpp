@@ -222,7 +222,7 @@ BaseEventData::BaseEventData(BinlogReaderPtr reader,
     auto res = reader->Read(payload_length);
     AssertInfo(res.first.ok(), "read payload failed");
 
-    if (data_type == milvus::DataType::BINARY) {
+    if (data_type == milvus::DataType::NONE) {
         payload_slice_ = Slice(res.second.get(), payload_length);
     } else {
         payload_reader = std::make_shared<PayloadReader>(res.second.get(),

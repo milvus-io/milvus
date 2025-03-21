@@ -642,7 +642,7 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     futures.reserve(remote_files.size());
     for (auto& file : remote_files) {
         futures.emplace_back(pool.Submit(
-                DownloadAndDecodeRemoteFile, remote_chunk_manager, file, true));
+            DownloadAndDecodeRemoteFile, remote_chunk_manager, file, true));
     }
     return futures;
 }

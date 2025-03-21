@@ -225,7 +225,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         auto null_offsets_data = CompactIndexDatas(index_datas);
         auto null_offsets_data_codecs =
             std::move(null_offsets_data.at(INDEX_NULL_OFFSET_FILE_NAME));
-        for (auto&& null_offsets_codec : null_offsets_data_codecs.first) {
+        for (auto&& null_offsets_codec : null_offsets_data_codecs.codecs_) {
             fill_null_offsets(null_offsets_codec->PayloadData(),
                               null_offsets_codec->PayloadSize());
         }

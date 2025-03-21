@@ -279,7 +279,8 @@ DiskFileManagerImpl::CacheIndexToDisk(
             uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
 
         auto appendIndexFiles = [&]() {
-            auto index_chunks_futures = GetObjectData(rcm_.get(), batch_remote_files);
+            auto index_chunks_futures =
+                GetObjectData(rcm_.get(), batch_remote_files);
             for (auto& chunk_future : index_chunks_futures) {
                 auto chunk_codec = chunk_future.get();
                 file.Write(chunk_codec->PayloadData(),

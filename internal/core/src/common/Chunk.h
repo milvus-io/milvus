@@ -214,7 +214,6 @@ class StringChunk : public Chunk {
 
 using JSONChunk = StringChunk;
 
-
 // An ArrayChunk is a class that represents a collection of arrays stored in a contiguous memory block.
 // It is initialized with the number of rows, a pointer to the data, the size of the data, the element type,
 // and a boolean indicating whether the data can contain null values. The data is accessed using offsets and lengths,

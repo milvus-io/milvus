@@ -152,7 +152,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                                                         index_files->end());
 
     LOG_INFO("load index files: {}", index_files.value().size());
-    std::map<std::string, IndexCodecInfo> index_datas{};
+    std::map<std::string, IndexDataCodec> index_data_codecs{};
     // try to read slice meta first
     std::string slice_meta_filepath;
     for (auto& file : pending_index_files) {
@@ -197,6 +197,8 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
                 auto batch_data = file_manager_->LoadIndexToMemory(batch);
                 int64_t payload_size = 0;
+                index_data_codecs.insert({prefix, IndexDataCodec{}});
+                auto& index_data_codec = index_data_codecs.at(prefix);
                 for (const auto& file_path : batch) {
                     const std::string file_name =
                         file_path.substr(file_path.find_last_of('/') + 1);
@@ -204,7 +206,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                                "lost index slice data: {}",
                                file_name);
                     payload_size += batch_data[file_name]->PayloadSize();
-                    index_datas[prefix].first.push_back(
+                    index_data_codec.codecs_.push_back(
                         std::move(batch_data[file_name]));
                 }
                 for (auto& file : batch) {
@@ -213,7 +215,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                 AssertInfo(
                     payload_size == total_len,
                     "index len is inconsistent after disassemble and assemble");
-                index_datas[prefix].second = payload_size;
+                index_data_codec.size_ = payload_size;
             }
         }
 
@@ -223,8 +225,10 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                     pending_index_files.begin(), pending_index_files.end()));
             for (auto&& index_data : result) {
                 auto prefix = index_data.first;
-                index_datas[prefix].second = index_data.second->PayloadSize();
-                index_datas[prefix].first.push_back(
+                index_data_codecs.insert({prefix, IndexDataCodec{}});
+                auto& index_data_codec = index_data_codecs.at(prefix);
+                index_data_codec.size_ = index_data.second->PayloadSize();
+                index_data_codec.codecs_.push_back(
                     std::move(index_data.second));
             }
         }
@@ -234,7 +238,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
     LOG_INFO("construct binary set...");
     BinarySet binary_set;
-    AssembleIndexDatas(index_datas, binary_set);
+    AssembleIndexDatas(index_data_codecs, binary_set);
 
     // start engine load index span
     auto span_load_engine =

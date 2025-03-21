@@ -151,10 +151,12 @@ Config
 ParseConfigFromIndexParams(
     const std::map<std::string, std::string>& index_params);
 
-using IndexCodecInfo =
-    std::pair<std::list<std::unique_ptr<storage::DataCodec>>, int64_t>;
+struct IndexDataCodec {
+    std::list<std::unique_ptr<storage::DataCodec>> codecs_{};
+    int64_t size_{0};
+};
 
-std::map<std::string, IndexCodecInfo>
+std::map<std::string, IndexDataCodec>
 CompactIndexDatas(
     std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas);
 
@@ -164,7 +166,7 @@ AssembleIndexDatas(
     BinarySet& index_binary_set);
 
 void
-AssembleIndexDatas(std::map<std::string, IndexCodecInfo>& index_datas,
+AssembleIndexDatas(std::map<std::string, IndexDataCodec>& index_datas,
                    BinarySet& index_binary_set);
 
 void

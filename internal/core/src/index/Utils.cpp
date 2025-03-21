@@ -263,10 +263,10 @@ ParseConfigFromIndexParams(
     return config;
 }
 
-std::map<std::string, IndexCodecInfo>
+std::map<std::string, IndexDataCodec>
 CompactIndexDatas(
     std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas) {
-    std::map<std::string, IndexCodecInfo> index_file_slices;
+    std::map<std::string, IndexDataCodec> index_file_slices;
     if (index_datas.find(INDEX_FILE_SLICE_META) != index_datas.end()) {
         auto slice_meta = std::move(index_datas.at(INDEX_FILE_SLICE_META));
         Config meta_data = Config::parse(std::string(
@@ -277,27 +277,31 @@ CompactIndexDatas(
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
             auto data_len = 0;
+            index_file_slices.insert({prefix, IndexDataCodec{}});
+            auto& index_data_codec = index_file_slices.at(prefix);
             for (auto i = 0; i < slice_num; ++i) {
                 std::string file_name = GenSlicedFileName(prefix, i);
                 AssertInfo(index_datas.find(file_name) != index_datas.end(),
                            "lost index slice data");
-                index_file_slices[prefix].first.push_back(
+                index_data_codec.codecs_.push_back(
                     std::move(index_datas.at(file_name)));
-                data_len +=
-                    index_file_slices[prefix].first.back()->PayloadSize();
+                data_len += index_data_codec.codecs_.back()->PayloadSize();
             }
             AssertInfo(
                 total_len == data_len,
                 "index len is inconsistent after disassemble and assemble");
-            if (slice_num == 0 && index_datas.count(prefix) > 0) {
-                index_file_slices[prefix].first.push_back(std::move(index_datas[prefix]));
+            if (index_datas.count(prefix) > 0) {
+                index_data_codec.codecs_.push_back(
+                    std::move(index_datas[prefix]));
             }
-            index_file_slices[prefix].second = data_len;
+            index_data_codec.size_ = data_len;
         }
     } else {
-        for(auto& index_data: index_datas) {
-            index_file_slices[index_data.first].second = index_data.second->PayloadSize();
-            index_file_slices[index_data.first].first.push_back(std::move(index_data.second));
+        for (auto& index_data : index_datas) {
+            index_file_slices.insert({index_data.first, IndexDataCodec{}});
+            auto& index_data_codec = index_file_slices.at(index_data.first);
+            index_data_codec.size_ = index_data.second->PayloadSize();
+            index_data_codec.codecs_.push_back(std::move(index_data.second));
         }
     }
     return index_file_slices;
@@ -312,13 +316,13 @@ AssembleIndexDatas(
 }
 
 void
-AssembleIndexDatas(std::map<std::string, IndexCodecInfo>& index_file_slices,
+AssembleIndexDatas(std::map<std::string, IndexDataCodec>& index_file_slices,
                    BinarySet& index_binary_set) {
     for (auto& [key, index_slices] : index_file_slices) {
-        auto index_size = index_slices.second;
+        auto index_size = index_slices.size_;
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[index_size]);
         int64_t offset = 0;
-        for (auto&& index_slice : index_slices.first) {
+        for (auto&& index_slice : index_slices.codecs_) {
             std::memcpy(buf.get() + offset,
                         index_slice->PayloadData(),
                         index_slice->PayloadSize());
