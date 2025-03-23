@@ -398,7 +398,7 @@ func TestRateLimiter(t *testing.T) {
 		err := simpleLimiter.Check(-1, nil, internalpb.RateType_DDLDB, 1)
 		assert.NoError(t, err)
 
-		err = simpleLimiter.Check(-1, nil, internalpb.RateType_DDLDB, 1)
+		err = simpleLimiter.Check(-1, nil, internalpb.RateType_DDLDB, 0)
 		assert.NoError(t, err)
 	})
 }

@@ -97,6 +97,11 @@ func (rln *RateLimiterNode) GetQuotaExceededError(rt internalpb.RateType) error 
 		if errCode, ok := rln.quotaStates.Get(milvuspb.QuotaState_DenyToRead); ok {
 			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorString(errCode))
 		}
+	case internalpb.RateType_DDLCollection, internalpb.RateType_DDLPartition,
+		internalpb.RateType_DDLIndex, internalpb.RateType_DDLCompaction, internalpb.RateType_DDLFlush:
+		if errCode, ok := rln.quotaStates.Get(milvuspb.QuotaState_DenyToDDL); ok {
+			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorString(errCode))
+		}
 	}
 	return merr.WrapErrServiceQuotaExceeded(fmt.Sprintf("rate type: %s", rt.String()))
 }
