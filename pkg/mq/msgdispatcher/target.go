@@ -75,6 +75,7 @@ func (t *target) close() {
 		t.closed = true
 		t.timer.Stop()
 		close(t.ch)
+		log.Info("close target chan", zap.String("vchannel", t.vchannel))
 	})
 }
 
