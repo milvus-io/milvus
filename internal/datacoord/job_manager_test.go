@@ -61,12 +61,12 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 						{
 							Key: "enable_analyzer", Value: "true",
 						},
-						{
-							FieldID:  102,
-							Name:     "json",
-							DataType: schemapb.DataType_JSON,
-						},
 					},
+				},
+				{
+					FieldID:  102,
+					Name:     "json",
+					DataType: schemapb.DataType_JSON,
 				},
 			},
 		},
