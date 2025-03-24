@@ -395,6 +395,13 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		}
 	}
 
+	// auto fill json path with field name if not specified for json index
+	if typeutil.IsJSONType(cit.fieldSchema.DataType) {
+		if _, exist := indexParamsMap[common.JSONPathKey]; !exist {
+			indexParamsMap[common.JSONPathKey] = cit.req.FieldName
+		}
+	}
+
 	err := checkTrain(ctx, cit.fieldSchema, indexParamsMap)
 	if err != nil {
 		return merr.WrapErrParameterInvalid("valid index params", "invalid index params", err.Error())

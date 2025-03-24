@@ -20,24 +20,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
-var _ Index = &JsonPathIndex{}
+var _ Index = &JSONPathIndex{}
 
-// JsonPathIndex is the pre-defined index model for json path scalar index.
-type JsonPathIndex struct {
+// JSONPathIndex is the pre-defined index model for json path scalar index.
+type JSONPathIndex struct {
 	scalarIndex
 	jsonCastType string
 	jsonPath     string
 }
 
 // WithIndexName setup the index name of JsonPathIndex.
-func (idx *JsonPathIndex) WithIndexName(name string) *JsonPathIndex {
+func (idx *JSONPathIndex) WithIndexName(name string) *JSONPathIndex {
 	idx.name = name
 	return idx
 }
 
 // Params implements Index interface
 // returns the create index related parameters.
-func (idx *JsonPathIndex) Params() map[string]string {
+func (idx *JSONPathIndex) Params() map[string]string {
 	return map[string]string{
 		IndexTypeKey:           string(idx.indexType),
 		common.JSONCastTypeKey: idx.jsonCastType,
@@ -45,9 +45,9 @@ func (idx *JsonPathIndex) Params() map[string]string {
 	}
 }
 
-// NewJsonPathIndex creates a `JsonPathIndex` with provided parameters.
-func NewJsonPathIndex(indexType IndexType, jsonCastType string, jsonPath string) *JsonPathIndex {
-	return &JsonPathIndex{
+// NewJSONPathIndex creates a `JsonPathIndex` with provided parameters.
+func NewJSONPathIndex(indexType IndexType, jsonCastType string, jsonPath string) *JSONPathIndex {
+	return &JSONPathIndex{
 		scalarIndex: scalarIndex{
 			indexType: indexType,
 		},
