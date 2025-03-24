@@ -11,6 +11,7 @@ expr:
 	| '(' expr ')'											                     # Parens
 	| '[' expr (',' expr)* ','? ']'                                              # Array
 	| EmptyArray                                                                 # EmptyArray
+	| EXISTS expr                                                                # Exists
 	| expr LIKE StringLiteral                                                    # Like
 	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
 	| expr POW expr											                     # Power
@@ -35,8 +36,7 @@ expr:
 	| expr AND expr											                     # LogicalAnd
 	| expr OR expr											                     # LogicalOr
 	| Identifier ISNULL                                                          # IsNull
-	| Identifier ISNOTNULL                                                       # IsNotNull
-	| EXISTS expr                                                                # Exists;
+	| Identifier ISNOTNULL                                                       # IsNotNull;
 
 // typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
 
