@@ -81,3 +81,14 @@ func (prop propertiesImpl) EstimateSize() int {
 	}
 	return size
 }
+
+// CheckIfMessageFromStreaming checks if the message is from streaming.
+func CheckIfMessageFromStreaming(props map[string]string) bool {
+	if props == nil {
+		return false
+	}
+	if props[messageVersion] != "" {
+		return true
+	}
+	return false
+}
