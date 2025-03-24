@@ -85,11 +85,12 @@ type queryParams struct {
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
+// If no output fields specified, return only pk field
 func translateToOutputFieldIDs(outputFields []string, schema *schemapb.CollectionSchema) ([]UniqueID, error) {
 	outputFieldIDs := make([]UniqueID, 0, len(outputFields)+1)
 	if len(outputFields) == 0 {
 		for _, field := range schema.Fields {
-			if field.FieldID >= common.StartOfUserFieldID && !typeutil.IsVectorType(field.DataType) {
+			if field.IsPrimaryKey {
 				outputFieldIDs = append(outputFieldIDs, field.FieldID)
 			}
 		}
