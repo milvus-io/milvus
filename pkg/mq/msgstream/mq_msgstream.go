@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -465,6 +466,11 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 				log.Ctx(ms.ctx).Warn("MqMsgStream get msg whose payload is nil")
 				continue
 			}
+			if message.CheckIfMessageFromStreaming(msg.Properties()) {
+				log.Ctx(ms.ctx).Warn("MqMsgStream can not consume the message from streaming service")
+				continue
+			}
+
 			// not need to check the preCreatedTopic is empty, related issue: https://github.com/milvus-io/milvus/issues/27295
 			// if the message not belong to the topic, will skip it
 			tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
@@ -841,6 +847,11 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 				log.Warn("MqTtMsgStream get msg whose payload is nil")
 				continue
 			}
+			if message.CheckIfMessageFromStreaming(msg.Properties()) {
+				log.Warn("MqTtMsgStream can not consume the message from streaming service")
+				continue
+			}
+
 			// not need to check the preCreatedTopic is empty, related issue: https://github.com/milvus-io/milvus/issues/27295
 			// if the message not belong to the topic, will skip it
 			tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
