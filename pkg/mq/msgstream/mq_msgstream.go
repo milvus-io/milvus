@@ -637,7 +637,7 @@ func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subN
 				return errors.Wrapf(err, errMsg)
 			}
 
-			panic(fmt.Sprintf("%s, errors = %s", errMsg, err.Error()))
+			panic(fmt.Sprintf("%s, subName = %s, errors = %s", errMsg, subName, err.Error()))
 		}
 	}
 
