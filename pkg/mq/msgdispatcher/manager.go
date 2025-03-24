@@ -242,6 +242,19 @@ OUTER:
 		}
 	}
 
+	// For CDC, CDC needs to includeCurrentMsg when create new dispatcher
+	// and NOT includeCurrentMsg when create lag dispatcher. So if any dispatcher lagged,
+	// we give up batch subscription and create dispatcher for only one target.
+	includeCurrentMsg := false
+	for _, candidate := range candidateTargets {
+		if candidate.isLagged {
+			candidateTargets = []*target{candidate}
+			includeCurrentMsg = true
+			candidate.isLagged = false
+			break
+		}
+	}
+
 	vchannels := lo.Map(candidateTargets, func(t *target, _ int) string {
 		return t.vchannel
 	})
@@ -254,7 +267,7 @@ OUTER:
 
 	// TODO: add newDispatcher timeout param and init context
 	id := c.idAllocator.Inc()
-	d, err := NewDispatcher(context.Background(), c.factory, id, c.pchannel, earliestTarget.pos, earliestTarget.subPos, latestTarget.pos.GetTimestamp())
+	d, err := NewDispatcher(context.Background(), c.factory, id, c.pchannel, earliestTarget.pos, earliestTarget.subPos, includeCurrentMsg, latestTarget.pos.GetTimestamp())
 	if err != nil {
 		panic(err)
 	}
