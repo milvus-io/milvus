@@ -377,25 +377,27 @@ func getSortStatus(sorted bool) string {
 }
 
 func calculateIndexTaskSlot(segmentSize int64) int64 {
-	if segmentSize > 1000*1024*1024 {
-		return max(Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64(), 1)
-	} else if segmentSize > 500*1024*1024 {
-		return max(Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()/4, 1)
+	defaultSlots := Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()
+	if segmentSize > 512*1024*1024 {
+		taskSlot := max(segmentSize/512/1024/1024, 1) * defaultSlots
+		return max(taskSlot, 1)
 	} else if segmentSize > 100*1024*1024 {
-		return max(Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()/16, 1)
+		return max(defaultSlots/4, 1)
 	} else if segmentSize > 10*1024*1024 {
-		return max(Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()/64, 1)
+		return max(defaultSlots/16, 1)
 	}
-	return max(Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()/256, 1)
+	return max(defaultSlots/64, 1)
 }
 
 func calculateStatsTaskSlot(segmentSize int64) int64 {
-	if segmentSize > 500*1024*1024 {
-		return max(Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64(), 1)
+	defaultSlots := Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()
+	if segmentSize > 512*1024*1024 {
+		taskSlot := max(segmentSize/512/1024/1024, 1) * defaultSlots
+		return max(taskSlot, 1)
 	} else if segmentSize > 100*1024*1024 {
-		return max(Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()/2, 1)
+		return max(defaultSlots/2, 1)
 	} else if segmentSize > 10*1024*1024 {
-		return max(Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()/4, 1)
+		return max(defaultSlots/4, 1)
 	}
-	return max(Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()/8, 1)
+	return max(defaultSlots/8, 1)
 }
