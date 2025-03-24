@@ -24,7 +24,7 @@ func TestSessionDiscoverer(t *testing.T) {
 
 	etcdClient, err := etcd.GetEmbedEtcdClient()
 	assert.NoError(t, err)
-	targetVersion := "0.1.0"
+	targetVersion := ">=0.1.0"
 	d := NewSessionDiscoverer(etcdClient, "session/", false, targetVersion)
 
 	s := d.NewVersionedState()

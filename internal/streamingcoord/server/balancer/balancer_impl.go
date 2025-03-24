@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -122,6 +123,11 @@ func (b *balancerImpl) execute() {
 		b.logger.Info("balancer execute finished")
 	}()
 
+	if err := b.blockUntilAllNodeIsGreaterThan260(b.ctx); err != nil {
+		b.logger.Warn("fail to block until all node is greater than 2.6.0", zap.Error(err))
+		return
+	}
+
 	balanceTimer := typeutil.NewBackoffTimer(&backoffConfigFetcher{})
 	nodeChanged, err := resource.Resource().StreamingNodeManagerClient().WatchNodeChanged(b.backgroundTaskNotifier.Context())
 	if err != nil {
@@ -162,6 +168,35 @@ func (b *balancerImpl) execute() {
 		b.logger.Info("apply balance success")
 		balanceTimer.DisableBackoff()
 	}
+}
+
+// blockUntilAllNodeIsGreaterThan260 block until all node is greater than 2.6.0.
+// It's just a protection, but didn't promised that there will never be a node with version < 2.6.0 join the cluster.
+// These promise can only be achieved by the cluster dev-ops.
+func (b *balancerImpl) blockUntilAllNodeIsGreaterThan260(ctx context.Context) error {
+	doneErr := errors.New("done")
+	expectedRoles := []string{typeutil.ProxyRole, typeutil.DataNodeRole}
+	for _, role := range expectedRoles {
+		logger := b.logger.With(zap.String("role", role))
+		logger.Info("start to wait that the nodes is greater than 2.6.0")
+		// Check if there's any proxy or data node with version < 2.6.0.
+		proxyResolver := resolver.NewSessionBuilder(resource.Resource().ETCD(), role, "<2.6.0")
+		r := proxyResolver.Resolver()
+		err := r.Watch(ctx, func(vs resolver.VersionedState) error {
+			if len(vs.Sessions()) == 0 {
+				return doneErr
+			}
+			logger.Info("session changes", zap.Int("sessionCount", len(vs.Sessions())))
+			return nil
+		})
+		if err != nil && !errors.Is(err, doneErr) {
+			logger.Info("fail to wait that the nodes is greater than 2.6.0", zap.Error(err))
+			return err
+		}
+		logger.Info("all nodes is greater than 2.6.0")
+		proxyResolver.Close()
+	}
+	return nil
 }
 
 // applyAllRequest apply all request in the request channel.
