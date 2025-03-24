@@ -18,8 +18,7 @@ using Map = std::map<std::string, std::string>;
 
 static constexpr const char* DEFAULT_TOKENIZER_NAME = "milvus_tokenizer";
 static const char* DEFAULT_analyzer_params = "{}";
-static constexpr uintptr_t DEFAULT_NUM_THREADS =
-    1;  // Every field with index writer will generate a thread, make huge thread amount, wait for refactoring.
+static constexpr uintptr_t DEFAULT_NUM_THREADS = 4;
 static constexpr uintptr_t DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES =
     DEFAULT_NUM_THREADS * 15 * 1024 * 1024;
 
