@@ -183,7 +183,7 @@ func TestManager(t *testing.T) {
 		defer paramtable.Get().Reset(checkIntervalK)
 
 		assert.Eventually(t, func() bool {
-			return c.(*dispatcherManager).numConsumer.Load() == 1 // expected merged
+			return c.(*dispatcherManager).NumConsumer() == 1 // expected merged
 		}, 3*time.Second, 10*time.Millisecond)
 		assert.Equal(t, 3, c.NumTarget())
 	})
