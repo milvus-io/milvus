@@ -120,6 +120,7 @@ const (
 	RankParamsKey    = "params"
 	RRFParamsKey     = "k"
 	WeightsParamsKey = "weights"
+	NormScoreKey     = "norm_score"
 )
 
 type task interface {
