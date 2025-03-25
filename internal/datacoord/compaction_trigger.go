@@ -55,7 +55,6 @@ type trigger interface {
 type compactionSignal struct {
 	id           UniqueID
 	isForce      bool
-	isGlobal     bool
 	collectionID UniqueID
 	partitionID  UniqueID
 	channel      string
@@ -67,7 +66,6 @@ type compactionSignal struct {
 
 func NewCompactionSignal() *compactionSignal {
 	return &compactionSignal{
-		isGlobal:   true,
 		resultCh:   make(chan error, 1),
 		waitResult: true,
 	}
@@ -100,9 +98,6 @@ func (cs *compactionSignal) WithChannel(channel string) *compactionSignal {
 
 func (cs *compactionSignal) WithSegmentIDs(segmentIDs ...UniqueID) *compactionSignal {
 	cs.segmentIDs = segmentIDs
-	if len(segmentIDs) > 0 {
-		cs.isGlobal = false
-	}
 	return cs
 }
 
@@ -216,7 +211,7 @@ func (t *compactionTrigger) work() {
 		}
 		err := t.handleSignal(signal)
 		if err != nil {
-			log.Warn("unable to handleSignal", zap.Bool("isGlobal", signal.isGlobal), zap.Int64("signalID", signal.id), zap.Error(err))
+			log.Warn("unable to handleSignal", zap.Int64("signalID", signal.id), zap.Error(err))
 		}
 		signal.Notify(err)
 	}
