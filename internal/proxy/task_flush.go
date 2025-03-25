@@ -36,9 +36,9 @@ type flushTask struct {
 	baseTask
 	Condition
 	*milvuspb.FlushRequest
-	ctx       context.Context
-	dataCoord types.DataCoordClient
-	result    *milvuspb.FlushResponse
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.FlushResponse
 
 	replicateMsgStream msgstream.MsgStream
 }
@@ -106,7 +106,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 			),
 			CollectionID: collID,
 		}
-		resp, err := t.dataCoord.Flush(ctx, flushReq)
+		resp, err := t.mixCoord.Flush(ctx, flushReq)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
 			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
 		}

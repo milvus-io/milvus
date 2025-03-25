@@ -981,7 +981,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:        successStatus,
 			CollectionIDs: []int64{collID, 10, 100},
 		}, nil)
@@ -1005,7 +1005,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:        successStatus,
 			CollectionIDs: []int64{collID},
 		}, errors.New("error"))
@@ -1029,7 +1029,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "fail reason",
@@ -1060,7 +1060,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+		qc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, nil)
@@ -1085,7 +1085,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+		qc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, errors.New("error"))
@@ -1110,7 +1110,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+		qc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "fail reason",
@@ -2196,7 +2196,7 @@ func Test_MaxQueryResultWindow(t *testing.T) {
 
 func Test_GetPartitionProgressFailed(t *testing.T) {
 	qc := mocks.NewMockQueryCoordClient(t)
-	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+	qc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "Unexpected error",

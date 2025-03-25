@@ -1508,9 +1508,9 @@ func validateIndexName(indexName string) error {
 	return nil
 }
 
-func isCollectionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64) (bool, error) {
+func isCollectionLoaded(ctx context.Context, mc types.MixCoordClient, collID int64) (bool, error) {
 	// get all loading collections
-	resp, err := qc.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
+	resp, err := mc.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
 		CollectionIDs: nil,
 	})
 	if err != nil {
@@ -1528,9 +1528,9 @@ func isCollectionLoaded(ctx context.Context, qc types.QueryCoordClient, collID i
 	return false, nil
 }
 
-func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partID int64) (bool, error) {
+func isPartitionLoaded(ctx context.Context, mc types.MixCoordClient, collID int64, partID int64) (bool, error) {
 	// get all loading collections
-	resp, err := qc.ShowLoadPartitions(ctx, &querypb.ShowPartitionsRequest{
+	resp, err := mc.ShowLoadPartitions(ctx, &querypb.ShowPartitionsRequest{
 		CollectionID: collID,
 		PartitionIDs: []int64{partID},
 	})

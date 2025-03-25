@@ -43,10 +43,10 @@ import (
 type importTask struct {
 	baseTask
 	Condition
-	req       *internalpb.ImportRequest
-	ctx       context.Context
-	node      *Proxy
-	dataCoord types.DataCoordClient
+	req      *internalpb.ImportRequest
+	ctx      context.Context
+	node     *Proxy
+	mixCoord types.MixCoordClient
 
 	msgID        UniqueID
 	taskTS       Timestamp
@@ -143,7 +143,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 		// the collection needs to be in an unloaded state,
 		// and then all L0 and L1 segments should be loaded at once.
 		// We will remove this restriction after querynode supported to load L0 segments dynamically.
-		loaded, err := isCollectionLoaded(ctx, node.queryCoord, collectionID)
+		loaded, err := isCollectionLoaded(ctx, node.mixCoord, collectionID)
 		if err != nil {
 			return err
 		}

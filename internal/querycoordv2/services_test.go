@@ -234,7 +234,7 @@ func (suite *ServiceSuite) TestShowCollections() {
 
 	// Test get all collections
 	req := &querypb.ShowCollectionsRequest{}
-	resp, err := server.ShowCollections(ctx, req)
+	resp, err := server.ShowLoadCollections(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	suite.Len(resp.CollectionIDs, collectionNum)
@@ -245,7 +245,7 @@ func (suite *ServiceSuite) TestShowCollections() {
 	// Test get 1 collection
 	collection := suite.collections[0]
 	req.CollectionIDs = []int64{collection}
-	resp, err = server.ShowCollections(ctx, req)
+	resp, err = server.ShowLoadCollections(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	suite.Len(resp.CollectionIDs, 1)
@@ -256,7 +256,7 @@ func (suite *ServiceSuite) TestShowCollections() {
 	err = suite.meta.CollectionManager.RemoveCollection(ctx, collection)
 	suite.NoError(err)
 	meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
-	resp, err = server.ShowCollections(ctx, req)
+	resp, err = server.ShowLoadCollections(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
 	meta.GlobalFailedLoadCache.Remove(collection)
@@ -265,7 +265,7 @@ func (suite *ServiceSuite) TestShowCollections() {
 
 	// Test when server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
-	resp, err = server.ShowCollections(ctx, req)
+	resp, err = server.ShowLoadCollections(ctx, req)
 	suite.NoError(err)
 	suite.Equal(resp.GetStatus().GetCode(), merr.Code(merr.ErrServiceNotReady))
 }
@@ -283,7 +283,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 		req := &querypb.ShowPartitionsRequest{
 			CollectionID: collection,
 		}
-		resp, err := server.ShowPartitions(ctx, req)
+		resp, err := server.ShowLoadPartitions(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.Len(resp.PartitionIDs, partitionNum)
@@ -296,7 +296,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			CollectionID: collection,
 			PartitionIDs: partitions[0:1],
 		}
-		resp, err = server.ShowPartitions(ctx, req)
+		resp, err = server.ShowLoadPartitions(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.Len(resp.PartitionIDs, 1)
@@ -310,7 +310,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			err = suite.meta.CollectionManager.RemoveCollection(ctx, collection)
 			suite.NoError(err)
 			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
-			resp, err = server.ShowPartitions(ctx, req)
+			resp, err = server.ShowLoadPartitions(ctx, req)
 			suite.NoError(err)
 			err := merr.CheckRPCCall(resp, err)
 			assert.True(suite.T(), errors.Is(err, merr.ErrPartitionNotLoaded))
@@ -323,7 +323,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			err = suite.meta.CollectionManager.RemovePartition(ctx, collection, partitionID)
 			suite.NoError(err)
 			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
-			resp, err = server.ShowPartitions(ctx, req)
+			resp, err = server.ShowLoadPartitions(ctx, req)
 			suite.NoError(err)
 			err := merr.CheckRPCCall(resp, err)
 			assert.True(suite.T(), errors.Is(err, merr.ErrPartitionNotLoaded))
@@ -338,7 +338,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 		CollectionID: suite.collections[0],
 	}
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
-	resp, err := server.ShowPartitions(ctx, req)
+	resp, err := server.ShowLoadPartitions(ctx, req)
 	suite.NoError(err)
 	suite.Equal(resp.GetStatus().GetCode(), merr.Code(merr.ErrServiceNotReady))
 }
@@ -1131,7 +1131,7 @@ func (suite *ServiceSuite) TestGetSegmentInfo() {
 		req := &querypb.GetSegmentInfoRequest{
 			CollectionID: collection,
 		}
-		resp, err := server.GetSegmentInfo(ctx, req)
+		resp, err := server.GetLoadSegmentInfo(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.assertSegments(collection, resp.GetInfos())
@@ -1143,7 +1143,7 @@ func (suite *ServiceSuite) TestGetSegmentInfo() {
 			CollectionID: collection,
 			SegmentIDs:   suite.getAllSegments(collection),
 		}
-		resp, err := server.GetSegmentInfo(ctx, req)
+		resp, err := server.GetLoadSegmentInfo(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.assertSegments(collection, resp.GetInfos())
@@ -1154,7 +1154,7 @@ func (suite *ServiceSuite) TestGetSegmentInfo() {
 	req := &querypb.GetSegmentInfoRequest{
 		CollectionID: suite.collections[0],
 	}
-	resp, err := server.GetSegmentInfo(ctx, req)
+	resp, err := server.GetLoadSegmentInfo(ctx, req)
 	suite.NoError(err)
 	suite.Equal(resp.GetStatus().GetCode(), merr.Code(merr.ErrServiceNotReady))
 }

@@ -592,9 +592,9 @@ type getCollectionStatisticsTask struct {
 	baseTask
 	Condition
 	*milvuspb.GetCollectionStatisticsRequest
-	ctx       context.Context
-	dataCoord types.DataCoordClient
-	result    *milvuspb.GetCollectionStatisticsResponse
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.GetCollectionStatisticsResponse
 
 	collectionID UniqueID
 }
@@ -656,7 +656,7 @@ func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
 		CollectionID: collID,
 	}
 
-	result, err := g.dataCoord.GetCollectionStatistics(ctx, req)
+	result, err := g.mixCoord.GetCollectionStatistics(ctx, req)
 	if err = merr.CheckRPCCall(result, err); err != nil {
 		return err
 	}
@@ -675,9 +675,9 @@ type getPartitionStatisticsTask struct {
 	baseTask
 	Condition
 	*milvuspb.GetPartitionStatisticsRequest
-	ctx       context.Context
-	dataCoord types.DataCoordClient
-	result    *milvuspb.GetPartitionStatisticsResponse
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.GetPartitionStatisticsResponse
 
 	collectionID UniqueID
 }
@@ -744,7 +744,7 @@ func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
 		PartitionIDs: []int64{partitionID},
 	}
 
-	result, _ := g.dataCoord.GetPartitionStatistics(ctx, req)
+	result, _ := g.mixCoord.GetPartitionStatistics(ctx, req)
 	if result == nil {
 		return errors.New("get partition statistics resp is nil")
 	}

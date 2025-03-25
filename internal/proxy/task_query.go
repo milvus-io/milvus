@@ -53,7 +53,7 @@ type queryTask struct {
 	ctx            context.Context
 	result         *milvuspb.QueryResults
 	request        *milvuspb.QueryRequest
-	qc             types.QueryCoordClient
+	mixCoord       types.MixCoordClient
 	ids            *schemapb.IDs
 	collectionName string
 	queryParams    *queryParams
