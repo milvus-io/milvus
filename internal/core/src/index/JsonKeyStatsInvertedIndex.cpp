@@ -273,8 +273,9 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
             path_.c_str(),
             false,
             false,
-            1,
-            json_stats_tantivy_memory_budget);
+            // To speed up index building process.
+            4,
+            4 * 64 * 1024 * 1024);
     }
 }
 
