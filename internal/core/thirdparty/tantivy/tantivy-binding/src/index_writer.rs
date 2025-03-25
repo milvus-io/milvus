@@ -478,7 +478,7 @@ mod tests {
             TantivyDataType::Keyword,
             temp_dir.path().to_str().unwrap().to_string(),
             1,
-            1024 * 1024 * 1024,
+            15 * 1024 * 1024,
             false,
         )
         .unwrap();
