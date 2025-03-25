@@ -1734,13 +1734,9 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.compactionTrigger = &mockCompactionTrigger{
-			methods: map[string]interface{}{
-				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
-					return 1, nil
-				},
-			},
-		}
+		mockTrigger := NewMockTrigger(t)
+		svr.compactionTrigger = mockTrigger
+		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(1, nil)
 
 		mockHandler := NewMockCompactionPlanContext(t)
 		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
@@ -1756,13 +1752,10 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction failure", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.compactionTrigger = &mockCompactionTrigger{
-			methods: map[string]interface{}{
-				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
-					return 0, errors.New("mock error")
-				},
-			},
-		}
+		mockTrigger := NewMockTrigger(t)
+		svr.compactionTrigger = mockTrigger
+		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(0, errors.New("mock error"))
+
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
 			Timetravel:   1,
@@ -1774,13 +1767,9 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction with closed server", func(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Abnormal)
-		svr.compactionTrigger = &mockCompactionTrigger{
-			methods: map[string]interface{}{
-				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
-					return 1, nil
-				},
-			},
-		}
+		mockTrigger := NewMockTrigger(t)
+		svr.compactionTrigger = mockTrigger
+		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(1, nil).Maybe()
 
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,

@@ -587,8 +587,12 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.flushCh <- req.SegmentID
 
 		// notify compaction
-		err := s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
-			req.GetSegmentID(), req.GetChannel(), false)
+		_, err := s.compactionTrigger.TriggerCompaction(ctx,
+			NewCompactionSignal().
+				WithWaitResult(false).
+				WithCollectionID(req.GetCollectionID()).
+				WithPartitionID(req.GetPartitionID()).
+				WithChannel(req.GetChannel()))
 		if err != nil {
 			log.Warn("failed to trigger single compaction")
 		}
@@ -1166,7 +1170,13 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	if req.MajorCompaction {
 		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction())
 	} else {
-		id, err = s.compactionTrigger.triggerManualCompaction(req.CollectionID)
+		id, err = s.compactionTrigger.TriggerCompaction(ctx, NewCompactionSignal().
+			WithIsForce(true).
+			WithCollectionID(req.GetCollectionID()).
+			WithPartitionID(req.GetPartitionId()).
+			WithChannel(req.GetChannel()).
+			WithSegmentIDs(req.GetSegmentIds()...),
+		)
 	}
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Error(err))

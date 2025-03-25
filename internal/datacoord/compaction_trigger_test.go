@@ -192,7 +192,7 @@ func Test_compactionTrigger_force_without_index(t *testing.T) {
 		testingOnly:       true,
 	}
 
-	_, err := tr.triggerManualCompaction(collectionID)
+	_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal().WithCollectionID(collectionID).WithIsForce(true))
 	assert.NoError(t, err)
 
 	select {
@@ -641,7 +641,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
-			_, err := tr.triggerManualCompaction(tt.collectionID)
+			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal().WithCollectionID(tt.collectionID).WithIsForce(true))
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			select {
@@ -680,7 +680,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				testingOnly:                  true,
 			}
 			tt.collectionID = 1000
-			_, err := tr.triggerManualCompaction(tt.collectionID)
+			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal().WithCollectionID(tt.collectionID).WithIsForce(true))
 			assert.Equal(t, tt.wantErr, err != nil)
 			// expect max row num =  2048*1024*1024/(128*4) = 4194304
 			// assert.EqualValues(t, 4194304, tt.fields.meta.segments.GetSegments()[0].MaxRowNum)
@@ -719,8 +719,9 @@ func Test_compactionTrigger_force(t *testing.T) {
 					isForce:      true,
 					isGlobal:     true,
 					collectionID: 1111,
+					waitResult:   true,
 				}
-				tr.handleGlobalSignal(signal)
+				tr.TriggerCompaction(context.TODO(), signal)
 
 				spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 				hasPlan := true
@@ -739,9 +740,10 @@ func Test_compactionTrigger_force(t *testing.T) {
 					id:           0,
 					isForce:      true,
 					collectionID: 1111,
-					segmentID:    3,
+					segmentIDs:   []int64{3},
+					waitResult:   true,
 				}
-				tr.handleSignal(signal)
+				tr.TriggerCompaction(context.TODO(), signal)
 
 				spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 				hasPlan := true
@@ -963,7 +965,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
-			_, err := tr.triggerManualCompaction(tt.args.collectionID)
+			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal().WithCollectionID(tt.args.collectionID).WithIsForce(true))
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 
@@ -1119,7 +1121,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 			}
 			tr.start()
 			defer tr.stop()
-			err := tr.triggerCompaction()
+			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal())
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			select {
@@ -1311,7 +1313,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 			}
 			tr.start()
 			defer tr.stop()
-			err := tr.triggerCompaction()
+			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal())
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			select {
@@ -1455,7 +1457,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 			}
 			tr.start()
 			defer tr.stop()
-			err := tr.triggerCompaction()
+			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal())
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			select {
@@ -1597,7 +1599,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 			}
 			tr.start()
 			defer tr.stop()
-			err := tr.triggerCompaction()
+			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal())
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			select {
@@ -1781,7 +1783,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 			}
 			tr.start()
 			defer tr.stop()
-			err := tr.triggerCompaction()
+			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal())
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 
@@ -2093,11 +2095,21 @@ func Test_triggerSingleCompaction(t *testing.T) {
 		}, newMockVersionManager())
 	got.signals = make(chan *compactionSignal, 1)
 	{
-		err := got.triggerSingleCompaction(1, 1, 1, "a", false)
+		_, err := got.TriggerCompaction(context.TODO(), NewCompactionSignal().
+			WithCollectionID(1).
+			WithPartitionID(1).
+			WithSegmentIDs(1).
+			WithChannel("a").
+			WithWaitResult(false))
 		assert.NoError(t, err)
 	}
 	{
-		err := got.triggerSingleCompaction(2, 2, 2, "b", false)
+		_, err := got.TriggerCompaction(context.TODO(), NewCompactionSignal().
+			WithCollectionID(2).
+			WithPartitionID(2).
+			WithSegmentIDs(2).
+			WithChannel("b").
+			WithWaitResult(false))
 		assert.NoError(t, err)
 	}
 	var i satomic.Value
@@ -2118,7 +2130,12 @@ func Test_triggerSingleCompaction(t *testing.T) {
 	assert.Equal(t, 1, i.Load().(int))
 
 	{
-		err := got.triggerSingleCompaction(3, 3, 3, "c", true)
+		_, err := got.TriggerCompaction(context.TODO(), NewCompactionSignal().
+			WithCollectionID(3).
+			WithPartitionID(3).
+			WithSegmentIDs(3).
+			WithChannel("c").
+			WithWaitResult(true))
 		assert.NoError(t, err)
 	}
 	var j satomic.Value
@@ -2142,7 +2159,12 @@ func Test_triggerSingleCompaction(t *testing.T) {
 		}
 	}()
 	{
-		err := got.triggerSingleCompaction(4, 4, 4, "d", true)
+		_, err := got.TriggerCompaction(context.TODO(), NewCompactionSignal().
+			WithCollectionID(4).
+			WithPartitionID(4).
+			WithSegmentIDs(4).
+			WithChannel("d").
+			WithWaitResult(true))
 		assert.NoError(t, err)
 	}
 	assert.Eventually(t, func() bool {
@@ -2351,7 +2373,6 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(nil, errors.New("mocked"))
 		tr.handleSignal(&compactionSignal{
-			segmentID:    1,
 			collectionID: s.collectionID,
 			partitionID:  s.partitionID,
 			channel:      s.channel,
@@ -2380,7 +2401,6 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 			},
 		}, nil)
 		tr.handleSignal(&compactionSignal{
-			segmentID:    1,
 			collectionID: s.collectionID,
 			partitionID:  s.partitionID,
 			channel:      s.channel,
@@ -2410,7 +2430,6 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 			},
 		}, nil)
 		tr.handleSignal(&compactionSignal{
-			segmentID:    1,
 			collectionID: s.collectionID,
 			partitionID:  s.partitionID,
 			channel:      s.channel,
@@ -2446,7 +2465,6 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		}, nil)
 		s.compactionHandler.EXPECT().enqueueCompaction(mock.Anything).Return(nil)
 		tr.handleSignal(&compactionSignal{
-			segmentID:    1,
 			collectionID: s.collectionID,
 			partitionID:  s.partitionID,
 			channel:      s.channel,
@@ -2480,21 +2498,17 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 			},
 		},
 	}
-	s.Run("getCompaction_failed", func() {
+
+	s.Run("GetCollection_failed", func() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.compactionHandler.EXPECT().isFull().Return(false)
-		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(nil, errors.New("mocked"))
-		tr.handleGlobalSignal(&compactionSignal{
-			segmentID:    1,
-			collectionID: s.collectionID,
-			partitionID:  s.partitionID,
-			channel:      s.channel,
-			isForce:      false,
-		})
-
-		// suite shall check compactionHandler.enqueueCompaction never called
+		err := tr.handleSignal(NewCompactionSignal().
+			WithCollectionID(s.collectionID).
+			WithPartitionID(s.partitionID).
+			WithChannel(s.channel))
+		s.Error(err)
 	})
 
 	s.Run("collectionAutoCompactionConfigError", func() {
@@ -2508,45 +2522,36 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 				common.CollectionAutoCompactionKey: "bad_value",
 			},
 		}, nil)
-		tr.handleGlobalSignal(&compactionSignal{
-			segmentID:    1,
-			collectionID: s.collectionID,
-			partitionID:  s.partitionID,
-			channel:      s.channel,
-			isForce:      false,
-		})
-
-		// suite shall check compactionHandler.enqueueCompaction never called
+		s.NotPanics(func() {
+			err := tr.handleSignal(NewCompactionSignal().
+				WithCollectionID(s.collectionID).
+				WithPartitionID(s.partitionID).
+				WithChannel(s.channel))
+			s.NoError(err)
+		}, "bad configuration shall not cause panicking")
 	})
 
 	s.Run("collectionAutoCompactionDisabled", func() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.compactionHandler.EXPECT().isFull().Return(false)
-		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Schema: schema,
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "false",
 			},
 		}, nil)
-		tr.handleGlobalSignal(&compactionSignal{
-			segmentID:    1,
-			collectionID: s.collectionID,
-			partitionID:  s.partitionID,
-			channel:      s.channel,
-			isForce:      false,
-		})
-
-		// suite shall check compactionHandler.enqueueCompaction never called
+		err := tr.handleSignal(NewCompactionSignal().
+			WithCollectionID(s.collectionID).
+			WithPartitionID(s.partitionID).
+			WithChannel(s.channel))
+		s.NoError(err)
 	})
 
 	s.Run("collectionAutoCompactionDisabled_force", func() {
 		defer s.SetupTest()
 		tr := s.tr
-		// s.compactionHandler.EXPECT().isFull().Return(false)
-		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
-		// s.allocator.EXPECT().AllocID(mock.Anything).Return(20000, nil).Maybe()
+		s.compactionHandler.EXPECT().isFull().Return(false)
 		start := int64(20000)
 		s.allocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
 			return start, start + i, nil
@@ -2558,14 +2563,11 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 				common.CollectionAutoCompactionKey: "false",
 			},
 		}, nil)
-		// s.compactionHandler.EXPECT().enqueueCompaction(mock.Anything).Return(nil)
-		tr.handleGlobalSignal(&compactionSignal{
-			segmentID:    1,
-			collectionID: s.collectionID,
-			partitionID:  s.partitionID,
-			channel:      s.channel,
-			isForce:      true,
-		})
+		err := tr.handleSignal(NewCompactionSignal().
+			WithCollectionID(s.collectionID).
+			WithPartitionID(s.partitionID).
+			WithChannel(s.channel))
+		s.NoError(err)
 	})
 }
 
