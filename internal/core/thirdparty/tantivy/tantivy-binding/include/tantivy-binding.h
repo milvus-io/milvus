@@ -245,6 +245,12 @@ RustResult tantivy_index_add_bools(void *ptr,
                                    uintptr_t len,
                                    int64_t offset_begin);
 
+RustResult tantivy_index_add_json_key_stats_data_by_batch(void *ptr,
+                                                          const char *const *keys,
+                                                          const int64_t *const *json_offsets,
+                                                          const uintptr_t *json_offsets_len,
+                                                          uintptr_t len);
+
 RustResult tantivy_index_add_bools_by_single_segment_writer(void *ptr,
                                                             const bool *array,
                                                             uintptr_t len);

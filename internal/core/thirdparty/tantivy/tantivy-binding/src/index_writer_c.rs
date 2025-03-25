@@ -27,7 +27,7 @@ pub extern "C" fn tantivy_create_index(
     path: *const c_char,
     num_threads: usize,
     overall_memory_budget_in_bytes: usize,
-    in_ram : bool,
+    in_ram: bool,
 ) -> RustResult {
     let field_name_str = cstr_to_str!(field_name);
     let path_str = cstr_to_str!(path);
@@ -314,6 +314,26 @@ pub extern "C" fn tantivy_index_add_bools(
             &mut (*real),
         )
         .into()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_json_key_stats_data_by_batch(
+    ptr: *mut c_void,
+    keys: *const *const c_char,
+    json_offsets: *const *const i64,
+    json_offsets_len: *const usize,
+    len: usize,
+) -> RustResult {
+    let real = ptr as *mut IndexWriterWrapper;
+    let json_offsets_len = unsafe { slice::from_raw_parts(json_offsets_len, len) };
+    let json_offsets = unsafe { slice::from_raw_parts(json_offsets, len) };
+    let keys = unsafe { slice::from_raw_parts(keys, len) };
+    unimplemented!();
+    unsafe {
+        (*real)
+            .add_json_keys(keys, json_offsets, json_offsets_len)
+            .into()
     }
 }
 

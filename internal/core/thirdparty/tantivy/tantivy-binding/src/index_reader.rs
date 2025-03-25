@@ -9,6 +9,7 @@ use crate::docid_collector::DocIdCollector;
 use crate::log::init_log;
 use crate::util::make_bounds;
 use crate::vec_collector::VecCollector;
+use log::info;
 
 use crate::error::{Result, TantivyBindingError};
 
@@ -24,6 +25,7 @@ impl IndexReaderWrapper {
     pub fn load(path: &str) -> Result<IndexReaderWrapper> {
         init_log();
 
+        info!("Loading index from {:?}", path);
         let index = Index::open_in_dir(path)?;
 
         IndexReaderWrapper::from_index(Arc::new(index))
