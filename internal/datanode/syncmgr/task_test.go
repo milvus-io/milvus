@@ -185,7 +185,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	metacache.UpdateNumOfRows(1000)(seg)
 	seg.GetBloomFilterSet().Roll()
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 	s.Run("without_data", func() {
@@ -269,7 +269,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 	bfs := metacache.NewBloomFilterSet()
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 	s.Run("pure_delete_l0_flush", func() {
@@ -309,7 +309,7 @@ func (s *SyncTaskSuite) TestRunError() {
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, metacache.NewBloomFilterSet())
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
-	s.metacache.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 
 	s.Run("allocate_id_fail", func() {
 		mockAllocator := allocator.NewMockAllocator(s.T())
