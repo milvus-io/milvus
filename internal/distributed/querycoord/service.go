@@ -328,8 +328,8 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 }
 
 // ShowCollections shows the collections in the QueryCoord.
-func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	return s.queryCoord.ShowCollections(ctx, req)
+func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+	return s.queryCoord.ShowLoadCollections(ctx, req)
 }
 
 // LoadCollection loads the data of the specified collection in QueryCoord.
@@ -343,8 +343,8 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 }
 
 // ShowPartitions shows the partitions in the QueryCoord.
-func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-	return s.queryCoord.ShowPartitions(ctx, req)
+func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+	return s.queryCoord.ShowLoadPartitions(ctx, req)
 }
 
 // GetPartitionStates gets the states of the specified partition.
@@ -368,8 +368,8 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 }
 
 // GetSegmentInfo gets the information of the specified segment from QueryCoord.
-func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	return s.queryCoord.GetSegmentInfo(ctx, req)
+func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+	return s.queryCoord.GetLoadSegmentInfo(ctx, req)
 }
 
 // LoadBalance migrate the sealed segments on the source node to the dst nodes

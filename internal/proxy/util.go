@@ -1510,7 +1510,7 @@ func validateIndexName(indexName string) error {
 
 func isCollectionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64) (bool, error) {
 	// get all loading collections
-	resp, err := qc.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+	resp, err := qc.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
 		CollectionIDs: nil,
 	})
 	if err != nil {
@@ -1530,7 +1530,7 @@ func isCollectionLoaded(ctx context.Context, qc types.QueryCoordClient, collID i
 
 func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID int64, partID int64) (bool, error) {
 	// get all loading collections
-	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+	resp, err := qc.ShowLoadPartitions(ctx, &querypb.ShowPartitionsRequest{
 		CollectionID: collID,
 		PartitionIDs: []int64{partID},
 	})
@@ -1797,7 +1797,7 @@ func getCollectionProgress(
 	msgBase *commonpb.MsgBase,
 	collectionID int64,
 ) (loadProgress int64, refreshProgress int64, err error) {
-	resp, err := queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+	resp, err := queryCoord.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
 		Base: commonpbutil.UpdateMsgBase(
 			msgBase,
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
@@ -1850,7 +1850,7 @@ func getPartitionProgress(
 	}
 
 	var resp *querypb.ShowPartitionsResponse
-	resp, err = queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+	resp, err = queryCoord.ShowLoadPartitions(ctx, &querypb.ShowPartitionsRequest{
 		Base: commonpbutil.UpdateMsgBase(
 			msgBase,
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),

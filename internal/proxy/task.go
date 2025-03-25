@@ -920,7 +920,7 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 			IDs2Names[collectionID] = collectionName
 		}
 
-		resp, err := t.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+		resp, err := t.queryCoord.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
 			Base: commonpbutil.UpdateMsgBase(
 				t.Base,
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
@@ -1749,7 +1749,7 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 			partitionIDs = append(partitionIDs, partitionID)
 			IDs2Names[partitionID] = partitionName
 		}
-		resp, err := t.queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+		resp, err := t.queryCoord.ShowLoadPartitions(ctx, &querypb.ShowPartitionsRequest{
 			Base: commonpbutil.UpdateMsgBase(
 				t.Base,
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),

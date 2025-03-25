@@ -784,7 +784,7 @@ func (m *MetaCache) getCollectionLoadFields(ctx context.Context, collectionID Un
 		CollectionIDs: []int64{collectionID},
 	}
 
-	resp, err := m.queryCoord.ShowCollections(ctx, req)
+	resp, err := m.queryCoord.ShowLoadCollections(ctx, req)
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotLoaded) {
 			return []int64{}, nil

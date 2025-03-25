@@ -326,7 +326,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 
 	// If request to search partitions
 	if len(searchPartitionIDs) > 0 {
-		resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+		resp, err := qc.ShowLoadPartitions(ctx, &querypb.ShowPartitionsRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -352,7 +352,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 	}
 
 	// If request to search collection
-	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+	resp, err := qc.ShowLoadPartitions(ctx, &querypb.ShowPartitionsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),

@@ -236,7 +236,7 @@ func listCollection(node *Proxy) gin.HandlerFunc {
 			return
 		}
 
-		queryCollectionListResp, err := queryCoord.ShowCollections(c, &querypb.ShowCollectionsRequest{
+		queryCollectionListResp, err := queryCoord.ShowLoadCollections(c, &querypb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_ShowCollections,
 			},

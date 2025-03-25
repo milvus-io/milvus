@@ -4525,7 +4525,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	infoResp, err := node.queryCoord.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
+	infoResp, err := node.queryCoord.GetLoadSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),

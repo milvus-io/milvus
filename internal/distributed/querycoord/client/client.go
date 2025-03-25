@@ -145,14 +145,14 @@ func (c *Client) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 }
 
 // ShowCollections shows the collections in the QueryCoord.
-func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
+func (c *Client) ShowLoadCollections(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.ShowCollectionsResponse, error) {
-		return client.ShowCollections(ctx, req)
+		return client.ShowLoadCollections(ctx, req)
 	})
 }
 
@@ -181,14 +181,14 @@ func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 }
 
 // ShowPartitions shows the partitions in the QueryCoord.
-func (c *Client) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest, opts ...grpc.CallOption) (*querypb.ShowPartitionsResponse, error) {
+func (c *Client) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest, opts ...grpc.CallOption) (*querypb.ShowPartitionsResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.ShowPartitionsResponse, error) {
-		return client.ShowPartitions(ctx, req)
+		return client.ShowLoadPartitions(ctx, req)
 	})
 }
 
@@ -241,14 +241,14 @@ func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 }
 
 // GetSegmentInfo gets the information of the specified segment from QueryCoord.
-func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*querypb.GetSegmentInfoResponse, error) {
+func (c *Client) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*querypb.GetSegmentInfoResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryCoordClient) (*querypb.GetSegmentInfoResponse, error) {
-		return client.GetSegmentInfo(ctx, req)
+		return client.GetLoadSegmentInfo(ctx, req)
 	})
 }
 

@@ -135,7 +135,7 @@ func (b *ServerBroker) SyncNewCreatedPartition(ctx context.Context, collectionID
 }
 
 func (b *ServerBroker) GetQuerySegmentInfo(ctx context.Context, collectionID int64, segIDs []int64) (retResp *querypb.GetSegmentInfoResponse, retErr error) {
-	resp, err := b.s.queryCoord.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
+	resp, err := b.s.queryCoord.GetLoadSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_GetSegmentState),
 			commonpbutil.WithSourceID(b.s.session.ServerID),
