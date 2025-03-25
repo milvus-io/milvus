@@ -300,8 +300,9 @@ func (t *compactionTrigger) TriggerCompaction(ctx context.Context, signal *compa
 				zap.Int64("collectionID", signal.collectionID),
 				zap.Int64s("segmentID", signal.segmentIDs),
 				zap.String("channel", signal.channel))
+			return -1, merr.WrapErrServiceUnavailable("signal channel is full")
 		}
-		return -1, merr.WrapErrServiceUnavailable("signal channel is full")
+		return id, nil
 	}
 
 	// force flag make sure signal is handle and returns error if any

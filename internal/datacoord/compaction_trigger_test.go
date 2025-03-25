@@ -185,12 +185,19 @@ func Test_compactionTrigger_force_without_index(t *testing.T) {
 		meta:              m,
 		handler:           newMockHandlerWithMeta(m),
 		allocator:         newMock0Allocator(t),
-		signals:           nil,
+		signals:           make(chan *compactionSignal, 100),
+		manualSignals:     make(chan *compactionSignal, 100),
 		compactionHandler: compactionHandler,
 		globalTrigger:     nil,
 		closeCh:           lifetime.NewSafeChan(),
 		testingOnly:       true,
 	}
+	tr.closeWaiter.Add(1)
+	go func() {
+		defer tr.closeWaiter.Done()
+		tr.work()
+	}()
+	defer tr.stop()
 
 	_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal().WithCollectionID(collectionID).WithIsForce(true))
 	assert.NoError(t, err)
@@ -633,7 +640,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 				meta:                         tt.fields.meta,
 				handler:                      newMockHandlerWithMeta(tt.fields.meta),
 				allocator:                    tt.fields.allocator,
-				signals:                      tt.fields.signals,
+				signals:                      make(chan *compactionSignal, 100),
+				manualSignals:                make(chan *compactionSignal, 100),
 				compactionHandler:            tt.fields.compactionHandler,
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
@@ -641,6 +649,12 @@ func Test_compactionTrigger_force(t *testing.T) {
 				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
+			tr.closeWaiter.Add(1)
+			go func() {
+				defer tr.closeWaiter.Done()
+				tr.work()
+			}()
+			defer tr.stop()
 			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal().WithCollectionID(tt.collectionID).WithIsForce(true))
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
@@ -671,7 +685,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 				meta:                         tt.fields.meta,
 				handler:                      newMockHandlerWithMeta(tt.fields.meta),
 				allocator:                    tt.fields.allocator,
-				signals:                      tt.fields.signals,
+				signals:                      make(chan *compactionSignal, 100),
+				manualSignals:                make(chan *compactionSignal, 100),
 				compactionHandler:            tt.fields.compactionHandler,
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
@@ -679,6 +694,12 @@ func Test_compactionTrigger_force(t *testing.T) {
 				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
+			tr.closeWaiter.Add(1)
+			go func() {
+				defer tr.closeWaiter.Done()
+				tr.work()
+			}()
+			defer tr.stop()
 			tt.collectionID = 1000
 			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal().WithCollectionID(tt.collectionID).WithIsForce(true))
 			assert.Equal(t, tt.wantErr, err != nil)
@@ -703,7 +724,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 				meta:                         tt.fields.meta,
 				handler:                      newMockHandlerWithMeta(tt.fields.meta),
 				allocator:                    tt.fields.allocator,
-				signals:                      tt.fields.signals,
+				signals:                      make(chan *compactionSignal, 100),
+				manualSignals:                make(chan *compactionSignal, 100),
 				compactionHandler:            tt.fields.compactionHandler,
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
@@ -711,16 +733,16 @@ func Test_compactionTrigger_force(t *testing.T) {
 				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
+			tr.closeWaiter.Add(1)
+			go func() {
+				defer tr.closeWaiter.Done()
+				tr.work()
+			}()
+			defer tr.stop()
 
 			{
 				// test getCompactTime fail for handle global signal
-				signal := &compactionSignal{
-					id:           0,
-					isForce:      true,
-					isGlobal:     true,
-					collectionID: 1111,
-					waitResult:   true,
-				}
+				signal := NewCompactionSignal().WithCollectionID(1111).WithIsForce(true)
 				tr.TriggerCompaction(context.TODO(), signal)
 
 				spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
@@ -736,13 +758,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 
 			{
 				// test getCompactTime fail for handle signal
-				signal := &compactionSignal{
-					id:           0,
-					isForce:      true,
-					collectionID: 1111,
-					segmentIDs:   []int64{3},
-					waitResult:   true,
-				}
+				signal := NewCompactionSignal().WithCollectionID(1111).WithIsForce(true).WithSegmentIDs(3)
 				tr.TriggerCompaction(context.TODO(), signal)
 
 				spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
@@ -957,7 +973,8 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 				meta:                         tt.fields.meta,
 				handler:                      newMockHandlerWithMeta(tt.fields.meta),
 				allocator:                    tt.fields.allocator,
-				signals:                      tt.fields.signals,
+				signals:                      make(chan *compactionSignal, 100),
+				manualSignals:                make(chan *compactionSignal, 100),
 				compactionHandler:            tt.fields.compactionHandler,
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
@@ -965,6 +982,12 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 				closeCh:                      lifetime.NewSafeChan(),
 				testingOnly:                  true,
 			}
+			tr.closeWaiter.Add(1)
+			go func() {
+				defer tr.closeWaiter.Done()
+				tr.work()
+			}()
+			defer tr.stop()
 			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal().WithCollectionID(tt.args.collectionID).WithIsForce(true))
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
@@ -1111,7 +1134,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 				meta:                         tt.fields.meta,
 				handler:                      newMockHandlerWithMeta(tt.fields.meta),
 				allocator:                    tt.fields.allocator,
-				signals:                      tt.fields.signals,
+				signals:                      make(chan *compactionSignal, 100),
 				compactionHandler:            tt.fields.compactionHandler,
 				globalTrigger:                tt.fields.globalTrigger,
 				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
@@ -1305,7 +1328,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 				meta:              tt.fields.meta,
 				handler:           newMockHandlerWithMeta(tt.fields.meta),
 				allocator:         tt.fields.allocator,
-				signals:           tt.fields.signals,
+				signals:           make(chan *compactionSignal, 100),
 				compactionHandler: tt.fields.compactionHandler,
 				globalTrigger:     tt.fields.globalTrigger,
 				closeCh:           lifetime.NewSafeChan(),
@@ -1446,7 +1469,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 				meta:                         tt.fields.meta,
 				handler:                      newMockHandlerWithMeta(tt.fields.meta),
 				allocator:                    tt.fields.allocator,
-				signals:                      tt.fields.signals,
+				signals:                      make(chan *compactionSignal, 100),
 				compactionHandler:            tt.fields.compactionHandler,
 				globalTrigger:                tt.fields.globalTrigger,
 				indexEngineVersionManager:    newMockVersionManager(),
@@ -1588,7 +1611,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 				meta:                         tt.fields.meta,
 				handler:                      newMockHandlerWithMeta(tt.fields.meta),
 				allocator:                    tt.fields.allocator,
-				signals:                      tt.fields.signals,
+				signals:                      make(chan *compactionSignal, 100),
 				compactionHandler:            tt.fields.compactionHandler,
 				globalTrigger:                tt.fields.globalTrigger,
 				indexEngineVersionManager:    newMockVersionManager(),
@@ -1774,7 +1797,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				meta:                      tt.fields.meta,
 				handler:                   newMockHandlerWithMeta(tt.fields.meta),
 				allocator:                 tt.fields.allocator,
-				signals:                   tt.fields.signals,
+				signals:                   make(chan *compactionSignal, 100),
 				compactionHandler:         tt.fields.compactionHandler,
 				globalTrigger:             tt.fields.globalTrigger,
 				indexEngineVersionManager: newMockVersionManager(),
@@ -2077,7 +2100,7 @@ func Test_compactionTrigger_getCompactTime(t *testing.T) {
 	assert.NotNil(t, ct)
 }
 
-func Test_triggerSingleCompaction(t *testing.T) {
+func Test_TirggerCompaction_WaitResult(t *testing.T) {
 	originValue := Params.DataCoordCfg.EnableAutoCompaction.GetValue()
 	Params.Save(Params.DataCoordCfg.EnableAutoCompaction.Key, "true")
 	defer func() {
@@ -2110,7 +2133,7 @@ func Test_triggerSingleCompaction(t *testing.T) {
 			WithSegmentIDs(2).
 			WithChannel("b").
 			WithWaitResult(false))
-		assert.NoError(t, err)
+		assert.Error(t, err)
 	}
 	var i satomic.Value
 	i.Store(0)
@@ -2129,15 +2152,6 @@ func Test_triggerSingleCompaction(t *testing.T) {
 	check()
 	assert.Equal(t, 1, i.Load().(int))
 
-	{
-		_, err := got.TriggerCompaction(context.TODO(), NewCompactionSignal().
-			WithCollectionID(3).
-			WithPartitionID(3).
-			WithSegmentIDs(3).
-			WithChannel("c").
-			WithWaitResult(true))
-		assert.NoError(t, err)
-	}
 	var j satomic.Value
 	j.Store(0)
 	go func() {
@@ -2153,11 +2167,23 @@ func Test_triggerSingleCompaction(t *testing.T) {
 				} else if x == 1 {
 					assert.EqualValues(t, 4, signal.collectionID)
 				}
+				signal.Notify(nil)
 			case <-timeoutCtx.Done():
 				return
 			}
 		}
 	}()
+
+	{
+		_, err := got.TriggerCompaction(context.TODO(), NewCompactionSignal().
+			WithCollectionID(3).
+			WithPartitionID(3).
+			WithSegmentIDs(3).
+			WithChannel("c").
+			WithWaitResult(false))
+		assert.NoError(t, err)
+	}
+
 	{
 		_, err := got.TriggerCompaction(context.TODO(), NewCompactionSignal().
 			WithCollectionID(4).
