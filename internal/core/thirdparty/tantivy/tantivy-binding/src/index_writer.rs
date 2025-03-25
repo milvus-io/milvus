@@ -16,7 +16,7 @@ use crate::error::{Result, TantivyBindingError};
 use crate::index_reader::IndexReaderWrapper;
 use crate::log::init_log;
 
-const BATCH_SIZE: usize = 4_000;
+const BATCH_SIZE: usize = 4096;
 
 pub(crate) struct IndexWriterWrapper {
     pub(crate) field: Field,
