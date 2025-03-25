@@ -56,7 +56,8 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
-        self.collection_wrap.insert(data=list(self.insert_data.values()), check_task=CheckTasks.check_insert_result)
+        for d in cf.iter_insert_list_data(list(self.insert_data.values()), batch=3000, total_len=self.nb):
+            self.collection_wrap.insert(data=d, check_task=CheckTasks.check_insert_result)
 
         # flush collection, segment sealed
         self.collection_wrap.flush()
@@ -270,7 +271,8 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
-        self.collection_wrap.insert(data=list(self.insert_data.values()), check_task=CheckTasks.check_insert_result)
+        for d in cf.iter_insert_list_data(list(self.insert_data.values()), batch=3000, total_len=self.nb):
+            self.collection_wrap.insert(data=d, check_task=CheckTasks.check_insert_result)
 
         # flush collection, segment sealed
         self.collection_wrap.flush()
@@ -572,7 +574,8 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
-        self.collection_wrap.insert(data=list(self.insert_data.values()), check_task=CheckTasks.check_insert_result)
+        for d in cf.iter_insert_list_data(list(self.insert_data.values()), batch=3000, total_len=self.nb):
+            self.collection_wrap.insert(data=d, check_task=CheckTasks.check_insert_result)
 
         # flush collection, segment sealed
         self.collection_wrap.flush()
@@ -839,7 +842,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
-        self.collection_wrap.insert(data=list(self.insert_data.values()), check_task=CheckTasks.check_insert_result)
+        for d in cf.iter_insert_list_data(list(self.insert_data.values()), batch=3000, total_len=self.nb):
+            self.collection_wrap.insert(data=d, check_task=CheckTasks.check_insert_result)
 
         # flush collection, segment sealed
         self.collection_wrap.flush()
