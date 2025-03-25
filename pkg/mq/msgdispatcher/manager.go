@@ -40,6 +40,8 @@ import (
 type DispatcherManager interface {
 	Add(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error)
 	Remove(vchannel string)
+	NumTarget() int
+	NumConsumer() int
 	Run()
 	Close()
 }
