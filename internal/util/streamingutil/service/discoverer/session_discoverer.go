@@ -40,14 +40,6 @@ type sessionDiscoverer struct {
 	peerSessions map[string]*sessionutil.SessionRaw // map[Key]SessionRaw, map the key path of session to session.
 }
 
-// NewVersionedState return the empty version state.
-func (sw *sessionDiscoverer) NewVersionedState() VersionedState {
-	return VersionedState{
-		Version: typeutil.VersionInt64(-1),
-		State:   resolver.State{},
-	}
-}
-
 // Discover watches the service discovery on these goroutine.
 // It may be broken down if compaction happens on etcd server.
 func (sw *sessionDiscoverer) Discover(ctx context.Context, cb func(VersionedState) error) error {

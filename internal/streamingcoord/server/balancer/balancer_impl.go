@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -180,7 +181,7 @@ func (b *balancerImpl) blockUntilAllNodeIsGreaterThan260(ctx context.Context) er
 		logger := b.logger.With(zap.String("role", role))
 		logger.Info("start to wait that the nodes is greater than 2.6.0")
 		// Check if there's any proxy or data node with version < 2.6.0.
-		proxyResolver := resolver.NewSessionBuilder(resource.Resource().ETCD(), role, "<2.6.0")
+		proxyResolver := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), "<2.6.0")
 		r := proxyResolver.Resolver()
 		err := r.Watch(ctx, func(vs resolver.VersionedState) error {
 			if len(vs.Sessions()) == 0 {
