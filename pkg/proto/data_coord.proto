@@ -29,10 +29,6 @@ enum SegmentLevel {
 }
 
 service DataCoord {
-  rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
-  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
-  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
-
   rpc Flush(FlushRequest) returns (FlushResponse) {}
 
   // AllocSegment alloc a new growing segment, add it into segment meta.

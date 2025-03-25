@@ -7,6 +7,7 @@ const (
 )
 
 var Roles = []string{
+	typeutil.MixCoordRole,
 	typeutil.RootCoordRole,
 	typeutil.IndexCoordRole,
 	typeutil.IndexNodeRole,

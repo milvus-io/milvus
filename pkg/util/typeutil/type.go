@@ -31,7 +31,7 @@ const (
 	// StandaloneRole is a constant represent Standalone
 	StandaloneRole = "standalone"
 	// RootCoordRole is a constant represent RootCoord
-	RootCoordRole = "rootcoord"
+	RootCoordRole = "mixcoord"
 	// ProxyRole is a constant represent Proxy
 	ProxyRole = "proxy"
 	// QueryCoordRole is a constant represent QueryCoord
@@ -52,6 +52,8 @@ const (
 	StreamingCoordRole = "streamingcoord"
 	// StreamingNode is a constant represent StreamingNode
 	StreamingNodeRole = "streamingnode"
+	// MixCoordRole is a constant represent MixCoord
+	MixCoordRole = "mixcoord"
 )
 
 var (
@@ -65,6 +67,7 @@ var (
 		DataCoordRole,
 		DataNodeRole,
 		StreamingNodeRole,
+		MixCoordRole,
 	)
 	serverTypeList = serverTypeSet.Collect()
 )

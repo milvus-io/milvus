@@ -14,16 +14,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 // ErrNotFound is returned when the vchannel is not found.
 var ErrNotFound = errors.New("not found")
 
 // NewVChannelTempStorage creates a new VChannelTempStorage.
-func NewVChannelTempStorage(rc *syncutil.Future[types.RootCoordClient]) *VChannelTempStorage {
+func NewVChannelTempStorage(mix types.MixCoordClient) *VChannelTempStorage {
 	return &VChannelTempStorage{
-		rc:        rc,
+		mix:       mix,
 		vchannels: make(map[int64]map[string]string),
 	}
 }
@@ -32,7 +31,7 @@ func NewVChannelTempStorage(rc *syncutil.Future[types.RootCoordClient]) *VChanne
 // It's used to make compatibility between old version and new version message.
 // TODO: removed in 3.0.
 type VChannelTempStorage struct {
-	rc *syncutil.Future[types.RootCoordClient]
+	mix types.MixCoordClient
 
 	mu        sync.Mutex
 	vchannels map[int64]map[string]string
@@ -64,13 +63,8 @@ func (ts *VChannelTempStorage) updateVChannelByPChannelOfCollectionIfNotExist(ct
 	}
 	ts.mu.Unlock()
 
-	rc, err := ts.rc.GetWithContext(ctx)
-	if err != nil {
-		return err
-	}
-
 	return retry.Do(ctx, func() error {
-		resp, err := rc.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+		resp, err := ts.mix.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),

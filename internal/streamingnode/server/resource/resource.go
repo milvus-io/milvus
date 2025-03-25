@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -41,19 +40,12 @@ func OptChunkManager(chunkManager storage.ChunkManager) optResourceInit {
 }
 
 // OptRootCoordClient provides the root coordinator client to the resource.
-func OptRootCoordClient(rootCoordClient *syncutil.Future[types.RootCoordClient]) optResourceInit {
+func OptMixCoordClient(mixCoordClient types.MixCoordClient) optResourceInit {
 	return func(r *resourceImpl) {
-		r.rootCoordClient = rootCoordClient
-		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
-		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
-		r.vchannelTempStorage = vchantempstore.NewVChannelTempStorage(r.rootCoordClient)
-	}
-}
-
-// OptDataCoordClient provides the data coordinator client to the resource.
-func OptDataCoordClient(dataCoordClient *syncutil.Future[types.DataCoordClient]) optResourceInit {
-	return func(r *resourceImpl) {
-		r.dataCoordClient = dataCoordClient
+		r.mixCoordClient = mixCoordClient
+		r.timestampAllocator = idalloc.NewTSOAllocator(r.mixCoordClient)
+		r.idAllocator = idalloc.NewIDAllocator(r.mixCoordClient)
+		r.vchannelTempStorage = vchantempstore.NewVChannelTempStorage(r.mixCoordClient)
 	}
 }
 
@@ -81,8 +73,7 @@ func Done() {
 	r.wbMgr.Start()
 	assertNotNil(r.ChunkManager())
 	assertNotNil(r.TSOAllocator())
-	assertNotNil(r.RootCoordClient())
-	assertNotNil(r.DataCoordClient())
+	assertNotNil(r.MixCoordClient())
 	assertNotNil(r.StreamingNodeCatalog())
 	assertNotNil(r.SegmentAssignStatsManager())
 	assertNotNil(r.TimeTickInspector())
@@ -109,8 +100,7 @@ type resourceImpl struct {
 	idAllocator               idalloc.Allocator
 	etcdClient                *clientv3.Client
 	chunkManager              storage.ChunkManager
-	rootCoordClient           *syncutil.Future[types.RootCoordClient]
-	dataCoordClient           *syncutil.Future[types.DataCoordClient]
+	mixCoordClient            types.MixCoordClient
 	streamingNodeCatalog      metastore.StreamingNodeCataLog
 	segmentAssignStatsManager *stats.StatsManager
 	timeTickInspector         tinspector.TimeTickSyncInspector
@@ -152,13 +142,8 @@ func (r *resourceImpl) WriteBufferManager() writebuffer.BufferManager {
 }
 
 // RootCoordClient returns the root coordinator client.
-func (r *resourceImpl) RootCoordClient() *syncutil.Future[types.RootCoordClient] {
-	return r.rootCoordClient
-}
-
-// DataCoordClient returns the data coordinator client.
-func (r *resourceImpl) DataCoordClient() *syncutil.Future[types.DataCoordClient] {
-	return r.dataCoordClient
+func (r *resourceImpl) MixCoordClient() types.MixCoordClient {
+	return r.mixCoordClient
 }
 
 // StreamingNodeCataLog returns the streaming node catalog.

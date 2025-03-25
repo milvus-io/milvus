@@ -92,7 +92,7 @@ func RegisterMgrRoute(proxy *Proxy) {
 func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 	pauseSeconds := req.URL.Query().Get("pause_seconds")
 
-	resp, err := node.dataCoord.GcControl(req.Context(), &datapb.GcControlRequest{
+	resp, err := node.mixCoord.GcControl(req.Context(), &datapb.GcControlRequest{
 		Base:    commonpbutil.NewMsgBase(),
 		Command: datapb.GcCommand_Pause,
 		Params: []*commonpb.KeyValuePair{
@@ -114,7 +114,7 @@ func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 }
 
 func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
-	resp, err := node.dataCoord.GcControl(req.Context(), &datapb.GcControlRequest{
+	resp, err := node.mixCoord.GcControl(req.Context(), &datapb.GcControlRequest{
 		Base:    commonpbutil.NewMsgBase(),
 		Command: datapb.GcCommand_Resume,
 	})
@@ -133,7 +133,7 @@ func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
 }
 
 func (node *Proxy) ListQueryNode(w http.ResponseWriter, req *http.Request) {
-	resp, err := node.queryCoord.ListQueryNode(req.Context(), &querypb.ListQueryNodeRequest{
+	resp, err := node.mixCoord.ListQueryNode(req.Context(), &querypb.ListQueryNodeRequest{
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
@@ -175,7 +175,7 @@ func (node *Proxy) GetQueryNodeDistribution(w http.ResponseWriter, req *http.Req
 		return
 	}
 
-	resp, err := node.queryCoord.GetQueryNodeDistribution(req.Context(), &querypb.GetQueryNodeDistributionRequest{
+	resp, err := node.mixCoord.GetQueryNodeDistribution(req.Context(), &querypb.GetQueryNodeDistributionRequest{
 		Base:   commonpbutil.NewMsgBase(),
 		NodeID: nodeID,
 	})
@@ -216,7 +216,7 @@ func (node *Proxy) GetQueryNodeDistribution(w http.ResponseWriter, req *http.Req
 }
 
 func (node *Proxy) SuspendQueryCoordBalance(w http.ResponseWriter, req *http.Request) {
-	resp, err := node.queryCoord.SuspendBalance(req.Context(), &querypb.SuspendBalanceRequest{
+	resp, err := node.mixCoord.SuspendBalance(req.Context(), &querypb.SuspendBalanceRequest{
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
@@ -235,7 +235,7 @@ func (node *Proxy) SuspendQueryCoordBalance(w http.ResponseWriter, req *http.Req
 }
 
 func (node *Proxy) ResumeQueryCoordBalance(w http.ResponseWriter, req *http.Request) {
-	resp, err := node.queryCoord.ResumeBalance(req.Context(), &querypb.ResumeBalanceRequest{
+	resp, err := node.mixCoord.ResumeBalance(req.Context(), &querypb.ResumeBalanceRequest{
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
@@ -254,7 +254,7 @@ func (node *Proxy) ResumeQueryCoordBalance(w http.ResponseWriter, req *http.Requ
 }
 
 func (node *Proxy) CheckQueryCoordBalanceStatus(w http.ResponseWriter, req *http.Request) {
-	resp, err := node.queryCoord.CheckBalanceStatus(req.Context(), &querypb.CheckBalanceStatusRequest{
+	resp, err := node.mixCoord.CheckBalanceStatus(req.Context(), &querypb.CheckBalanceStatusRequest{
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
@@ -290,7 +290,7 @@ func (node *Proxy) SuspendQueryNode(w http.ResponseWriter, req *http.Request) {
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to suspend node, %s"}`, err.Error())))
 		return
 	}
-	resp, err := node.queryCoord.SuspendNode(req.Context(), &querypb.SuspendNodeRequest{
+	resp, err := node.mixCoord.SuspendNode(req.Context(), &querypb.SuspendNodeRequest{
 		Base:   commonpbutil.NewMsgBase(),
 		NodeID: nodeID,
 	})
@@ -323,7 +323,7 @@ func (node *Proxy) ResumeQueryNode(w http.ResponseWriter, req *http.Request) {
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to resume node, %s"}`, err.Error())))
 		return
 	}
-	resp, err := node.queryCoord.ResumeNode(req.Context(), &querypb.ResumeNodeRequest{
+	resp, err := node.mixCoord.ResumeNode(req.Context(), &querypb.ResumeNodeRequest{
 		Base:   commonpbutil.NewMsgBase(),
 		NodeID: nodeID,
 	})
@@ -401,7 +401,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 		request.CopyMode = value
 	}
 
-	resp, err := node.queryCoord.TransferSegment(req.Context(), request)
+	resp, err := node.mixCoord.TransferSegment(req.Context(), request)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
@@ -470,7 +470,7 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 		request.CopyMode = value
 	}
 
-	resp, err := node.queryCoord.TransferChannel(req.Context(), request)
+	resp, err := node.mixCoord.TransferChannel(req.Context(), request)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer channel, %s"}`, err.Error())))
@@ -507,7 +507,7 @@ func (node *Proxy) CheckQueryNodeDistribution(w http.ResponseWriter, req *http.R
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())))
 		return
 	}
-	resp, err := node.queryCoord.CheckQueryNodeDistribution(req.Context(), &querypb.CheckQueryNodeDistributionRequest{
+	resp, err := node.mixCoord.CheckQueryNodeDistribution(req.Context(), &querypb.CheckQueryNodeDistributionRequest{
 		Base:         commonpbutil.NewMsgBase(),
 		SourceNodeID: source,
 		TargetNodeID: target,

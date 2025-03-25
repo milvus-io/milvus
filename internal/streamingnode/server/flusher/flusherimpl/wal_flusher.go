@@ -125,11 +125,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	}
 	impl.logger.Info("fetch recovery info done", zap.Int("recoveryInfoNum", len(recoverInfos)))
 
-	dc, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
-	if err != nil {
-		impl.logger.Warn("flusher recovery is canceled before data coord client ready", zap.Error(err))
-		return nil, err
-	}
+	dc := resource.Resource().MixCoordClient()
 	impl.logger.Info("data coord client ready")
 
 	// build all components.

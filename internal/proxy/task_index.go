@@ -587,11 +587,10 @@ func (cit *createIndexTask) PostExecute(ctx context.Context) error {
 type alterIndexTask struct {
 	baseTask
 	Condition
-	req        *milvuspb.AlterIndexRequest
-	ctx        context.Context
-	datacoord  types.DataCoordClient
-	querycoord types.QueryCoordClient
-	result     *commonpb.Status
+	req      *milvuspb.AlterIndexRequest
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *commonpb.Status
 
 	replicateMsgStream msgstream.MsgStream
 
@@ -680,7 +679,7 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 	// 	return err
 	// }
 
-	loaded, err := isCollectionLoaded(ctx, t.querycoord, collection)
+	loaded, err := isCollectionLoaded(ctx, t.mixCoord, collection)
 	if err != nil {
 		return err
 	}
@@ -708,7 +707,7 @@ func (t *alterIndexTask) Execute(ctx context.Context) error {
 		Params:       t.req.GetExtraParams(),
 		DeleteKeys:   t.req.GetDeleteKeys(),
 	}
-	t.result, err = t.datacoord.AlterIndex(ctx, req)
+	t.result, err = t.mixCoord.AlterIndex(ctx, req)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
@@ -724,9 +723,9 @@ type describeIndexTask struct {
 	baseTask
 	Condition
 	*milvuspb.DescribeIndexRequest
-	ctx       context.Context
-	datacoord types.DataCoordClient
-	result    *milvuspb.DescribeIndexResponse
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.DescribeIndexResponse
 
 	collectionID UniqueID
 }
@@ -790,7 +789,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("failed to get collection schema: %s", err)
 	}
 
-	resp, err := dit.datacoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: dit.collectionID, IndexName: dit.IndexName, Timestamp: dit.Timestamp})
+	resp, err := dit.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: dit.collectionID, IndexName: dit.IndexName, Timestamp: dit.Timestamp})
 	if err != nil {
 		return err
 	}
@@ -861,9 +860,9 @@ type getIndexStatisticsTask struct {
 	baseTask
 	Condition
 	*milvuspb.GetIndexStatisticsRequest
-	ctx       context.Context
-	datacoord types.DataCoordClient
-	result    *milvuspb.GetIndexStatisticsResponse
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.GetIndexStatisticsResponse
 
 	nodeID       int64
 	collectionID UniqueID
@@ -929,7 +928,7 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 	}
 	schemaHelper := schema.schemaHelper
 
-	resp, err := dit.datacoord.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{
+	resp, err := dit.mixCoord.GetIndexStatistics(ctx, &indexpb.GetIndexStatisticsRequest{
 		CollectionID: dit.collectionID, IndexName: dit.IndexName,
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
@@ -971,9 +970,8 @@ type dropIndexTask struct {
 	Condition
 	ctx context.Context
 	*milvuspb.DropIndexRequest
-	dataCoord  types.DataCoordClient
-	queryCoord types.QueryCoordClient
-	result     *commonpb.Status
+	mixCoord types.MixCoordClient
+	result   *commonpb.Status
 
 	collectionID UniqueID
 
@@ -1040,7 +1038,7 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	}
 	dit.collectionID = collID
 
-	loaded, err := isCollectionLoaded(ctx, dit.queryCoord, collID)
+	loaded, err := isCollectionLoaded(ctx, dit.mixCoord, collID)
 	if err != nil {
 		return err
 	}
@@ -1061,7 +1059,7 @@ func (dit *dropIndexTask) Execute(ctx context.Context) error {
 	)
 
 	var err error
-	dit.result, err = dit.dataCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
+	dit.result, err = dit.mixCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: dit.collectionID,
 		PartitionIDs: nil,
 		IndexName:    dit.IndexName,
@@ -1084,10 +1082,9 @@ type getIndexBuildProgressTask struct {
 	baseTask
 	Condition
 	*milvuspb.GetIndexBuildProgressRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	dataCoord types.DataCoordClient
-	result    *milvuspb.GetIndexBuildProgressResponse
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.GetIndexBuildProgressResponse
 
 	collectionID UniqueID
 }
@@ -1147,7 +1144,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 	}
 	gibpt.collectionID = collectionID
 
-	resp, err := gibpt.dataCoord.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{
+	resp, err := gibpt.mixCoord.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{
 		CollectionID: collectionID,
 		IndexName:    gibpt.IndexName,
 	})
@@ -1173,10 +1170,9 @@ type getIndexStateTask struct {
 	baseTask
 	Condition
 	*milvuspb.GetIndexStateRequest
-	ctx       context.Context
-	dataCoord types.DataCoordClient
-	rootCoord types.RootCoordClient
-	result    *milvuspb.GetIndexStateResponse
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.GetIndexStateResponse
 
 	collectionID UniqueID
 }
@@ -1234,7 +1230,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	state, err := gist.dataCoord.GetIndexState(ctx, &indexpb.GetIndexStateRequest{
+	state, err := gist.mixCoord.GetIndexState(ctx, &indexpb.GetIndexStateRequest{
 		CollectionID: collectionID,
 		IndexName:    gist.IndexName,
 	})

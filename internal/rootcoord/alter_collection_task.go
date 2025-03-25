@@ -169,7 +169,7 @@ func executeAlterCollectionTaskSteps(ctx context.Context,
 			zap.Strings("newResourceGroups", newResourceGroups),
 		)
 		redoTask.AddAsyncStep(NewSimpleStep("", func(ctx context.Context) ([]nestedStep, error) {
-			resp, err := core.queryCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
+			resp, err := core.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
 				CollectionIDs:  []int64{oldColl.CollectionID},
 				ReplicaNumber:  int32(newReplicaNumber),
 				ResourceGroups: newResourceGroups,

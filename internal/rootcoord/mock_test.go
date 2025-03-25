@@ -633,7 +633,7 @@ func withInvalidQueryCoord() Opt {
 		nil, errors.New("error mock ReleaseCollection"),
 	)
 
-	qc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(
+	qc.EXPECT().GetLoadSegmentInfo(mock.Anything, mock.Anything).Return(
 		nil, errors.New("error mock GetSegmentInfo"),
 	)
 
@@ -653,7 +653,7 @@ func withFailedQueryCoord() Opt {
 		merr.Status(err), nil,
 	)
 
-	qc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(
+	qc.EXPECT().GetLoadSegmentInfo(mock.Anything, mock.Anything).Return(
 		&querypb.GetSegmentInfoResponse{
 			Status: merr.Status(err),
 		}, nil,
@@ -678,7 +678,7 @@ func withValidQueryCoord() Opt {
 		merr.Success(), nil,
 	)
 
-	qc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(
+	qc.EXPECT().GetLoadSegmentInfo(mock.Anything, mock.Anything).Return(
 		&querypb.GetSegmentInfoResponse{
 			Status: merr.Success(),
 		}, nil,

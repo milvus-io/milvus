@@ -41,20 +41,20 @@ var _ Allocator = (*rootCoordAllocator)(nil)
 
 // rootCoordAllocator use RootCoord as allocator
 type rootCoordAllocator struct {
-	types.RootCoordClient
+	mixCoord types.MixCoord
 }
 
 // NewRootCoordAllocator gets an allocator from RootCoord
-func NewRootCoordAllocator(rootCoordClient types.RootCoordClient) Allocator {
+func NewRootCoordAllocator(mixCoord types.MixCoord) Allocator {
 	return &rootCoordAllocator{
-		RootCoordClient: rootCoordClient,
+		mixCoord: mixCoord,
 	}
 }
 
 // AllocTimestamp allocates a Timestamp
 // invoking RootCoord `AllocTimestamp`
 func (alloc *rootCoordAllocator) AllocTimestamp(ctx context.Context) (typeutil.Timestamp, error) {
-	resp, err := alloc.RootCoordClient.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
+	resp, err := alloc.mixCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -69,7 +69,7 @@ func (alloc *rootCoordAllocator) AllocTimestamp(ctx context.Context) (typeutil.T
 
 // AllocID allocates an `UniqueID` from RootCoord, invoking AllocID grpc
 func (alloc *rootCoordAllocator) AllocID(ctx context.Context) (typeutil.UniqueID, error) {
-	resp, err := alloc.RootCoordClient.AllocID(ctx, &rootcoordpb.AllocIDRequest{
+	resp, err := alloc.mixCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -91,7 +91,7 @@ func (alloc *rootCoordAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.Un
 	if n <= 0 {
 		n = 1
 	}
-	resp, err := alloc.RootCoordClient.AllocID(ctx, &rootcoordpb.AllocIDRequest{
+	resp, err := alloc.mixCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),

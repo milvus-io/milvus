@@ -21,10 +21,7 @@ import (
 // getVchannels gets the vchannels of current pchannel.
 func (impl *WALFlusherImpl) getVchannels(ctx context.Context, pchannel string) ([]string, error) {
 	var vchannels []string
-	rc, err := resource.Resource().RootCoordClient().GetWithContext(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "when wait for rootcoord client ready")
-	}
+	rc := resource.Resource().MixCoordClient()
 	retryCnt := -1
 	if err := retry.Do(ctx, func() error {
 		retryCnt++
@@ -81,12 +78,8 @@ func (impl *WALFlusherImpl) getRecoveryInfo(ctx context.Context, vchannel string
 	retryCnt := -1
 	err := retry.Do(ctx, func() error {
 		retryCnt++
-		dc, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
-		if err != nil {
-			// Should never failed at here.
-			return err
-		}
-		resp, err = dc.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: vchannel})
+		dc := resource.Resource().MixCoordClient()
+		resp, err := dc.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: vchannel})
 		err = merr.CheckRPCCall(resp, err)
 		if errors.Is(err, merr.ErrChannelNotAvailable) {
 			impl.logger.Warn("channel not available because of collection dropped", zap.String("vchannel", vchannel), zap.Int("retryCnt", retryCnt))

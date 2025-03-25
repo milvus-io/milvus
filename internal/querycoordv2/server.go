@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -52,20 +51,16 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -89,8 +84,7 @@ type Server struct {
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	// Coordinators
-	dataCoord types.DataCoordClient
-	rootCoord types.RootCoordClient
+	mixCoord types.MixCoord
 
 	// Meta
 	store     metastore.QueryCoordCatalog
@@ -157,38 +151,46 @@ func NewQueryCoord(ctx context.Context) (*Server, error) {
 }
 
 func (s *Server) Register() error {
-	log := log.Ctx(s.ctx)
-	s.session.Register()
-	afterRegister := func() {
-		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.QueryCoordRole).Inc()
-		s.session.LivenessCheck(s.ctx, func() {
-			log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.GetServerID()))
-			os.Exit(1)
-		})
-	}
-	if s.enableActiveStandBy {
-		go func() {
-			if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
-				log.Error("failed to activate standby server", zap.Error(err))
-				panic(err)
-			}
-			afterRegister()
-		}()
-	} else {
-		afterRegister()
-	}
+	// log := log.Ctx(s.ctx)
+	// s.session.Register()
+	// afterRegister := func() {
+	// 	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.QueryCoordRole).Inc()
+	// 	s.session.LivenessCheck(s.ctx, func() {
+	// 		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.GetServerID()))
+	// 		os.Exit(1)
+	// 	})
+	// }
+	// if s.enableActiveStandBy {
+	// 	go func() {
+	// 		if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
+	// 			log.Error("failed to activate standby server", zap.Error(err))
+	// 			panic(err)
+	// 		}
+	// 		afterRegister()
+	// 	}()
+	// } else {
+	// 	afterRegister()
+	// }
 	return nil
 }
 
 func (s *Server) initSession() error {
 	// Init QueryCoord session
-	s.session = sessionutil.NewSession(s.ctx)
+	// s.session = sessionutil.NewSession(s.ctx)
+	// if s.session == nil {
+	// 	return fmt.Errorf("failed to create session")
+	// }
+	// s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
+	// s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
+	// s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
+	return nil
+}
+
+func (s *Server) SetSession(session sessionutil.SessionInterface) error {
+	s.session = session
 	if s.session == nil {
-		return fmt.Errorf("failed to create session")
+		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
-	s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
-	s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
-	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	return nil
 }
 
@@ -284,20 +286,20 @@ func (s *Server) Init() error {
 func (s *Server) initQueryCoord() error {
 	log := log.Ctx(s.ctx)
 	// wait for master init or healthy
-	log.Info("QueryCoord try to wait for RootCoord ready")
-	if err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200); err != nil {
-		log.Error("QueryCoord wait for RootCoord ready failed", zap.Error(err))
-		return errors.Wrap(err, "RootCoord not ready")
-	}
-	log.Info("QueryCoord report RootCoord ready")
+	// log.Info("QueryCoord try to wait for RootCoord ready")
+	// if err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200); err != nil {
+	// 	log.Error("QueryCoord wait for RootCoord ready failed", zap.Error(err))
+	// 	return errors.Wrap(err, "RootCoord not ready")
+	// }
+	// log.Info("QueryCoord report RootCoord ready")
 
-	// wait for master init or healthy
-	log.Info("QueryCoord try to wait for DataCoord ready")
-	if err := componentutil.WaitForComponentHealthy(s.ctx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200); err != nil {
-		log.Error("QueryCoord wait for DataCoord ready failed", zap.Error(err))
-		return errors.Wrap(err, "DataCoord not ready")
-	}
-	log.Info("QueryCoord report DataCoord ready")
+	// // wait for master init or healthy
+	// log.Info("QueryCoord try to wait for DataCoord ready")
+	// if err := componentutil.WaitForComponentHealthy(s.ctx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200); err != nil {
+	// 	log.Error("QueryCoord wait for DataCoord ready failed", zap.Error(err))
+	// 	return errors.Wrap(err, "DataCoord not ready")
+	// }
+	// log.Info("QueryCoord report DataCoord ready")
 
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	log.Info("start init querycoord", zap.Any("State", commonpb.StateCode_Initializing))
@@ -440,8 +442,7 @@ func (s *Server) initMeta() error {
 	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr)
 
 	s.broker = meta.NewCoordinatorBroker(
-		s.dataCoord,
-		s.rootCoord,
+		s.mixCoord,
 	)
 
 	log.Info("recover meta...")
@@ -571,7 +572,7 @@ func (s *Server) startQueryCoord() error {
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
-	sessionutil.SaveServerInfo(typeutil.QueryCoordRole, s.session.GetServerID())
+	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
 	return nil
 }
 
@@ -678,37 +679,37 @@ func (s *Server) State() commonpb.StateCode {
 	return commonpb.StateCode(s.status.Load())
 }
 
-func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	log.Ctx(ctx).Debug("QueryCoord current state", zap.String("StateCode", s.State().String()))
-	nodeID := common.NotRegisteredID
-	if s.session != nil && s.session.Registered() {
-		nodeID = s.session.GetServerID()
-	}
-	serviceComponentInfo := &milvuspb.ComponentInfo{
-		// NodeID:    Params.QueryCoordID, // will race with QueryCoord.Register()
-		NodeID:    nodeID,
-		StateCode: s.State(),
-	}
+// func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+// 	log.Ctx(ctx).Debug("QueryCoord current state", zap.String("StateCode", s.State().String()))
+// 	nodeID := common.NotRegisteredID
+// 	if s.session != nil && s.session.Registered() {
+// 		nodeID = s.session.GetServerID()
+// 	}
+// 	serviceComponentInfo := &milvuspb.ComponentInfo{
+// 		// NodeID:    Params.QueryCoordID, // will race with QueryCoord.Register()
+// 		NodeID:    nodeID,
+// 		StateCode: s.State(),
+// 	}
 
-	return &milvuspb.ComponentStates{
-		Status: merr.Success(),
-		State:  serviceComponentInfo,
-		// SubcomponentStates: subComponentInfos,
-	}, nil
-}
+// 	return &milvuspb.ComponentStates{
+// 		Status: merr.Success(),
+// 		State:  serviceComponentInfo,
+// 		// SubcomponentStates: subComponentInfos,
+// 	}, nil
+// }
 
-func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: merr.Success(),
-	}, nil
-}
+// func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+// 	return &milvuspb.StringResponse{
+// 		Status: merr.Success(),
+// 	}, nil
+// }
 
-func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: merr.Success(),
-		Value:  Params.CommonCfg.QueryCoordTimeTick.GetValue(),
-	}, nil
-}
+// func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+// 	return &milvuspb.StringResponse{
+// 		Status: merr.Success(),
+// 		Value:  Params.CommonCfg.QueryCoordTimeTick.GetValue(),
+// 	}, nil
+// }
 
 func (s *Server) SetAddress(address string) {
 	s.address = address
@@ -723,23 +724,17 @@ func (s *Server) SetTiKVClient(client *txnkv.Client) {
 	s.tikvCli = client
 }
 
+func (s *Server) SetMixCoord(mixCoord types.MixCoord) {
+	s.mixCoord = mixCoord
+}
+
 // SetRootCoord sets root coordinator's client
 func (s *Server) SetRootCoordClient(rootCoord types.RootCoordClient) error {
-	if rootCoord == nil {
-		return errors.New("null RootCoord interface")
-	}
-
-	s.rootCoord = rootCoord
 	return nil
 }
 
 // SetDataCoord sets data coordinator's client
 func (s *Server) SetDataCoordClient(dataCoord types.DataCoordClient) error {
-	if dataCoord == nil {
-		return errors.New("null DataCoord interface")
-	}
-
-	s.dataCoord = dataCoord
 	return nil
 }
 

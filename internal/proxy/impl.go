@@ -254,7 +254,7 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		CreateDatabaseRequest: request,
-		rootCoord:             node.rootCoord,
+		mixCoord:              node.mixCoord,
 		replicateMsgStream:    node.replicateMsgStream,
 	}
 
@@ -322,7 +322,7 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
 		DropDatabaseRequest: request,
-		rootCoord:           node.rootCoord,
+		mixCoord:            node.mixCoord,
 		replicateMsgStream:  node.replicateMsgStream,
 	}
 
@@ -390,7 +390,7 @@ func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListData
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		ListDatabasesRequest: request,
-		rootCoord:            node.rootCoord,
+		mixCoord:             node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -451,7 +451,7 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		AlterDatabaseRequest: request,
-		rootCoord:            node.rootCoord,
+		mixCoord:             node.mixCoord,
 		replicateMsgStream:   node.replicateMsgStream,
 	}
 
@@ -512,7 +512,7 @@ func (node *Proxy) DescribeDatabase(ctx context.Context, request *milvuspb.Descr
 		ctx:                     ctx,
 		Condition:               NewTaskCondition(ctx),
 		DescribeDatabaseRequest: request,
-		rootCoord:               node.rootCoord,
+		mixCoord:                node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -578,7 +578,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		ctx:                     ctx,
 		Condition:               NewTaskCondition(ctx),
 		CreateCollectionRequest: request,
-		rootCoord:               node.rootCoord,
+		mixCoord:                node.mixCoord,
 	}
 
 	// avoid data race
@@ -665,7 +665,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		DropCollectionRequest: request,
-		rootCoord:             node.rootCoord,
+		mixCoord:              node.mixCoord,
 		chMgr:                 node.chMgr,
 		chTicker:              node.chTicker,
 	}
@@ -756,7 +756,7 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		HasCollectionRequest: request,
-		rootCoord:            node.rootCoord,
+		mixCoord:             node.mixCoord,
 	}
 
 	if err := node.sched.ddQueue.Enqueue(hct); err != nil {
@@ -832,8 +832,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		LoadCollectionRequest: request,
-		queryCoord:            node.queryCoord,
-		datacoord:             node.dataCoord,
+		mixCoord:              node.mixCoord,
 		replicateMsgStream:    node.replicateMsgStream,
 	}
 
@@ -908,7 +907,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
 		ReleaseCollectionRequest: request,
-		queryCoord:               node.queryCoord,
+		mixCoord:                 node.mixCoord,
 		replicateMsgStream:       node.replicateMsgStream,
 	}
 
@@ -976,7 +975,7 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
 		DescribeCollectionRequest: request,
-		rootCoord:                 node.rootCoord,
+		mixCoord:                  node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1122,8 +1121,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 		Condition: NewTaskCondition(ctx),
 		ctx:       ctx,
 		tr:        tr,
-		dc:        node.dataCoord,
-		qc:        node.queryCoord,
+		dc:        node.mixCoord,
 		lb:        node.lbPolicy,
 	}
 
@@ -1201,7 +1199,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		ctx:                            ctx,
 		Condition:                      NewTaskCondition(ctx),
 		GetCollectionStatisticsRequest: request,
-		dataCoord:                      node.dataCoord,
+		mixCoord:                       node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1274,8 +1272,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		ShowCollectionsRequest: request,
-		queryCoord:             node.queryCoord,
-		rootCoord:              node.rootCoord,
+		mixCoord:               node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1340,9 +1337,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		AlterCollectionRequest: request,
-		rootCoord:              node.rootCoord,
-		queryCoord:             node.queryCoord,
-		dataCoord:              node.dataCoord,
+		mixCoord:               node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1406,9 +1401,7 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 		ctx:                         ctx,
 		Condition:                   NewTaskCondition(ctx),
 		AlterCollectionFieldRequest: request,
-		rootCoord:                   node.rootCoord,
-		queryCoord:                  node.queryCoord,
-		dataCoord:                   node.dataCoord,
+		mixCoord:                    node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1472,8 +1465,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		CreatePartitionRequest: request,
-		rootCoord:              node.rootCoord,
-		queryCoord:             node.queryCoord,
+		mixCoord:               node.mixCoord,
 		result:                 nil,
 	}
 
@@ -1538,8 +1530,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DropPartitionRequest: request,
-		rootCoord:            node.rootCoord,
-		queryCoord:           node.queryCoord,
+		mixCoord:             node.mixCoord,
 		result:               nil,
 	}
 
@@ -1608,7 +1599,7 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
 		HasPartitionRequest: request,
-		rootCoord:           node.rootCoord,
+		mixCoord:            node.mixCoord,
 		result:              nil,
 	}
 
@@ -1682,8 +1673,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		LoadPartitionsRequest: request,
-		queryCoord:            node.queryCoord,
-		datacoord:             node.dataCoord,
+		mixCoord:              node.mixCoord,
 		replicateMsgStream:    node.replicateMsgStream,
 	}
 
@@ -1749,7 +1739,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
 		ReleasePartitionsRequest: request,
-		queryCoord:               node.queryCoord,
+		mixCoord:                 node.mixCoord,
 		replicateMsgStream:       node.replicateMsgStream,
 	}
 
@@ -1825,7 +1815,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 		ctx:                           ctx,
 		Condition:                     NewTaskCondition(ctx),
 		GetPartitionStatisticsRequest: request,
-		dataCoord:                     node.dataCoord,
+		mixCoord:                      node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1895,8 +1885,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		ctx:                   ctx,
 		Condition:             NewTaskCondition(ctx),
 		ShowPartitionsRequest: request,
-		rootCoord:             node.rootCoord,
-		queryCoord:            node.queryCoord,
+		mixCoord:              node.mixCoord,
 		result:                nil,
 	}
 
@@ -2021,11 +2010,11 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 		refreshProgress int64
 	)
 	if len(request.GetPartitionNames()) == 0 {
-		if loadProgress, refreshProgress, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
+		if loadProgress, refreshProgress, err = getCollectionProgress(ctx, node.mixCoord, request.GetBase(), collectionID); err != nil {
 			return getErrResponse(err), nil
 		}
 	} else {
-		if loadProgress, refreshProgress, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
+		if loadProgress, refreshProgress, err = getPartitionProgress(ctx, node.mixCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID, request.GetDbName()); err != nil {
 			return getErrResponse(err), nil
 		}
@@ -2110,7 +2099,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 
 	var progress int64
 	if len(request.GetPartitionNames()) == 0 {
-		if progress, _, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
+		if progress, _, err = getCollectionProgress(ctx, node.mixCoord, request.GetBase(), collectionID); err != nil {
 			if errors.Is(err, merr.ErrCollectionNotLoaded) {
 				successResponse.State = commonpb.LoadState_LoadStateNotLoad
 				return successResponse, nil
@@ -2120,7 +2109,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 			}, nil
 		}
 	} else {
-		if progress, _, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
+		if progress, _, err = getPartitionProgress(ctx, node.mixCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID, request.GetDbName()); err != nil {
 			if errors.IsAny(err,
 				merr.ErrCollectionNotLoaded,
@@ -2154,8 +2143,8 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		req:                request,
-		rootCoord:          node.rootCoord,
-		datacoord:          node.dataCoord,
+		rootCoord:          node.mixCoord,
+		datacoord:          node.mixCoord,
 		replicateMsgStream: node.replicateMsgStream,
 	}
 
@@ -2225,8 +2214,7 @@ func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexR
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		req:                request,
-		datacoord:          node.dataCoord,
-		querycoord:         node.queryCoord,
+		mixCoord:           node.mixCoord,
 		replicateMsgStream: node.replicateMsgStream,
 	}
 
@@ -2299,7 +2287,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DescribeIndexRequest: request,
-		datacoord:            node.dataCoord,
+		mixCoord:             node.mixCoord,
 	}
 
 	method := "DescribeIndex"
@@ -2376,7 +2364,7 @@ func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.Get
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
 		GetIndexStatisticsRequest: request,
-		datacoord:                 node.dataCoord,
+		mixCoord:                  node.mixCoord,
 	}
 
 	method := "GetIndexStatistics"
@@ -2444,8 +2432,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		DropIndexRequest:   request,
-		dataCoord:          node.dataCoord,
-		queryCoord:         node.queryCoord,
+		mixCoord:           node.mixCoord,
 		replicateMsgStream: node.replicateMsgStream,
 	}
 
@@ -2519,8 +2506,7 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 		ctx:                          ctx,
 		Condition:                    NewTaskCondition(ctx),
 		GetIndexBuildProgressRequest: request,
-		rootCoord:                    node.rootCoord,
-		dataCoord:                    node.dataCoord,
+		mixCoord:                     node.mixCoord,
 	}
 
 	method := "GetIndexBuildProgress"
@@ -2595,8 +2581,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		GetIndexStateRequest: request,
-		dataCoord:            node.dataCoord,
-		rootCoord:            node.rootCoord,
+		mixCoord:             node.mixCoord,
 	}
 
 	method := "GetIndexState"
@@ -3179,7 +3164,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		},
 		request:                request,
 		tr:                     timerecord.NewTimeRecorder("search"),
-		qc:                     node.queryCoord,
+		mixCoord:               node.mixCoord,
 		node:                   node,
 		lb:                     node.lbPolicy,
 		enableMaterializedView: node.enableMaterializedView,
@@ -3418,7 +3403,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		},
 		request:             newSearchReq,
 		tr:                  timerecord.NewTimeRecorder(method),
-		qc:                  node.queryCoord,
+		mixCoord:            node.mixCoord,
 		node:                node,
 		lb:                  node.lbPolicy,
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
@@ -3632,7 +3617,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		FlushRequest:       request,
-		dataCoord:          node.dataCoord,
+		mixCoord:           node.mixCoord,
 		replicateMsgStream: node.replicateMsgStream,
 	}
 
@@ -3829,7 +3814,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			ConsistencyLevel: request.ConsistencyLevel,
 		},
 		request:             request,
-		qc:                  node.queryCoord,
+		mixCoord:            node.mixCoord,
 		lb:                  node.lbPolicy,
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
@@ -3908,7 +3893,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		CreateAliasRequest: request,
-		rootCoord:          node.rootCoord,
+		mixCoord:           node.mixCoord,
 	}
 
 	method := "CreateAlias"
@@ -3975,7 +3960,7 @@ func (node *Proxy) DescribeAlias(ctx context.Context, request *milvuspb.Describe
 		Condition:            NewTaskCondition(ctx),
 		nodeID:               node.session.ServerID,
 		DescribeAliasRequest: request,
-		rootCoord:            node.rootCoord,
+		mixCoord:             node.mixCoord,
 	}
 
 	method := "DescribeAlias"
@@ -4039,7 +4024,7 @@ func (node *Proxy) ListAliases(ctx context.Context, request *milvuspb.ListAliase
 		Condition:          NewTaskCondition(ctx),
 		nodeID:             node.session.ServerID,
 		ListAliasesRequest: request,
-		rootCoord:          node.rootCoord,
+		mixCoord:           node.mixCoord,
 	}
 
 	method := "ListAliases"
@@ -4099,7 +4084,7 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 		ctx:              ctx,
 		Condition:        NewTaskCondition(ctx),
 		DropAliasRequest: request,
-		rootCoord:        node.rootCoord,
+		mixCoord:         node.mixCoord,
 	}
 
 	method := "DropAlias"
@@ -4162,7 +4147,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 		ctx:               ctx,
 		Condition:         NewTaskCondition(ctx),
 		AlterAliasRequest: request,
-		rootCoord:         node.rootCoord,
+		mixCoord:          node.mixCoord,
 	}
 
 	method := "AlterAlias"
@@ -4249,7 +4234,7 @@ func (node *Proxy) FlushAll(ctx context.Context, req *milvuspb.FlushAllRequest) 
 		return false
 	}
 
-	dbsRsp, err := node.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
+	dbsRsp, err := node.mixCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
 		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases)),
 	})
 	if hasError(dbsRsp.GetStatus(), err) {
@@ -4351,7 +4336,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		return resp, nil
 	}
 
-	getSegmentsByStatesResponse, err := node.dataCoord.GetSegmentsByStates(ctx, &datapb.GetSegmentsByStatesRequest{
+	getSegmentsByStatesResponse, err := node.mixCoord.GetSegmentsByStates(ctx, &datapb.GetSegmentsByStatesRequest{
 		CollectionID: collectionID,
 		// -1 means list all partition segemnts
 		PartitionID: -1,
@@ -4364,7 +4349,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	}
 
 	// get Segment info
-	infoResp, err := node.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+	infoResp, err := node.mixCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -4441,7 +4426,7 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}()
 
-	infoResp, err := node.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+	infoResp, err := node.mixCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		SegmentIDs:       req.GetSegmentIDs(),
 		IncludeUnHealthy: true,
 	})
@@ -4525,7 +4510,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	infoResp, err := node.queryCoord.GetLoadSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
+	infoResp, err := node.mixCoord.GetLoadSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -4796,7 +4781,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 		status = merr.Status(err)
 		return status, nil
 	}
-	infoResp, err := node.queryCoord.LoadBalance(ctx, &querypb.LoadBalanceRequest{
+	infoResp, err := node.mixCoord.LoadBalance(ctx, &querypb.LoadBalanceRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadBalanceSegments),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -4856,7 +4841,7 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 		}
 	}
 
-	r, err := node.queryCoord.GetReplicas(ctx, req)
+	r, err := node.mixCoord.GetReplicas(ctx, req)
 	if err != nil {
 		log.Warn("Failed to get replicas from Query Coordinator",
 			zap.Error(err))
@@ -4882,7 +4867,7 @@ func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetComp
 		return resp, nil
 	}
 
-	resp, err := node.dataCoord.GetCompactionState(ctx, req)
+	resp, err := node.mixCoord.GetCompactionState(ctx, req)
 	log.Debug("received GetCompactionState response",
 		zap.Any("resp", resp),
 		zap.Error(err))
@@ -4915,7 +4900,7 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 		}
 	}
 
-	resp, err := node.dataCoord.ManualCompaction(ctx, req)
+	resp, err := node.mixCoord.ManualCompaction(ctx, req)
 	log.Info("received ManualCompaction response",
 		zap.Any("resp", resp),
 		zap.Error(err))
@@ -4937,7 +4922,7 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 		return resp, nil
 	}
 
-	resp, err := node.dataCoord.GetCompactionStateWithPlans(ctx, req)
+	resp, err := node.mixCoord.GetCompactionStateWithPlans(ctx, req)
 	log.Debug("received GetCompactionStateWithPlans response",
 		zap.Any("resp", resp),
 		zap.Error(err))
@@ -4979,7 +4964,7 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 		stateReq.CollectionID = collectionID
 	}
 
-	resp, err := node.dataCoord.GetFlushState(ctx, stateReq)
+	resp, err := node.mixCoord.GetFlushState(ctx, stateReq)
 	if err != nil {
 		log.Warn("failed to get flush state response",
 			zap.Error(err))
@@ -5008,7 +4993,7 @@ func (node *Proxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushA
 		return resp, nil
 	}
 
-	resp, err = node.dataCoord.GetFlushAllState(ctx, req)
+	resp, err = node.mixCoord.GetFlushAllState(ctx, req)
 	if err != nil {
 		resp.Status = merr.Status(err)
 		log.Warn("GetFlushAllState failed", zap.Error(err))
@@ -5266,7 +5251,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 		EncryptedPassword: encryptedPassword,
 		Sha256Password:    crypto.SHA256(rawPassword, req.Username),
 	}
-	result, err := node.rootCoord.CreateCredential(ctx, credInfo)
+	result, err := node.mixCoord.CreateCredential(ctx, credInfo)
 	if err != nil { // for error like conntext timeout etc.
 		log.Error("create credential fail",
 			zap.Error(err))
@@ -5341,7 +5326,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 		Sha256Password:    crypto.SHA256(rawNewPassword, req.Username),
 		EncryptedPassword: encryptedPassword,
 	}
-	result, err := node.rootCoord.UpdateCredential(ctx, updateCredReq)
+	result, err := node.mixCoord.UpdateCredential(ctx, updateCredReq)
 	if err != nil { // for error like conntext timeout etc.
 		log.Error("update credential fail",
 			zap.Error(err))
@@ -5374,7 +5359,7 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 		req.Base = &commonpb.MsgBase{}
 	}
 	req.Base.MsgType = commonpb.MsgType_DeleteCredential
-	result, err := node.rootCoord.DeleteCredential(ctx, req)
+	result, err := node.mixCoord.DeleteCredential(ctx, req)
 	if err != nil { // for error like conntext timeout etc.
 		log.Error("delete credential fail",
 			zap.Error(err))
@@ -5406,7 +5391,7 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 			commonpbutil.WithMsgType(commonpb.MsgType_ListCredUsernames),
 		),
 	}
-	resp, err := node.rootCoord.ListCredUsers(ctx, rootCoordReq)
+	resp, err := node.mixCoord.ListCredUsers(ctx, rootCoordReq)
 	if err != nil {
 		return &milvuspb.ListCredUsersResponse{
 			Status: merr.Status(err),
@@ -5441,7 +5426,7 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 	}
 	req.Base.MsgType = commonpb.MsgType_CreateRole
 
-	result, err := node.rootCoord.CreateRole(ctx, req)
+	result, err := node.mixCoord.CreateRole(ctx, req)
 	if err != nil {
 		log.Warn("fail to create role", zap.Error(err))
 		return merr.Status(err), nil
@@ -5474,7 +5459,7 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 		err := merr.WrapErrPrivilegeNotPermitted("the role[%s] is a default role, which can't be dropped", req.GetRoleName())
 		return merr.Status(err), nil
 	}
-	result, err := node.rootCoord.DropRole(ctx, req)
+	result, err := node.mixCoord.DropRole(ctx, req)
 	if err != nil {
 		log.Warn("fail to drop role",
 			zap.String("role_name", req.RoleName),
@@ -5508,7 +5493,7 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 	}
 	req.Base.MsgType = commonpb.MsgType_OperateUserRole
 
-	result, err := node.rootCoord.OperateUserRole(ctx, req)
+	result, err := node.mixCoord.OperateUserRole(ctx, req)
 	if err != nil {
 		log.Warn("fail to operate user role", zap.Error(err))
 		return merr.Status(err), nil
@@ -5542,7 +5527,7 @@ func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReque
 	}
 	req.Base.MsgType = commonpb.MsgType_SelectRole
 
-	result, err := node.rootCoord.SelectRole(ctx, req)
+	result, err := node.mixCoord.SelectRole(ctx, req)
 	if err != nil {
 		log.Warn("fail to select role", zap.Error(err))
 		return &milvuspb.SelectRoleResponse{
@@ -5576,7 +5561,7 @@ func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReque
 	}
 	req.Base.MsgType = commonpb.MsgType_SelectUser
 
-	result, err := node.rootCoord.SelectUser(ctx, req)
+	result, err := node.mixCoord.SelectUser(ctx, req)
 	if err != nil {
 		log.Warn("fail to select user", zap.Error(err))
 		return &milvuspb.SelectUserResponse{
@@ -5674,7 +5659,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 		Version: "v2",
 	}
 	req.Grantor.User = &milvuspb.UserEntity{Name: curUser}
-	result, err := node.rootCoord.OperatePrivilege(ctx, request)
+	result, err := node.mixCoord.OperatePrivilege(ctx, request)
 	if err != nil {
 		log.Warn("fail to operate privilege", zap.Error(err))
 		return merr.Status(err), nil
@@ -5684,7 +5669,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 		for _, relatedPrivilege := range relatedPrivileges {
 			relatedReq := proto.Clone(request).(*milvuspb.OperatePrivilegeRequest)
 			relatedReq.Entity.Grantor.Privilege.Name = util.PrivilegeNameForAPI(relatedPrivilege)
-			result, err = node.rootCoord.OperatePrivilege(ctx, relatedReq)
+			result, err = node.mixCoord.OperatePrivilege(ctx, relatedReq)
 			if err != nil {
 				log.Warn("fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Error(err))
 				return merr.Status(err), nil
@@ -5725,7 +5710,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 		return merr.Status(err), nil
 	}
 	req.Entity.Grantor.User = &milvuspb.UserEntity{Name: curUser}
-	result, err := node.rootCoord.OperatePrivilege(ctx, req)
+	result, err := node.mixCoord.OperatePrivilege(ctx, req)
 	if err != nil {
 		log.Warn("fail to operate privilege", zap.Error(err))
 		return merr.Status(err), nil
@@ -5735,7 +5720,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 		for _, relatedPrivilege := range relatedPrivileges {
 			relatedReq := proto.Clone(req).(*milvuspb.OperatePrivilegeRequest)
 			relatedReq.Entity.Grantor.Privilege.Name = util.PrivilegeNameForAPI(relatedPrivilege)
-			result, err = node.rootCoord.OperatePrivilege(ctx, relatedReq)
+			result, err = node.mixCoord.OperatePrivilege(ctx, relatedReq)
 			if err != nil {
 				log.Warn("fail to operate related privilege", zap.String("related_privilege", relatedPrivilege), zap.Error(err))
 				return merr.Status(err), nil
@@ -5800,7 +5785,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 	}
 	req.Base.MsgType = commonpb.MsgType_SelectGrant
 
-	result, err := node.rootCoord.SelectGrant(ctx, req)
+	result, err := node.mixCoord.SelectGrant(ctx, req)
 	if err != nil {
 		log.Warn("fail to select grant", zap.Error(err))
 		return &milvuspb.SelectGrantResponse{
@@ -5821,7 +5806,7 @@ func (node *Proxy) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaR
 		return &milvuspb.BackupRBACMetaResponse{Status: merr.Status(err)}, nil
 	}
 
-	result, err := node.rootCoord.BackupRBAC(ctx, req)
+	result, err := node.mixCoord.BackupRBAC(ctx, req)
 	if err != nil {
 		log.Warn("fail to backup rbac", zap.Error(err))
 		return &milvuspb.BackupRBACMetaResponse{
@@ -5845,7 +5830,7 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 		return merr.Success(), nil
 	}
 
-	result, err := node.rootCoord.RestoreRBAC(ctx, req)
+	result, err := node.mixCoord.RestoreRBAC(ctx, req)
 	if err != nil {
 		log.Warn("fail to restore rbac", zap.Error(err))
 		return merr.Status(err), nil
@@ -5936,18 +5921,8 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 	}
 
 	group.Go(func() error {
-		resp, err := node.rootCoord.CheckHealth(ctx, request)
-		return fn("rootcoord", resp, err)
-	})
-
-	group.Go(func() error {
-		resp, err := node.queryCoord.CheckHealth(ctx, request)
-		return fn("querycoord", resp, err)
-	})
-
-	group.Go(func() error {
-		resp, err := node.dataCoord.CheckHealth(ctx, request)
-		return fn("datacoord", resp, err)
+		resp, err := node.mixCoord.CheckHealth(ctx, request)
+		return fn("mixcoord", resp, err)
 	})
 
 	err := group.Wait()
@@ -5990,7 +5965,7 @@ func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCol
 		commonpbutil.WithMsgType(commonpb.MsgType_RenameCollection),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
-	resp, err := node.rootCoord.RenameCollection(ctx, req)
+	resp, err := node.mixCoord.RenameCollection(ctx, req)
 	if err != nil {
 		log.Warn("failed to rename collection", zap.Error(err))
 		return merr.Status(err), err
@@ -6021,7 +5996,7 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 		ctx:                        ctx,
 		Condition:                  NewTaskCondition(ctx),
 		CreateResourceGroupRequest: request,
-		queryCoord:                 node.queryCoord,
+		mixCoord:                   node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -6081,7 +6056,7 @@ func (node *Proxy) UpdateResourceGroups(ctx context.Context, request *milvuspb.U
 		ctx:                         ctx,
 		Condition:                   NewTaskCondition(ctx),
 		UpdateResourceGroupsRequest: request,
-		queryCoord:                  node.queryCoord,
+		mixCoord:                    node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -6138,7 +6113,7 @@ func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.Drop
 		ctx:                      ctx,
 		Condition:                NewTaskCondition(ctx),
 		DropResourceGroupRequest: request,
-		queryCoord:               node.queryCoord,
+		mixCoord:                 node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -6205,7 +6180,7 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
 		TransferNodeRequest: request,
-		queryCoord:          node.queryCoord,
+		mixCoord:            node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -6272,7 +6247,7 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		TransferReplicaRequest: request,
-		queryCoord:             node.queryCoord,
+		mixCoord:               node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -6327,7 +6302,7 @@ func (node *Proxy) ListResourceGroups(ctx context.Context, request *milvuspb.Lis
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
 		ListResourceGroupsRequest: request,
-		queryCoord:                node.queryCoord,
+		mixCoord:                  node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -6398,7 +6373,7 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 		ctx:                          ctx,
 		Condition:                    NewTaskCondition(ctx),
 		DescribeResourceGroupRequest: request,
-		queryCoord:                   node.queryCoord,
+		mixCoord:                     node.mixCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -6459,7 +6434,7 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 
 	log.Info("connect received")
 
-	resp, err := node.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
+	resp, err := node.mixCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases),
 		),
@@ -6712,7 +6687,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		Condition: NewTaskCondition(ctx),
 		req:       req,
 		node:      node,
-		dataCoord: node.dataCoord,
+		mixCoord:  node.mixCoord,
 		resp:      resp,
 	}
 
@@ -6760,7 +6735,7 @@ func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImp
 	log.Info(rpcReceived(method))
 
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
-	resp, err := node.dataCoord.GetImportProgress(ctx, req)
+	resp, err := node.mixCoord.GetImportProgress(ctx, req)
 	if resp.GetStatus().GetCode() != 0 || err != nil {
 		log.Warn("get import progress failed", zap.String("reason", resp.GetStatus().GetReason()), zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel, req.GetDbName(), "").Inc()
@@ -6805,7 +6780,7 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 			return resp, nil
 		}
 	}
-	resp, err = node.dataCoord.ListImports(ctx, &internalpb.ListImportsRequestInternal{
+	resp, err = node.mixCoord.ListImports(ctx, &internalpb.ListImportsRequestInternal{
 		CollectionID: collectionID,
 	})
 	if resp.GetStatus().GetCode() != 0 || err != nil {
@@ -6893,7 +6868,7 @@ func (node *Proxy) CreatePrivilegeGroup(ctx context.Context, req *milvuspb.Creat
 	}
 	req.Base.MsgType = commonpb.MsgType_CreatePrivilegeGroup
 
-	result, err := node.rootCoord.CreatePrivilegeGroup(ctx, req)
+	result, err := node.mixCoord.CreatePrivilegeGroup(ctx, req)
 	if err != nil {
 		log.Warn("fail to create privilege group", zap.Error(err))
 		return merr.Status(err), nil
@@ -6925,7 +6900,7 @@ func (node *Proxy) DropPrivilegeGroup(ctx context.Context, req *milvuspb.DropPri
 	}
 	req.Base.MsgType = commonpb.MsgType_DropPrivilegeGroup
 
-	result, err := node.rootCoord.DropPrivilegeGroup(ctx, req)
+	result, err := node.mixCoord.DropPrivilegeGroup(ctx, req)
 	if err != nil {
 		log.Warn("fail to drop privilege group", zap.Error(err))
 		return merr.Status(err), nil
@@ -6956,7 +6931,7 @@ func (node *Proxy) ListPrivilegeGroups(ctx context.Context, req *milvuspb.ListPr
 			commonpbutil.WithMsgType(commonpb.MsgType_ListPrivilegeGroups),
 		),
 	}
-	resp, err := node.rootCoord.ListPrivilegeGroups(ctx, rootCoordReq)
+	resp, err := node.mixCoord.ListPrivilegeGroups(ctx, rootCoordReq)
 	if err != nil {
 		return &milvuspb.ListPrivilegeGroupsResponse{
 			Status: merr.Status(err),
@@ -6991,7 +6966,7 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	}
 	req.Base.MsgType = commonpb.MsgType_OperatePrivilegeGroup
 
-	result, err := node.rootCoord.OperatePrivilegeGroup(ctx, req)
+	result, err := node.mixCoord.OperatePrivilegeGroup(ctx, req)
 	if err != nil {
 		log.Warn("fail to operate privilege group", zap.Error(err))
 		return merr.Status(err), nil

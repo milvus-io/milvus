@@ -97,10 +97,7 @@ func (impl *msgHandlerImpl) HandleImport(ctx context.Context, vchannel string, i
 				})
 			}
 		}()
-		client, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
-		if err != nil {
-			return err
-		}
+		client := resource.Resource().MixCoordClient()
 		importResp, err := client.ImportV2(ctx, &internalpb.ImportRequestInternal{
 			CollectionID:   importMsg.GetCollectionID(),
 			CollectionName: importMsg.GetCollectionName(),

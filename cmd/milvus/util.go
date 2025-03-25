@@ -123,7 +123,7 @@ func removePidFile(lock *flock.Flock) {
 }
 
 func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
-	alias, enableRootCoord, enableQueryCoord, enableDataCoord, enableQueryNode,
+	alias, enableMixCoord, enableQueryNode,
 		enableDataNode, enableProxy, enableStreamingNode := formatFlags(args, flags)
 
 	serverType := args[2]
@@ -132,16 +132,12 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 	role.ServerType = serverType
 
 	switch serverType {
-	case typeutil.RootCoordRole:
-		role.EnableRootCoord = true
+	case typeutil.MixCoordRole:
+		role.EnableMixCoord = true
 	case typeutil.ProxyRole:
 		role.EnableProxy = true
-	case typeutil.QueryCoordRole:
-		role.EnableQueryCoord = true
 	case typeutil.QueryNodeRole:
 		role.EnableQueryNode = true
-	case typeutil.DataCoordRole:
-		role.EnableDataCoord = true
 	case typeutil.DataNodeRole:
 		role.EnableDataNode = true
 	case typeutil.StreamingNodeRole:
@@ -149,11 +145,9 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableStreamingNode = true
 		role.EnableQueryNode = true
 	case typeutil.StandaloneRole, typeutil.EmbeddedRole:
-		role.EnableRootCoord = true
+		role.EnableMixCoord = true
 		role.EnableProxy = true
-		role.EnableQueryCoord = true
 		role.EnableQueryNode = true
-		role.EnableDataCoord = true
 		role.EnableDataNode = true
 		if streamingutil.IsStreamingServiceEnabled() {
 			role.EnableStreamingNode = true
@@ -161,9 +155,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.Local = true
 		role.Embedded = serverType == typeutil.EmbeddedRole
 	case typeutil.MixtureRole:
-		role.EnableRootCoord = enableRootCoord
-		role.EnableQueryCoord = enableQueryCoord
-		role.EnableDataCoord = enableDataCoord
+		role.EnableMixCoord = enableMixCoord
 		role.EnableQueryNode = enableQueryNode
 		role.EnableDataNode = enableDataNode
 		role.EnableProxy = enableProxy
@@ -180,17 +172,12 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 	return role
 }
 
-func formatFlags(args []string, flags *flag.FlagSet) (alias string, enableRootCoord, enableQueryCoord,
-	enableDataCoord, enableQueryNode, enableDataNode, enableProxy bool,
+func formatFlags(args []string, flags *flag.FlagSet) (alias string, enableMixCoord, enableQueryNode, enableDataNode, enableProxy bool,
 	enableStreamingNode bool,
 ) {
 	flags.StringVar(&alias, "alias", "", "set alias")
 
-	var enableIndexCoord bool
-	flags.BoolVar(&enableRootCoord, typeutil.RootCoordRole, false, "enable root coordinator")
-	flags.BoolVar(&enableQueryCoord, typeutil.QueryCoordRole, false, "enable query coordinator")
-	flags.BoolVar(&enableIndexCoord, typeutil.IndexCoordRole, false, "enable index coordinator")
-	flags.BoolVar(&enableDataCoord, typeutil.DataCoordRole, false, "enable data coordinator")
+	flags.BoolVar(&enableMixCoord, typeutil.MixCoordRole, false, "enable mix coordinator")
 
 	flags.BoolVar(&enableQueryNode, typeutil.QueryNodeRole, false, "enable query node")
 	flags.BoolVar(&enableDataNode, typeutil.DataNodeRole, false, "enable data node")

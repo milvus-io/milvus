@@ -131,7 +131,7 @@ type DataCoordComponent interface {
 	// SetTiKVClient set TiKV client for QueryNode
 	SetTiKVClient(client *txnkv.Client)
 
-	SetRootCoordClient(rootCoord RootCoordClient)
+	SetMixCoord(mixCoord MixCoord)
 
 	// SetDataNodeCreator set DataNode client creator func for DataCoord
 	SetDataNodeCreator(func(context.Context, string, int64) (DataNodeClient, error))
@@ -167,17 +167,11 @@ type RootCoordComponent interface {
 	// State includes: Initializing, Healthy and Abnormal
 	UpdateStateCode(commonpb.StateCode)
 
-	// SetDataCoordClient set SetDataCoordClient for RootCoord
+	// SetMixCoord set SetMixCoord for RootCoord
 	// `dataCoord` is a client of data coordinator.
 	//
 	// Always return nil.
-	SetDataCoordClient(dataCoord DataCoordClient) error
-
-	// SetQueryCoord set QueryCoord for RootCoord
-	//  `queryCoord` is a client of query coordinator.
-	//
-	// Always return nil.
-	SetQueryCoordClient(queryCoord QueryCoordClient) error
+	SetMixCoord(mixCoord MixCoord) error
 
 	// SetProxyCreator set Proxy client creator func for RootCoord
 	SetProxyCreator(func(ctx context.Context, addr string, nodeID int64) (ProxyClient, error))
@@ -186,8 +180,6 @@ type RootCoordComponent interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 
 	RegisterStreamingCoordGRPCService(server *grpc.Server)
-
-	GracefulStop()
 }
 
 // ProxyClient is the client interface for proxy server
@@ -219,17 +211,9 @@ type ProxyComponent interface {
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
 
-	// SetRootCoordClient set RootCoord for Proxy
-	// `rootCoord` is a client of root coordinator.
-	SetRootCoordClient(rootCoord RootCoordClient)
-
-	// SetDataCoordClient set DataCoord for Proxy
-	// `dataCoord` is a client of data coordinator.
-	SetDataCoordClient(dataCoord DataCoordClient)
-
-	// SetQueryCoordClient set QueryCoord for Proxy
-	//  `queryCoord` is a client of query coordinator.
-	SetQueryCoordClient(queryCoord QueryCoordClient)
+	// SetMixCoordClient set MixCoord for Proxy
+	// `mixCoord` is a client of mix coordinator.
+	SetMixCoordClient(rootCoord MixCoordClient)
 
 	// SetQueryNodeCreator set QueryNode client creator func for Proxy
 	SetQueryNodeCreator(func(ctx context.Context, addr string, nodeID int64) (QueryNodeClient, error))
@@ -321,6 +305,8 @@ type QueryCoordComponent interface {
 
 	// SetQueryNodeCreator set QueryNode client creator func for QueryCoord
 	SetQueryNodeCreator(func(ctx context.Context, addr string, nodeID int64) (QueryNodeClient, error))
+
+	SetMixCoord(mixCoord MixCoord)
 }
 
 // MixCoordClient is the client interface for mixcoord server
@@ -340,7 +326,6 @@ type MixCoord interface {
 	rootcoordpb.RootCoordServer
 	querypb.QueryCoordServer
 	datapb.DataCoordServer
-	indexpb.IndexCoordServer
 }
 
 // MixCoordComponent is used by grpc server of MixCoord
@@ -348,24 +333,23 @@ type MixCoordComponent interface {
 	MixCoord
 
 	SetAddress(address string)
-	// SetEtcdClient set EtcdClient for RootCoord
+	// SetEtcdClient set EtcdClient for MixCoord
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
 
-	// SetTiKVClient set TiKV client for RootCoord
+	// SetTiKVClient set TiKV client for MixCoord
 	SetTiKVClient(client *txnkv.Client)
 
-	// UpdateStateCode updates state code for RootCoord
+	// UpdateStateCode updates state code for MixCoord
 	// State includes: Initializing, Healthy and Abnormal
 	UpdateStateCode(commonpb.StateCode)
 
-	// SetProxyCreator set Proxy client creator func for RootCoord
-	SetProxyCreator(func(ctx context.Context, addr string, nodeID int64) (ProxyClient, error))
-
-	// GetMetrics notifies RootCoordComponent to collect metrics for specified component
+	// GetMetrics notifies MixCoordComponent to collect metrics for specified component
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 
 	RegisterStreamingCoordGRPCService(server *grpc.Server)
 
 	GracefulStop()
+
+	SetMixCoordClient(client MixCoordClient)
 }

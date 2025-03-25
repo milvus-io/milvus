@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 // ServerBuilder is used to build a server.
@@ -18,8 +17,7 @@ import (
 type ServerBuilder struct {
 	etcdClient   *clientv3.Client
 	grpcServer   *grpc.Server
-	rc           *syncutil.Future[types.RootCoordClient]
-	dc           *syncutil.Future[types.DataCoordClient]
+	mixc         types.MixCoordClient
 	session      *sessionutil.Session
 	kv           kv.MetaKv
 	chunkManager storage.ChunkManager
@@ -49,14 +47,8 @@ func (b *ServerBuilder) WithGRPCServer(svr *grpc.Server) *ServerBuilder {
 }
 
 // WithRootCoordClient sets root coord client to the server builder.
-func (b *ServerBuilder) WithRootCoordClient(rc *syncutil.Future[types.RootCoordClient]) *ServerBuilder {
-	b.rc = rc
-	return b
-}
-
-// WithDataCoordClient sets data coord client to the server builder.
-func (b *ServerBuilder) WithDataCoordClient(dc *syncutil.Future[types.DataCoordClient]) *ServerBuilder {
-	b.dc = dc
+func (b *ServerBuilder) WithMixCoordClient(mixc types.MixCoordClient) *ServerBuilder {
+	b.mixc = mixc
 	return b
 }
 
@@ -77,8 +69,7 @@ func (b *ServerBuilder) Build() *Server {
 	resource.Apply(
 		resource.OptETCD(b.etcdClient),
 		resource.OptChunkManager(b.chunkManager),
-		resource.OptRootCoordClient(b.rc),
-		resource.OptDataCoordClient(b.dc),
+		resource.OptMixCoordClient(b.mixc),
 		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(b.kv)),
 	)
 	resource.Done()
