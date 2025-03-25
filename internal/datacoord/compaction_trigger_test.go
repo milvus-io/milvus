@@ -149,6 +149,11 @@ func Test_compactionTrigger_force_without_index(t *testing.T) {
 		Deltalogs:      deltaLogs,
 		IsSorted:       true,
 	}
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collectionID, &collectionInfo{
+		ID:     collectionID,
+		Schema: schema,
+	})
 	m := &meta{
 		catalog:    catalog,
 		channelCPs: newChannelCps(),
@@ -172,12 +177,7 @@ func Test_compactionTrigger_force_without_index(t *testing.T) {
 			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			indexes:        map[UniqueID]map[UniqueID]*model.Index{},
 		},
-		collections: map[int64]*collectionInfo{
-			collectionID: {
-				ID:     collectionID,
-				Schema: schema,
-			},
-		},
+		collections: collections,
 	}
 
 	compactionHandler := &spyCompactionHandler{t: t, spyChan: make(chan *datapb.CompactionPlan, 1), meta: m}
@@ -308,6 +308,113 @@ func Test_compactionTrigger_force(t *testing.T) {
 		},
 	}
 
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(2, &collectionInfo{
+		ID:     2,
+		Schema: schema,
+		Properties: map[string]string{
+			common.CollectionTTLConfigKey: "0",
+		},
+	})
+	collections.Insert(1111, &collectionInfo{
+		ID: 1111,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+			},
+		},
+		Properties: map[string]string{
+			common.CollectionTTLConfigKey: "error",
+		},
+	})
+	collections.Insert(1000, &collectionInfo{
+		ID: 1000,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+			},
+		},
+	})
+	// error (has no vector field)
+	collections.Insert(2000, &collectionInfo{
+		ID: 2000,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID,
+					DataType: schemapb.DataType_Int16,
+				},
+			},
+		},
+	})
+	// error (has no dim)
+	collections.Insert(3000, &collectionInfo{
+		ID: 3000,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{},
+					},
+				},
+			},
+		},
+	})
+	// error (dim parse fail)
+	collections.Insert(4000, &collectionInfo{
+		ID: 4000,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128error",
+						},
+					},
+				},
+			},
+		},
+	})
+	collections.Insert(10000, &collectionInfo{
+		ID: 10000,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+			},
+		},
+	})
 	im := &indexMeta{
 		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -443,115 +550,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 							},
 						},
 					},
-					indexMeta: im,
-					collections: map[int64]*collectionInfo{
-						2: {
-							ID:     2,
-							Schema: schema,
-							Properties: map[string]string{
-								common.CollectionTTLConfigKey: "0",
-							},
-						},
-						1111: {
-							ID: 1111,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-										TypeParams: []*commonpb.KeyValuePair{
-											{
-												Key:   common.DimKey,
-												Value: "128",
-											},
-										},
-									},
-								},
-							},
-							Properties: map[string]string{
-								common.CollectionTTLConfigKey: "error",
-							},
-						},
-						1000: {
-							ID: 1000,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-										TypeParams: []*commonpb.KeyValuePair{
-											{
-												Key:   common.DimKey,
-												Value: "128",
-											},
-										},
-									},
-								},
-							},
-						},
-						// error (has no vector field)
-						2000: {
-							ID: 2000,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_Int16,
-									},
-								},
-							},
-						},
-						// error (has no dim)
-						3000: {
-							ID: 3000,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-										TypeParams: []*commonpb.KeyValuePair{
-											{},
-										},
-									},
-								},
-							},
-						},
-						// error (dim parse fail)
-						4000: {
-							ID: 4000,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-										TypeParams: []*commonpb.KeyValuePair{
-											{
-												Key:   common.DimKey,
-												Value: "128error",
-											},
-										},
-									},
-								},
-							},
-						},
-						10000: {
-							ID: 10000,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-										TypeParams: []*commonpb.KeyValuePair{
-											{
-												Key:   common.DimKey,
-												Value: "128",
-											},
-										},
-									},
-								},
-							},
-						},
-					},
+					indexMeta:   im,
+					collections: collections,
 				},
 				mock0Allocator,
 				nil,
@@ -851,6 +851,25 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 
 	mock0Allocator := newMockAllocator(t)
 
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(2, &collectionInfo{
+		ID: 2,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+			},
+		},
+	})
+
 	tests := []struct {
 		name      string
 		fields    fields
@@ -862,28 +881,10 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			"test many segments",
 			fields{
 				&meta{
-					segments:   segmentInfos,
-					channelCPs: newChannelCps(),
-					collections: map[int64]*collectionInfo{
-						2: {
-							ID: 2,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-										TypeParams: []*commonpb.KeyValuePair{
-											{
-												Key:   common.DimKey,
-												Value: "128",
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-					indexMeta: indexMeta,
+					segments:    segmentInfos,
+					channelCPs:  newChannelCps(),
+					collections: collections,
+					indexMeta:   indexMeta,
 				},
 				mock0Allocator,
 				nil,
@@ -1004,6 +1005,25 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 	im := newSegmentIndexMeta(nil)
 	im.indexes[2] = make(map[UniqueID]*model.Index)
 
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(2, &collectionInfo{
+		ID: 2,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+			},
+		},
+	})
+
 	tests := []struct {
 		name      string
 		fields    fields
@@ -1070,25 +1090,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 							},
 						},
 					},
-					collections: map[int64]*collectionInfo{
-						2: {
-							ID: 2,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-										TypeParams: []*commonpb.KeyValuePair{
-											{
-												Key:   common.DimKey,
-												Value: "128",
-											},
-										},
-									},
-								},
-							},
-						},
-					},
+					collections: collections,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -1217,6 +1219,25 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 		return segIdx
 	}
 
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(2, &collectionInfo{
+		ID: 2,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+			},
+		},
+	})
+
 	im := &indexMeta{
 		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -1261,27 +1282,9 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 					// 8 small segments
 					channelCPs: newChannelCps(),
 
-					segments:  mockSegmentsInfo(20, 20, 20, 20, 20, 20),
-					indexMeta: im,
-					collections: map[int64]*collectionInfo{
-						2: {
-							ID: 2,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-										TypeParams: []*commonpb.KeyValuePair{
-											{
-												Key:   common.DimKey,
-												Value: "128",
-											},
-										},
-									},
-								},
-							},
-						},
-					},
+					segments:    mockSegmentsInfo(20, 20, 20, 20, 20, 20),
+					indexMeta:   im,
+					collections: collections,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -1358,6 +1361,20 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 		})
 		return segIdx
 	}
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(2, &collectionInfo{
+		ID: 2,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID,
+					DataType: schemapb.DataType_FloatVector,
+				},
+			},
+		},
+	})
+
 	im := &indexMeta{
 		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -1404,21 +1421,9 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 					channelCPs: newChannelCps(),
 					// 7 segments with 200MB each, the compaction is expected to be triggered
 					//  as the first 5 being merged, and 1 plus being squeezed.
-					segments:  mockSegmentsInfo(200, 200, 200, 200, 200, 200, 200),
-					indexMeta: im,
-					collections: map[int64]*collectionInfo{
-						2: {
-							ID: 2,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-									},
-								},
-							},
-						},
-					},
+					segments:    mockSegmentsInfo(200, 200, 200, 200, 200, 200, 200),
+					indexMeta:   im,
+					collections: collections,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -1533,6 +1538,20 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 	im.segmentIndexes.Insert(5, genSegIndex(5, indexID, 20))
 	im.segmentIndexes.Insert(6, genSegIndex(6, indexID, 20))
 	mock0Allocator := newMockAllocator(t)
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(2, &collectionInfo{
+		ID: 2,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID,
+					DataType: schemapb.DataType_FloatVector,
+				},
+			},
+		},
+	})
+
 	tests := []struct {
 		name      string
 		fields    fields
@@ -1544,23 +1563,10 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 			"test small segment",
 			fields{
 				&meta{
-					channelCPs: newChannelCps(),
-
-					segments:  mockSegmentsInfo(600, 600, 600, 600, 260, 260),
-					indexMeta: im,
-					collections: map[int64]*collectionInfo{
-						2: {
-							ID: 2,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-									},
-								},
-							},
-						},
-					},
+					channelCPs:  newChannelCps(),
+					segments:    mockSegmentsInfo(600, 600, 600, 600, 260, 260),
+					indexMeta:   im,
+					collections: collections,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -1713,6 +1719,25 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 
 	mock0Allocator := newMockAllocator(t)
 
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(2, &collectionInfo{
+		ID: 2,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  vecFieldID,
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "128",
+						},
+					},
+				},
+			},
+		},
+	})
+
 	tests := []struct {
 		name      string
 		fields    fields
@@ -1726,27 +1751,9 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				&meta{
 					channelCPs: newChannelCps(),
 
-					segments: segmentInfos,
-					collections: map[int64]*collectionInfo{
-						2: {
-							ID: 2,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-										TypeParams: []*commonpb.KeyValuePair{
-											{
-												Key:   common.DimKey,
-												Value: "128",
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-					indexMeta: indexMeta,
+					segments:    segmentInfos,
+					collections: collections,
+					indexMeta:   indexMeta,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -2083,7 +2090,7 @@ func Test_triggerSingleCompaction(t *testing.T) {
 	}()
 	m := &meta{
 		channelCPs: newChannelCps(),
-		segments:   NewSegmentsInfo(), collections: make(map[UniqueID]*collectionInfo),
+		segments:   NewSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	got := newCompactionTrigger(m, &compactionPlanHandler{}, newMockAllocator(t),
 		&ServerHandler{
@@ -2243,6 +2250,19 @@ func (s *CompactionTriggerSuite) SetupTest() {
 		lastFlushTime: time.Now(),
 	}
 
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(s.collectionID, &collectionInfo{
+		ID: s.collectionID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  s.vecFieldID,
+					DataType: schemapb.DataType_FloatVector,
+				},
+			},
+		},
+	})
+
 	im := &indexMeta{
 		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -2309,20 +2329,8 @@ func (s *CompactionTriggerSuite) SetupTest() {
 				},
 			},
 		},
-		indexMeta: im,
-		collections: map[int64]*collectionInfo{
-			s.collectionID: {
-				ID: s.collectionID,
-				Schema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{
-						{
-							FieldID:  s.vecFieldID,
-							DataType: schemapb.DataType_FloatVector,
-						},
-					},
-				},
-			},
-		},
+		indexMeta:   im,
+		collections: collections,
 	}
 	s.meta.UpdateChannelCheckpoint(context.TODO(), s.channel, &msgpb.MsgPosition{
 		ChannelName: s.channel,
@@ -2733,6 +2741,16 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 		compactTime  *compactTime
 		expectedSize int64
 	}
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(2, &collectionInfo{
+		ID:     2,
+		Schema: schema,
+		Properties: map[string]string{
+			common.CollectionTTLConfigKey: "0",
+		},
+	})
+
 	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 	segIdx0 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segIdx0.Insert(indexID, &model.SegmentIndex{
@@ -2823,15 +2841,7 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 							},
 						},
 					},
-					collections: map[int64]*collectionInfo{
-						2: {
-							ID:     2,
-							Schema: schema,
-							Properties: map[string]string{
-								common.CollectionTTLConfigKey: "0",
-							},
-						},
-					},
+					collections: collections,
 				},
 				mock0Allocator,
 				nil,

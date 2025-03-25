@@ -15,7 +15,7 @@ pytest-level==0.1.1
 pytest-xdist==2.5.0
 
 pytest-rerunfailures==14.0
-git+https://github.com/Projectplace/pytest-tags
+pytest_tagging==1.6.0
 ndg-httpsclient
 pyopenssl
 pyasn1
