@@ -605,7 +605,6 @@ dataCoord:
       minCentroidsNum: 16 # minimum centroids number in Kmeans train
       minClusterSizeRatio: 0.01 # minimum cluster size / avg size in Kmeans train
       maxClusterSizeRatio: 10 # maximum cluster size / avg size in Kmeans train
-      maxClusterSize: 5g # maximum cluster size in Kmeans train
   syncSegmentsInterval: 300 # The time interval for regularly syncing segments
   index:
     memSizeEstimateMultiplier: 2 # When the memory size is not setup by index procedure, multiplier to estimate the memory size of index data
