@@ -509,7 +509,8 @@ func withStatsTaskMeta(stm *statsTaskMeta) testMetaOption {
 
 func createMeta(catalog metastore.DataCoordCatalog, opts ...testMetaOption) *meta {
 	mt := &meta{
-		catalog: catalog,
+		catalog:     catalog,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
 				1000: {
@@ -1614,6 +1615,16 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 			IsPartitionKey: true,
 		},
 	}
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, &collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: fieldsSchema,
+		},
+		CreatedAt: 0,
+	})
+
 	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 	segIdx := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segIdx.Insert(indexID, &model.SegmentIndex{
@@ -1633,17 +1644,10 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		IndexSerializedSize: 0,
 	})
 	segIndexes.Insert(segID, segIdx)
+
 	mt := meta{
-		catalog: catalog,
-		collections: map[int64]*collectionInfo{
-			collID: {
-				ID: collID,
-				Schema: &schemapb.CollectionSchema{
-					Fields: fieldsSchema,
-				},
-				CreatedAt: 0,
-			},
-		},
+		catalog:     catalog,
+		collections: collections,
 
 		analyzeMeta: &analyzeMeta{
 			ctx:     context.Background(),
@@ -1774,9 +1778,11 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		mt.indexMeta.fieldIndexLock.Lock()
 		defer mt.indexMeta.fieldIndexLock.Unlock()
 		mt.indexMeta.indexes[collID][indexID].IndexParams[1].Value = "HNSW"
-		mt.collections[collID].Schema.Fields[0].DataType = schemapb.DataType_FloatVector
-		mt.collections[collID].Schema.Fields[1].IsPartitionKey = true
-		mt.collections[collID].Schema.Fields[1].DataType = schemapb.DataType_VarChar
+		coll, ok := mt.collections.Get(collID)
+		s.True(ok)
+		coll.Schema.Fields[0].DataType = schemapb.DataType_FloatVector
+		coll.Schema.Fields[1].IsPartitionKey = true
+		coll.Schema.Fields[1].DataType = schemapb.DataType_VarChar
 	}
 
 	in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).RunAndReturn(
@@ -1835,7 +1841,9 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 			schemapb.DataType_VarChar,
 			schemapb.DataType_String,
 		} {
-			mt.collections[collID].Schema.Fields[1].DataType = dataType
+			coll, ok := mt.collections.Get(collID)
+			s.True(ok)
+			coll.Schema.Fields[1].DataType = dataType
 			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
 				func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 					s.NotZero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
@@ -1883,7 +1891,9 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 		for _, dataType := range []schemapb.DataType{
 			schemapb.DataType_SparseFloatVector,
 		} {
-			mt.collections[collID].Schema.Fields[0].DataType = dataType
+			coll, ok := mt.collections.Get(collID)
+			s.True(ok)
+			coll.Schema.Fields[0].DataType = dataType
 			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
 				func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 					s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should not be set")
@@ -1913,7 +1923,9 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 			schemapb.DataType_Array,
 			schemapb.DataType_JSON,
 		} {
-			mt.collections[collID].Schema.Fields[1].DataType = dataType
+			coll, ok := mt.collections.Get(collID)
+			s.True(ok)
+			coll.Schema.Fields[1].DataType = dataType
 			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
 				func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 					s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
@@ -1936,7 +1948,9 @@ func (s *taskSchedulerSuite) Test_indexTaskWithMvOptionalScalarField() {
 
 	s.Run("Submit returns empty optional field when no partition key", func() {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
-		mt.collections[collID].Schema.Fields[1].IsPartitionKey = false
+		coll, ok := mt.collections.Get(collID)
+		s.True(ok)
+		coll.Schema.Fields[1].IsPartitionKey = false
 		in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, in *workerpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 				s.Zero(len(in.GetIndexRequest().OptionalScalarFields), "optional scalar field should be set")
