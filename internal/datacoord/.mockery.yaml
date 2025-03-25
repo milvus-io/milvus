@@ -8,6 +8,9 @@ dir: "{{.InterfaceDir}}"
 packages:
   github.com/milvus-io/milvus/internal/datacoord:
     interfaces:
+      trigger:
+        config:
+          mockname: MockTrigger
       compactionPlanContext:
         config:
           mockname: MockCompactionPlanContext
