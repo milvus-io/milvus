@@ -24,10 +24,10 @@ service QueryCoord {
         returns (milvus.StringResponse) {
     }
 
-    rpc ShowCollections(ShowCollectionsRequest)
+    rpc ShowLoadCollections(ShowCollectionsRequest)
         returns (ShowCollectionsResponse) {
     }
-    rpc ShowPartitions(ShowPartitionsRequest) returns (ShowPartitionsResponse) {
+    rpc ShowLoadPartitions(ShowPartitionsRequest) returns (ShowPartitionsResponse) {
     }
 
     rpc LoadPartitions(LoadPartitionsRequest) returns (common.Status) {
@@ -45,7 +45,7 @@ service QueryCoord {
     rpc GetPartitionStates(GetPartitionStatesRequest)
         returns (GetPartitionStatesResponse) {
     }
-    rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
+    rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
     }
     rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {
     }

@@ -322,3 +322,50 @@ type QueryCoordComponent interface {
 	// SetQueryNodeCreator set QueryNode client creator func for QueryCoord
 	SetQueryNodeCreator(func(ctx context.Context, addr string, nodeID int64) (QueryNodeClient, error))
 }
+
+// MixCoordClient is the client interface for mixcoord server
+type MixCoordClient interface {
+	io.Closer
+	rootcoordpb.RootCoordClient
+	querypb.QueryCoordClient
+	datapb.DataCoordClient
+	indexpb.IndexCoordClient
+}
+
+// MixCoord is the interface `MixCoord` package implements
+//
+//go:generate mockery --name=MixCoord  --output=../mocks --filename=mock_mixcoord.go --with-expecter
+type MixCoord interface {
+	Component
+	rootcoordpb.RootCoordServer
+	querypb.QueryCoordServer
+	datapb.DataCoordServer
+	indexpb.IndexCoordServer
+}
+
+// MixCoordComponent is used by grpc server of MixCoord
+type MixCoordComponent interface {
+	MixCoord
+
+	SetAddress(address string)
+	// SetEtcdClient set EtcdClient for RootCoord
+	// `etcdClient` is a client of etcd
+	SetEtcdClient(etcdClient *clientv3.Client)
+
+	// SetTiKVClient set TiKV client for RootCoord
+	SetTiKVClient(client *txnkv.Client)
+
+	// UpdateStateCode updates state code for RootCoord
+	// State includes: Initializing, Healthy and Abnormal
+	UpdateStateCode(commonpb.StateCode)
+
+	// SetProxyCreator set Proxy client creator func for RootCoord
+	SetProxyCreator(func(ctx context.Context, addr string, nodeID int64) (ProxyClient, error))
+
+	// GetMetrics notifies RootCoordComponent to collect metrics for specified component
+	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	RegisterStreamingCoordGRPCService(server *grpc.Server)
+
+	GracefulStop()
+}
