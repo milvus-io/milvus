@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use either::Either;
 use futures::executor::block_on;
-use itertools::Itertools;
 use libc::c_char;
 use log::info;
 use tantivy::schema::{
@@ -207,7 +206,7 @@ impl IndexWriterWrapper {
                     }
                     if *json_offsets_len > BATCH_SIZE {
                         for chunk in json_offsets.chunks(BATCH_SIZE) {
-                            let ops = chunk
+                            let ops: Vec<_> = chunk
                                 .iter()
                                 .map(|offset| {
                                     UserOperation::Add(doc!(
@@ -215,7 +214,7 @@ impl IndexWriterWrapper {
                                         self.field => key,
                                     ))
                                 })
-                                .collect_vec();
+                                .collect();
                             writer.run(ops)?;
                         }
 
