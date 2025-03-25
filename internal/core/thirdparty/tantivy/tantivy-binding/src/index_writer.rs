@@ -11,14 +11,13 @@ use tantivy::schema::{
 };
 use tantivy::{doc, Document, Index, IndexWriter, SingleSegmentIndexWriter, UserOperation};
 
-use crate::array::RustResult;
 use crate::data_type::TantivyDataType;
 
 use crate::error::{Result, TantivyBindingError};
 use crate::index_reader::IndexReaderWrapper;
 use crate::log::init_log;
 
-const BATCH_SIZE: usize = 10_000;
+const BATCH_SIZE: usize = 4_000;
 
 pub(crate) struct IndexWriterWrapper {
     pub(crate) field: Field,
@@ -179,17 +178,19 @@ impl IndexWriterWrapper {
         ))
     }
 
-    pub fn add_json_keys(
+    // add in batch within BATCH_SIZE
+    pub fn add_json_key_stats(
         &mut self,
         keys: &[*const i8],
         json_offsets: &[*const i64],
         json_offsets_len: &[usize],
     ) -> Result<()> {
         let writer = self.index_writer.as_ref().left().unwrap();
+        let id_field = self.id_field.unwrap();
         let mut batch = Vec::with_capacity(BATCH_SIZE);
-        keys.into_iter()
-            .zip(json_offsets.into_iter())
-            .zip(json_offsets_len.into_iter())
+        keys.iter()
+            .zip(json_offsets.iter())
+            .zip(json_offsets_len.iter())
             .try_for_each(|((key, json_offsets), json_offsets_len)| -> Result<()> {
                 let key = unsafe { CStr::from_ptr(*key) }
                     .to_str()
@@ -197,34 +198,41 @@ impl IndexWriterWrapper {
                 let json_offsets =
                     unsafe { std::slice::from_raw_parts(*json_offsets, *json_offsets_len) };
 
-                if batch.len() + *json_offsets_len > BATCH_SIZE {
+                if *json_offsets_len > BATCH_SIZE {
                     if !batch.is_empty() {
-                        writer.run(std::mem::take(&mut batch))?;
-                        batch = Vec::with_capacity(BATCH_SIZE);
+                        writer.run(std::mem::replace(
+                            &mut batch,
+                            Vec::with_capacity(BATCH_SIZE),
+                        ))?;
                     }
                     if *json_offsets_len > BATCH_SIZE {
-                        let chunks = json_offsets
-                            .iter()
-                            .map(|offset| {
-                                UserOperation::Add(doc!(
-                                    self.id_field.unwrap() => *offset,
-                                    self.field => key,
-                                ))
-                            })
-                            .chunks(10_000);
-
-                        for chunk in &chunks {
-                            let ops = chunk.collect_vec();
-                            self.index_writer.as_ref().left().unwrap().run(ops)?;
+                        for chunk in json_offsets.chunks(BATCH_SIZE) {
+                            let ops = chunk
+                                .iter()
+                                .map(|offset| {
+                                    UserOperation::Add(doc!(
+                                        id_field => *offset,
+                                        self.field => key,
+                                    ))
+                                })
+                                .collect_vec();
+                            writer.run(ops)?;
                         }
 
                         return Ok(());
                     }
                 }
 
+                if batch.len() + *json_offsets_len > BATCH_SIZE {
+                    writer.run(std::mem::replace(
+                        &mut batch,
+                        Vec::with_capacity(BATCH_SIZE),
+                    ))?;
+                }
+
                 batch.extend(json_offsets.iter().map(|offset| {
                     UserOperation::Add(doc!(
-                        self.id_field.unwrap() => *offset,
+                        id_field => *offset,
                         self.field => key,
                     ))
                 }));
@@ -232,53 +240,7 @@ impl IndexWriterWrapper {
             })?;
 
         if !batch.is_empty() {
-            self.index_writer.as_ref().left().unwrap().run(batch)?;
-        }
-
-        Ok(())
-    }
-
-    pub fn add_json_keys_one(
-        &mut self,
-        key: &str,
-        json_offsets: *const i64,
-        len: usize,
-    ) -> Result<()> {
-        let writer = self.index_writer.as_ref().left().unwrap();
-        let json_offsets = unsafe { std::slice::from_raw_parts(json_offsets, len) };
-        let ops = json_offsets.iter().map(|offset| {
-            UserOperation::Add(doc!(
-                self.id_field.unwrap() => *offset,
-                self.field => key,
-            ))
-        });
-
-        writer.run(ops)?;
-
-        Ok(())
-    }
-
-    pub fn add_json_keys_two(
-        &mut self,
-        key: &str,
-        json_offsets: *const i64,
-        len: usize,
-    ) -> Result<()> {
-        let json_offsets = unsafe { std::slice::from_raw_parts(json_offsets, len) };
-        let writer = self.index_writer.as_ref().left().unwrap();
-        let chunks = json_offsets
-            .iter()
-            .map(|offset| {
-                UserOperation::Add(doc!(
-                    self.id_field.unwrap() => *offset,
-                    self.field => key,
-                ))
-            })
-            .chunks(10_000);
-
-        for chunk in &chunks {
-            let ops = chunk.collect_vec();
-            writer.run(ops)?;
+            writer.run(batch)?;
         }
 
         Ok(())
@@ -501,48 +463,50 @@ impl IndexWriterWrapper {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::CString;
+
     use rand::Rng;
     use tempfile::tempdir;
 
-    use crate::tokenizer::standard_analyzer;
-
     #[test]
-    pub fn test_index_writer() {
-        use crate::array::RustResult;
+    pub fn test_add_json_key_stats() {
         use crate::data_type::TantivyDataType;
         use crate::index_writer::IndexWriterWrapper;
 
-        let analyzer = standard_analyzer(vec![]);
         let temp_dir = tempdir().unwrap();
-        let mut index_writer = IndexWriterWrapper::create_text_writer(
+        let mut index_writer = IndexWriterWrapper::new(
             "test".to_string(),
+            TantivyDataType::Keyword,
             temp_dir.path().to_str().unwrap().to_string(),
-            "a".to_string(),
-            analyzer,
-            2,
+            1,
             1024 * 1024 * 1024,
             false,
-        );
+        )
+        .unwrap();
 
         let keys = (0..100).map(|i| format!("key{:05}", i)).collect::<Vec<_>>();
+        let mut total_count = 0;
         let mut rng = rand::thread_rng();
         let json_offsets = (0..100)
             .map(|_| {
-                (0..100000)
+                let count = rng.gen_range(0, 1000);
+                total_count += count;
+                (0..count)
                     .map(|_| rng.gen_range(0, i64::MAX))
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-        let json_offsets_len = (0..100).map(|_| 100000).collect::<Vec<_>>();
-
+        let json_offsets_len = json_offsets
+            .iter()
+            .map(|offsets| offsets.len())
+            .collect::<Vec<_>>();
         let json_offsets = json_offsets.iter().map(|x| x.as_ptr()).collect::<Vec<_>>();
+        let c_keys: Vec<CString> = keys.into_iter().map(|k| CString::new(k).unwrap()).collect();
+        let key_ptrs: Vec<*const libc::c_char> = c_keys.iter().map(|cs| cs.as_ptr()).collect();
 
-        let keys: Vec<_> = keys.iter().map(|k| k.as_str()).collect();
-        let now = std::time::Instant::now();
         index_writer
-            .add_json_keys(&keys, &json_offsets, &json_offsets_len)
+            .add_json_key_stats(&key_ptrs, &json_offsets, &json_offsets_len)
             .unwrap();
-        println!("Add json keys: {:?}", now.elapsed());
 
         index_writer.commit().unwrap();
         let count: u32 = index_writer
@@ -553,136 +517,6 @@ mod tests {
             .iter()
             .map(|s| s.max_doc())
             .sum();
-        println!("Total count: {}", count);
-    }
-
-    #[test]
-    pub fn test_index_writer2() {
-        use crate::array::RustResult;
-        use crate::data_type::TantivyDataType;
-        use crate::index_writer::IndexWriterWrapper;
-
-        let analyzer = standard_analyzer(vec![]);
-        let temp_dir = tempdir().unwrap();
-        let mut index_writer = IndexWriterWrapper::create_text_writer(
-            "test".to_string(),
-            temp_dir.path().to_str().unwrap().to_string(),
-            "a".to_string(),
-            analyzer,
-            2,
-            1024 * 1024 * 1024,
-            false,
-        );
-
-        let keys = (0..100).map(|i| format!("key{:05}", i)).collect::<Vec<_>>();
-        let mut rng = rand::thread_rng();
-        let json_offsets = (0..100)
-            .map(|_| {
-                (0..100000)
-                    .map(|_| rng.gen_range(0, i64::MAX))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-
-        let now = std::time::Instant::now();
-        for (key, offset) in keys.into_iter().zip(json_offsets.into_iter()) {
-            for off in offset {
-                index_writer.add_string(&key, off);
-            }
-        }
-        println!("Add json keys: {:?}", now.elapsed());
-
-        index_writer.commit().unwrap();
-        let count: u32 = index_writer
-            .index
-            .load_metas()
-            .unwrap()
-            .segments
-            .iter()
-            .map(|s| s.max_doc())
-            .sum();
-        println!("Total count: {}", count);
-    }
-
-    #[test]
-    pub fn test_index_writer3() {
-        use crate::array::RustResult;
-        use crate::data_type::TantivyDataType;
-        use crate::index_writer::IndexWriterWrapper;
-
-        let analyzer = standard_analyzer(vec![]);
-        let temp_dir = tempdir().unwrap();
-        let mut index_writer = IndexWriterWrapper::create_text_writer(
-            "test".to_string(),
-            temp_dir.path().to_str().unwrap().to_string(),
-            "a".to_string(),
-            analyzer,
-            2,
-            1024 * 1024 * 1024,
-            false,
-        );
-
-        let keys = (0..100).map(|i| format!("key{:05}", i)).collect::<Vec<_>>();
-        let mut rng = rand::thread_rng();
-        let json_offsets = (0..100)
-            .map(|_| {
-                (0..100000)
-                    .map(|_| rng.gen_range(0, i64::MAX))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-
-        let now = std::time::Instant::now();
-        for (key, offset) in keys.into_iter().zip(json_offsets.into_iter()) {
-            index_writer
-                .add_json_keys_one(key.as_str(), offset.as_ptr(), offset.len())
-                .unwrap();
-        }
-        println!("Add json keys: {:?}", now.elapsed());
-
-        index_writer.commit().unwrap();
-        let count: u32 = index_writer.create_reader().unwrap().count().unwrap();
-        println!("Total count: {}", count);
-    }
-
-    #[test]
-    pub fn test_index_writer4() {
-        use crate::array::RustResult;
-        use crate::data_type::TantivyDataType;
-        use crate::index_writer::IndexWriterWrapper;
-
-        let analyzer = standard_analyzer(vec![]);
-        let temp_dir = tempdir().unwrap();
-        let mut index_writer = IndexWriterWrapper::create_text_writer(
-            "test".to_string(),
-            temp_dir.path().to_str().unwrap().to_string(),
-            "a".to_string(),
-            analyzer,
-            2,
-            1024 * 1024 * 1024,
-            false,
-        );
-
-        let keys = (0..100).map(|i| format!("key{:05}", i)).collect::<Vec<_>>();
-        let mut rng = rand::thread_rng();
-        let json_offsets = (0..100)
-            .map(|_| {
-                (0..100000)
-                    .map(|_| rng.gen_range(0, i64::MAX))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-
-        let now = std::time::Instant::now();
-        for (key, offset) in keys.into_iter().zip(json_offsets.into_iter()) {
-            index_writer
-                .add_json_keys_two(key.as_str(), offset.as_ptr(), offset.len())
-                .unwrap();
-        }
-        println!("Add json keys: {:?}", now.elapsed());
-
-        index_writer.commit().unwrap();
-        let count: u32 = index_writer.create_reader().unwrap().count().unwrap();
-        println!("Total count: {}", count);
+        assert_eq!(count, total_count);
     }
 }

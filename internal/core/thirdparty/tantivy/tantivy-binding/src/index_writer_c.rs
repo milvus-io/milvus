@@ -329,10 +329,9 @@ pub extern "C" fn tantivy_index_add_json_key_stats_data_by_batch(
     let json_offsets_len = unsafe { slice::from_raw_parts(json_offsets_len, len) };
     let json_offsets = unsafe { slice::from_raw_parts(json_offsets, len) };
     let keys = unsafe { slice::from_raw_parts(keys, len) };
-    unimplemented!();
     unsafe {
         (*real)
-            .add_json_keys(keys, json_offsets, json_offsets_len)
+            .add_json_key_stats(keys, json_offsets, json_offsets_len)
             .into()
     }
 }
