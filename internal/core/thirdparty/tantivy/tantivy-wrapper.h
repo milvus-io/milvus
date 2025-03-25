@@ -265,12 +265,13 @@ struct TantivyIndexWrapper {
 
     void
     add_json_key_stats_data_by_batch(const char* const* keys,
-                            const int64_t* const* json_offsets,
-                            const uintptr_t* json_offsets_lens,
-                            uintptr_t len_of_lens) {
+                                     const int64_t* const* json_offsets,
+                                     const uintptr_t* json_offsets_lens,
+                                     uintptr_t len_of_lens) {
         assert(!finished_);
-        auto res = RustResultWrapper(tantivy_index_add_json_key_stats_data_by_batch(
-            writer_, keys, json_offsets, json_offsets_lens, len_of_lens));
+        auto res =
+            RustResultWrapper(tantivy_index_add_json_key_stats_data_by_batch(
+                writer_, keys, json_offsets, json_offsets_lens, len_of_lens));
         AssertInfo(res.result_->success,
                    "failed to add json key stats: {}",
                    res.result_->error);
