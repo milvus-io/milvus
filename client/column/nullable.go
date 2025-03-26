@@ -52,9 +52,7 @@ type NullableColumnCreator[col interface {
 }
 
 func (c NullableColumnCreator[col, T]) New(name string, values []T, validData []bool) (col, error) {
-	var result col
-
-	result = c.base(name, values)
+	result := c.base(name, values)
 	result.withValidData(validData)
 
 	return result, result.ValidateNullable()
