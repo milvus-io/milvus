@@ -510,7 +510,14 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 	expireTs := allocations[0].ExpireTime
 	segID := allocations[0].SegmentID
 
-	info, err := s.testServer.segmentManager.AllocNewGrowingSegment(context.TODO(), 0, 1, 1, "channel-1", storage.StorageV1)
+	info, err := s.testServer.segmentManager.AllocNewGrowingSegment(context.TODO(), AllocNewGrowingSegmentRequest{
+		CollectionID:         0,
+		PartitionID:          1,
+		SegmentID:            1,
+		ChannelName:          "channel1-1",
+		StorageVersion:       storage.StorageV1,
+		IsCreatedByStreaming: true,
+	})
 	s.NoError(err)
 	s.NotNil(info)
 

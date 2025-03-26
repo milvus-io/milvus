@@ -198,6 +198,16 @@ func (b *mutableMesasgeBuilder[H, B]) BuildMutable() (MutableMessage, error) {
 	return msg, nil
 }
 
+// MustBuildMutable builds a mutable message.
+// Panics if build failed.
+func (b *mutableMesasgeBuilder[H, B]) MustBuildMutable() MutableMessage {
+	msg, err := b.BuildMutable()
+	if err != nil {
+		panic(err)
+	}
+	return msg
+}
+
 // BuildBroadcast builds a broad mutable message.
 // Panic if not set payload and message type.
 // should only used at client side.

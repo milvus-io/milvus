@@ -230,11 +230,12 @@ func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*
 	}
 
 	resp, err := dc.AllocSegment(ctx, &datapb.AllocSegmentRequest{
-		CollectionId:   pendingSegment.GetCollectionID(),
-		PartitionId:    pendingSegment.GetPartitionID(),
-		SegmentId:      pendingSegment.GetSegmentID(),
-		Vchannel:       pendingSegment.GetVChannel(),
-		StorageVersion: pendingSegment.GetStorageVersion(),
+		CollectionId:         pendingSegment.GetCollectionID(),
+		PartitionId:          pendingSegment.GetPartitionID(),
+		SegmentId:            pendingSegment.GetSegmentID(),
+		Vchannel:             pendingSegment.GetVChannel(),
+		StorageVersion:       pendingSegment.GetStorageVersion(),
+		IsCreatedByStreaming: true,
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, errors.Wrap(err, "failed to alloc growing segment at datacoord")
