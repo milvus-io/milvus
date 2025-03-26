@@ -2,7 +2,7 @@ import datetime
 import logging
 import time
 from utils.util_log import test_log as logger
-from utils.utils import gen_collection_name
+from utils.utils import gen_collection_name, gen_vector
 import pytest
 from api.milvus import CollectionClient
 from base.testbase import TestBase
@@ -537,7 +537,6 @@ class TestCreateCollection(TestBase):
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("metric_type", ["JACCARD", "HAMMING"])
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/31494")
     def test_create_collections_binary_vector_datatype(self, dim, auto_id, enable_dynamic_field, enable_partition_key,
                                                        metric_type):
         """
@@ -956,7 +955,6 @@ class TestGetCollectionStats(TestBase):
             "metricType": "L2",
             "dimension": dim,
         }
-        time.sleep(1)
         rsp = client.collection_create(payload)
         assert rsp['code'] == 0
         # describe collection
@@ -1406,3 +1404,260 @@ class TestCollectionWithAuth(TestBase):
         }
         rsp = client.collection_create(payload)
         assert rsp['code'] == 1800
+
+
+@pytest.mark.L0
+class TestCollectionProperties(TestBase):
+    """Test collection property operations"""
+
+    def test_refresh_load_collection(self):
+        """
+        target: test refresh load collection
+        method: create collection, refresh load
+        expected: refresh load success
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+
+        # release collection
+        client.collection_release(collection_name=name)
+        # load collection
+        client.collection_load(collection_name=name)
+        client.wait_load_completed(collection_name=name)
+        # refresh load
+        rsp = client.refresh_load(collection_name=name)
+
+        assert rsp['code'] == 0
+
+    def test_alter_collection_properties(self):
+        """
+        target: test alter collection properties
+        method: create collection, alter properties
+        expected: alter properties success
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        client.collection_release(collection_name=name)
+        # alter properties
+        properties = {"mmap.enabled": "true"}
+        rsp = client.alter_collection_properties(name, properties)
+        assert rsp['code'] == 0
+        rsp = client.collection_describe(name)
+        enabled_mmap = False
+        for prop in rsp['data']['properties']:
+            if prop['key'] == "mmap.enabled":
+                assert prop['value'] == "true"
+                enabled_mmap = True
+        assert enabled_mmap
+
+    def test_drop_collection_properties(self):
+        """
+        target: test drop collection properties
+        method: create collection, alter properties, drop properties
+        expected: drop properties success
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        client.collection_release(collection_name=name)
+
+        # alter properties
+        properties = {"mmap.enabled": "true"}
+        rsp = client.alter_collection_properties(name, properties)
+        assert rsp['code'] == 0
+        rsp = client.collection_describe(name)
+        enabled_mmap = False
+        for prop in rsp['data']['properties']:
+            if prop['key'] == "mmap.enabled":
+                assert prop['value'] == "true"
+                enabled_mmap = True
+        assert enabled_mmap
+
+        # drop properties
+        delete_keys = ["mmap.enabled"]
+        rsp = client.drop_collection_properties(name, delete_keys)
+        assert rsp['code'] == 0
+        rsp = client.collection_describe(name)
+        enabled_mmap = False
+        for prop in rsp['data']['properties']:
+            if prop['key'] == "mmap.enabled":
+                enabled_mmap = True
+        assert not enabled_mmap
+
+    def test_alter_field_properties(self):
+        """
+        target: test alter field properties
+        method: create collection with varchar field, alter field properties
+        expected: alter field properties success
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": True,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": True,
+                     "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "image_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ]
+            }
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        # release collection
+        client.collection_release(collection_name=name)
+
+        # describe collection
+        rsp = client.collection_describe(name)
+        for field in rsp['data']['fields']:
+            if field['name'] == "book_describe":
+                for p in field['params']:
+                    if p['key'] == "max_length":
+                        assert p['value'] == "256"
+
+        # alter field properties
+        field_params = {"max_length": "100"}
+        rsp = client.alter_field_properties(name, "book_describe", field_params)
+        assert rsp['code'] == 0
+
+        # describe collection
+        rsp = client.collection_describe(name)
+        for field in rsp['data']['fields']:
+            if field['name'] == "book_describe":
+                for p in field['params']:
+                    if p['key'] == "max_length":
+                        assert p['value'] == "100"
+
+
+@pytest.mark.L0
+class TestCollectionMaintenance(TestBase):
+    """Test collection maintenance operations"""
+
+    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/39546")
+    def test_collection_flush(self):
+        """
+        target: test collection flush
+        method: create collection, insert data multiple times and flush
+        expected: flush successfully
+        """
+        # Create collection
+        name = gen_collection_name()
+        client = self.collection_client
+        vector_client = self.vector_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "my_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": 128}}
+                ]
+            }
+        }
+        client.collection_create(payload)
+
+        # Insert small batches of data multiple times
+        for i in range(3):
+            vectors = [gen_vector(dim=128) for _ in range(10)]
+            insert_data = {
+                "collectionName": name,
+                "data": [
+                    {
+                        "book_id": i * 10 + j,
+                        "my_vector": vector
+                    }
+                    for i, vector in enumerate(vectors)
+                    for j in range(10)
+                ]
+            }
+            response = vector_client.vector_insert(insert_data)
+            assert response["code"] == 0
+        c = Collection(name)
+        num_entities_before_flush = c.num_entities
+        # Flush collection
+        response = client.flush(name)
+        assert response["code"] == 0
+        # check segments
+        num_entities_after_flush = c.num_entities
+        logger.info(f"num_entities_before_flush: {num_entities_before_flush}, num_entities_after_flush: {num_entities_after_flush}")
+        assert num_entities_after_flush > num_entities_before_flush
+
+    def test_collection_compact(self):
+        """
+        target: test collection compact
+        method: create collection, insert data, flush multiple times, then compact
+        expected: compact successfully
+        """
+        # Create collection
+        name = gen_collection_name()
+        client = self.collection_client
+        vector_client = self.vector_client
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "my_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": 128}}
+                ]
+            }
+        }
+        client.collection_create(payload)
+
+        # Insert and flush multiple times
+        for i in range(3):
+            # Insert data
+            vectors = [gen_vector(dim=128) for _ in range(10)]
+            insert_data = {
+                "collectionName": name,
+                "data": [
+                    {
+                        "book_id": i * 10 + j,
+                        "my_vector": vector
+                    }
+                    for i, vector in enumerate(vectors)
+                    for j in range(10)
+                ]
+            }
+            response = vector_client.vector_insert(insert_data)
+            assert response["code"] == 0
+
+            # Flush after each insert
+            c = Collection(name)
+            c.flush()
+        # Compact collection
+        response = client.compact(name)
+        assert response["code"] == 0
+
+        # Get compaction state
+        response = client.get_compaction_state(name)
+        assert response["code"] == 0
+        assert "state" in response["data"]
+        assert "compactionID" in response["data"]
+        # TODO need verification by pymilvus
+
