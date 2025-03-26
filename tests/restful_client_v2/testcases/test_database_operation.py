@@ -168,7 +168,7 @@ class TestDatabaseOperationNegative(TestBase):
 class TestDatabaseProperties(TestBase):
     """Test database properties operations"""
 
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/39953")
+
     def test_alter_database_properties(self):
         """
         target: test alter database properties
