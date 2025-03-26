@@ -29,4 +29,6 @@ var FieldNameKeywords = map[string]struct{}{
 	"false":              {},
 	"False":              {},
 	"FALSE":              {},
+	"text_match":         {},
+	"TEXT_MATCH":         {},
 }
