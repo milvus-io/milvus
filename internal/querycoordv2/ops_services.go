@@ -241,7 +241,9 @@ func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeReques
 		return merr.Status(err), nil
 	}
 
-	s.meta.ResourceManager.HandleNodeDown(ctx, req.GetNodeID())
+	// change node state immediately, stopping node won't be affected
+	s.meta.ResourceManager.HandleNodeSuspend(ctx, req.GetNodeID())
+
 	return merr.Success(), nil
 }
 
@@ -268,7 +270,8 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 			merr.WrapErrParameterInvalidMsg("embedded query node in streaming node can't be resumed")), nil
 	}
 
-	s.meta.ResourceManager.HandleNodeUp(ctx, req.GetNodeID())
+	// change node state immediately, stopping node won't be affected
+	s.meta.ResourceManager.HandleNodeResume(ctx, req.GetNodeID())
 
 	return merr.Success(), nil
 }

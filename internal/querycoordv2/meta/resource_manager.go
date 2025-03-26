@@ -461,14 +461,19 @@ func (rm *ResourceManager) CheckIncomingNodeNum(ctx context.Context) int {
 }
 
 // HandleNodeUp handle node when new node is incoming.
+func (rm *ResourceManager) handleNodeInComeLocked(ctx context.Context, node int64) (string, error) {
+	rm.incomingNode.Insert(node)
+	// Trigger assign incoming node right away.
+	// error can be ignored here, because `AssignPendingIncomingNode`` will retry assign node.
+	return rm.assignIncomingNodeWithNodeCheck(ctx, node)
+}
+
+// HandleNodeUp handle node when new node is incoming.
 func (rm *ResourceManager) HandleNodeUp(ctx context.Context, node int64) {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
-	rm.incomingNode.Insert(node)
-	// Trigger assign incoming node right away.
-	// error can be ignored here, because `AssignPendingIncomingNode`` will retry assign node.
-	rgName, err := rm.assignIncomingNodeWithNodeCheck(ctx, node)
+	rgName, err := rm.handleNodeInComeLocked(ctx, node)
 	log.Info("HandleNodeUp: add node to resource group",
 		zap.String("rgName", rgName),
 		zap.Int64("node", node),
@@ -476,17 +481,39 @@ func (rm *ResourceManager) HandleNodeUp(ctx context.Context, node int64) {
 	)
 }
 
-// HandleNodeDown handle the node when node is leave.
-func (rm *ResourceManager) HandleNodeDown(ctx context.Context, node int64) {
+func (rm *ResourceManager) HandleNodeResume(ctx context.Context, node int64) {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
+	rgName, err := rm.handleNodeInComeLocked(ctx, node)
+	if err == nil {
+		rm.nodeMgr.Resume(node)
+	}
+
+	log.Info("HandleNodeResume: add node to resource group",
+		zap.String("rgName", rgName),
+		zap.Int64("node", node),
+		zap.Error(err),
+	)
+}
+
+// handleNodeLeaveLocked handle the node when node is leave.
+// mutex lock has already been hold
+func (rm *ResourceManager) handleNodeLeaveLocked(ctx context.Context, node int64) (string, error) {
 	rm.incomingNode.Remove(node)
 
 	// for stopping query node becomes offline, node change won't be triggered,
 	// cause when it becomes stopping, it already remove from resource manager
 	// then `unassignNode` will do nothing
-	rgName, err := rm.unassignNode(ctx, node)
+	return rm.unassignNode(ctx, node)
+}
+
+// HandleNodeDown handle the node when node is leave.
+func (rm *ResourceManager) HandleNodeDown(ctx context.Context, node int64) {
+	rm.rwmutex.Lock()
+	defer rm.rwmutex.Unlock()
+
+	rgName, err := rm.handleNodeLeaveLocked(ctx, node)
 
 	// trigger node changes, expected to remove ro node from replica immediately
 	rm.nodeChangedNotifier.NotifyAll()
@@ -497,12 +524,29 @@ func (rm *ResourceManager) HandleNodeDown(ctx context.Context, node int64) {
 	)
 }
 
+func (rm *ResourceManager) HandleNodeSuspend(ctx context.Context, node int64) {
+	rm.rwmutex.Lock()
+	defer rm.rwmutex.Unlock()
+
+	rgName, err := rm.handleNodeLeaveLocked(ctx, node)
+	if err == nil {
+		rm.nodeMgr.Suspend(node)
+	}
+
+	// trigger node changes, expected to remove ro node from replica immediately
+	rm.nodeChangedNotifier.NotifyAll()
+	log.Info("HandleNodeSuspend: remove node from resource group",
+		zap.String("rgName", rgName),
+		zap.Int64("node", node),
+		zap.Error(err),
+	)
+}
+
 func (rm *ResourceManager) HandleNodeStopping(ctx context.Context, node int64) {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
-	rm.incomingNode.Remove(node)
-	rgName, err := rm.unassignNode(ctx, node)
+	rgName, err := rm.handleNodeLeaveLocked(ctx, node)
 	log.Info("HandleNodeStopping: remove node from resource group",
 		zap.String("rgName", rgName),
 		zap.Int64("node", node),
