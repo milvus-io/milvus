@@ -182,8 +182,8 @@ func (w *MultiSegmentWriter) splitColumnByRecord(r storage.Record, splitThresHol
 	shortColumnGroup := storagecommon.ColumnGroup{Columns: make([]int, 0)}
 	for i, field := range w.schema.Fields {
 		arr := r.Column(field.FieldID)
-		size := storage.CalculateArraySize(arr)
-		rows := arr.Len()
+		size := arr.Data().SizeInBytes()
+		rows := uint64(arr.Len())
 		if rows != 0 && int64(size/rows) >= splitThresHold {
 			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}})
 		} else {
