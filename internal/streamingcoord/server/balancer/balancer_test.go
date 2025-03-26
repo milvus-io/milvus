@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_manager"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	_ "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/policy"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -23,6 +24,8 @@ import (
 
 func TestBalancer(t *testing.T) {
 	paramtable.Init()
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
 
 	streamingNodeManager := mock_manager.NewMockManagerClient(t)
 	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
@@ -90,7 +93,7 @@ func TestBalancer(t *testing.T) {
 	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	ctx := context.Background()
-	b, err := balancer.RecoverBalancer(ctx, "pchannel_count_fair")
+	b, err := balancer.RecoverBalancer(ctx)
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
 

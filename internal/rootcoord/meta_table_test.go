@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
@@ -1080,6 +1081,8 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 				100: {Name: "collection"},
 			},
 		}
+		channel.ResetStaticPChannelStatsManager()
+		channel.RecoverPChannelStatsManager([]string{})
 		meta.names.insert("", "collection", 100)
 		meta.names.insert("", "alias1", 100)
 		meta.names.insert("", "alias2", 100)
@@ -1191,6 +1194,7 @@ func TestMetaTable_reload(t *testing.T) {
 					nil)
 			},
 		)
+		channel.ResetStaticPChannelStatsManager()
 		err := meta.reload()
 		assert.NoError(t, err)
 		assert.NoError(t, err)
@@ -1224,6 +1228,7 @@ func TestMetaTable_reload(t *testing.T) {
 			nil)
 
 		meta := &MetaTable{catalog: catalog}
+		channel.ResetStaticPChannelStatsManager()
 		err := meta.reload()
 		assert.NoError(t, err)
 		assert.NoError(t, err)
@@ -1257,6 +1262,7 @@ func TestMetaTable_reload(t *testing.T) {
 			},
 		)
 
+		channel.ResetStaticPChannelStatsManager()
 		err := meta.reload()
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(meta.collID2Meta))

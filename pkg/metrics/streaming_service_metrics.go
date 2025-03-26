@@ -107,6 +107,11 @@ var (
 		Help: "Term of pchannels",
 	}, WALChannelLabelName, WALChannelTermLabelName, StreamingNodeLabelName, WALStateLabelName)
 
+	StreamingCoordVChannelTotal = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
+		Name: "vchannel_total",
+		Help: "Total of vchannels",
+	}, WALChannelLabelName, StreamingNodeLabelName)
+
 	StreamingCoordAssignmentVersion = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
 		Name: "assignment_info",
 		Help: "Info of assignment",
@@ -396,6 +401,7 @@ func RegisterStreamingServiceClient(registry *prometheus.Registry) {
 // registerStreamingCoord registers streaming coord metrics
 func registerStreamingCoord(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingCoordPChannelInfo)
+	registry.MustRegister(StreamingCoordVChannelTotal)
 	registry.MustRegister(StreamingCoordAssignmentVersion)
 	registry.MustRegister(StreamingCoordAssignmentListenerTotal)
 	registry.MustRegister(StreamingCoordBroadcasterTaskTotal)
