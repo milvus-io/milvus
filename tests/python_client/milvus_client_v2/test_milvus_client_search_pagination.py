@@ -843,8 +843,7 @@ class TestSearchPagination(TestcaseBase):
         res = collection_w.search(search_vectors[:default_nq], ct.default_sparse_vec_field_name, _search_param,
                                   default_limit + offset)[0]
         assert len(search_res[0].ids) == len(res[0].ids[offset:])
-        assert sorted(search_res[0].distances, key=numpy.float32) == sorted(
-            res[0].distances[offset:], key=numpy.float32)
+        assert sorted(search_res[0].distances, key=np.float32) == sorted(res[0].distances[offset:], key=np.float32)
 
 
 class TestSearchPaginationInvalid(TestMilvusClientV2Base):
