@@ -16,11 +16,6 @@
 
 package column
 
-import (
-	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
-)
-
 var (
 	// scalars
 	NewNullableColumnBool      NullableColumnCreateFunc[bool, *ColumnBool]        = NewNullableColumnCreator(NewColumnBool).New
@@ -58,17 +53,11 @@ type NullableColumnCreator[col interface {
 
 func (c NullableColumnCreator[col, T]) New(name string, values []T, validData []bool) (col, error) {
 	var result col
-	validCnt := lo.CountBy(validData, func(v bool) bool {
-		return v
-	})
-	if validCnt != len(values) {
-		return result, errors.Newf("values number(%d) does not match valid count(%d)", len(values), validCnt)
-	}
 
 	result = c.base(name, values)
 	result.withValidData(validData)
 
-	return result, nil
+	return result, result.ValidateNullable()
 }
 
 func NewNullableColumnCreator[col interface {
