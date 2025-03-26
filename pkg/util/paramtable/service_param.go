@@ -495,7 +495,7 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 	p.PaginationSize = ParamItem{
 		Key:          "metastore.paginationSize",
 		Version:      "2.5.1",
-		DefaultValue: "100000",
+		DefaultValue: "10000",
 		Doc:          `limits the number of results to return from metastore.`,
 	}
 	p.PaginationSize.Init(base.mgr)
