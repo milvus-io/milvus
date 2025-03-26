@@ -74,6 +74,7 @@ enum ErrorCode {
 
     KnowhereError = 2099
 };
+
 namespace impl {
 void
 EasyAssertInfo(bool value,
@@ -82,6 +83,9 @@ EasyAssertInfo(bool value,
                int lineno,
                std::string_view extra_info,
                ErrorCode error_code = ErrorCode::UnexpectedError);
+
+std::string
+EasyStackTrace();
 
 }  // namespace impl
 
