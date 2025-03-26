@@ -368,11 +368,9 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			case "zh", "chinese":
 				lang = "zh"
 			default:
-				// Fallback to sequential numbers for unsupported languages
-				for i := start; i < start+nb; i++ {
-					varcharValues = append(varcharValues, strconv.Itoa(i))
-				}
-				return column.NewColumnVarChar(fieldName, varcharValues)
+				// Fallback to en for unsupported languages
+				log.Warn("Unsupported language, fallback to English", zap.String("language", option.textLang))
+				lang = "en"
 			}
 
 			// Generate text data with empty values based on textEmptyPercent

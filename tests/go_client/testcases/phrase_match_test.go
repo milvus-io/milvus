@@ -116,9 +116,6 @@ func TestPhraseMatchWithDiffLang(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.language == common.Chinese {
-				t.Skip("Skip test for Chinese language, issue: https://github.com/milvus-io/milvus/issues/39711")
-			}
 			analyzerParams := map[string]any{"tokenizer": tc.analyzer}
 			fieldsOption := hp.TNewFieldsOption().TWithAnalyzerParams(analyzerParams)
 			function := hp.TNewBM25Function(common.DefaultTextFieldName, common.DefaultTextSparseVecFieldName)
