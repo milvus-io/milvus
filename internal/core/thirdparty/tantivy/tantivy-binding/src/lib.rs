@@ -1,3 +1,6 @@
+use error::TantivyBindingError;
+
+mod analyzer;
 mod array;
 mod data_type;
 mod demo_c;
@@ -12,26 +15,44 @@ mod index_writer;
 mod index_writer_c;
 mod index_writer_text;
 mod index_writer_text_c;
+mod index_writer_v5;
+mod index_writer_v7;
 mod log;
 mod string_c;
 mod token_stream_c;
-mod analyzer;
 mod tokenizer_c;
 mod util;
 mod util_c;
 mod vec_collector;
 
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+use error::Result;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TantivyIndexVersion {
+    V5, // Version for compatibility (for 2.4.x)
+    V7, // Latest version
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl TantivyIndexVersion {
+    pub fn from_u32(version: u32) -> Result<Self> {
+        match version {
+            5 => Ok(Self::V5),
+            7 => Ok(Self::V7),
+            _ => Err(TantivyBindingError::InvalidArgument(format!(
+                "unsupported version {}",
+                version
+            ))),
+        }
+    }
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    pub fn as_u32(&self) -> u32 {
+        match self {
+            Self::V5 => 5,
+            Self::V7 => 7,
+        }
+    }
+
+    pub fn default_version() -> Self {
+        Self::V7
     }
 }

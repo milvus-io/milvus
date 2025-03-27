@@ -65,25 +65,26 @@ mod tests {
     use tantivy::query::TermQuery;
     use tempfile::TempDir;
 
-    use crate::{analyzer::create_analyzer, index_writer::IndexWriterWrapper};
+    use crate::{index_writer::IndexWriterWrapper, TantivyIndexVersion};
     #[test]
     fn test_jeba() {
         let params = "{\"tokenizer\": \"jieba\"}".to_string();
-        let tokenizer = create_analyzer(&params).unwrap();
         let dir = TempDir::new().unwrap();
 
         let mut writer = IndexWriterWrapper::create_text_writer(
-            "text".to_string(),
-            dir.path().to_str().unwrap().to_string(),
-            "jieba".to_string(),
-            tokenizer,
+            "text",
+            dir.path().to_str().unwrap(),
+            "jieba",
+            &params,
             1,
             50_000_000,
             false,
-        );
+            TantivyIndexVersion::default_version(),
+        )
+        .unwrap();
 
-        writer.add_string("网球和滑雪", 0).unwrap();
-        writer.add_string("网球以及滑雪", 1).unwrap();
+        writer.add("网球和滑雪", Some(0)).unwrap();
+        writer.add("网球以及滑雪", Some(1)).unwrap();
 
         writer.commit().unwrap();
 
@@ -100,20 +101,21 @@ mod tests {
 
     #[test]
     fn test_read() {
-        let tokenizer = create_analyzer("").unwrap();
         let dir = TempDir::new().unwrap();
         let mut writer = IndexWriterWrapper::create_text_writer(
-            "text".to_string(),
-            dir.path().to_str().unwrap().to_string(),
-            "default".to_string(),
-            tokenizer,
+            "text",
+            dir.path().to_str().unwrap(),
+            "default",
+            "",
             1,
             50_000_000,
             false,
-        );
+            TantivyIndexVersion::default_version(),
+        )
+        .unwrap();
 
         for i in 0..10000 {
-            writer.add_string("hello world", i).unwrap();
+            writer.add("hello world", Some(i)).unwrap();
         }
         writer.commit().unwrap();
 

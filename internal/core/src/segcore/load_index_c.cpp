@@ -193,6 +193,21 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         index_info.field_type = milvus::DataType(field_type);
         index_info.index_type = index_params["index_type"];
 
+        auto config = milvus::index::ParseConfigFromIndexParams(
+            load_index_info->index_params);
+
+        // Config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain.
+        // Use value_or(1) for unit test without setting this value
+        index_info.scalar_index_engine_version =
+            milvus::index::GetValueFromConfig<int32_t>(
+                config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+                .value_or(1);
+
+        index_info.tantivy_index_version =
+            milvus::index::GetValueFromConfig<int32_t>(
+                config, milvus::index::TANTIVY_INDEX_VERSION)
+                .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
+
         load_index_info->index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(
                 index_info, milvus::storage::FileManagerContext());
@@ -261,6 +276,21 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         index_info.field_type = load_index_info->field_type;
         index_info.index_engine_version = engine_version;
 
+        auto config = milvus::index::ParseConfigFromIndexParams(
+            load_index_info->index_params);
+
+        // Config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain.
+        // Use value_or(1) for unit test without setting this value
+        index_info.scalar_index_engine_version =
+            milvus::index::GetValueFromConfig<int32_t>(
+                config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+                .value_or(1);
+
+        index_info.tantivy_index_version =
+            milvus::index::GetValueFromConfig<int32_t>(
+                config, milvus::index::TANTIVY_INDEX_VERSION)
+                .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
+
         auto ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
         auto span = milvus::tracer::StartSpan("SegCoreLoadIndex", &ctx);
@@ -302,8 +332,6 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
             milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                 .GetRemoteChunkManager();
 
-        auto config = milvus::index::ParseConfigFromIndexParams(
-            load_index_info->index_params);
         config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
         if (load_index_info->field_type == milvus::DataType::JSON) {
