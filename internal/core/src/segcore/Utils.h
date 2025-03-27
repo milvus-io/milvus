@@ -119,8 +119,24 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
                           std::shared_ptr<ArrowReaderChannel> channel);
 
 void
+LoadArrowReaderFromStorageV2(
+    const std::vector<std::string>& remote_files,
+    SchemaPtr schema,
+    std::unordered_map<int64_t, FieldDataInfo>& field_data_infos,
+    int64_t memory_limit,
+    uint64_t parallel_degree);
+
+void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                          FieldDataChannelPtr channel);
+
+void
+LoadFieldDatasFromStorageV2(
+    const std::vector<std::string>& remote_files,
+    SchemaPtr schema,
+    std::unordered_map<int64_t, FieldDataInfo>& field_data_infos,
+    int64_t memory_limit,
+    uint64_t parallel_degree);
 /**
  * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
  * (i.e. that is strictly greater than value), or last if no such element is found.

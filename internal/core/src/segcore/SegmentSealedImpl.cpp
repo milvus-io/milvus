@@ -36,10 +36,12 @@
 #include "common/File.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
+#include "common/Schema.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "google/protobuf/message_lite.h"
 #include "index/VectorMemIndex.h"
+#include "milvus-storage/common/metadata.h"
 #include "mmap/Column.h"
 #include "mmap/Utils.h"
 #include "mmap/Types.h"
@@ -51,6 +53,9 @@
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/MmapManager.h"
+
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::segcore {
 
@@ -295,6 +300,18 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
 void
 SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
+    switch (load_info.storage_version) {
+        case 2:
+            load_field_group_data(load_info);
+            break;
+        default:
+            load_field_data(load_info);
+            break;
+    }
+}
+
+void
+SegmentSealedImpl::load_field_data(const LoadFieldDataInfo& load_info) {
     // NOTE: lock only when data is ready to avoid starvation
     // only one field for now, parallel load field data in golang
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
@@ -341,6 +358,78 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
                  this->get_segment_id(),
                  field_id.get(),
                  use_mmap);
+    }
+}
+
+void
+SegmentSealedImpl::load_field_group_data(const LoadFieldDataInfo& load_info) {
+    size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
+    ArrowSchemaPtr arrow_schema = schema_->ConvertToArrowSchema();
+
+    for (auto& [id, info] : load_info.field_infos) {
+        AssertInfo(info.row_count > 0, "The row count of field data is 0");
+
+        auto column_group_id = FieldId(id);
+        auto insert_files = info.insert_files;
+
+        AssertInfo(insert_files.size() > 0,
+                   "No insert files found for column group id");
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        auto file_reader =
+            std::make_shared<milvus_storage::FileRecordBatchReader>(
+                fs, insert_files[0], arrow_schema);
+        std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
+            file_reader->file_metadata();
+        milvus_storage::FieldIDList field_ids =
+            metadata->GetGroupFieldIDList().GetFieldIDList(
+                column_group_id.get());
+
+        auto parallel_degree = static_cast<uint64_t>(
+            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+        std::unordered_map<int64_t, FieldDataInfo> field_data_infos;
+        for (int i = 0; i < field_ids.size(); i++) {
+            int64_t field_id = field_ids.Get(i);
+            field_data_infos[field_id] =
+                FieldDataInfo(field_id, num_rows, load_info.mmap_dir_path);
+            field_data_infos[field_id].channel->set_capacity(parallel_degree *
+                                                             2);
+            LOG_INFO(
+                "segment {} load column group {} field {} with num_rows {}",
+                this->get_segment_id(),
+                id,
+                field_id,
+                num_rows);
+        }
+
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        pool.Submit(LoadFieldDatasFromStorageV2,
+                    insert_files,
+                    schema_,
+                    field_data_infos,
+                    FILE_SLICE_SIZE,
+                    parallel_degree);
+
+        LOG_INFO("segment {} submits load fields {} task to thread pool",
+                 this->get_segment_id(),
+                 field_ids.ToString());
+
+        for (auto& [field_id, field_data_info] : field_data_infos) {
+            auto fid = FieldId(field_id);
+            bool use_mmap = false;
+            if (!info.enable_mmap || SystemProperty::Instance().IsSystem(fid)) {
+                LoadFieldData(fid, field_data_info);
+            } else {
+                MapFieldData(fid, field_data_info);
+                use_mmap = true;
+            }
+
+            LOG_INFO("segment {} loads field {} mmap {} done",
+                     this->get_segment_id(),
+                     field_id,
+                     use_mmap);
+        }
     }
 }
 
@@ -843,6 +932,7 @@ const Schema&
 SegmentSealedImpl::get_schema() const {
     return *schema_;
 }
+
 std::vector<SegOffset>
 SegmentSealedImpl::search_pk(const PkType& pk, Timestamp timestamp) const {
     if (!is_sorted_by_pk_) {

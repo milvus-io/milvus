@@ -28,6 +28,7 @@
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"
 #include "common/EasyAssert.h"
+#include "common/LoadInfo.h"
 #include "google/protobuf/message_lite.h"
 #include "mmap/ChunkedColumn.h"
 #include "index/ScalarIndex.h"
@@ -97,6 +98,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadTextIndex(FieldId field_id,
                   std::unique_ptr<index::TextMatchIndex> index) override;
+
+    void
+    load_field_data(const LoadFieldDataInfo& load_info);
+
+    void
+    load_field_group_data(const LoadFieldDataInfo& load_info);
 
  public:
     size_t

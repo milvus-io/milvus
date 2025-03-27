@@ -30,11 +30,13 @@ token_stream_get_token(CTokenStream token_stream) {
 
 CToken
 token_stream_get_detailed_token(CTokenStream token_stream) {
-    auto token= static_cast<milvus::tantivy::TokenStream*>(token_stream)
-        ->get_detailed_token();
-    return CToken{
-        token.token, token.start_offset, token.end_offset, token.position, token.position_length
-    };
+    auto token = static_cast<milvus::tantivy::TokenStream*>(token_stream)
+                     ->get_detailed_token();
+    return CToken{token.token,
+                  token.start_offset,
+                  token.end_offset,
+                  token.position,
+                  token.position_length};
 }
 
 void

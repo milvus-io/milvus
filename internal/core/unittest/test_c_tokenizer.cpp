@@ -70,16 +70,15 @@ TEST(CTokenizer, Default) {
     ASSERT_FALSE(token_stream_advance(token_stream));
 
     free_token_stream(token_stream);
-  
-    token_stream =
-        create_token_stream(tokenizer, text.c_str(), text.length());
+
+    token_stream = create_token_stream(tokenizer, text.c_str(), text.length());
 
     for (int i = 0; i < 3; i++) {
         ASSERT_TRUE(token_stream_advance(token_stream));
         auto token = token_stream_get_detailed_token(token_stream);
         ASSERT_EQ(refs[i], std::string(token.token));
         ASSERT_EQ(offsets[i], token.start_offset);
-        
+
         free_token(const_cast<char*>(token.token));
     }
     ASSERT_FALSE(token_stream_advance(token_stream));

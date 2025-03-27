@@ -16,8 +16,10 @@
 
 #include <optional>
 #include <string>
+#include "arrow/type.h"
 #include <boost/lexical_cast.hpp>
 #include <google/protobuf/text_format.h>
+#include <memory>
 
 #include "Schema.h"
 #include "SystemProperty.h"
@@ -59,6 +61,20 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
                "primary key should be specified");
 
     return schema;
+}
+
+const ArrowSchemaPtr
+Schema::ConvertToArrowSchema() const {
+    arrow::FieldVector arrow_fields;
+    for (auto& field : fields_) {
+        auto meta = field.second;
+        auto arrow_field = std::make_shared<arrow::Field>(
+            meta.get_name().get(),
+            GetArrowDataType(meta.get_data_type(), meta.get_dim()),
+            meta.is_nullable());
+        arrow_fields.push_back(arrow_field);
+    }
+    return std::make_shared<arrow::Schema>(arrow_fields);
 }
 
 const FieldMeta FieldMeta::RowIdMeta(FieldName("RowID"),
