@@ -43,7 +43,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
-	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -363,24 +363,24 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
 		case util.MetaStoreTypeEtcd:
 			log.Ctx(initCtx).Info("Using etcd as meta storage.")
-			var ss *kvmetestore.SuffixSnapshot
+			var ss *kvmetastore.SuffixSnapshot
 			var err error
 
 			metaKV := c.metaKVCreator()
-			if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, Params.EtcdCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
+			if ss, err = kvmetastore.NewSuffixSnapshot(metaKV, kvmetastore.SnapshotsSep, Params.EtcdCfg.MetaRootPath.GetValue(), kvmetastore.SnapshotPrefix); err != nil {
 				return err
 			}
-			catalog = kvmetestore.NewCatalog(metaKV, ss)
+			catalog = kvmetastore.NewCatalog(metaKV, ss)
 		case util.MetaStoreTypeTiKV:
 			log.Ctx(initCtx).Info("Using tikv as meta storage.")
-			var ss *kvmetestore.SuffixSnapshot
+			var ss *kvmetastore.SuffixSnapshot
 			var err error
 
 			metaKV := c.metaKVCreator()
-			if ss, err = kvmetestore.NewSuffixSnapshot(metaKV, kvmetestore.SnapshotsSep, Params.TiKVCfg.MetaRootPath.GetValue(), kvmetestore.SnapshotPrefix); err != nil {
+			if ss, err = kvmetastore.NewSuffixSnapshot(metaKV, kvmetastore.SnapshotsSep, Params.TiKVCfg.MetaRootPath.GetValue(), kvmetastore.SnapshotPrefix); err != nil {
 				return err
 			}
-			catalog = kvmetestore.NewCatalog(metaKV, ss)
+			catalog = kvmetastore.NewCatalog(metaKV, ss)
 		default:
 			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}
