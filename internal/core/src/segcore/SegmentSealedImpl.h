@@ -73,6 +73,13 @@ class SegmentSealedImpl : public SegmentSealed {
 
     void
     LoadFieldData(FieldId field_id, FieldDataInfo& data) override;
+
+    void
+    LoadColumnGroupData(FieldId column_group_id,
+                        FieldDataInfo& data,
+                        milvus_storage::FieldIDList field_ids,
+                        bool use_mmap) override;
+
     void
     MapFieldData(const FieldId field_id, FieldDataInfo& data) override;
     void

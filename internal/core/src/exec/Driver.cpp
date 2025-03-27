@@ -176,21 +176,21 @@ Driver::Next(std::shared_ptr<BlockingState>& blocking_state) {
     return result;
 }
 
-#define CALL_OPERATOR(call_func, operator, method_name)                        \
-    try {                                                                      \
-        call_func;                                                             \
-    } catch (std::exception & e) {                                             \
-        std::string stack_trace = milvus::impl::EasyStackTrace();              \
-        auto err_msg = fmt::format(                                            \
-            "Operator::{} failed for [Operator:{}, plan node id: "             \
-            "{}] : {}\nStack trace: {}",                                       \
-            method_name,                                                       \
-            operator->ToString() ,                                             \
-            operator->get_plannode_id(),                                       \
-            e.what(),                                                          \
-            stack_trace);                                                      \
-        LOG_ERROR(err_msg);                                                    \
-        throw ExecOperatorException(err_msg);                                  \
+#define CALL_OPERATOR(call_func, operator, method_name)            \
+    try {                                                          \
+        call_func;                                                 \
+    } catch (std::exception & e) {                                 \
+        std::string stack_trace = milvus::impl::EasyStackTrace();  \
+        auto err_msg = fmt::format(                                \
+            "Operator::{} failed for [Operator:{}, plan node id: " \
+            "{}] : {}\nStack trace: {}",                           \
+            method_name,                                           \
+            operator->ToString(),                                  \
+            operator->get_plannode_id(),                           \
+            e.what(),                                              \
+            stack_trace);                                          \
+        LOG_ERROR(err_msg);                                        \
+        throw ExecOperatorException(err_msg);                      \
     }
 
 StopReason
