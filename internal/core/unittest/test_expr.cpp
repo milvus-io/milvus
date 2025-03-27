@@ -16231,21 +16231,21 @@ class JsonIndexTestFixture : public testing::Test {
             json_path = "/bool";
             lower_bound.set_bool_val(std::numeric_limits<bool>::min());
             upper_bound.set_bool_val(std::numeric_limits<bool>::max());
-            cast_type = milvus::DataType::BOOL;
+            cast_type = JsonCastType::BOOL;
             wrong_type_val.set_int64_val(123);
         } else if constexpr (std::is_same_v<T, int64_t>) {
             schema_data_type = proto::schema::Int64;
             json_path = "/int";
             lower_bound.set_int64_val(std::numeric_limits<int64_t>::min());
             upper_bound.set_int64_val(std::numeric_limits<int64_t>::max());
-            cast_type = milvus::DataType::INT64;
+            cast_type = JsonCastType::DOUBLE;
             wrong_type_val.set_string_val("123");
         } else if constexpr (std::is_same_v<T, double>) {
             schema_data_type = proto::schema::Double;
             json_path = "/double";
             lower_bound.set_float_val(std::numeric_limits<double>::min());
             upper_bound.set_float_val(std::numeric_limits<double>::max());
-            cast_type = milvus::DataType::DOUBLE;
+            cast_type = JsonCastType::DOUBLE;
             wrong_type_val.set_string_val("123");
         } else if constexpr (std::is_same_v<T, std::string>) {
             schema_data_type = proto::schema::String;
@@ -16253,7 +16253,7 @@ class JsonIndexTestFixture : public testing::Test {
             lower_bound.set_string_val("");
             std::string s(1024, '9');
             upper_bound.set_string_val(s);
-            cast_type = milvus::DataType::STRING;
+            cast_type = JsonCastType::VARCHAR;
             wrong_type_val.set_int64_val(123);
         }
     }
@@ -16261,7 +16261,7 @@ class JsonIndexTestFixture : public testing::Test {
     std::string json_path;
     proto::plan::GenericValue lower_bound;
     proto::plan::GenericValue upper_bound;
-    milvus::DataType cast_type;
+    JsonCastType cast_type;
 
     proto::plan::GenericValue wrong_type_val;
 };
@@ -16398,4 +16398,70 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     EXPECT_EQ(final.count(), expect_count);
+}
+
+TEST(JsonIndexTest, TestJsonNotEqualExpr) {
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    segcore::LoadIndexInfo load_index_info;
+
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        index::INVERTED_INDEX_TYPE,
+        JsonCastType::DOUBLE,
+        "/a",
+        file_manager_ctx);
+
+    using json_index_type = index::JsonInvertedIndex<double>;
+    auto json_index = std::unique_ptr<json_index_type>(
+        static_cast<json_index_type*>(inv_index.release()));
+    auto json_strs = std::vector<std::string>{
+        R"({"a": 1.0})", R"({"a": "abc"})", R"({"a": 3.0})", R"({"a": null})"};
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    auto json_field2 =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    std::vector<milvus::Json> jsons;
+
+    for (auto& json : json_strs) {
+        jsons.push_back(milvus::Json(simdjson::padded_string(json)));
+    }
+    json_field->add_json_data(jsons);
+    json_field2->add_json_data(jsons);
+
+    json_index->BuildWithFieldData({json_field, json_field2});
+    json_index->finish();
+    json_index->create_reader();
+
+    load_index_info.field_id = json_fid.get();
+    load_index_info.field_type = DataType::JSON;
+    load_index_info.index = std::move(json_index);
+    load_index_info.index_params = {{JSON_PATH, "/a"}};
+    seg->LoadIndex(load_index_info);
+
+    auto json_field_data_info = FieldDataInfo(
+        json_fid.get(), 2 * json_strs.size(), {json_field, json_field2});
+    seg->LoadFieldData(json_fid, json_field_data_info);
+
+    proto::plan::GenericValue val;
+    val.set_int64_val(1);
+    auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
+        proto::plan::OpType::NotEqual,
+        val,
+        std::vector<proto::plan::GenericValue>());
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
+    auto final =
+        ExecuteQueryExpr(plan, seg.get(), 2 * json_strs.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 2 * json_strs.size() - 2);
 }
