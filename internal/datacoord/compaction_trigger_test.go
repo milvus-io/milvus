@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -620,13 +621,13 @@ func Test_compactionTrigger_force(t *testing.T) {
 						},
 					},
 					// StartTime:        0,
-					BeginLogID:             100,
 					TimeoutInSeconds:       Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
 					Type:                   datapb.CompactionType_MixCompaction,
 					Channel:                "ch1",
 					TotalRows:              200,
 					Schema:                 schema,
 					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 101, End: 200},
+					PreAllocatedLogIDs:     &datapb.IDRange{Begin: 100, End: 200},
 					MaxSize:                1342177280,
 					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 				},
@@ -662,7 +663,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			case plan := <-spy.spyChan:
 				plan.StartTime = 0
 				sortPlanCompactionBinlogs(plan)
-				assert.EqualValues(t, tt.wantPlans[0], plan)
+				assert.True(t, proto.Equal(tt.wantPlans[0], plan))
 				return
 			case <-time.After(3 * time.Second):
 				assert.Fail(t, "timeout")
@@ -957,12 +958,12 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 							IsSorted: true,
 						},
 					},
-					BeginLogID:       100,
-					StartTime:        3,
-					TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
-					Type:             datapb.CompactionType_MixCompaction,
-					Channel:          "ch1",
-					MaxSize:          1342177280,
+					PreAllocatedLogIDs: &datapb.IDRange{Begin: 200, End: 2000},
+					StartTime:          3,
+					TimeoutInSeconds:   Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
+					Type:               datapb.CompactionType_MixCompaction,
+					Channel:            "ch1",
+					MaxSize:            1342177280,
 				},
 			},
 		},

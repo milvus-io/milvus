@@ -307,10 +307,6 @@ func (t *mixCompactionTask) CheckCompactionContainsSegment(segmentID int64) bool
 
 func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
-	beginLogID, _, err := t.allocator.AllocN(1)
-	if err != nil {
-		return nil, err
-	}
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	plan := &datapb.CompactionPlan{
 		PlanID:                 taskProto.GetPlanID(),
@@ -321,13 +317,13 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		CollectionTtl:          taskProto.GetCollectionTtl(),
 		TotalRows:              taskProto.GetTotalRows(),
 		Schema:                 taskProto.GetSchema(),
-		BeginLogID:             beginLogID,
 		PreAllocatedSegmentIDs: taskProto.GetPreAllocatedSegmentIDs(),
 		SlotUsage:              t.GetSlotUsage(),
 		MaxSize:                taskProto.GetMaxSize(),
 	}
 
 	segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
+	segments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
 	for _, segID := range taskProto.GetInputSegments() {
 		segInfo := t.meta.GetHealthySegment(context.TODO(), segID)
 		if segInfo == nil {
@@ -346,8 +342,17 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			StorageVersion:      segInfo.GetStorageVersion(),
 		})
 		segIDMap[segID] = segInfo.GetDeltalogs()
+		segments = append(segments, segInfo)
 	}
-	log.Info("Compaction handler refreshed mix compaction plan", zap.Int64("maxSize", plan.GetMaxSize()), zap.Any("segID2DeltaLogs", segIDMap))
+
+	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments)
+	if err != nil {
+		return nil, err
+	}
+	plan.PreAllocatedLogIDs = logIDRange
+
+	log.Info("Compaction handler refreshed mix compaction plan", zap.Int64("maxSize", plan.GetMaxSize()),
+		zap.Any("segID2DeltaLogs", segIDMap), zap.Any("PreAllocatedLogIDs", logIDRange))
 	return plan, nil
 }
 
