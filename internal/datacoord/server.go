@@ -462,6 +462,14 @@ func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (type
 	s.dataNodeCreator = f
 }
 
+func (s *Server) SetSession(session sessionutil.SessionInterface) error {
+	s.session = session
+	if s.session == nil {
+		return fmt.Errorf("session is nil, the etcd client connection may have failed")
+	}
+	return nil
+}
+
 func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
 	cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(s.ctx)

@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -85,8 +84,7 @@ type Server struct {
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	// Coordinators
-	dataCoord types.DataCoordClient
-	rootCoord types.RootCoordClient
+	mixCoord types.MixCoord
 
 	// Meta
 	store     metastore.QueryCoordCatalog
@@ -178,13 +176,21 @@ func (s *Server) Register() error {
 
 func (s *Server) initSession() error {
 	// Init QueryCoord session
-	s.session = sessionutil.NewSession(s.ctx)
+	// s.session = sessionutil.NewSession(s.ctx)
+	// if s.session == nil {
+	// 	return fmt.Errorf("failed to create session")
+	// }
+	// s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
+	// s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
+	// s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
+	return nil
+}
+
+func (s *Server) SetSession(session sessionutil.SessionInterface) error {
+	s.session = session
 	if s.session == nil {
-		return fmt.Errorf("failed to create session")
+		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
-	s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
-	s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
-	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	return nil
 }
 
@@ -436,8 +442,7 @@ func (s *Server) initMeta() error {
 	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr)
 
 	s.broker = meta.NewCoordinatorBroker(
-		s.dataCoord,
-		s.rootCoord,
+		s.mixCoord,
 	)
 
 	log.Info("recover meta...")
@@ -719,23 +724,17 @@ func (s *Server) SetTiKVClient(client *txnkv.Client) {
 	s.tikvCli = client
 }
 
+func (s *Server) SetMixCoord(mixCoord types.MixCoord) {
+	s.mixCoord = mixCoord
+}
+
 // SetRootCoord sets root coordinator's client
 func (s *Server) SetRootCoordClient(rootCoord types.RootCoordClient) error {
-	if rootCoord == nil {
-		return errors.New("null RootCoord interface")
-	}
-
-	s.rootCoord = rootCoord
 	return nil
 }
 
 // SetDataCoord sets data coordinator's client
 func (s *Server) SetDataCoordClient(dataCoord types.DataCoordClient) error {
-	if dataCoord == nil {
-		return errors.New("null DataCoord interface")
-	}
-
-	s.dataCoord = dataCoord
 	return nil
 }
 

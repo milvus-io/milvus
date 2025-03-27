@@ -180,8 +180,6 @@ type RootCoordComponent interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 
 	RegisterStreamingCoordGRPCService(server *grpc.Server)
-
-	GracefulStop()
 }
 
 // ProxyClient is the client interface for proxy server
@@ -307,6 +305,8 @@ type QueryCoordComponent interface {
 
 	// SetQueryNodeCreator set QueryNode client creator func for QueryCoord
 	SetQueryNodeCreator(func(ctx context.Context, addr string, nodeID int64) (QueryNodeClient, error))
+
+	SetMixCoord(mixCoord MixCoord)
 }
 
 // MixCoordClient is the client interface for mixcoord server

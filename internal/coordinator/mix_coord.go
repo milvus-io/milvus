@@ -119,7 +119,16 @@ func (s *mixCoordImpl) Init() error {
 			return
 		}
 
+		s.rootcoordServer.SetMixCoord(s)
+		s.datacoordServer.SetMixCoord(s)
+		s.queryCoordServer.SetMixCoord(s)
+
 		if err := s.rootcoordServer.Init(); err != nil {
+			initErr = err
+			return
+		}
+
+		if err := s.rootcoordServer.Start(); err != nil {
 			initErr = err
 			return
 		}
@@ -129,7 +138,17 @@ func (s *mixCoordImpl) Init() error {
 			return
 		}
 
+		if err := s.datacoordServer.Start(); err != nil {
+			initErr = err
+			return
+		}
+
 		if err := s.queryCoordServer.Init(); err != nil {
+			initErr = err
+			return
+		}
+
+		if err := s.queryCoordServer.Start(); err != nil {
 			initErr = err
 			return
 		}
@@ -139,30 +158,13 @@ func (s *mixCoordImpl) Init() error {
 
 func (s *mixCoordImpl) Start() error {
 	var startErr error
-	s.startOnce.Do(func() {
-		if err := s.rootcoordServer.Start(); err != nil {
-			startErr = err
-			return
-		}
-
-		if err := s.datacoordServer.Start(); err != nil {
-			startErr = err
-			return
-		}
-
-		if err := s.queryCoordServer.Start(); err != nil {
-			startErr = err
-			return
-		}
-
-		s.wg.Add(1)
-		go s.startHealthCheck()
-	})
 	return startErr
 }
 
 func (s *mixCoordImpl) Stop() error {
-	s.cancel()
+	log.Info("graceful stop")
+	s.GracefulStop()
+	log.Info("graceful stop done")
 
 	if err := s.queryCoordServer.Stop(); err != nil {
 		log.Error("Failed to stop queryCoord", zap.Error(err))
@@ -175,18 +177,17 @@ func (s *mixCoordImpl) Stop() error {
 	if err := s.rootcoordServer.Stop(); err != nil {
 		log.Error("Failed to stop rootCoord", zap.Error(err))
 	}
-
-	s.wg.Wait()
+	s.cancel()
 	return nil
 }
 
 func (s *mixCoordImpl) initStreamingCoord() {
-	s.streamingCoord = streamingcoord.NewServerBuilder().
-		WithETCD(s.etcdCli).
-		// WithMetaKV(s.metaKVCreator()).
-		WithSession(s.session).
-		// WithMixCoordClient(s).
-		Build()
+	// s.streamingCoord = streamingcoord.NewServerBuilder().
+	// 	WithETCD(s.etcdCli).
+	// 	WithMetaKV(s.metaKVCreator()).
+	// 	WithSession(s.session).
+	// 	WithMixCoordClient(s).
+	// 	Build()
 }
 
 func (s *mixCoordImpl) initSession() error {
@@ -195,8 +196,8 @@ func (s *mixCoordImpl) initSession() error {
 	s.enableActiveStandBy = Params.RootCoordCfg.EnableActiveStandby.GetAsBool()
 	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	s.rootcoordServer.SetSession(s.session)
-	// s.datacoordServer.SetSession(s.session)
-	// s.queryCoordServer.SetSession(s.session)
+	s.datacoordServer.SetSession(s.session)
+	s.queryCoordServer.SetSession(s.session)
 
 	return nil
 }
