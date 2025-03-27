@@ -1054,11 +1054,13 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 
 func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {
 	ret := make(map[int64]map[int64]*indexpb.SegmentIndexState, 0)
+	m.fieldIndexLock.RLock()
 	fieldIndexes, ok := m.indexes[collectionID]
 	if !ok {
+		m.fieldIndexLock.RUnlock()
 		return ret
 	}
-
+	m.fieldIndexLock.RUnlock()
 	for _, segID := range segmentIDs {
 		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 		segIndexInfos, ok := m.segmentIndexes.Get(segID)
