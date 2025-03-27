@@ -197,8 +197,8 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Success(), nil
 	}
 
-	if req.GetBeginLogID() == 0 {
-		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid beginLogID")), nil
+	if req.GetPreAllocatedLogIDs().GetBegin() == 0 || req.GetPreAllocatedLogIDs().GetBegin() == 0 {
+		return merr.Status(merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid beginID %d and invalid endID %d", req.GetPreAllocatedLogIDs().GetBegin(), req.GetPreAllocatedLogIDs().GetBegin()))), nil
 	}
 
 	/*

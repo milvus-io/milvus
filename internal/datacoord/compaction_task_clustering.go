@@ -190,11 +190,11 @@ func (t *clusteringCompactionTask) CheckCompactionContainsSegment(segmentID int6
 }
 
 func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
-	beginLogID, _, err := t.allocator.AllocN(1)
+	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
+	logIDRange, err := PreAllocateBinlogIDs(t.allocator, t.meta.GetSegmentInfos(taskProto.GetInputSegments()))
 	if err != nil {
 		return nil, err
 	}
-	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	plan := &datapb.CompactionPlan{
 		PlanID:                 taskProto.GetPlanID(),
 		StartTime:              taskProto.GetStartTime(),
@@ -209,8 +209,8 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		PreferSegmentRows:      taskProto.GetPreferSegmentRows(),
 		AnalyzeResultPath:      path.Join(t.meta.(*meta).chunkManager.RootPath(), common.AnalyzeStatsPath, metautil.JoinIDPath(taskProto.AnalyzeTaskID, taskProto.AnalyzeVersion)),
 		AnalyzeSegmentIds:      taskProto.GetInputSegments(),
-		BeginLogID:             beginLogID,
 		PreAllocatedSegmentIDs: taskProto.GetPreAllocatedSegmentIDs(),
+		PreAllocatedLogIDs:     logIDRange,
 		SlotUsage:              t.GetSlotUsage(),
 	}
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
@@ -232,7 +232,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			IsSorted:            segInfo.GetIsSorted(),
 		})
 	}
-	log.Info("Compaction handler build clustering compaction plan")
+	log.Info("Compaction handler build clustering compaction plan", zap.Any("PreAllocatedLogIDs", logIDRange))
 	return plan, nil
 }
 
