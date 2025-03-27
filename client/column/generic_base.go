@@ -18,6 +18,7 @@ package column
 
 import (
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
@@ -32,6 +33,8 @@ type genericColumnBase[T any] struct {
 	fieldType entity.FieldType
 	values    []T
 
+	// nullable related fields
+	// note that nullable must be set to true explicitly
 	nullable  bool
 	validData []bool
 }
@@ -169,9 +172,8 @@ func (c *genericColumnBase[T]) AppendNull() error {
 	if !c.nullable {
 		return errors.New("append null to not nullable column")
 	}
-	// var v T
-	c.validData = append(c.validData, true)
-	// c.values = append(c.values, v)
+
+	c.validData = append(c.validData, false)
 	return nil
 }
 
@@ -187,6 +189,40 @@ func (c *genericColumnBase[T]) IsNull(idx int) (bool, error) {
 
 func (c *genericColumnBase[T]) Nullable() bool {
 	return c.nullable
+}
+
+// SetNullable update the nullable flag and change the valid data array according to the flag value.
+// NOTE: set nullable to false will erase all the validData previously set.
+func (c *genericColumnBase[T]) SetNullable(nullable bool) {
+	c.nullable = nullable
+	// initialize validData only when
+	if c.nullable && c.validData == nil {
+		// set valid flag for all exisiting values
+		c.validData = lo.RepeatBy(len(c.values), func(_ int) bool { return true })
+	}
+
+	if !c.nullable {
+		c.validData = nil
+	}
+}
+
+// ValidateNullable performs the sanity check for nullable column.
+// it checks the length of data and the valid number indicated by validData slice,
+// which shall be the same by definition
+func (c *genericColumnBase[T]) ValidateNullable() error {
+	// skip check if column not nullable
+	if !c.nullable {
+		return nil
+	}
+
+	// count valid entries
+	validCnt := lo.CountBy(c.validData, func(v bool) bool {
+		return v
+	})
+	if validCnt != len(c.values) {
+		return errors.Newf("values number(%d) does not match valid count(%d)", len(c.values), validCnt)
+	}
+	return nil
 }
 
 func (c *genericColumnBase[T]) withValidData(validData []bool) {
