@@ -1083,7 +1083,6 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			newGrow = append(newGrow, SegmentEntry{NodeID: 1, SegmentID: seg, TargetVersion: targetVersion})
 		}
 
-		log.Info("Test-", zap.Any("shanshot", snapshot), zap.Any("seg", newSeal))
 		snapshot.dist[0].Segments = newSeal
 		snapshot.growing = newGrow
 		return snapshot
