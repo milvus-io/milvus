@@ -60,15 +60,15 @@ func (a *localAllocator) exhausted() {
 
 // tsoAllocator allocate timestamp from remote root coordinator.
 type tsoAllocator struct {
-	rc     *syncutil.Future[types.RootCoordClient]
+	mix    *syncutil.Future[types.MixCoordClient]
 	nodeID int64
 }
 
 // newTSOAllocator creates a new remote allocator.
-func newTSOAllocator(rc *syncutil.Future[types.RootCoordClient]) *tsoAllocator {
+func newTSOAllocator(mix *syncutil.Future[types.MixCoordClient]) *tsoAllocator {
 	a := &tsoAllocator{
 		nodeID: paramtable.GetNodeID(),
-		rc:     rc,
+		mix:    mix,
 	}
 	return a
 }
@@ -84,7 +84,7 @@ func (ta *tsoAllocator) batchAllocate(ctx context.Context, count uint32) (uint64
 		),
 		Count: count,
 	}
-	rc, err := ta.rc.GetWithContext(ctx)
+	rc, err := ta.mix.GetWithContext(ctx)
 	if err != nil {
 		return 0, 0, fmt.Errorf("get root coordinator client timeout: %w", err)
 	}
@@ -104,15 +104,15 @@ func (ta *tsoAllocator) batchAllocate(ctx context.Context, count uint32) (uint64
 
 // idAllocator allocate timestamp from remote root coordinator.
 type idAllocator struct {
-	rc     *syncutil.Future[types.RootCoordClient]
+	mix    *syncutil.Future[types.MixCoordClient]
 	nodeID int64
 }
 
 // newIDAllocator creates a new remote allocator.
-func newIDAllocator(rc *syncutil.Future[types.RootCoordClient]) *idAllocator {
+func newIDAllocator(mix *syncutil.Future[types.MixCoordClient]) *idAllocator {
 	a := &idAllocator{
 		nodeID: paramtable.GetNodeID(),
-		rc:     rc,
+		mix:    mix,
 	}
 	return a
 }
@@ -128,7 +128,7 @@ func (ta *idAllocator) batchAllocate(ctx context.Context, count uint32) (uint64,
 		),
 		Count: count,
 	}
-	rc, err := ta.rc.GetWithContext(ctx)
+	rc, err := ta.mix.GetWithContext(ctx)
 	if err != nil {
 		return 0, 0, fmt.Errorf("get root coordinator client timeout: %w", err)
 	}

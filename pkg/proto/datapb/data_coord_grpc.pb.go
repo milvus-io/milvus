@@ -23,9 +23,6 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	DataCoord_GetComponentStates_FullMethodName          = "/milvus.proto.data.DataCoord/GetComponentStates"
-	DataCoord_GetTimeTickChannel_FullMethodName          = "/milvus.proto.data.DataCoord/GetTimeTickChannel"
-	DataCoord_GetStatisticsChannel_FullMethodName        = "/milvus.proto.data.DataCoord/GetStatisticsChannel"
 	DataCoord_Flush_FullMethodName                       = "/milvus.proto.data.DataCoord/Flush"
 	DataCoord_AllocSegment_FullMethodName                = "/milvus.proto.data.DataCoord/AllocSegment"
 	DataCoord_AssignSegmentID_FullMethodName             = "/milvus.proto.data.DataCoord/AssignSegmentID"
@@ -78,9 +75,6 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DataCoordClient interface {
-	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
-	GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
-	GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error)
 	// AllocSegment alloc a new growing segment, add it into segment meta.
 	AllocSegment(ctx context.Context, in *AllocSegmentRequest, opts ...grpc.CallOption) (*AllocSegmentResponse, error)
@@ -142,33 +136,6 @@ type dataCoordClient struct {
 
 func NewDataCoordClient(cc grpc.ClientConnInterface) DataCoordClient {
 	return &dataCoordClient{cc}
-}
-
-func (c *dataCoordClient) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
-	out := new(milvuspb.ComponentStates)
-	err := c.cc.Invoke(ctx, DataCoord_GetComponentStates_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataCoordClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	out := new(milvuspb.StringResponse)
-	err := c.cc.Invoke(ctx, DataCoord_GetTimeTickChannel_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataCoordClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	out := new(milvuspb.StringResponse)
-	err := c.cc.Invoke(ctx, DataCoord_GetStatisticsChannel_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *dataCoordClient) Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error) {
@@ -590,9 +557,6 @@ func (c *dataCoordClient) ListImports(ctx context.Context, in *internalpb.ListIm
 // All implementations should embed UnimplementedDataCoordServer
 // for forward compatibility
 type DataCoordServer interface {
-	GetComponentStates(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)
-	GetTimeTickChannel(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)
-	GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)
 	Flush(context.Context, *FlushRequest) (*FlushResponse, error)
 	// AllocSegment alloc a new growing segment, add it into segment meta.
 	AllocSegment(context.Context, *AllocSegmentRequest) (*AllocSegmentResponse, error)
@@ -652,15 +616,6 @@ type DataCoordServer interface {
 type UnimplementedDataCoordServer struct {
 }
 
-func (UnimplementedDataCoordServer) GetComponentStates(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetComponentStates not implemented")
-}
-func (UnimplementedDataCoordServer) GetTimeTickChannel(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetTimeTickChannel not implemented")
-}
-func (UnimplementedDataCoordServer) GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetStatisticsChannel not implemented")
-}
 func (UnimplementedDataCoordServer) Flush(context.Context, *FlushRequest) (*FlushResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Flush not implemented")
 }
@@ -809,60 +764,6 @@ type UnsafeDataCoordServer interface {
 
 func RegisterDataCoordServer(s grpc.ServiceRegistrar, srv DataCoordServer) {
 	s.RegisterService(&DataCoord_ServiceDesc, srv)
-}
-
-func _DataCoord_GetComponentStates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(milvuspb.GetComponentStatesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataCoordServer).GetComponentStates(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataCoord_GetComponentStates_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataCoordServer).GetComponentStates(ctx, req.(*milvuspb.GetComponentStatesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataCoord_GetTimeTickChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.GetTimeTickChannelRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataCoordServer).GetTimeTickChannel(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataCoord_GetTimeTickChannel_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataCoordServer).GetTimeTickChannel(ctx, req.(*internalpb.GetTimeTickChannelRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataCoord_GetStatisticsChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.GetStatisticsChannelRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataCoordServer).GetStatisticsChannel(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataCoord_GetStatisticsChannel_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataCoordServer).GetStatisticsChannel(ctx, req.(*internalpb.GetStatisticsChannelRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _DataCoord_Flush_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -1700,18 +1601,6 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.data.DataCoord",
 	HandlerType: (*DataCoordServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "GetComponentStates",
-			Handler:    _DataCoord_GetComponentStates_Handler,
-		},
-		{
-			MethodName: "GetTimeTickChannel",
-			Handler:    _DataCoord_GetTimeTickChannel_Handler,
-		},
-		{
-			MethodName: "GetStatisticsChannel",
-			Handler:    _DataCoord_GetStatisticsChannel_Handler,
-		},
 		{
 			MethodName: "Flush",
 			Handler:    _DataCoord_Flush_Handler,

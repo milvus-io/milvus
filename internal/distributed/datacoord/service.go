@@ -32,7 +32,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/types"
@@ -206,7 +205,6 @@ func (s *Server) startGrpcLoop() {
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
-	coordclient.RegisterDataCoordServer(s)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
 		s.grpcErrChan <- err
@@ -282,17 +280,17 @@ func (s *Server) Run() error {
 
 // GetComponentStates gets states of datacoord and datanodes
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return s.dataCoord.GetComponentStates(ctx, req)
+	return nil, nil
 }
 
 // GetTimeTickChannel gets timetick channel
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataCoord.GetTimeTickChannel(ctx, req)
+	return nil, nil
 }
 
 // GetStatisticsChannel gets statistics channel
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataCoord.GetStatisticsChannel(ctx, req)
+	return nil, nil
 }
 
 // GetSegmentInfo gets segment information according to segment id
@@ -440,7 +438,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, request *datapb
 }
 
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	return s.dataCoord.CheckHealth(ctx, req)
+	return nil, nil
 }
 
 func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {

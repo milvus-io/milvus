@@ -52,20 +52,16 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -284,20 +280,20 @@ func (s *Server) Init() error {
 func (s *Server) initQueryCoord() error {
 	log := log.Ctx(s.ctx)
 	// wait for master init or healthy
-	log.Info("QueryCoord try to wait for RootCoord ready")
-	if err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200); err != nil {
-		log.Error("QueryCoord wait for RootCoord ready failed", zap.Error(err))
-		return errors.Wrap(err, "RootCoord not ready")
-	}
-	log.Info("QueryCoord report RootCoord ready")
+	// log.Info("QueryCoord try to wait for RootCoord ready")
+	// if err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200); err != nil {
+	// 	log.Error("QueryCoord wait for RootCoord ready failed", zap.Error(err))
+	// 	return errors.Wrap(err, "RootCoord not ready")
+	// }
+	// log.Info("QueryCoord report RootCoord ready")
 
-	// wait for master init or healthy
-	log.Info("QueryCoord try to wait for DataCoord ready")
-	if err := componentutil.WaitForComponentHealthy(s.ctx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200); err != nil {
-		log.Error("QueryCoord wait for DataCoord ready failed", zap.Error(err))
-		return errors.Wrap(err, "DataCoord not ready")
-	}
-	log.Info("QueryCoord report DataCoord ready")
+	// // wait for master init or healthy
+	// log.Info("QueryCoord try to wait for DataCoord ready")
+	// if err := componentutil.WaitForComponentHealthy(s.ctx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200); err != nil {
+	// 	log.Error("QueryCoord wait for DataCoord ready failed", zap.Error(err))
+	// 	return errors.Wrap(err, "DataCoord not ready")
+	// }
+	// log.Info("QueryCoord report DataCoord ready")
 
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	log.Info("start init querycoord", zap.Any("State", commonpb.StateCode_Initializing))
@@ -678,37 +674,37 @@ func (s *Server) State() commonpb.StateCode {
 	return commonpb.StateCode(s.status.Load())
 }
 
-func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	log.Ctx(ctx).Debug("QueryCoord current state", zap.String("StateCode", s.State().String()))
-	nodeID := common.NotRegisteredID
-	if s.session != nil && s.session.Registered() {
-		nodeID = s.session.GetServerID()
-	}
-	serviceComponentInfo := &milvuspb.ComponentInfo{
-		// NodeID:    Params.QueryCoordID, // will race with QueryCoord.Register()
-		NodeID:    nodeID,
-		StateCode: s.State(),
-	}
+// func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+// 	log.Ctx(ctx).Debug("QueryCoord current state", zap.String("StateCode", s.State().String()))
+// 	nodeID := common.NotRegisteredID
+// 	if s.session != nil && s.session.Registered() {
+// 		nodeID = s.session.GetServerID()
+// 	}
+// 	serviceComponentInfo := &milvuspb.ComponentInfo{
+// 		// NodeID:    Params.QueryCoordID, // will race with QueryCoord.Register()
+// 		NodeID:    nodeID,
+// 		StateCode: s.State(),
+// 	}
 
-	return &milvuspb.ComponentStates{
-		Status: merr.Success(),
-		State:  serviceComponentInfo,
-		// SubcomponentStates: subComponentInfos,
-	}, nil
-}
+// 	return &milvuspb.ComponentStates{
+// 		Status: merr.Success(),
+// 		State:  serviceComponentInfo,
+// 		// SubcomponentStates: subComponentInfos,
+// 	}, nil
+// }
 
-func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: merr.Success(),
-	}, nil
-}
+// func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+// 	return &milvuspb.StringResponse{
+// 		Status: merr.Success(),
+// 	}, nil
+// }
 
-func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: merr.Success(),
-		Value:  Params.CommonCfg.QueryCoordTimeTick.GetValue(),
-	}, nil
-}
+// func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+// 	return &milvuspb.StringResponse{
+// 		Status: merr.Success(),
+// 		Value:  Params.CommonCfg.QueryCoordTimeTick.GetValue(),
+// 	}, nil
+// }
 
 func (s *Server) SetAddress(address string) {
 	s.address = address

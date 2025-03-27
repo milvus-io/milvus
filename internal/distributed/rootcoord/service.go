@@ -31,7 +31,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
@@ -133,7 +132,6 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 	}
-	s.setClient()
 	var err error
 	s.rootCoord, err = rootcoord.NewCore(s.ctx, factory)
 	if err != nil {
@@ -155,11 +153,6 @@ func (s *Server) Prepare() error {
 	log.Info("RootCoord listen on", zap.String("address", listener.Addr().String()), zap.Int("port", listener.Port()))
 	s.listener = listener
 	return nil
-}
-
-func (s *Server) setClient() {
-	s.newDataCoordClient = coordclient.GetDataCoordClient
-	s.newQueryCoordClient = coordclient.GetQueryCoordClient
 }
 
 // Run initializes and starts RootCoord's grpc service.
@@ -215,23 +208,23 @@ func (s *Server) init() error {
 		log.Info("Connected to tikv. Using tikv as metadata storage.")
 	}
 
-	if s.newDataCoordClient != nil {
-		log.Info("RootCoord start to create DataCoord client")
-		dataCoord := s.newDataCoordClient(s.ctx)
-		s.dataCoord = dataCoord
-		if err := s.rootCoord.SetDataCoordClient(dataCoord); err != nil {
-			panic(err)
-		}
-	}
+	// if s.newDataCoordClient != nil {
+	// 	log.Info("RootCoord start to create DataCoord client")
+	// 	dataCoord := s.newDataCoordClient(s.ctx)
+	// 	s.dataCoord = dataCoord
+	// 	if err := s.rootCoord.SetDataCoordClient(dataCoord); err != nil {
+	// 		panic(err)
+	// 	}
+	// }
 
-	if s.newQueryCoordClient != nil {
-		log.Info("RootCoord start to create QueryCoord client")
-		queryCoord := s.newQueryCoordClient(s.ctx)
-		s.queryCoord = queryCoord
-		if err := s.rootCoord.SetQueryCoordClient(queryCoord); err != nil {
-			panic(err)
-		}
-	}
+	// if s.newQueryCoordClient != nil {
+	// 	log.Info("RootCoord start to create QueryCoord client")
+	// 	queryCoord := s.newQueryCoordClient(s.ctx)
+	// 	s.queryCoord = queryCoord
+	// 	if err := s.rootCoord.SetQueryCoordClient(queryCoord); err != nil {
+	// 		panic(err)
+	// 	}
+	// }
 
 	if err := s.rootCoord.Init(); err != nil {
 		return err
@@ -306,7 +299,6 @@ func (s *Server) startGrpcLoop() {
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 	rootcoordpb.RegisterRootCoordServer(s.grpcServer, s)
 	s.rootCoord.RegisterStreamingCoordGRPCService(s.grpcServer)
-	coordclient.RegisterRootCoordServer(s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {

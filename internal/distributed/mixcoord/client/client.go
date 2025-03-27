@@ -82,7 +82,7 @@ func NewClient(ctx context.Context) (types.MixCoordClient, error) {
 		ctx:        ctx,
 	}
 	client.grpcClient.SetRole(typeutil.MixCoordRole)
-	client.grpcClient.SetGetAddrFunc(client.getRootCoordAddr)
+	client.grpcClient.SetGetAddrFunc(client.getMixCoordAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetSession(sess)
 
@@ -108,20 +108,20 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) MixCoordClient {
 	}
 }
 
-func (c *Client) getRootCoordAddr() (string, error) {
+func (c *Client) getMixCoordAddr() (string, error) {
 	log := log.Ctx(c.ctx)
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(key)
 	if err != nil {
-		log.Debug("RootCoordClient GetSessions failed", zap.Any("key", key))
+		log.Debug("MixCoordClient GetSessions failed", zap.Any("key", key))
 		return "", err
 	}
 	ms, ok := msess[key]
 	if !ok {
-		log.Warn("RootCoordClient mess key not exist", zap.Any("key", key))
+		log.Warn("MixCoordClient mess key not exist", zap.Any("key", key))
 		return "", fmt.Errorf("find no available rootcoord, check rootcoord state")
 	}
-	log.Debug("RootCoordClient GetSessions success",
+	log.Debug("MixCoordClient GetSessions success",
 		zap.String("address", ms.Address),
 		zap.Int64("serverID", ms.ServerID),
 	)

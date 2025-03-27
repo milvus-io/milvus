@@ -29,11 +29,11 @@ func TestServer(t *testing.T) {
 	b := NewServerBuilder()
 	metaKV := etcdkv.NewEtcdKV(c, "test")
 	s := sessionutil.NewMockSession(t)
-	f := syncutil.NewFuture[types.RootCoordClient]()
+	f := syncutil.NewFuture[types.MixCoordClient]()
 	newServer := b.WithETCD(c).
 		WithMetaKV(metaKV).
 		WithSession(s).
-		WithRootCoordClient(f).
+		WithMixCoordClient(f).
 		Build()
 
 	ctx := context.Background()

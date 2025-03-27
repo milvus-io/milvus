@@ -14,16 +14,6 @@ import "data_coord.proto";
 import "index_coord.proto";
 
 service QueryCoord {
-    rpc GetComponentStates(milvus.GetComponentStatesRequest)
-        returns (milvus.ComponentStates) {
-    }
-    rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest)
-        returns (milvus.StringResponse) {
-    }
-    rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest)
-        returns (milvus.StringResponse) {
-    }
-
     rpc ShowLoadCollections(ShowCollectionsRequest)
         returns (ShowCollectionsResponse) {
     }

@@ -31,7 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
+	mixcoord "github.com/milvus-io/milvus/internal/coordinator"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -73,55 +73,6 @@ type Server struct {
 	tikvCli *txnkv.Client
 }
 
-func (s *Server) DescribeDatabase(ctx context.Context, request *rootcoordpb.DescribeDatabaseRequest) (*rootcoordpb.DescribeDatabaseResponse, error) {
-	return s.mixCoord.DescribeDatabase(ctx, request)
-}
-
-func (s *Server) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
-	return s.mixCoord.CreateDatabase(ctx, request)
-}
-
-func (s *Server) DropDatabase(ctx context.Context, request *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
-	return s.mixCoord.DropDatabase(ctx, request)
-}
-
-func (s *Server) ListDatabases(ctx context.Context, request *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
-	return s.mixCoord.ListDatabases(ctx, request)
-}
-
-func (s *Server) AlterDatabase(ctx context.Context, request *rootcoordpb.AlterDatabaseRequest) (*commonpb.Status, error) {
-	return s.mixCoord.AlterDatabase(ctx, request)
-}
-
-func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	return s.mixCoord.CheckHealth(ctx, request)
-}
-
-// CreateAlias creates an alias for specified collection.
-func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
-	return s.mixCoord.CreateAlias(ctx, request)
-}
-
-// DropAlias drops the specified alias.
-func (s *Server) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
-	return s.mixCoord.DropAlias(ctx, request)
-}
-
-// AlterAlias alters the alias for the specified collection.
-func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	return s.mixCoord.AlterAlias(ctx, request)
-}
-
-// DescribeAlias show the alias-collection relation for the specified alias.
-func (s *Server) DescribeAlias(ctx context.Context, request *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
-	return s.mixCoord.DescribeAlias(ctx, request)
-}
-
-// ListAliases show all alias in db.
-func (s *Server) ListAliases(ctx context.Context, request *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
-	return s.mixCoord.ListAliases(ctx, request)
-}
-
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &Server{
@@ -131,7 +82,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	}
 
 	var err error
-	s.mixCoord, err = mixcoord.NewServer(s.ctx, factory)
+	s.mixCoord, err = mixcoord.NewMixCoordServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}
@@ -281,8 +232,6 @@ func (s *Server) startGrpcLoop() {
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	s.mixCoord.RegisterStreamingCoordGRPCService(s.grpcServer)
-	coordclient.RegisterRootCoordServer(s)
-
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
 		s.grpcErrChan <- err
@@ -324,7 +273,7 @@ func (s *Server) Stop() (err error) {
 
 	if s.mixCoord != nil {
 		log.Info("graceful stop rootCoord")
-		s.mixCoord.GracefulStop()
+		// s.mixCoord.GracefulStop()
 		log.Info("graceful stop rootCoord done")
 	}
 
@@ -360,6 +309,55 @@ func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTime
 // GetStatisticsChannel just define a channel, not used currently
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.mixCoord.GetStatisticsChannel(ctx, req)
+}
+
+func (s *Server) DescribeDatabase(ctx context.Context, request *rootcoordpb.DescribeDatabaseRequest) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	return s.mixCoord.DescribeDatabase(ctx, request)
+}
+
+func (s *Server) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CreateDatabase(ctx, request)
+}
+
+func (s *Server) DropDatabase(ctx context.Context, request *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+	return s.mixCoord.DropDatabase(ctx, request)
+}
+
+func (s *Server) ListDatabases(ctx context.Context, request *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+	return s.mixCoord.ListDatabases(ctx, request)
+}
+
+func (s *Server) AlterDatabase(ctx context.Context, request *rootcoordpb.AlterDatabaseRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AlterDatabase(ctx, request)
+}
+
+func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return s.mixCoord.CheckHealth(ctx, request)
+}
+
+// CreateAlias creates an alias for specified collection.
+func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CreateAlias(ctx, request)
+}
+
+// DropAlias drops the specified alias.
+func (s *Server) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	return s.mixCoord.DropAlias(ctx, request)
+}
+
+// AlterAlias alters the alias for the specified collection.
+func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AlterAlias(ctx, request)
+}
+
+// DescribeAlias show the alias-collection relation for the specified alias.
+func (s *Server) DescribeAlias(ctx context.Context, request *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+	return s.mixCoord.DescribeAlias(ctx, request)
+}
+
+// ListAliases show all alias in db.
+func (s *Server) ListAliases(ctx context.Context, request *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
+	return s.mixCoord.ListAliases(ctx, request)
 }
 
 // CreateCollection creates a collection

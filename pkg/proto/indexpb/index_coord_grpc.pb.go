@@ -22,8 +22,6 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	IndexCoord_GetComponentStates_FullMethodName    = "/milvus.proto.index.IndexCoord/GetComponentStates"
-	IndexCoord_GetStatisticsChannel_FullMethodName  = "/milvus.proto.index.IndexCoord/GetStatisticsChannel"
 	IndexCoord_CreateIndex_FullMethodName           = "/milvus.proto.index.IndexCoord/CreateIndex"
 	IndexCoord_AlterIndex_FullMethodName            = "/milvus.proto.index.IndexCoord/AlterIndex"
 	IndexCoord_GetIndexState_FullMethodName         = "/milvus.proto.index.IndexCoord/GetIndexState"
@@ -42,8 +40,6 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type IndexCoordClient interface {
-	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
-	GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AlterIndex(ctx context.Context, in *AlterIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	// Deprecated: use DescribeIndex instead
@@ -67,24 +63,6 @@ type indexCoordClient struct {
 
 func NewIndexCoordClient(cc grpc.ClientConnInterface) IndexCoordClient {
 	return &indexCoordClient{cc}
-}
-
-func (c *indexCoordClient) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
-	out := new(milvuspb.ComponentStates)
-	err := c.cc.Invoke(ctx, IndexCoord_GetComponentStates_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *indexCoordClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	out := new(milvuspb.StringResponse)
-	err := c.cc.Invoke(ctx, IndexCoord_GetStatisticsChannel_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *indexCoordClient) CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -199,8 +177,6 @@ func (c *indexCoordClient) CheckHealth(ctx context.Context, in *milvuspb.CheckHe
 // All implementations should embed UnimplementedIndexCoordServer
 // for forward compatibility
 type IndexCoordServer interface {
-	GetComponentStates(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)
-	GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)
 	CreateIndex(context.Context, *CreateIndexRequest) (*commonpb.Status, error)
 	AlterIndex(context.Context, *AlterIndexRequest) (*commonpb.Status, error)
 	// Deprecated: use DescribeIndex instead
@@ -222,12 +198,6 @@ type IndexCoordServer interface {
 type UnimplementedIndexCoordServer struct {
 }
 
-func (UnimplementedIndexCoordServer) GetComponentStates(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetComponentStates not implemented")
-}
-func (UnimplementedIndexCoordServer) GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetStatisticsChannel not implemented")
-}
 func (UnimplementedIndexCoordServer) CreateIndex(context.Context, *CreateIndexRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateIndex not implemented")
 }
@@ -274,42 +244,6 @@ type UnsafeIndexCoordServer interface {
 
 func RegisterIndexCoordServer(s grpc.ServiceRegistrar, srv IndexCoordServer) {
 	s.RegisterService(&IndexCoord_ServiceDesc, srv)
-}
-
-func _IndexCoord_GetComponentStates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(milvuspb.GetComponentStatesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(IndexCoordServer).GetComponentStates(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: IndexCoord_GetComponentStates_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexCoordServer).GetComponentStates(ctx, req.(*milvuspb.GetComponentStatesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _IndexCoord_GetStatisticsChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.GetStatisticsChannelRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(IndexCoordServer).GetStatisticsChannel(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: IndexCoord_GetStatisticsChannel_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexCoordServer).GetStatisticsChannel(ctx, req.(*internalpb.GetStatisticsChannelRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _IndexCoord_CreateIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -535,14 +469,6 @@ var IndexCoord_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.index.IndexCoord",
 	HandlerType: (*IndexCoordServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "GetComponentStates",
-			Handler:    _IndexCoord_GetComponentStates_Handler,
-		},
-		{
-			MethodName: "GetStatisticsChannel",
-			Handler:    _IndexCoord_GetStatisticsChannel_Handler,
-		},
 		{
 			MethodName: "CreateIndex",
 			Handler:    _IndexCoord_CreateIndex_Handler,

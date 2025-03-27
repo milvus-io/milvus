@@ -32,7 +32,7 @@ func (c *Core) ExpireMetaCache(ctx context.Context, dbName string, collNames []s
 		req := proxypb.InvalidateCollMetaCacheRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithTimeStamp(ts),
-				commonpbutil.WithSourceID(c.session.ServerID),
+				commonpbutil.WithSourceID(c.session.GetServerID()),
 			),
 			DbName:         dbName,
 			CollectionName: collName,

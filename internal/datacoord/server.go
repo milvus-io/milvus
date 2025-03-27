@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -47,7 +46,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -117,7 +115,7 @@ type Server struct {
 	cluster          Cluster
 	sessionManager   session.DataNodeManager
 	channelManager   ChannelManager
-	rootCoordClient  types.RootCoordClient
+	mixCoord         types.MixCoord
 	garbageCollector *garbageCollector
 	gcOpt            GcOption
 	handler          Handler
@@ -202,16 +200,15 @@ func WithSegmentManager(manager Manager) Option {
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
-		ctx:                    ctx,
-		quitCh:                 make(chan struct{}),
-		factory:                factory,
-		flushCh:                make(chan UniqueID, 1024),
-		notifyIndexChan:        make(chan UniqueID, 1024),
-		dataNodeCreator:        defaultDataNodeCreatorFunc,
-		rootCoordClientCreator: defaultRootCoordCreatorFunc,
-		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
-		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby.GetAsBool(),
-		metricsRequest:         metricsinfo.NewMetricsRequest(),
+		ctx:                 ctx,
+		quitCh:              make(chan struct{}),
+		factory:             factory,
+		flushCh:             make(chan UniqueID, 1024),
+		notifyIndexChan:     make(chan UniqueID, 1024),
+		dataNodeCreator:     defaultDataNodeCreatorFunc,
+		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
+		enableActiveStandBy: Params.DataCoordCfg.EnableActiveStandby.GetAsBool(),
+		metricsRequest:      metricsinfo.NewMetricsRequest(),
 	}
 
 	for _, opt := range opts {
@@ -223,10 +220,6 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 	return datanodeclient.NewClient(ctx, addr, nodeID, Params.DataCoordCfg.WithCredential.GetAsBool())
-}
-
-func defaultRootCoordCreatorFunc(ctx context.Context) (types.RootCoordClient, error) {
-	return coordclient.GetRootCoordClient(ctx), nil
 }
 
 // QuitSignal returns signal when server quits
@@ -321,23 +314,11 @@ func (s *Server) Init() error {
 
 func (s *Server) initDataCoord() error {
 	log := log.Ctx(s.ctx)
-	// wait for master init or healthy
-	log.Info("DataCoord try to wait for RootCoord ready")
-	if err := s.initRootCoordClient(); err != nil {
-		return err
-	}
-	log.Info("init rootcoord client done")
-	err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoordClient, "RootCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Error("DataCoord wait for RootCoord ready failed", zap.Error(err))
-		return err
-	}
-	log.Info("DataCoord report RootCoord ready")
 
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 
-	s.broker = broker.NewCoordinatorBroker(s.rootCoordClient)
-	s.allocator = allocator.NewRootCoordAllocator(s.rootCoordClient)
+	s.broker = broker.NewCoordinatorBroker(s.mixCoord)
+	s.allocator = allocator.NewRootCoordAllocator(s.mixCoord)
 
 	storageCli, err := s.newChunkManagerFactory()
 	if err != nil {
@@ -426,43 +407,6 @@ func (s *Server) startDataCoord() {
 	s.startTaskScheduler()
 	s.startServerLoop()
 
-	// http.Register(&http.Handler{
-	// 	Path: "/datacoord/garbage_collection/pause",
-	// 	HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
-	// 		pauseSeconds := req.URL.Query().Get("pause_seconds")
-	// 		seconds, err := strconv.ParseInt(pauseSeconds, 10, 64)
-	// 		if err != nil {
-	// 			w.WriteHeader(400)
-	// 			w.Write([]byte(fmt.Sprintf(`{"msg": "invalid pause seconds(%v)"}`, pauseSeconds)))
-	// 			return
-	// 		}
-
-	// 		err = s.garbageCollector.Pause(req.Context(), time.Duration(seconds)*time.Second)
-	// 		if err != nil {
-	// 			w.WriteHeader(500)
-	// 			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to pause garbage collection, %s"}`, err.Error())))
-	// 			return
-	// 		}
-	// 		w.WriteHeader(200)
-	// 		w.Write([]byte(`{"msg": "OK"}`))
-	// 		return
-	// 	},
-	// })
-	// http.Register(&http.Handler{
-	// 	Path: "/datacoord/garbage_collection/resume",
-	// 	HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
-	// 		err := s.garbageCollector.Resume(req.Context())
-	// 		if err != nil {
-	// 			w.WriteHeader(500)
-	// 			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to pause garbage collection, %s"}`, err.Error())))
-	// 			return
-	// 		}
-	// 		w.WriteHeader(200)
-	// 		w.Write([]byte(`{"msg": "OK"}`))
-	// 		return
-	// 	},
-	// })
-
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.GetServerID())
@@ -510,8 +454,8 @@ func (s *Server) SetTiKVClient(client *txnkv.Client) {
 	s.tikvCli = client
 }
 
-func (s *Server) SetRootCoordClient(rootCoord types.RootCoordClient) {
-	s.rootCoordClient = rootCoord
+func (s *Server) SetMixCoord(mixCoord types.MixCoord) {
+	s.mixCoord = mixCoord
 }
 
 func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (types.DataNodeClient, error)) {
@@ -1017,16 +961,6 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 		case s.flushCh <- segment.ID:
 		}
 	}
-}
-
-func (s *Server) initRootCoordClient() error {
-	var err error
-	if s.rootCoordClient == nil {
-		if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // Stop do the Server finalize processes
