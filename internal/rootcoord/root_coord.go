@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
@@ -114,9 +115,9 @@ type Core struct {
 	idAllocator  allocator.Interface
 	tsoAllocator tso2.Allocator
 
-	mixCoord types.MixCoord
-
-	quotaCenter *QuotaCenter
+	mixCoord       types.MixCoord
+	streamingCoord *streamingcoord.Server
+	quotaCenter    *QuotaCenter
 
 	stateCode atomic.Int32
 	initOnce  sync.Once
@@ -257,9 +258,6 @@ func (c *Core) SetProxyCreator(f func(ctx context.Context, addr string, nodeID i
 }
 
 func (c *Core) SetMixCoord(s types.MixCoord) error {
-	if s == nil {
-		return errors.New("null QueryCoord interface")
-	}
 	c.mixCoord = s
 	return nil
 }
@@ -312,7 +310,7 @@ func (c *Core) initStreamingCoord() {
 	// 	WithETCD(c.etcdCli).
 	// 	WithMetaKV(c.metaKVCreator()).
 	// 	WithSession(c.session).
-	// 	WithMixCoordClient(mixcoord.NewServer()).
+	// 	WithMixCoordClient(mixcoord).
 	// 	Build()
 }
 
@@ -700,9 +698,9 @@ func (c *Core) startInternal() error {
 		panic(err)
 	}
 
-	if Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
-		c.quotaCenter.Start()
-	}
+	// if Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
+	// 	c.quotaCenter.Start()
+	// }
 
 	c.scheduler.Start()
 	c.stepExecutor.Start()
@@ -723,7 +721,7 @@ func (c *Core) startInternal() error {
 
 	c.startServerLoop()
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
-	sessionutil.SaveServerInfo(typeutil.RootCoordRole, c.session.GetServerID())
+	sessionutil.SaveServerInfo(typeutil.MixCoordRole, c.session.GetServerID())
 	log.Info("rootcoord startup successfully")
 
 	// regster the core as a appendoperator for broadcast service.

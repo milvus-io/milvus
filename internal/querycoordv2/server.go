@@ -151,26 +151,26 @@ func NewQueryCoord(ctx context.Context) (*Server, error) {
 }
 
 func (s *Server) Register() error {
-	log := log.Ctx(s.ctx)
-	s.session.Register()
-	afterRegister := func() {
-		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.QueryCoordRole).Inc()
-		s.session.LivenessCheck(s.ctx, func() {
-			log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.GetServerID()))
-			os.Exit(1)
-		})
-	}
-	if s.enableActiveStandBy {
-		go func() {
-			if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
-				log.Error("failed to activate standby server", zap.Error(err))
-				panic(err)
-			}
-			afterRegister()
-		}()
-	} else {
-		afterRegister()
-	}
+	// log := log.Ctx(s.ctx)
+	// s.session.Register()
+	// afterRegister := func() {
+	// 	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.QueryCoordRole).Inc()
+	// 	s.session.LivenessCheck(s.ctx, func() {
+	// 		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.GetServerID()))
+	// 		os.Exit(1)
+	// 	})
+	// }
+	// if s.enableActiveStandBy {
+	// 	go func() {
+	// 		if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
+	// 			log.Error("failed to activate standby server", zap.Error(err))
+	// 			panic(err)
+	// 		}
+	// 		afterRegister()
+	// 	}()
+	// } else {
+	// 	afterRegister()
+	// }
 	return nil
 }
 
@@ -572,7 +572,7 @@ func (s *Server) startQueryCoord() error {
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
-	sessionutil.SaveServerInfo(typeutil.QueryCoordRole, s.session.GetServerID())
+	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
 	return nil
 }
 

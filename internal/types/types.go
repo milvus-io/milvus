@@ -350,4 +350,6 @@ type MixCoordComponent interface {
 	RegisterStreamingCoordGRPCService(server *grpc.Server)
 
 	GracefulStop()
+
+	SetMixCoordClient(client MixCoordClient)
 }

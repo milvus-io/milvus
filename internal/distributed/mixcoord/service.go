@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	mixcoord "github.com/milvus-io/milvus/internal/coordinator"
+	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -71,6 +72,8 @@ type Server struct {
 
 	etcdCli *clientv3.Client
 	tikvCli *txnkv.Client
+
+	mixCoordClient types.MixCoordClient
 }
 
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
@@ -83,6 +86,8 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 
 	var err error
 	s.mixCoord, err = mixcoord.NewMixCoordServer(ctx, factory)
+	mixCoordClient, _ := mix.NewClient(ctx1)
+	s.mixCoordClient = mixCoordClient
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +149,7 @@ func (s *Server) init() error {
 	s.etcdCli = etcdCli
 	s.mixCoord.SetEtcdClient(s.etcdCli)
 	s.mixCoord.SetAddress(s.listener.Address())
+	s.mixCoord.SetMixCoordClient(s.mixCoordClient)
 	log.Info("etcd connect done ...")
 
 	if params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
@@ -273,7 +279,7 @@ func (s *Server) Stop() (err error) {
 
 	if s.mixCoord != nil {
 		log.Info("graceful stop rootCoord")
-		// s.mixCoord.GracefulStop()
+		s.mixCoord.GracefulStop()
 		log.Info("graceful stop rootCoord done")
 	}
 

@@ -54,8 +54,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -84,7 +82,7 @@ type Server struct {
 	// component client
 	etcdCli        *clientv3.Client
 	tikvCli        *txnkv.Client
-	mixCoord       *syncutil.Future[types.MixCoordClient]
+	mixCoord       types.MixCoordClient
 	chunkManager   storage.ChunkManager
 	componentState *componentutil.ComponentStateService
 }
@@ -95,7 +93,6 @@ func NewServer(ctx context.Context, f dependency.Factory) (*Server, error) {
 	return &Server{
 		stopOnce:       sync.Once{},
 		factory:        f,
-		mixCoord:       syncutil.NewFuture[types.MixCoordClient](),
 		grpcServerChan: make(chan struct{}),
 		componentState: componentutil.NewComponentStateService(typeutil.StreamingNodeRole),
 		ctx:            ctx1,
@@ -167,10 +164,9 @@ func (s *Server) stop() {
 
 	// Stop rootCoord client.
 	log.Info("streamingnode stop rootCoord client...")
-	if s.mixCoord.Ready() {
-		if err := s.mixCoord.Get().Close(); err != nil {
-			log.Warn("streamingnode stop rootCoord client failed", zap.Error(err))
-		}
+
+	if err := s.mixCoord.Close(); err != nil {
+		log.Warn("streamingnode stop rootCoord client failed", zap.Error(err))
 	}
 
 	// Stop tikv
@@ -315,24 +311,23 @@ func (s *Server) initMeta() error {
 
 func (s *Server) initMixCoord() {
 	log := log.Ctx(s.ctx)
-	go func() {
-		retry.Do(s.ctx, func() error {
-			log.Info("StreamingNode connect to mixCoord...")
-			mixCoord, err := mix.NewClient(s.ctx)
-			if err != nil {
-				return errors.Wrap(err, "StreamingNode try to new mixCoord client failed")
-			}
+	// go func() {
+	// 	retry.Do(s.ctx, func() error {
+	log.Info("StreamingNode connect to mixCoord...")
+	mixCoord, _ := mix.NewClient(s.ctx)
+	// if err != nil {
+	// 	return errors.Wrap(err, "StreamingNode try to new mixCoord client failed")
+	// }
 
-			log.Info("StreamingNode try to wait for mixCoord ready")
-			err = componentutil.WaitForComponentHealthy(s.ctx, mixCoord, "mixCoord", 1000000, time.Millisecond*200)
-			if err != nil {
-				return errors.Wrap(err, "StreamingNode wait for mixCoord ready failed")
-			}
-			log.Info("StreamingNode wait for mixCoord ready")
-			s.mixCoord.Set(mixCoord)
-			return nil
-		}, retry.AttemptAlways())
-	}()
+	// log.Info("StreamingNode try to wait for mixCoord ready")
+	// err = componentutil.WaitForComponentHealthy(s.ctx, mixCoord, "mixCoord", 1000000, time.Millisecond*200)
+	// if err != nil {
+	// 	return errors.Wrap(err, "StreamingNode wait for mixCoord ready failed")
+	// }
+	log.Info("StreamingNode wait for mixCoord ready")
+	s.mixCoord = mixCoord
+	// 	}, retry.AttemptAlways())
+	// }()
 }
 
 func (s *Server) initChunkManager() (err error) {

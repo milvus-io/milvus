@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -229,55 +228,42 @@ func (s *Server) QuitSignal() <-chan struct{} {
 
 // Register registers data service at etcd
 func (s *Server) Register() error {
-	log := log.Ctx(s.ctx)
-	// first register indexCoord
-	s.icSession.Register()
-	s.session.Register()
-	afterRegister := func() {
-		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.DataCoordRole).Inc()
-		log.Info("DataCoord Register Finished")
+	// log := log.Ctx(s.ctx)
+	// // first register indexCoord
+	// s.icSession.Register()
+	// s.session.Register()
+	// afterRegister := func() {
+	// 	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.DataCoordRole).Inc()
+	// 	log.Info("DataCoord Register Finished")
 
-		s.session.LivenessCheck(s.ctx, func() {
-			logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.GetServerID()))
-			os.Exit(1)
-		})
-	}
-	if s.enableActiveStandBy {
-		go func() {
-			err := s.session.ProcessActiveStandBy(s.activateFunc)
-			if err != nil {
-				log.Error("failed to activate standby datacoord server", zap.Error(err))
-				panic(err)
-			}
+	// 	s.session.LivenessCheck(s.ctx, func() {
+	// 		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.GetServerID()))
+	// 		os.Exit(1)
+	// 	})
+	// }
+	// if s.enableActiveStandBy {
+	// 	go func() {
+	// 		err := s.session.ProcessActiveStandBy(s.activateFunc)
+	// 		if err != nil {
+	// 			log.Error("failed to activate standby datacoord server", zap.Error(err))
+	// 			panic(err)
+	// 		}
 
-			err = s.icSession.ForceActiveStandby(nil)
-			if err != nil {
-				log.Error("failed to force activate standby indexcoord server", zap.Error(err))
-				panic(err)
-			}
-			afterRegister()
-		}()
-	} else {
-		afterRegister()
-	}
+	// 		err = s.icSession.ForceActiveStandby(nil)
+	// 		if err != nil {
+	// 			log.Error("failed to force activate standby indexcoord server", zap.Error(err))
+	// 			panic(err)
+	// 		}
+	// 		afterRegister()
+	// 	}()
+	// } else {
+	// 	afterRegister()
+	// }
 
 	return nil
 }
 
 func (s *Server) initSession() error {
-	s.icSession = sessionutil.NewSession(s.ctx)
-	if s.icSession == nil {
-		return errors.New("failed to initialize IndexCoord session")
-	}
-	s.icSession.Init(typeutil.IndexCoordRole, s.address, true, true)
-	s.icSession.SetEnableActiveStandBy(s.enableActiveStandBy)
-
-	s.session = sessionutil.NewSession(s.ctx)
-	if s.session == nil {
-		return errors.New("failed to initialize session")
-	}
-	s.session.Init(typeutil.DataCoordRole, s.address, true, true)
-	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	return nil
 }
 
@@ -409,7 +395,7 @@ func (s *Server) startDataCoord() {
 
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
-	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.GetServerID())
+	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
 }
 
 func (s *Server) GetServerID() int64 {

@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -41,7 +40,7 @@ func OptChunkManager(chunkManager storage.ChunkManager) optResourceInit {
 }
 
 // OptRootCoordClient provides the root coordinator client to the resource.
-func OptMixCoordClient(mixCoordClient *syncutil.Future[types.MixCoordClient]) optResourceInit {
+func OptMixCoordClient(mixCoordClient types.MixCoordClient) optResourceInit {
 	return func(r *resourceImpl) {
 		r.mixCoordClient = mixCoordClient
 		r.timestampAllocator = idalloc.NewTSOAllocator(r.mixCoordClient)
@@ -101,7 +100,7 @@ type resourceImpl struct {
 	idAllocator               idalloc.Allocator
 	etcdClient                *clientv3.Client
 	chunkManager              storage.ChunkManager
-	mixCoordClient            *syncutil.Future[types.MixCoordClient]
+	mixCoordClient            types.MixCoordClient
 	streamingNodeCatalog      metastore.StreamingNodeCataLog
 	segmentAssignStatsManager *stats.StatsManager
 	timeTickInspector         tinspector.TimeTickSyncInspector
@@ -143,7 +142,7 @@ func (r *resourceImpl) WriteBufferManager() writebuffer.BufferManager {
 }
 
 // RootCoordClient returns the root coordinator client.
-func (r *resourceImpl) MixCoordClient() *syncutil.Future[types.MixCoordClient] {
+func (r *resourceImpl) MixCoordClient() types.MixCoordClient {
 	return r.mixCoordClient
 }
 

@@ -119,7 +119,7 @@ func (c *Client) getMixCoordAddr() (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Warn("MixCoordClient mess key not exist", zap.Any("key", key))
-		return "", fmt.Errorf("find no available rootcoord, check rootcoord state")
+		return "", fmt.Errorf("find no available mixcoord, check mixcoord state")
 	}
 	log.Debug("MixCoordClient GetSessions success",
 		zap.String("address", ms.Address),
