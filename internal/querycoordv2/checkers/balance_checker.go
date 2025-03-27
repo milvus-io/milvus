@@ -19,6 +19,7 @@ package checkers
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -86,12 +87,8 @@ func (b *BalanceChecker) readyToCheck(ctx context.Context, collectionID int64) b
 func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context) []int64 {
 	ids := b.meta.GetAll(ctx)
 
-	// sort collections by row count, and balance the collection with the largest row count first
-	sort.Slice(ids, func(i, j int) bool {
-		rowCount1 := b.targetMgr.GetCollectionRowCount(ctx, ids[i], meta.CurrentTargetFirst)
-		rowCount2 := b.targetMgr.GetCollectionRowCount(ctx, ids[j], meta.CurrentTargetFirst)
-		return rowCount1 > rowCount2 || (rowCount1 == rowCount2 && ids[i] < ids[j])
-	})
+	// Sort collections using the configured sort order
+	ids = b.sortCollections(ctx, ids)
 
 	if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
 		for _, cid := range ids {
@@ -141,12 +138,8 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context) []int64
 		return nil
 	}
 
-	// sort collections by row count, and balance the collection with the largest row count first
-	sort.Slice(loadedCollections, func(i, j int) bool {
-		rowCount1 := b.targetMgr.GetCollectionRowCount(ctx, loadedCollections[i], meta.CurrentTargetFirst)
-		rowCount2 := b.targetMgr.GetCollectionRowCount(ctx, loadedCollections[j], meta.CurrentTargetFirst)
-		return rowCount1 > rowCount2 || (rowCount1 == rowCount2 && ids[i] < ids[j])
-	})
+	// Sort collections using the configured sort order
+	loadedCollections = b.sortCollections(ctx, loadedCollections)
 
 	// iterator one normal collection in one round
 	normalReplicasToBalance := make([]int64, 0)
@@ -226,4 +219,38 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	task.SetReason("channel unbalanced", tasks...)
 	ret = append(ret, tasks...)
 	return ret
+}
+
+func (b *BalanceChecker) sortCollections(ctx context.Context, collections []int64) []int64 {
+	sortOrder := strings.ToLower(Params.QueryCoordCfg.BalanceTriggerOrder.GetValue())
+	if sortOrder == "" {
+		sortOrder = "byrowcount" // Default to ByRowCount
+	}
+
+	// Define sorting functions
+	sortByRowCount := func(i, j int) bool {
+		rowCount1 := b.targetMgr.GetCollectionRowCount(ctx, collections[i], meta.CurrentTargetFirst)
+		rowCount2 := b.targetMgr.GetCollectionRowCount(ctx, collections[j], meta.CurrentTargetFirst)
+		return rowCount1 > rowCount2 || (rowCount1 == rowCount2 && collections[i] < collections[j])
+	}
+
+	sortByCollectionID := func(i, j int) bool {
+		return collections[i] < collections[j]
+	}
+
+	// Select the appropriate sorting function
+	var sortFunc func(i, j int) bool
+	switch sortOrder {
+	case "byrowcount":
+		sortFunc = sortByRowCount
+	case "bycollectionid":
+		sortFunc = sortByCollectionID
+	default:
+		log.Warn("Invalid balance sort order configuration, using default ByRowCount", zap.String("sortOrder", sortOrder))
+		sortFunc = sortByRowCount
+	}
+
+	// Sort the collections
+	sort.Slice(collections, sortFunc)
+	return collections
 }

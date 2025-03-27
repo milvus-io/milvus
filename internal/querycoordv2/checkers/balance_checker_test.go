@@ -503,6 +503,238 @@ func (suite *BalanceCheckerTestSuite) TestBalanceOrder() {
 	suite.Equal(replicas, []int64{int64(replicaID1)})
 }
 
+func (suite *BalanceCheckerTestSuite) TestSortCollections() {
+	ctx := context.Background()
+
+	// Set up test collections
+	cid1, cid2, cid3 := int64(1), int64(2), int64(3)
+
+	// Mock the target manager for row count returns
+	mockTargetManager := meta.NewMockTargetManager(suite.T())
+	suite.checker.targetMgr = mockTargetManager
+
+	// Collection 1: Low ID, High row count
+	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, cid1, mock.Anything).Return(int64(300)).Maybe()
+
+	// Collection 2: Middle ID, Low row count
+	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, cid2, mock.Anything).Return(int64(100)).Maybe()
+
+	// Collection 3: High ID, Middle row count
+	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, cid3, mock.Anything).Return(int64(200)).Maybe()
+
+	collections := []int64{cid1, cid2, cid3}
+
+	// Test ByRowCount sorting (default)
+	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "ByRowCount")
+	sortedCollections := suite.checker.sortCollections(ctx, collections)
+	suite.Equal([]int64{cid1, cid3, cid2}, sortedCollections, "Collections should be sorted by row count (highest first)")
+
+	// Test ByCollectionID sorting
+	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "ByCollectionID")
+	sortedCollections = suite.checker.sortCollections(ctx, collections)
+	suite.Equal([]int64{cid1, cid2, cid3}, sortedCollections, "Collections should be sorted by collection ID (ascending)")
+
+	// Test with empty sort order (should default to ByRowCount)
+	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "")
+	sortedCollections = suite.checker.sortCollections(ctx, collections)
+	suite.Equal([]int64{cid1, cid3, cid2}, sortedCollections, "Should default to ByRowCount when sort order is empty")
+
+	// Test with invalid sort order (should default to ByRowCount)
+	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "InvalidOrder")
+	sortedCollections = suite.checker.sortCollections(ctx, collections)
+	suite.Equal([]int64{cid1, cid3, cid2}, sortedCollections, "Should default to ByRowCount when sort order is invalid")
+
+	// Test with mixed case (should be case-insensitive)
+	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "bYcOlLeCtIoNiD")
+	sortedCollections = suite.checker.sortCollections(ctx, collections)
+	suite.Equal([]int64{cid1, cid2, cid3}, sortedCollections, "Should handle case-insensitive sort order names")
+
+	// Test with empty collection list
+	emptyCollections := []int64{}
+	sortedCollections = suite.checker.sortCollections(ctx, emptyCollections)
+	suite.Equal([]int64{}, sortedCollections, "Should handle empty collection list")
+}
+
+func (suite *BalanceCheckerTestSuite) TestSortCollectionsIntegration() {
+	ctx := context.Background()
+
+	// Set up test collections and nodes
+	nodeID1 := int64(1)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID1)
+
+	// Create two collections to ensure sorting is triggered
+	cid1, replicaID1 := int64(1), int64(101)
+	collection1 := utils.CreateTestCollection(cid1, int32(replicaID1))
+	collection1.Status = querypb.LoadStatus_Loaded
+	replica1 := utils.CreateTestReplica(replicaID1, cid1, []int64{nodeID1})
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
+
+	// Add a second collection with different characteristics
+	cid2, replicaID2 := int64(2), int64(102)
+	collection2 := utils.CreateTestCollection(cid2, int32(replicaID2))
+	collection2.Status = querypb.LoadStatus_Loaded
+	replica2 := utils.CreateTestReplica(replicaID2, cid2, []int64{nodeID1})
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
+
+	// Mock target manager
+	mockTargetManager := meta.NewMockTargetManager(suite.T())
+	suite.checker.targetMgr = mockTargetManager
+
+	// Setup different row counts to test sorting
+	// Collection 1 has more rows than Collection 2
+	var getRowCountCallCount int
+	mockTargetManager.On("GetCollectionRowCount", mock.Anything, mock.Anything, mock.Anything).
+		Return(func(ctx context.Context, collectionID int64, scope int32) int64 {
+			getRowCountCallCount++
+			if collectionID == cid1 {
+				return 200 // More rows in collection 1
+			}
+			return 100 // Fewer rows in collection 2
+		})
+
+	mockTargetManager.On("IsCurrentTargetReady", mock.Anything, mock.Anything).Return(true)
+	mockTargetManager.On("IsNextTargetExist", mock.Anything, mock.Anything).Return(true)
+
+	// Configure for testing
+	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
+	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "ByRowCount")
+
+	// Clear first to avoid previous test state
+	suite.checker.normalBalanceCollectionsCurrentRound.Clear()
+
+	// Call normal balance
+	_ = suite.checker.getReplicaForNormalBalance(ctx)
+
+	// Verify GetCollectionRowCount was called at least twice (once for each collection)
+	// This confirms that the collections were sorted
+	suite.True(getRowCountCallCount >= 2, "GetCollectionRowCount should be called at least twice during normal balance")
+
+	// Reset counter and test stopping balance
+	getRowCountCallCount = 0
+
+	// Set up for stopping balance test
+	mr1 := replica1.CopyForWrite()
+	mr1.AddRONode(nodeID1)
+	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
+
+	mr2 := replica2.CopyForWrite()
+	mr2.AddRONode(nodeID1)
+	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
+
+	paramtable.Get().Save(Params.QueryCoordCfg.EnableStoppingBalance.Key, "true")
+
+	// Call stopping balance
+	_ = suite.checker.getReplicaForStoppingBalance(ctx)
+
+	// Verify GetCollectionRowCount was called at least twice during stopping balance
+	suite.True(getRowCountCallCount >= 2, "GetCollectionRowCount should be called at least twice during stopping balance")
+}
+
+func (suite *BalanceCheckerTestSuite) TestBalanceTriggerOrder() {
+	ctx := context.Background()
+
+	// Set up nodes
+	nodeID1, nodeID2 := int64(1), int64(2)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID1)
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID2)
+
+	// Create collections with different row counts
+	cid1, replicaID1 := int64(1), int64(101)
+	collection1 := utils.CreateTestCollection(cid1, int32(replicaID1))
+	collection1.Status = querypb.LoadStatus_Loaded
+	replica1 := utils.CreateTestReplica(replicaID1, cid1, []int64{nodeID1, nodeID2})
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
+
+	cid2, replicaID2 := int64(2), int64(102)
+	collection2 := utils.CreateTestCollection(cid2, int32(replicaID2))
+	collection2.Status = querypb.LoadStatus_Loaded
+	replica2 := utils.CreateTestReplica(replicaID2, cid2, []int64{nodeID1, nodeID2})
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection2)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica2)
+
+	cid3, replicaID3 := int64(3), int64(103)
+	collection3 := utils.CreateTestCollection(cid3, int32(replicaID3))
+	collection3.Status = querypb.LoadStatus_Loaded
+	replica3 := utils.CreateTestReplica(replicaID3, cid3, []int64{nodeID1, nodeID2})
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection3)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica3)
+
+	// Mock the target manager
+	mockTargetManager := meta.NewMockTargetManager(suite.T())
+	suite.checker.targetMgr = mockTargetManager
+
+	// Set row counts: Collection 1 (highest), Collection 3 (middle), Collection 2 (lowest)
+	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, cid1, mock.Anything).Return(int64(300)).Maybe()
+	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, cid2, mock.Anything).Return(int64(100)).Maybe()
+	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, cid3, mock.Anything).Return(int64(200)).Maybe()
+
+	// Mark the current target as ready
+	mockTargetManager.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(true).Maybe()
+	mockTargetManager.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
+	mockTargetManager.EXPECT().IsCurrentTargetExist(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
+
+	// Enable auto balance
+	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
+
+	// Test with ByRowCount order (default)
+	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "ByRowCount")
+	suite.checker.normalBalanceCollectionsCurrentRound.Clear()
+
+	// Normal balance should pick the collection with highest row count first
+	replicas := suite.checker.getReplicaForNormalBalance(ctx)
+	suite.Contains(replicas, replicaID1, "Should balance collection with highest row count first")
+
+	// Add stopping nodes to test stopping balance
+	mr1 := replica1.CopyForWrite()
+	mr1.AddRONode(nodeID1)
+	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
+
+	mr2 := replica2.CopyForWrite()
+	mr2.AddRONode(nodeID1)
+	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
+
+	mr3 := replica3.CopyForWrite()
+	mr3.AddRONode(nodeID1)
+	suite.checker.meta.ReplicaManager.Put(ctx, mr3.IntoReplica())
+
+	// Enable stopping balance
+	paramtable.Get().Save(Params.QueryCoordCfg.EnableStoppingBalance.Key, "true")
+
+	// Stopping balance should also pick the collection with highest row count first
+	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
+	suite.Contains(replicas, replicaID1, "Stopping balance should prioritize collection with highest row count")
+
+	// Test with ByCollectionID order
+	paramtable.Get().Save(Params.QueryCoordCfg.BalanceTriggerOrder.Key, "ByCollectionID")
+	suite.checker.normalBalanceCollectionsCurrentRound.Clear()
+
+	// Normal balance should pick the collection with lowest ID first
+	replicas = suite.checker.getReplicaForNormalBalance(ctx)
+	suite.Contains(replicas, replicaID1, "Should balance collection with lowest ID first")
+
+	// Stopping balance should also pick the collection with lowest ID first
+	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
+	suite.Contains(replicas, replicaID1, "Stopping balance should prioritize collection with lowest ID")
+}
+
 func TestBalanceCheckerSuite(t *testing.T) {
 	suite.Run(t, new(BalanceCheckerTestSuite))
 }
