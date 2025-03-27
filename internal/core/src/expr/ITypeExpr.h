@@ -161,6 +161,19 @@ struct ColumnInfo {
         return true;
     }
 
+    bool
+    operator<(const ColumnInfo& other) const {
+        return std::tie(field_id_,
+                        data_type_,
+                        element_type_,
+                        nested_path_,
+                        nullable_) < std::tie(other.field_id_,
+                                              other.data_type_,
+                                              other.element_type_,
+                                              other.nested_path_,
+                                              other.nullable_);
+    }
+
     std::string
     ToString() const {
         return fmt::format(
