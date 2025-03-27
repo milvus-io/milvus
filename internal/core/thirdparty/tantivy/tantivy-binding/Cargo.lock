@@ -1332,9 +1332,9 @@ dependencies = [
 
 [[package]]
 name = "lindera"
-version = "0.38.1"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fff887f4b98539fb5f879ede50e17eb7eaafa5622c252cffe8280f42cafc6b7d"
+checksum = "5e4788d40d68746f81d50faba969dca5d9226ab527a9da90a7708dcbd1203f69"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1362,9 +1362,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-cc-cedict"
-version = "0.38.1"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a891e53b4fac346b314dcd60e4337b6deec7d972f338c004cfb9e0fe9868893"
+checksum = "a9d2239d15eb62732f2912fee43585598e61dfe62600df13a8c54ae1c4b1ac71"
 dependencies = [
  "bincode",
  "byteorder",
@@ -1375,9 +1375,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-dictionary"
-version = "0.38.1"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec716483ceb95aa84ac262cb766eef314b24257c343ca230daa71f856a278fe4"
+checksum = "bc5a12c962d4acf12d4bca442fd6420ca7be5e78163167443dd95503ab8b3ee0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1400,9 +1400,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-ipadic"
-version = "0.38.1"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74d2b997fa2aeee8adccea2e4cb0ade771132f6e32093ed0beda8409e9a44018"
+checksum = "c64227c9bd30152825df8693300b11fc370e93dd3b8f833d202b7a1709625104"
 dependencies = [
  "bincode",
  "byteorder",
@@ -1413,9 +1413,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-ipadic-neologd"
-version = "0.38.1"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "084c4e7b63500b235af2c7cbf8ee23735ae452971ac29bbd9a7f55a10eae50c4"
+checksum = "c36f3516601e9b4bee37cc85126928fb19b70c0bc15210775d93019d07ebecda"
 dependencies = [
  "bincode",
  "byteorder",
@@ -1426,9 +1426,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-ko-dic"
-version = "0.38.1"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d921a5c39a634316125fc1572f00bc78f4351baeacaff2cf39953b2fc8493a55"
+checksum = "479bb34668a96bee04d9d39107c8e7b52a09f1b115c255aa4ccd5962b1fa5a86"
 dependencies = [
  "bincode",
  "byteorder",
@@ -1439,9 +1439,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-unidic"
-version = "0.38.1"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b95e25975448fa10f2bec61bfd012d8b0a1740d92ac7fc43e725edb1568ff7e"
+checksum = "32f95b856c9a016df9f713ffc34fdf5d5e8e4353779fe1f114e95cfa2e04fb22"
 dependencies = [
  "bincode",
  "byteorder",
@@ -2188,18 +2188,18 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "strum"
-version = "0.26.3"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
+checksum = "f64def088c51c9510a8579e3c5d67c65349dcf755e5479ad3d010aa6454e2c32"
 dependencies = [
  "strum_macros",
 ]
 
 [[package]]
 name = "strum_macros"
-version = "0.26.4"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
+checksum = "c77a8c5abcaf0f9ce05d62342b7d298c346515365c36b673df4ebe3ced01fde8"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
