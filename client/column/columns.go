@@ -43,6 +43,8 @@ type Column interface {
 	AppendNull() error
 	IsNull(int) (bool, error)
 	Nullable() bool
+	SetNullable(bool)
+	ValidateNullable() error
 }
 
 var errFieldDataTypeNotMatch = errors.New("FieldData type not matched")
