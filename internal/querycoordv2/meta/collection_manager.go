@@ -144,30 +144,37 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 	ctxLog := log.Ctx(ctx)
 	ctxLog.Info("recover partitions from kv store", zap.Duration("dur", time.Since(start)))
 
-	for _, collection := range collections {
-		if collection.GetReplicaNumber() <= 0 {
+	for _, collectionLoadInfo := range collections {
+		if collectionLoadInfo.GetReplicaNumber() <= 0 {
 			ctxLog.Info("skip recovery and release collection due to invalid replica number",
-				zap.Int64("collectionID", collection.GetCollectionID()),
-				zap.Int32("replicaNumber", collection.GetReplicaNumber()))
-			m.catalog.ReleaseCollection(ctx, collection.GetCollectionID())
+				zap.Int64("collectionID", collectionLoadInfo.GetCollectionID()),
+				zap.Int32("replicaNumber", collectionLoadInfo.GetReplicaNumber()))
+			m.catalog.ReleaseCollection(ctx, collectionLoadInfo.GetCollectionID())
 			continue
 		}
 
-		if collection.GetStatus() != querypb.LoadStatus_Loaded {
-			if collection.RecoverTimes >= paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32() {
-				m.catalog.ReleaseCollection(ctx, collection.CollectionID)
+		if collectionLoadInfo.GetStatus() != querypb.LoadStatus_Loaded {
+			if collectionLoadInfo.RecoverTimes >= paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32() {
+				m.catalog.ReleaseCollection(ctx, collectionLoadInfo.CollectionID)
 				ctxLog.Info("recover loading collection times reach limit, release collection",
-					zap.Int64("collectionID", collection.CollectionID),
-					zap.Int32("recoverTimes", collection.RecoverTimes))
+					zap.Int64("collectionID", collectionLoadInfo.CollectionID),
+					zap.Int32("recoverTimes", collectionLoadInfo.RecoverTimes))
 				break
 			}
 			// update recoverTimes meta in etcd
-			collection.RecoverTimes += 1
-			m.putCollection(ctx, true, &Collection{CollectionLoadInfo: collection})
+			collectionLoadInfo.RecoverTimes += 1
+			m.putCollection(ctx, true, &Collection{CollectionLoadInfo: collectionLoadInfo})
 			continue
 		}
-
-		err := m.upgradeLoadFields(ctx, collection, broker)
+		resp, err := broker.DescribeCollection(context.Background(), collectionLoadInfo.CollectionID)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		collection := &Collection{
+			CollectionLoadInfo: collectionLoadInfo,
+			Schema:             resp.Schema,
+		}
+		err = m.upgradeLoadFields(ctx, collection)
 		if err != nil {
 			if errors.Is(err, merr.ErrCollectionNotFound) {
 				log.Warn("collection not found, skip upgrade logic and wait for release")
@@ -179,8 +186,9 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 
 		// update collection's CreateAt and UpdateAt to now after qc restart
 		m.putCollection(ctx, false, &Collection{
-			CollectionLoadInfo: collection,
+			CollectionLoadInfo: collection.CollectionLoadInfo,
 			CreatedAt:          time.Now(),
+			Schema:             collection.Schema,
 		})
 	}
 
@@ -218,30 +226,20 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 	return nil
 }
 
-func (m *CollectionManager) upgradeLoadFields(ctx context.Context, collection *querypb.CollectionLoadInfo, broker Broker) error {
+func (m *CollectionManager) upgradeLoadFields(ctx context.Context, collection *Collection) error {
 	// only fill load fields when value is nil
 	if collection.LoadFields != nil {
 		return nil
 	}
 
-	// invoke describe collection to get collection schema
-	resp, err := broker.DescribeCollection(context.Background(), collection.CollectionID)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return err
-	}
-
 	// fill all field id as legacy default behavior
-	collection.LoadFields = lo.FilterMap(resp.GetSchema().GetFields(), func(fieldSchema *schemapb.FieldSchema, _ int) (int64, bool) {
+	collection.LoadFields = lo.FilterMap(collection.Schema.GetFields(), func(fieldSchema *schemapb.FieldSchema, _ int) (int64, bool) {
 		// load fields list excludes system fields
 		return fieldSchema.GetFieldID(), !common.IsSystemField(fieldSchema.GetFieldID())
 	})
-
+	collection.LoadPercentage = 100
 	// put updated meta back to store
-	err = m.putCollection(ctx, true, &Collection{
-		CollectionLoadInfo: collection,
-		LoadPercentage:     100,
-		Schema:             resp.GetSchema(),
-	})
+	err := m.putCollection(ctx, true, collection)
 	if err != nil {
 		return err
 	}
