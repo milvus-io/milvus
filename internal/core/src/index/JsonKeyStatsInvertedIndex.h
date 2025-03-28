@@ -293,5 +293,44 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
     std::atomic<stdclock::time_point> last_commit_time_;
     int64_t commit_interval_in_ms_;
     std::atomic<bool> is_data_uncommitted_ = false;
+
+    struct IndexBuildTimestamps {
+        std::chrono::time_point<std::chrono::system_clock> index_build_begin_;
+        std::chrono::time_point<std::chrono::system_clock> tantivy_build_begin_;
+        // The time that we have finished push add operations to tantivy, which will be
+        // executed asynchronously.
+        std::chrono::time_point<std::chrono::system_clock>
+            tantivy_add_schedule_end_;
+        std::chrono::time_point<std::chrono::system_clock> index_build_done_;
+
+        auto
+        getJsonParsingDuration() const {
+            return std::chrono::duration<double>(tantivy_build_begin_ -
+                                                 index_build_begin_)
+                .count();
+        }
+
+        auto
+        getTantivyAddSchedulingDuration() const {
+            return std::chrono::duration<double>(tantivy_add_schedule_end_ -
+                                                 tantivy_build_begin_)
+                .count();
+        }
+
+        auto
+        getTantivyTotalDuration() const {
+            return std::chrono::duration<double>(index_build_done_ -
+                                                 tantivy_build_begin_)
+                .count();
+        }
+
+        auto
+        getIndexBuildTotalDuration() const {
+            return std::chrono::duration<double>(index_build_done_ -
+                                                 index_build_begin_)
+                .count();
+        }
+    };
+    IndexBuildTimestamps index_build_timestamps_;
 };
 }  // namespace milvus::index
