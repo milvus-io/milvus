@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -600,7 +601,24 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 		return merr.Status(err), nil
 	}
 
-	return merr.Success(), nil
+	// wait until new partition is loaded
+	for {
+		select {
+		case <-ctx.Done():
+			msg := "sync new created partition timeout before load finished"
+			log.Warn(msg)
+			return merr.Status(merr.WrapErrServiceInternal(msg)), nil
+		case <-time.After(time.Second):
+			// accelerate check
+			s.targetObserver.TriggerUpdateCurrentTarget(req.GetCollectionID())
+			if s.targetMgr.IsCurrentTargetExist(ctx, req.GetCollectionID(), req.GetPartitionID()) {
+				log.Info("sync new created partition finished")
+				return merr.Success(), nil
+			}
+			log.WithRateGroup("SyncNewCreatedPartition", 1, 60).
+				RatedInfo(10, "sync new created partition not finished, wait for loading")
+		}
+	}
 }
 
 // refreshCollection must be called after loading a collection. It looks for new segments that are not loaded yet and
