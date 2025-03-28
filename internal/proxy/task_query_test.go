@@ -404,7 +404,7 @@ func Test_translateToOutputFieldIDs(t *testing.T) {
 				},
 			},
 			expectedError: false,
-			expectedIDs:   []int64{100, 101},
+			expectedIDs:   []int64{100},
 		},
 		{
 			name:         "nil output fields",
@@ -427,7 +427,7 @@ func Test_translateToOutputFieldIDs(t *testing.T) {
 				},
 			},
 			expectedError: false,
-			expectedIDs:   []int64{100, 101},
+			expectedIDs:   []int64{100},
 		},
 		{
 			name:         "full list",
