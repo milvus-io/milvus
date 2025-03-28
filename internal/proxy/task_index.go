@@ -59,11 +59,10 @@ const (
 type createIndexTask struct {
 	baseTask
 	Condition
-	req       *milvuspb.CreateIndexRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	datacoord types.DataCoordClient
-	result    *commonpb.Status
+	req      *milvuspb.CreateIndexRequest
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *commonpb.Status
 
 	replicateMsgStream msgstream.MsgStream
 
@@ -572,7 +571,7 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		Timestamp:                        cit.BeginTs(),
 		UserAutoindexMetricTypeSpecified: cit.userAutoIndexMetricTypeSpecified,
 	}
-	cit.result, err = cit.datacoord.CreateIndex(ctx, req)
+	cit.result, err = cit.mixCoord.CreateIndex(ctx, req)
 	if err = merr.CheckRPCCall(cit.result, err); err != nil {
 		return err
 	}

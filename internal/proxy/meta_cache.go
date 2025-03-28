@@ -323,8 +323,7 @@ var _ Cache = (*MetaCache)(nil)
 
 // MetaCache implements Cache, provides collection meta cache based on internal RootCoord
 type MetaCache struct {
-	rootCoord  types.RootCoordClient
-	queryCoord types.QueryCoordClient
+	mixCoord types.MixCoordClient
 
 	dbInfo         map[string]*databaseInfo              // database -> db_info
 	collInfo       map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
@@ -351,16 +350,16 @@ type MetaCache struct {
 var globalMetaCache Cache
 
 // InitMetaCache initializes globalMetaCache
-func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCoord types.QueryCoordClient, shardMgr shardClientMgr) error {
+func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient, shardMgr shardClientMgr) error {
 	var err error
-	globalMetaCache, err = NewMetaCache(rootCoord, queryCoord, shardMgr)
+	globalMetaCache, err = NewMetaCache(mixCoord, shardMgr)
 	if err != nil {
 		return err
 	}
 	expr.Register("cache", globalMetaCache)
 
 	// The privilege info is a little more. And to get this info, the query operation of involving multiple table queries is required.
-	resp, err := rootCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+	resp, err := mixCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		log.Error("fail to init meta cache", zap.Error(err))
 		return err
@@ -371,10 +370,9 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 }
 
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
-func NewMetaCache(rootCoord types.RootCoordClient, queryCoord types.QueryCoordClient, shardMgr shardClientMgr) (*MetaCache, error) {
+func NewMetaCache(mixCoord types.MixCoordClient, shardMgr shardClientMgr) (*MetaCache, error) {
 	return &MetaCache{
-		rootCoord:              rootCoord,
-		queryCoord:             queryCoord,
+		mixCoord:               mixCoord,
 		dbInfo:                 map[string]*databaseInfo{},
 		collInfo:               map[string]map[string]*collectionInfo{},
 		collLeader:             map[string]map[string]*shardLeaders{},
@@ -731,7 +729,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 		CollectionName: collectionName,
 		CollectionID:   collectionID,
 	}
-	coll, err := m.rootCoord.DescribeCollection(ctx, req)
+	coll, err := m.mixCoord.DescribeCollection(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -759,7 +757,7 @@ func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectio
 		CollectionID:   collectionID,
 	}
 
-	partitions, err := m.rootCoord.ShowPartitions(ctx, req)
+	partitions, err := m.mixCoord.ShowPartitions(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -784,7 +782,7 @@ func (m *MetaCache) getCollectionLoadFields(ctx context.Context, collectionID Un
 		CollectionIDs: []int64{collectionID},
 	}
 
-	resp, err := m.queryCoord.ShowLoadCollections(ctx, req)
+	resp, err := m.mixCoord.ShowLoadCollections(ctx, req)
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotLoaded) {
 			return []int64{}, nil
@@ -803,7 +801,7 @@ func (m *MetaCache) describeDatabase(ctx context.Context, dbName string) (*rootc
 		DbName: dbName,
 	}
 
-	resp, err := m.rootCoord.DescribeDatabase(ctx, req)
+	resp, err := m.mixCoord.DescribeDatabase(ctx, req)
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return nil, err
 	}
@@ -908,7 +906,7 @@ func (m *MetaCache) GetCredentialInfo(ctx context.Context, username string) (*in
 			),
 			Username: username,
 		}
-		resp, err := m.rootCoord.GetCredential(ctx, req)
+		resp, err := m.mixCoord.GetCredential(ctx, req)
 		if err != nil {
 			return &internalpb.CredentialInfo{}, err
 		}
@@ -985,7 +983,7 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 	}
 
 	tr := timerecord.NewTimeRecorder("UpdateShardCache")
-	resp, err := m.queryCoord.GetShardLeaders(ctx, req)
+	resp, err := m.mixCoord.GetShardLeaders(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1185,7 +1183,7 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 			}
 		}
 	case typeutil.CacheRefresh:
-		resp, err := m.rootCoord.ListPolicy(context.Background(), &internalpb.ListPolicyRequest{})
+		resp, err := m.mixCoord.ListPolicy(context.Background(), &internalpb.ListPolicyRequest{})
 		if err != nil {
 			log.Error("fail to init meta cache", zap.Error(err))
 			return err
@@ -1269,7 +1267,7 @@ func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {
 	defer m.IDLock.Unlock()
 
 	if m.IDIndex == m.IDCount {
-		resp, err := m.rootCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
+		resp, err := m.mixCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 			Count: 1000000,
 		})
 		if err != nil {

@@ -7,6 +7,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tikv/client-go/v2/txnkv"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
@@ -33,12 +39,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/tikv/client-go/v2/txnkv"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/atomic"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 var Params *paramtable.ComponentParam = paramtable.Get()
@@ -96,59 +98,17 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (types.Mix
 func (s *mixCoordImpl) Register() error {
 	log := log.Ctx(s.ctx)
 	s.session.Register()
-
-	s.activateFunc = func() error {
-		log.Info("MixCoord switch from standby to active, activating")
-
-		if err := s.rootcoordServer.Init(); err != nil {
-			log.Error("RootCoord init failed", zap.Error(err))
-			return err
-		}
-		if err := s.rootcoordServer.Start(); err != nil {
-			log.Error("RootCoord start failed", zap.Error(err))
-			return err
-		}
-
-		if err := s.streamingCoord.Start(s.ctx); err != nil {
-			log.Info("start streaming coord failed", zap.Error(err))
-			return err
-		}
-
-		if err := s.datacoordServer.Init(); err != nil {
-			log.Error("DataCoord init failed", zap.Error(err))
-			return err
-		}
-		if err := s.datacoordServer.Start(); err != nil {
-			log.Error("DataCoord start failed", zap.Error(err))
-			return err
-		}
-
-		if err := s.queryCoordServer.Init(); err != nil {
-			log.Error("QueryCoord init failed", zap.Error(err))
-			return err
-		}
-		if err := s.queryCoordServer.Start(); err != nil {
-			log.Error("QueryCoord start failed", zap.Error(err))
-			return err
-		}
-
-		log.Info("MixCoord startup success")
-		return nil
-	}
-
 	afterRegister := func() {
 		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.MixCoordRole).Inc()
-		log.Info("MixCoord Register Finished")
 		s.session.LivenessCheck(s.ctx, func() {
-			log.Error("Mix Coord disconnected from etcd, process will exit", zap.Int64("Server Id", s.session.ServerID))
+			log.Error("MixCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.GetServerID()))
 			os.Exit(1)
 		})
 	}
-
 	if s.enableActiveStandBy {
 		go func() {
 			if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
-				log.Error("failed to activate standby mixcoord server", zap.Error(err))
+				log.Error("failed to activate standby server", zap.Error(err))
 				panic(err)
 			}
 			afterRegister()
@@ -160,54 +120,84 @@ func (s *mixCoordImpl) Register() error {
 }
 
 func (s *mixCoordImpl) Init() error {
+	log := log.Ctx(s.ctx)
 	var initErr error
-	s.initOnce.Do(func() {
-		if err := s.initSession(); err != nil {
-			initErr = err
-			return
-		}
-		s.initKVCreator()
-		s.initStreamingCoord()
-		s.rootcoordServer.SetMixCoord(s)
-		s.datacoordServer.SetMixCoord(s)
-		s.queryCoordServer.SetMixCoord(s)
+	if err := s.initSession(); err != nil {
+		initErr = err
+		return initErr
+	}
+	s.initKVCreator()
+	if s.enableActiveStandBy {
+		s.activateFunc = func() error {
+			log.Info("mixCoord switch from standby to active, activating")
 
-		if err := s.rootcoordServer.Init(); err != nil {
-			initErr = err
-			return
+			var err error
+			s.initOnce.Do(func() {
+				if err = s.initInternal(); err != nil {
+					log.Error("mixCoord init failed", zap.Error(err))
+				}
+			})
+			if err != nil {
+				return err
+			}
+			log.Info("mixCoord startup success", zap.String("address", s.session.GetAddress()))
+			return err
 		}
-
-		if err := s.rootcoordServer.Start(); err != nil {
-			initErr = err
-			return
-		}
-
-		if err := s.streamingCoord.Start(s.ctx); err != nil {
-			log.Info("start streaming coord failed", zap.Error(err))
-			return
-		}
-
-		if err := s.datacoordServer.Init(); err != nil {
-			initErr = err
-			return
-		}
-
-		if err := s.datacoordServer.Start(); err != nil {
-			initErr = err
-			return
-		}
-
-		if err := s.queryCoordServer.Init(); err != nil {
-			initErr = err
-			return
-		}
-
-		if err := s.queryCoordServer.Start(); err != nil {
-			initErr = err
-			return
-		}
-	})
+		s.UpdateStateCode(commonpb.StateCode_StandBy)
+		log.Info("MixCoord enter standby mode successfully")
+	} else {
+		var err error
+		s.initOnce.Do(func() {
+			if err = s.initInternal(); err != nil {
+				log.Error("mixCoord init failed", zap.Error(err))
+			}
+		})
+	}
 	return initErr
+}
+
+func (s *mixCoordImpl) initInternal() error {
+	log := log.Ctx(s.ctx)
+	s.initStreamingCoord()
+	s.rootcoordServer.SetMixCoord(s)
+	s.datacoordServer.SetMixCoord(s)
+	s.queryCoordServer.SetMixCoord(s)
+
+	if err := s.rootcoordServer.Init(); err != nil {
+		log.Error("rootCoord init failed", zap.Error(err))
+		return err
+	}
+
+	if err := s.rootcoordServer.Start(); err != nil {
+		log.Error("rootCoord start failed", zap.Error(err))
+		return err
+	}
+
+	if err := s.streamingCoord.Start(s.ctx); err != nil {
+		log.Error("streamCoord init failed", zap.Error(err))
+		return err
+	}
+
+	if err := s.datacoordServer.Init(); err != nil {
+		log.Error("dataCoord init failed", zap.Error(err))
+		return err
+	}
+
+	if err := s.datacoordServer.Start(); err != nil {
+		log.Error("dataCoord init failed", zap.Error(err))
+		return err
+	}
+
+	if err := s.queryCoordServer.Init(); err != nil {
+		log.Error("queryCoord init failed", zap.Error(err))
+		return err
+	}
+
+	if err := s.queryCoordServer.Start(); err != nil {
+		log.Error("queryCoord init failed", zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 func (s *mixCoordImpl) initKVCreator() {
@@ -253,11 +243,14 @@ func (s *mixCoordImpl) Stop() error {
 }
 
 func (s *mixCoordImpl) initStreamingCoord() {
+	fMixcoord := syncutil.NewFuture[types.MixCoordClient]()
+	fMixcoord.Set(s.mixCoordClient)
+
 	s.streamingCoord = streamingcoord.NewServerBuilder().
 		WithETCD(s.etcdCli).
 		WithMetaKV(s.metaKVCreator()).
 		WithSession(s.session).
-		WithMixCoordClient(s.mixCoordClient).
+		WithMixCoordClient(fMixcoord).
 		Build()
 }
 
@@ -583,26 +576,7 @@ func (s *mixCoordImpl) GetStatisticsChannel(ctx context.Context, req *internalpb
 
 // GetMetrics get metrics
 func (s *mixCoordImpl) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return &milvuspb.GetMetricsResponse{
-			Status:   merr.Status(err),
-			Response: "",
-		}, nil
-	}
-
-	resp := &milvuspb.GetMetricsResponse{
-		Status:        merr.Success(),
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, paramtable.GetNodeID()),
-	}
-
-	ret, err := s.metricsRequest.ExecuteMetricsRequest(ctx, in)
-	if err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-
-	resp.Response = ret
-	return resp, nil
+	return s.rootcoordServer.GetMetrics(ctx, in)
 }
 
 // QueryCoordServer

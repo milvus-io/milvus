@@ -18,9 +18,9 @@ package grpcmixcoordclient
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	grpcCodes "google.golang.org/grpc/codes"
@@ -53,7 +53,6 @@ type MixCoordClient struct {
 	rootcoordpb.RootCoordClient
 	datapb.DataCoordClient
 	querypb.QueryCoordClient
-	indexpb.IndexCoordClient
 }
 
 // Client grpc client
@@ -224,6 +223,18 @@ func (c *Client) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRe
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.BoolResponse, error) {
 		return client.HasCollection(ctx, in)
+	})
+}
+
+// CreatePartition create partition
+func (c *Client) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.AddCollectionField(ctx, in)
 	})
 }
 

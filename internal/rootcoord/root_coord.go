@@ -31,7 +31,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -305,15 +304,6 @@ func (c *Core) initKVCreator() {
 	}
 }
 
-func (c *Core) initStreamingCoord() {
-	// c.streamingCoord = streamingcoord.NewServerBuilder().
-	// 	WithETCD(c.etcdCli).
-	// 	WithMetaKV(c.metaKVCreator()).
-	// 	WithSession(c.session).
-	// 	WithMixCoordClient(mixcoord).
-	// 	Build()
-}
-
 func (c *Core) initMetaTable(initCtx context.Context) error {
 	fn := func() error {
 		var catalog metastore.RootCoordCatalog
@@ -435,10 +425,6 @@ func (c *Core) initInternal() error {
 	c.garbageCollector = newBgGarbageCollector(c)
 	c.stepExecutor = newBgStepExecutor(c.ctx)
 
-	// if err := c.streamingCoord.Start(c.ctx); err != nil {
-	// 	log.Info("start streaming coord failed", zap.Error(err))
-	// 	return err
-	// }
 	if !streamingutil.IsStreamingServiceEnabled() {
 		c.proxyWatcher = proxyutil.NewProxyWatcher(
 			c.etcdCli,
@@ -490,7 +476,6 @@ func (c *Core) Init() error {
 	c.registerMetricsRequest()
 	c.factory.Init(Params)
 	c.initKVCreator()
-	c.initStreamingCoord()
 
 	if c.enableActiveStandBy {
 		c.activateFunc = func() error {
@@ -3266,8 +3251,4 @@ func (c *Core) getDefaultAndCustomPrivilegeGroups(ctx context.Context) ([]*milvu
 		return nil, err
 	}
 	return allGroups, nil
-}
-
-// RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.
-func (s *Core) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 }

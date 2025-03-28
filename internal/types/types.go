@@ -85,23 +85,14 @@ type DataNodeComponent interface {
 	// SetEtcdClient set etcd client for DataNode
 	SetEtcdClient(etcdClient *clientv3.Client)
 
-	// SetRootCoordClient set SetRootCoordClient for DataNode
-	// `rootCoord` is a client of root coordinator.
+	// SetMixCoordClient set SetMixCoordClient for DataNode
+	// `mixCoord` is a client of root coordinator.
 	//
 	// Return a generic error in status:
-	//     If the rootCoord is nil or the rootCoord has been set before.
+	//     If the mixCoord is nil or the mixCoord has been set before.
 	// Return nil in status:
-	//     The rootCoord is not nil.
-	SetRootCoordClient(rootCoord RootCoordClient) error
-
-	// SetDataCoordClient set DataCoord for DataNode
-	// `dataCoord` is a client of data coordinator.
-	//
-	// Return a generic error in status:
-	//     If the dataCoord is nil or the dataCoord has been set before.
-	// Return nil in status:
-	//     The dataCoord is not nil.
-	SetDataCoordClient(dataCoord DataCoordClient) error
+	//     The mixCoord is not nil.
+	SetMixCoordClient(mixCoord MixCoordClient) error
 }
 
 // DataCoordClient is the client interface for datacoord server
@@ -178,8 +169,6 @@ type RootCoordComponent interface {
 
 	// GetMetrics notifies RootCoordComponent to collect metrics for specified component
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
-
-	RegisterStreamingCoordGRPCService(server *grpc.Server)
 }
 
 // ProxyClient is the client interface for proxy server
@@ -284,24 +273,6 @@ type QueryCoordComponent interface {
 	// UpdateStateCode updates state code for QueryCoord
 	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
 	UpdateStateCode(stateCode commonpb.StateCode)
-
-	// SetDataCoordClient set SetDataCoordClient for QueryCoord
-	// `dataCoord` is a client of data coordinator.
-	//
-	// Return a generic error in status:
-	//     If the dataCoord is nil.
-	// Return nil in status:
-	//     The dataCoord is not nil.
-	SetDataCoordClient(dataCoord DataCoordClient) error
-
-	// SetRootCoordClient set SetRootCoordClient for QueryCoord
-	// `rootCoord` is a client of root coordinator.
-	//
-	// Return a generic error in status:
-	//     If the rootCoord is nil.
-	// Return nil in status:
-	//     The rootCoord is not nil.
-	SetRootCoordClient(rootCoord RootCoordClient) error
 
 	// SetQueryNodeCreator set QueryNode client creator func for QueryCoord
 	SetQueryNodeCreator(func(ctx context.Context, addr string, nodeID int64) (QueryNodeClient, error))

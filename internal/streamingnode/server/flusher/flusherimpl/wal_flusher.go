@@ -125,11 +125,15 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	}
 	impl.logger.Info("fetch recovery info done", zap.Int("recoveryInfoNum", len(recoverInfos)))
 
-	dc := resource.Resource().MixCoordClient()
+	mixc, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+	if err != nil {
+		impl.logger.Warn("flusher recovery is canceled before data coord client ready", zap.Error(err))
+		return nil, err
+	}
 	impl.logger.Info("data coord client ready")
 
 	// build all components.
-	broker := broker.NewCoordBroker(dc, paramtable.GetNodeID())
+	broker := broker.NewCoordBroker(mixc, paramtable.GetNodeID())
 	chunkManager := resource.Resource().ChunkManager()
 
 	pm, err := recoverPChannelCheckpointManager(ctx, l.WALName(), l.Channel().Name, checkpoints)

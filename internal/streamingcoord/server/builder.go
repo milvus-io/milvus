@@ -19,7 +19,7 @@ type ServerBuilder struct {
 	etcdClient     *clientv3.Client
 	metaKV         kv.MetaKv
 	session        sessionutil.SessionInterface
-	mixCoordClient types.MixCoordClient
+	mixCoordClient *syncutil.Future[types.MixCoordClient]
 }
 
 func NewServerBuilder() *ServerBuilder {
@@ -36,7 +36,7 @@ func (b *ServerBuilder) WithMetaKV(metaKV kv.MetaKv) *ServerBuilder {
 	return b
 }
 
-func (b *ServerBuilder) WithMixCoordClient(mixCoordClient types.MixCoordClient) *ServerBuilder {
+func (b *ServerBuilder) WithMixCoordClient(mixCoordClient *syncutil.Future[types.MixCoordClient]) *ServerBuilder {
 	b.mixCoordClient = mixCoordClient
 	return b
 }

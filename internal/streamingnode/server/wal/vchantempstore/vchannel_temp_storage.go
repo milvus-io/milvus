@@ -14,13 +14,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 // ErrNotFound is returned when the vchannel is not found.
 var ErrNotFound = errors.New("not found")
 
 // NewVChannelTempStorage creates a new VChannelTempStorage.
-func NewVChannelTempStorage(mix types.MixCoordClient) *VChannelTempStorage {
+func NewVChannelTempStorage(mix *syncutil.Future[types.MixCoordClient]) *VChannelTempStorage {
 	return &VChannelTempStorage{
 		mix:       mix,
 		vchannels: make(map[int64]map[string]string),
@@ -31,7 +32,7 @@ func NewVChannelTempStorage(mix types.MixCoordClient) *VChannelTempStorage {
 // It's used to make compatibility between old version and new version message.
 // TODO: removed in 3.0.
 type VChannelTempStorage struct {
-	mix types.MixCoordClient
+	mix *syncutil.Future[types.MixCoordClient]
 
 	mu        sync.Mutex
 	vchannels map[int64]map[string]string
@@ -62,9 +63,13 @@ func (ts *VChannelTempStorage) updateVChannelByPChannelOfCollectionIfNotExist(ct
 		return nil
 	}
 	ts.mu.Unlock()
+	mix, err := ts.mix.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
 
 	return retry.Do(ctx, func() error {
-		resp, err := ts.mix.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+		resp, err := mix.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),

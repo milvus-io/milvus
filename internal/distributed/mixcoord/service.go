@@ -401,6 +401,10 @@ func (s *Server) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowColl
 	return s.mixCoord.ShowCollectionIDs(ctx, in)
 }
 
+func (s *Server) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
+	return s.mixCoord.AddCollectionField(ctx, in)
+}
+
 // CreatePartition creates a partition in a collection
 func (s *Server) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return s.mixCoord.CreatePartition(ctx, in)
