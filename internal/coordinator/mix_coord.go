@@ -428,6 +428,10 @@ func (c *mixCoordImpl) ListAliases(ctx context.Context, in *milvuspb.ListAliases
 	return c.rootcoordServer.ListAliases(ctx, in)
 }
 
+func (c *mixCoordImpl) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
+	return c.rootcoordServer.AddCollectionField(ctx, in)
+}
+
 func (s *mixCoordImpl) CreateCredential(ctx context.Context, req *internalpb.CredentialInfo) (*commonpb.Status, error) {
 	return s.rootcoordServer.CreateCredential(ctx, req)
 }
