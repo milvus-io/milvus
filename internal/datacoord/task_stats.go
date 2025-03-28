@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
@@ -212,7 +213,7 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		return false
 	}
 
-	binlogNum := (segment.getSegmentSize()/Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() + 1) * int64(len(collInfo.Schema.GetFields())) * 100
+	binlogNum := (segment.getSegmentSize()/Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() + 1) * int64(len(collInfo.Schema.GetFields())) * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
 	// binlogNum + BM25logNum + statslogNum
 	start, end, err := dependency.allocator.AllocN(binlogNum + int64(len(collInfo.Schema.GetFunctions())) + 1)
 	if err != nil {
