@@ -35,6 +35,7 @@ import (
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -171,12 +172,8 @@ func (s *Server) SetEtcdClient(client *clientv3.Client) {
 	s.datanode.SetEtcdClient(client)
 }
 
-func (s *Server) SetRootCoordInterface(ms types.RootCoordClient) error {
-	return s.datanode.SetRootCoordClient(ms)
-}
-
-func (s *Server) SetDataCoordInterface(ds types.DataCoordClient) error {
-	return s.datanode.SetDataCoordClient(ds)
+func (s *Server) SetMixCoordInterface(ms types.MixCoordClient) error {
+	return s.datanode.SetMixCoordClient(ms)
 }
 
 // Run initializes and starts Datanode's grpc service.
@@ -255,6 +252,25 @@ func (s *Server) init() error {
 	err = s.startGrpc()
 	if err != nil {
 		return err
+	}
+
+	// --- MixCoord Client ---
+	if s.mixCoordClient != nil {
+		log.Info("initializing MixCoord client for DataNode")
+		mixCoordClient, err := s.mixCoordClient()
+		if err != nil {
+			log.Error("failed to create new MixCoord client", zap.Error(err))
+			panic(err)
+		}
+
+		if err = componentutil.WaitForComponentHealthy(s.ctx, mixCoordClient, "MixCoord", 1000000, time.Millisecond*200); err != nil {
+			log.Error("failed to wait for MixCoord client to be ready", zap.Error(err))
+			panic(err)
+		}
+		log.Info("MixCoord client is ready for DataNode")
+		if err = s.SetMixCoordInterface(mixCoordClient); err != nil {
+			panic(err)
+		}
 	}
 
 	s.datanode.UpdateStateCode(commonpb.StateCode_Initializing)

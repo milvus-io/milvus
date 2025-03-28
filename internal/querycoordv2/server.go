@@ -151,38 +151,6 @@ func NewQueryCoord(ctx context.Context) (*Server, error) {
 }
 
 func (s *Server) Register() error {
-	// log := log.Ctx(s.ctx)
-	// s.session.Register()
-	// afterRegister := func() {
-	// 	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.QueryCoordRole).Inc()
-	// 	s.session.LivenessCheck(s.ctx, func() {
-	// 		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.GetServerID()))
-	// 		os.Exit(1)
-	// 	})
-	// }
-	// if s.enableActiveStandBy {
-	// 	go func() {
-	// 		if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
-	// 			log.Error("failed to activate standby server", zap.Error(err))
-	// 			panic(err)
-	// 		}
-	// 		afterRegister()
-	// 	}()
-	// } else {
-	// 	afterRegister()
-	// }
-	return nil
-}
-
-func (s *Server) initSession() error {
-	// Init QueryCoord session
-	// s.session = sessionutil.NewSession(s.ctx)
-	// if s.session == nil {
-	// 	return fmt.Errorf("failed to create session")
-	// }
-	// s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
-	// s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
-	// s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	return nil
 }
 
@@ -257,10 +225,6 @@ func (s *Server) Init() error {
 
 	s.registerMetricsRequest()
 
-	if err := s.initSession(); err != nil {
-		return err
-	}
-
 	if s.enableActiveStandBy {
 		s.activateFunc = func() error {
 			log.Info("QueryCoord switch from standby to active, activating")
@@ -285,22 +249,6 @@ func (s *Server) Init() error {
 
 func (s *Server) initQueryCoord() error {
 	log := log.Ctx(s.ctx)
-	// wait for master init or healthy
-	// log.Info("QueryCoord try to wait for RootCoord ready")
-	// if err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200); err != nil {
-	// 	log.Error("QueryCoord wait for RootCoord ready failed", zap.Error(err))
-	// 	return errors.Wrap(err, "RootCoord not ready")
-	// }
-	// log.Info("QueryCoord report RootCoord ready")
-
-	// // wait for master init or healthy
-	// log.Info("QueryCoord try to wait for DataCoord ready")
-	// if err := componentutil.WaitForComponentHealthy(s.ctx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200); err != nil {
-	// 	log.Error("QueryCoord wait for DataCoord ready failed", zap.Error(err))
-	// 	return errors.Wrap(err, "DataCoord not ready")
-	// }
-	// log.Info("QueryCoord report DataCoord ready")
-
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	log.Info("start init querycoord", zap.Any("State", commonpb.StateCode_Initializing))
 	// Init KV and ID allocator
@@ -726,16 +674,6 @@ func (s *Server) SetTiKVClient(client *txnkv.Client) {
 
 func (s *Server) SetMixCoord(mixCoord types.MixCoord) {
 	s.mixCoord = mixCoord
-}
-
-// SetRootCoord sets root coordinator's client
-func (s *Server) SetRootCoordClient(rootCoord types.RootCoordClient) error {
-	return nil
-}
-
-// SetDataCoord sets data coordinator's client
-func (s *Server) SetDataCoordClient(dataCoord types.DataCoordClient) error {
-	return nil
 }
 
 func (s *Server) SetQueryNodeCreator(f func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)) {

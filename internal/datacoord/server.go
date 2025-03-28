@@ -228,54 +228,14 @@ func (s *Server) QuitSignal() <-chan struct{} {
 
 // Register registers data service at etcd
 func (s *Server) Register() error {
-	// log := log.Ctx(s.ctx)
-	// // first register indexCoord
-	// s.icSession.Register()
-	// s.session.Register()
-	// afterRegister := func() {
-	// 	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.DataCoordRole).Inc()
-	// 	log.Info("DataCoord Register Finished")
-
-	// 	s.session.LivenessCheck(s.ctx, func() {
-	// 		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.GetServerID()))
-	// 		os.Exit(1)
-	// 	})
-	// }
-	// if s.enableActiveStandBy {
-	// 	go func() {
-	// 		err := s.session.ProcessActiveStandBy(s.activateFunc)
-	// 		if err != nil {
-	// 			log.Error("failed to activate standby datacoord server", zap.Error(err))
-	// 			panic(err)
-	// 		}
-
-	// 		err = s.icSession.ForceActiveStandby(nil)
-	// 		if err != nil {
-	// 			log.Error("failed to force activate standby indexcoord server", zap.Error(err))
-	// 			panic(err)
-	// 		}
-	// 		afterRegister()
-	// 	}()
-	// } else {
-	// 	afterRegister()
-	// }
-
-	return nil
-}
-
-func (s *Server) initSession() error {
 	return nil
 }
 
 // Init change server state to Initializing
 func (s *Server) Init() error {
 	log := log.Ctx(s.ctx)
-	var err error
 	s.registerMetricsRequest()
 	s.factory.Init(Params)
-	if err = s.initSession(); err != nil {
-		return err
-	}
 	if err := s.initKV(); err != nil {
 		return err
 	}
