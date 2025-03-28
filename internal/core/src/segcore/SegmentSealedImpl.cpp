@@ -448,11 +448,11 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                                 var_column->Append(*array);
                             }
 
-                            // we stores the offset for each array element, so there is a additional uint64_t for each array element
+                            // we stores the offset for each array element, so there is a additional uint32_t for each array element
                             field_data_size =
-                                array->byte_size() + sizeof(uint64_t);
+                                array->byte_size() + sizeof(uint32_t);
                             stats_.mem_size +=
-                                array->byte_size() + sizeof(uint64_t);
+                                array->byte_size() + sizeof(uint32_t);
                         }
                     }
                     var_column->Seal();
@@ -554,7 +554,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     FieldDataPtr field_data;
     uint64_t total_written = 0;
     std::vector<uint64_t> indices{};
-    std::vector<std::vector<uint64_t>> element_indices{};
+    std::vector<std::vector<uint32_t>> element_indices{};
     FixedVector<bool> valid_data{};
     while (data.channel->pop(field_data)) {
         WriteFieldData(file,
