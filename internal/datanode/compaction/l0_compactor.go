@@ -68,7 +68,7 @@ func NewLevelZeroCompactionTask(
 	plan *datapb.CompactionPlan,
 ) *LevelZeroCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
-	alloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
+	alloc := allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd())
 	return &LevelZeroCompactionTask{
 		ctx:    ctx,
 		cancel: cancel,
