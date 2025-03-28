@@ -143,10 +143,10 @@ func runComponent[T component](ctx context.Context,
 // MilvusRoles decides which components are brought up with Milvus.
 type MilvusRoles struct {
 	EnableProxy         bool `env:"ENABLE_PROXY"`
+	EnableMixCoord      bool `env:"ENABLE_ROOT_COORD"`
 	EnableQueryNode     bool `env:"ENABLE_QUERY_NODE"`
 	EnableDataNode      bool `env:"ENABLE_DATA_NODE"`
 	EnableStreamingNode bool `env:"ENABLE_STREAMING_NODE"`
-	EnableMixCoord      bool `env:"ENABLE_ROOT_COORD"`
 	Local               bool
 	Alias               string
 	Embedded            bool
