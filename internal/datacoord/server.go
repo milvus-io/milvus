@@ -749,7 +749,7 @@ func (s *Server) startServerLoop() {
 	go s.importChecker.Start()
 	s.garbageCollector.start()
 
-	if !(streamingutil.IsStreamingServiceEnabled() || paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()) {
+	if !streamingutil.IsStreamingServiceEnabled() {
 		s.syncSegmentsScheduler.Start()
 	}
 }

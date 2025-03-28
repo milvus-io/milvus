@@ -336,7 +336,7 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 			}
 
 			if syncTask.IsFlush() {
-				if paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() || streamingutil.IsStreamingServiceEnabled() {
+				if streamingutil.IsStreamingServiceEnabled() {
 					wb.metaCache.RemoveSegments(metacache.WithSegmentIDs(syncTask.SegmentID()))
 					log.Info("flushed segment removed", zap.Int64("segmentID", syncTask.SegmentID()), zap.String("channel", syncTask.ChannelName()))
 				}
