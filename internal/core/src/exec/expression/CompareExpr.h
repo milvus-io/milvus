@@ -141,6 +141,7 @@ class PhyCompareFilterExpr : public Expr {
                 if (++processed_rows >= batch_size_) {
                     current_chunk_id_ = chunk_id;
                     current_chunk_pos_ = i + 1;
+                    break;
                 }
             }
         }
