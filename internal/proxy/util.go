@@ -1631,7 +1631,11 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 // now only support utf-8
 func checkInputUtf8Compatiable(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
 	checkeFields := lo.FilterMap(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
-		if field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_Text {
+		if field.DataType == schemapb.DataType_VarChar {
+			return field.GetFieldID(), true
+		}
+
+		if field.DataType != schemapb.DataType_Text {
 			return 0, false
 		}
 
@@ -1652,9 +1656,11 @@ func checkInputUtf8Compatiable(schema *schemapb.CollectionSchema, insertMsg *msg
 			continue
 		}
 
-		for row, data := range fieldData.GetScalars().GetStringData().GetData() {
+		strData := fieldData.GetScalars().GetStringData()
+		for row, data := range strData.GetData() {
 			ok := utf8.ValidString(data)
 			if !ok {
+				log.Warn("string field data not utf-8 format", zap.String("messageVersion", strData.ProtoReflect().Descriptor().Syntax().GoString()))
 				return merr.WrapErrAsInputError(fmt.Errorf("input with analyzer should be utf-8 format, but row: %d not utf-8 format. data: %s", row, data))
 			}
 		}
