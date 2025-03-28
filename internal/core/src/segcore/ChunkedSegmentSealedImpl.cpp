@@ -245,13 +245,20 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         field_data_info.arrow_reader_channel->set_capacity(parallel_degree * 2);
         auto& pool =
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+
+        auto priority = load_info.recovering ? milvus::ThreadPoolPriority::HIGH
+                                             : milvus::ThreadPoolPriority::LOW;
         pool.Submit(LoadArrowReaderFromRemote,
                     insert_files,
-                    field_data_info.arrow_reader_channel);
+                    field_data_info.arrow_reader_channel,
+                    priority);
 
-        LOG_INFO("segment {} submits load field {} task to thread pool",
-                 this->get_segment_id(),
-                 field_id.get());
+        LOG_INFO(
+            "segment {} submits load field {} task to thread pool, "
+            "recovering:{}",
+            this->get_segment_id(),
+            field_id.get(),
+            load_info.recovering);
         bool use_mmap = false;
         if (!info.enable_mmap ||
             SystemProperty::Instance().IsSystem(field_id)) {

@@ -205,8 +205,8 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
             std::string index_file_prefix = slice_meta_filepath.substr(
                 0, slice_meta_filepath.find_last_of('/') + 1);
 
-            auto result =
-                file_manager_->LoadIndexToMemory({slice_meta_filepath});
+            auto result = file_manager_->LoadIndexToMemory(
+                {slice_meta_filepath}, config[milvus::THREAD_POOL_PRIORITY]);
             auto raw_slice_meta = result[INDEX_FILE_SLICE_META];
             Config meta_data = Config::parse(
                 std::string(static_cast<const char*>(raw_slice_meta->Data()),
@@ -226,7 +226,8 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                     batch.push_back(index_file_prefix + file_name);
                 }
 
-                auto batch_data = file_manager_->LoadIndexToMemory(batch);
+                auto batch_data = file_manager_->LoadIndexToMemory(
+                    batch, config[milvus::THREAD_POOL_PRIORITY]);
                 for (const auto& file_path : batch) {
                     const std::string file_name =
                         file_path.substr(file_path.find_last_of('/') + 1);
@@ -248,9 +249,10 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
         }
 
         if (!pending_index_files.empty()) {
-            auto result =
-                file_manager_->LoadIndexToMemory(std::vector<std::string>(
-                    pending_index_files.begin(), pending_index_files.end()));
+            auto result = file_manager_->LoadIndexToMemory(
+                std::vector<std::string>(pending_index_files.begin(),
+                                         pending_index_files.end()),
+                config[milvus::THREAD_POOL_PRIORITY]);
             for (auto&& index_data : result) {
                 index_datas.insert(std::move(index_data));
             }
@@ -562,7 +564,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         std::vector<std::string> batch{};
         batch.reserve(parallel_degree);
 
-        auto result = file_manager_->LoadIndexToMemory({slice_meta_filepath});
+        auto result = file_manager_->LoadIndexToMemory(
+            {slice_meta_filepath}, config[milvus::THREAD_POOL_PRIORITY]);
         auto raw_slice_meta = result[INDEX_FILE_SLICE_META];
         Config meta_data = Config::parse(
             std::string(static_cast<const char*>(raw_slice_meta->Data()),
@@ -574,7 +577,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
             auto HandleBatch = [&](int index) {
                 auto start_load2_mem = std::chrono::system_clock::now();
-                auto batch_data = file_manager_->LoadIndexToMemory(batch);
+                auto batch_data = file_manager_->LoadIndexToMemory(
+                    batch, config[milvus::THREAD_POOL_PRIORITY]);
                 load_duration_sum +=
                     (std::chrono::system_clock::now() - start_load2_mem);
                 for (int j = index - batch.size() + 1; j <= index; j++) {
@@ -612,8 +616,10 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     } else {
         //1. load files into memory
         auto start_load_files2_mem = std::chrono::system_clock::now();
-        auto result = file_manager_->LoadIndexToMemory(std::vector<std::string>(
-            pending_index_files.begin(), pending_index_files.end()));
+        auto result = file_manager_->LoadIndexToMemory(
+            std::vector<std::string>(pending_index_files.begin(),
+                                     pending_index_files.end()),
+            config[milvus::THREAD_POOL_PRIORITY]);
         load_duration_sum +=
             (std::chrono::system_clock::now() - start_load_files2_mem);
         //2. write data into files

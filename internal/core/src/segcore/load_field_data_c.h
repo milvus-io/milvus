@@ -58,6 +58,9 @@ EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
            int64_t field_id,
            bool enabled);
 
+void
+SetRecovering(CLoadFieldDataInfo c_load_field_data_info, bool recovering);
+
 #ifdef __cplusplus
 }
 #endif

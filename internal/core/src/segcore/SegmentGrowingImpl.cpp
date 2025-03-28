@@ -222,6 +222,8 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
     AssertInfo(infos.field_infos.find(primary_field_id.get()) !=
                    infos.field_infos.end(),
                "primary field data should be included");
+    auto priority = infos.recovering ? milvus::ThreadPoolPriority::HIGH
+                                     : milvus::ThreadPoolPriority::LOW;
 
     size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
     auto reserved_offset = PreInsert(num_rows);
@@ -243,8 +245,9 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
                  this->get_segment_id(),
                  field_id.get(),
                  num_rows);
-        auto load_future =
-            pool.Submit(LoadFieldDatasFromRemote, insert_files, channel);
+
+        auto load_future = pool.Submit(
+            LoadFieldDatasFromRemote, insert_files, channel, priority);
 
         LOG_INFO("segment {} submits load field {} task to thread pool",
                  this->get_segment_id(),
@@ -318,9 +321,10 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         // update the mem size
         stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
 
-        LOG_INFO("segment {} loads field {} done",
+        LOG_INFO("segment {} loads field {} done, recovering:{}",
                  this->get_segment_id(),
-                 field_id.get());
+                 field_id.get(),
+                 infos.recovering);
     }
 
     // step 5: update small indexes
