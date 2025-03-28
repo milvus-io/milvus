@@ -544,13 +544,24 @@ func (sd *shardDelegator) LoadL0(ctx context.Context, infos []*querypb.SegmentLo
 func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkoracle.Candidate, fn func(pk storage.PrimaryKey, ts uint64) error) error {
 	level0Segments := sd.deleteBuffer.ListL0()
 
+	if len(level0Segments) == 0 {
+		return nil
+	}
+
+	log := sd.getLogger(context.Background())
+	start := time.Now()
+	totalL0Rows := 0
+	totalBfHitRows := int64(0)
+	processedL0Count := 0
+
 	for _, segment := range level0Segments {
 		segment := segment.(*segments.L0Segment)
 		if segment.Partition() == partitionID || segment.Partition() == common.AllPartitionsID {
 			segmentPks, segmentTss := segment.DeleteRecords()
+			totalL0Rows += len(segmentPks)
+			processedL0Count++
 			batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
-			bfHitRowInL0 := int64(0)
-			start := time.Now()
+
 			for idx := 0; idx < len(segmentPks); idx += batchSize {
 				endIdx := idx + batchSize
 				if endIdx > len(segmentPks) {
@@ -561,24 +572,25 @@ func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkora
 				hits := candidate.BatchPkExist(lc)
 				for i, hit := range hits {
 					if hit {
-						bfHitRowInL0 += 1
+						totalBfHitRows += 1
 						if err := fn(segmentPks[idx+i], segmentTss[idx+i]); err != nil {
 							return err
 						}
 					}
 				}
 			}
-
-			log.Info("forward delete to worker...",
-				zap.Int64("L0SegmentID", segment.ID()),
-				zap.Int64("segmentID", candidate.ID()),
-				zap.String("channel", segment.LoadInfo().GetInsertChannel()),
-				zap.Int("totalDeleteRowsInL0", len(segmentPks)),
-				zap.Int64("bfHitRowsInL0", bfHitRowInL0),
-				zap.Int64("bfCost", time.Since(start).Milliseconds()),
-			)
 		}
 	}
+
+	log.Info("forward delete from L0 segments to worker",
+		zap.Int64("targetSegmentID", candidate.ID()),
+		zap.String("channel", sd.vchannelName),
+		zap.Int("l0SegmentCount", processedL0Count),
+		zap.Int("totalDeleteRowsInL0", totalL0Rows),
+		zap.Int64("totalBfHitRows", totalBfHitRows),
+		zap.Int64("totalCost", time.Since(start).Milliseconds()),
+	)
+
 	return nil
 }
 
