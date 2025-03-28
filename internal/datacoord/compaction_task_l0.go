@@ -322,10 +322,6 @@ func (t *l0CompactionTask) PreparePlan() bool {
 }
 
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
-	beginLogID, _, err := t.allocator.AllocN(1)
-	if err != nil {
-		return nil, err
-	}
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	plan := &datapb.CompactionPlan{
 		PlanID:           taskProto.GetPlanID(),
@@ -336,7 +332,6 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		CollectionTtl:    taskProto.GetCollectionTtl(),
 		TotalRows:        taskProto.GetTotalRows(),
 		Schema:           taskProto.GetSchema(),
-		BeginLogID:       beginLogID,
 		SlotUsage:        t.GetSlotUsage(),
 	}
 
@@ -364,6 +359,12 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		return nil, errors.Errorf("Selected zero L1/L2 segments for the position=%v", taskProto.GetPos())
 	}
 
+	// Alloc LogIDs by selected L1 segments count
+	beginLogID, _, err := t.allocator.AllocN(int64(len(sealedSegmentIDs)))
+	if err != nil {
+		return nil, err
+	}
+	plan.BeginLogID = beginLogID
 	plan.SegmentBinlogs = append(plan.SegmentBinlogs, sealedSegBinlogs...)
 	log.Info("l0CompactionTask refreshed level zero compaction plan",
 		zap.Any("target position", taskProto.GetPos()),
