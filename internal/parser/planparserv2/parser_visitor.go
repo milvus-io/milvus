@@ -1182,15 +1182,35 @@ func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface
 }
 
 func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
-	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
+	}
+
+	if len(column.NestedPath) != 0 {
+		// convert json not null expr to exists expr, eg: json['a'] is not null -> exists json['a']
+		expr := &planpb.Expr{
+			Expr: &planpb.Expr_ExistsExpr{
+				ExistsExpr: &planpb.ExistsExpr{
+					Info: &planpb.ColumnInfo{
+						FieldId:    column.FieldId,
+						DataType:   column.DataType,
+						NestedPath: column.NestedPath,
+					},
+				},
+			},
+		}
+
+		return &ExprWithType{
+			expr:     expr,
+			dataType: schemapb.DataType_Bool,
+		}
 	}
 
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_NullExpr{
 			NullExpr: &planpb.NullExpr{
-				ColumnInfo: toColumnInfo(column),
+				ColumnInfo: column,
 				Op:         planpb.NullExpr_IsNotNull,
 			},
 		},
@@ -1202,15 +1222,41 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 }
 
 func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
-	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
+	}
+
+	if len(column.NestedPath) != 0 {
+		// convert json is null expr to not exists expr, eg: json['a'] is null -> not exists json['a']
+		expr := &planpb.Expr{
+			Expr: &planpb.Expr_ExistsExpr{
+				ExistsExpr: &planpb.ExistsExpr{
+					Info: &planpb.ColumnInfo{
+						FieldId:    column.FieldId,
+						DataType:   column.DataType,
+						NestedPath: column.NestedPath,
+					},
+				},
+			},
+		}
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_UnaryExpr{
+					UnaryExpr: &planpb.UnaryExpr{
+						Op:    unaryLogicalOpMap[parser.PlanParserNOT],
+						Child: expr,
+					},
+				},
+			},
+			dataType: schemapb.DataType_Bool,
+		}
 	}
 
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_NullExpr{
 			NullExpr: &planpb.NullExpr{
-				ColumnInfo: toColumnInfo(column),
+				ColumnInfo: column,
 				Op:         planpb.NullExpr_IsNull,
 			},
 		},

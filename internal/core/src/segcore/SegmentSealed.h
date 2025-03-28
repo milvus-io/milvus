@@ -68,6 +68,18 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual std::pair<std::string_view, bool>
     GetJsonData(FieldId field_id, size_t offset) const = 0;
 
+    virtual index::IndexBase*
+    GetJsonIndex(FieldId field_id, std::string path) const override {
+        JSONIndexKey key;
+        key.field_id = field_id;
+        key.nested_path = path;
+        auto index = json_indexings_.find(key);
+        if (index == json_indexings_.end()) {
+            return nullptr;
+        }
+        return index->second.get();
+    }
+
     SegmentType
     type() const override {
         return SegmentType::Sealed;
@@ -90,15 +102,21 @@ class SegmentSealed : public SegmentInternalInterface {
     bool
     HasIndex(FieldId field_id,
              const std::string& path,
-             DataType data_type) const override {
+             DataType data_type,
+             bool any_type = false) const override {
         JSONIndexKey key;
         key.field_id = field_id;
         key.nested_path = path;
         auto index = json_indexings_.find(key);
-        return index != json_indexings_.end() &&
-               (data_type == index->second->JsonCastType() ||
-                (data_type == DataType::INT64 &&
-                 index->second->JsonCastType() == DataType::DOUBLE));
+        if (index == json_indexings_.end()) {
+            return false;
+        }
+        if (any_type) {
+            return true;
+        }
+        return data_type == index->second->JsonCastType() ||
+               (data_type == DataType::INT64 &&
+                index->second->JsonCastType() == DataType::DOUBLE);
     }
 
  protected:
