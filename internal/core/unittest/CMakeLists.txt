@@ -54,7 +54,6 @@ set(MILVUS_TEST_FILES
         test_float16.cpp
         test_function.cpp
         test_futures.cpp
-        test_group_by.cpp
         test_iterative_filter.cpp
         test_growing.cpp
         test_growing_index.cpp
@@ -72,6 +71,7 @@ set(MILVUS_TEST_FILES
         test_offset_ordered_map.cpp
         test_plan_proto.cpp
         test_query.cpp
+        test_query_group_by.cpp
         test_range_search_sort.cpp
         test_reduce_c.cpp
         test_reduce.cpp
@@ -81,6 +81,7 @@ set(MILVUS_TEST_FILES
         test_retrieve.cpp
         test_scalar_index.cpp
         test_sealed.cpp
+        test_search_group_by.cpp
         test_segcore.cpp
         test_similarity_corelation.cpp
         test_span.cpp
@@ -113,7 +114,7 @@ if ( BUILD_DISK_ANN STREQUAL "ON" )
 endif()
 
 if (LINUX OR APPLE)
-    set(MILVUS_TEST_FILES
+   set(MILVUS_TEST_FILES
             ${MILVUS_TEST_FILES}
             test_scalar_index_creator.cpp
             test_string_index.cpp

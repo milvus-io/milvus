@@ -1306,6 +1306,89 @@ SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
     }
 }
 
+void
+SegmentSealedImpl::bulk_subscript(FieldId field_id,
+                                  DataType data_type,
+                                  const int64_t* seg_offsets,
+                                  int64_t count,
+                                  void* data,
+                                  TargetBitmapView& valid_map) const {
+    auto& field_meta = schema_->operator[](field_id);
+    auto& field_data = fields_.at(field_id);
+    valid_map.set();
+    if (field_data->IsNullable()) {
+        for (auto i = 0; i < count; i++) {
+            valid_map.set(i, field_data->IsValid(seg_offsets[i]));
+        }
+    }
+
+    switch (data_type) {
+        case DataType::BOOL: {
+            bulk_subscript_impl<bool>(field_data->Data(0),
+                                      seg_offsets,
+                                      count,
+                                      static_cast<bool*>(data));
+            break;
+        }
+        case DataType::INT8: {
+            bulk_subscript_impl<int8_t>(field_data->Data(0),
+                                        seg_offsets,
+                                        count,
+                                        static_cast<int8_t*>(data));
+            break;
+        }
+        case DataType::INT16: {
+            bulk_subscript_impl<int16_t>(field_data->Data(0),
+                                         seg_offsets,
+                                         count,
+                                         static_cast<int16_t*>(data));
+            break;
+        }
+        case DataType::INT32: {
+            bulk_subscript_impl<int32_t>(field_data->Data(0),
+                                         seg_offsets,
+                                         count,
+                                         static_cast<int32_t*>(data));
+            break;
+        }
+        case DataType::INT64: {
+            bulk_subscript_impl<int64_t>(field_data->Data(0),
+                                         seg_offsets,
+                                         count,
+                                         static_cast<int64_t*>(data));
+            break;
+        }
+        case DataType::FLOAT: {
+            bulk_subscript_impl<float>(field_data->Data(0),
+                                       seg_offsets,
+                                       count,
+                                       static_cast<float*>(data));
+            break;
+        }
+        case DataType::DOUBLE: {
+            bulk_subscript_impl<double>(field_data->Data(0),
+                                        seg_offsets,
+                                        count,
+                                        static_cast<double*>(data));
+            break;
+        }
+        case DataType::VARCHAR:
+        case DataType::STRING: {
+            bulk_subscript_ptr_impl<std::string>(
+                field_data.get(),
+                seg_offsets,
+                count,
+                static_cast<std::string*>(data));
+            break;
+        }
+        default: {
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type {}",
+                                  field_meta.get_data_type()));
+        }
+    }
+}
+
 template <typename S, typename T>
 void
 SegmentSealedImpl::bulk_subscript_impl(const void* src_raw,
@@ -1345,6 +1428,19 @@ SegmentSealedImpl::bulk_subscript_ptr_impl(
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         dst->at(i) = std::move(T(field->RawAt(offset)));
+    }
+}
+
+template <typename S, typename T>
+void
+SegmentSealedImpl::bulk_subscript_ptr_impl(const SingleChunkColumnBase* column,
+                                           const int64_t* seg_offsets,
+                                           int64_t count,
+                                           T* dst) {
+    auto field = reinterpret_cast<const SingleChunkVariableColumn<S>*>(column);
+    for (auto i = 0; i < count; i++) {
+        auto offset = seg_offsets[i];
+        dst[i] = std::move(T(field->RawAt(offset)));
     }
 }
 

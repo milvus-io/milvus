@@ -1,6 +1,6 @@
 package segments
 
-import (
+/*import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -48,4 +48,4 @@ func (r *cntReducerSegCore) Reduce(ctx context.Context, results []*segcorepb.Ret
 	res := funcutil.WrapCntToSegCoreResult(cnt)
 	res.AllRetrieveCount = allRetrieveCount
 	return res, nil
-}
+}*/
