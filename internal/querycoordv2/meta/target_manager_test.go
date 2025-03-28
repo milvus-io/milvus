@@ -620,6 +620,7 @@ func (suite *TargetManagerSuite) TestRecover() {
 		suite.Equal(int64(100), segment.GetNumOfRows())
 	}
 	suite.True(target.Ready())
+	suite.Equal(int64(200), target.GetRowCount())
 
 	// after recover, target info should be cleaned up
 	targets, err := suite.catalog.GetCollectionTargets(ctx)

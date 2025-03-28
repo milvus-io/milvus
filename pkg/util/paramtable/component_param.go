@@ -1874,6 +1874,7 @@ type queryCoordConfig struct {
 	AutoBalance                         ParamItem `refreshable:"true"`
 	AutoBalanceChannel                  ParamItem `refreshable:"true"`
 	Balancer                            ParamItem `refreshable:"true"`
+	BalanceTriggerOrder                 ParamItem `refreshable:"true"`
 	GlobalRowCountFactor                ParamItem `refreshable:"true"`
 	ScoreUnbalanceTolerationFactor      ParamItem `refreshable:"true"`
 	ReverseUnbalanceTolerationFactor    ParamItem `refreshable:"true"`
@@ -2010,6 +2011,16 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.Balancer.Init(base.mgr)
+
+	p.BalanceTriggerOrder = ParamItem{
+		Key:          "queryCoord.balanceTriggerOrder",
+		Version:      "2.5.8",
+		DefaultValue: "ByRowCount",
+		PanicIfEmpty: false,
+		Doc:          "sorting order for collection balancing, options: ByRowCount, ByCollectionID",
+		Export:       false,
+	}
+	p.BalanceTriggerOrder.Init(base.mgr)
 
 	p.GlobalRowCountFactor = ParamItem{
 		Key:          "queryCoord.globalRowCountFactor",
