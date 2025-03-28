@@ -350,6 +350,11 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		return nil, err
 	}
 	plan.PreAllocatedLogIDs = logIDRange
+	beginLogID, _, err := t.allocator.AllocN(1)
+	if err != nil {
+		return nil, err
+	}
+	plan.BeginLogID = beginLogID
 
 	log.Info("Compaction handler refreshed mix compaction plan", zap.Int64("maxSize", plan.GetMaxSize()),
 		zap.Any("segID2DeltaLogs", segIDMap), zap.Any("PreAllocatedLogIDs", logIDRange))
