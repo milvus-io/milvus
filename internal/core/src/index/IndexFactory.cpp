@@ -403,7 +403,7 @@ IndexFactory::CreateJsonIndex(
                 file_manager_context);
         case JsonCastType::VARCHAR:
             return std::make_unique<index::JsonInvertedIndex<std::string>>(
-                proto::schema::DataType::String,
+                proto::schema::DataType::VarChar,
                 nested_path,
                 file_manager_context);
         default:
