@@ -224,7 +224,6 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 		Begin: 200,
 		End:   2000,
 	}
-}
 
 	// 8+8+8+4+7+4*4=51
 	// 51*1024 = 52224
@@ -308,14 +307,10 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 		Begin: time.Now().UnixMilli(),
 		End:   time.Now().UnixMilli() + 1000,
 	}
-<<<<<<< HEAD:internal/datanode/compaction/clustering_compactor_test.go
-=======
 	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
 		Begin: 1001,
 		End:   2000,
 	}
-}
->>>>>>> 05fc0a85a9 (fix: Fix delete data loss due to duplicate binlogID):internal/datanode/compactor/clustering_compactor_test.go
 
 	// 8+8+8+4+7+4*4=51
 	// 51*1024 = 52224
@@ -389,14 +384,10 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 		Begin: time.Now().UnixMilli(),
 		End:   time.Now().UnixMilli() + 1000,
 	}
-<<<<<<< HEAD:internal/datanode/compaction/clustering_compactor_test.go
-=======
 	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
 		Begin: 1001,
 		End:   2000,
 	}
-}
->>>>>>> 05fc0a85a9 (fix: Fix delete data loss due to duplicate binlogID):internal/datanode/compactor/clustering_compactor_test.go
 
 	// 8 + 8 + 8 + 7 + 8 = 39
 	// 39*1024 = 39936
