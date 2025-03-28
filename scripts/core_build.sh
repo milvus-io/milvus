@@ -105,7 +105,7 @@ INDEX_ENGINE="KNOWHERE"
 ENABLE_AZURE_FS="OFF"
 : "${ENABLE_GCP_NATIVE:="OFF"}"
 
-while getopts "p:t:u:l:c:g:s:b:n:a:y:Z:x:o:f:" arg; do
+while getopts "p:t:s:n:a:y:x:o:f:ulcgbZh" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
