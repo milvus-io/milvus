@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"strconv"
 
@@ -277,6 +278,118 @@ func CreateFieldWithDefaultValue(dataType schemapb.DataType, id int64, nullable 
 	return field, nil
 }
 
+func BuildSparseVectorData(mem *memory.GoAllocator, contents [][]byte, arrowType arrow.DataType) (arrow.Array, error) {
+	if arrowType == nil || arrowType.ID() == arrow.STRING {
+		// build sparse vector as JSON-format string
+		builder := array.NewStringBuilder(mem)
+		rows := len(contents)
+		jsonBytesData := make([][]byte, 0)
+		for i := 0; i < rows; i++ {
+			rowVecData := contents[i]
+			mapData := typeutil.SparseFloatBytesToMap(rowVecData)
+			// convert to JSON format
+			jsonBytes, err := json.Marshal(mapData)
+			if err != nil {
+				return nil, err
+			}
+			jsonBytesData = append(jsonBytesData, jsonBytes)
+		}
+		builder.AppendValues(lo.Map(jsonBytesData, func(bs []byte, _ int) string {
+			return string(bs)
+		}), nil)
+		return builder.NewStringArray(), nil
+	} else if arrowType.ID() == arrow.STRUCT {
+		// build sparse vector as parquet struct
+		stType, _ := arrowType.(*arrow.StructType)
+		indicesField, ok1 := stType.FieldByName("indices")
+		valuesField, ok2 := stType.FieldByName("values")
+		if !ok1 || !ok2 {
+			return nil, merr.WrapErrParameterInvalidMsg("Indices type or values type is missed for sparse vector")
+		}
+
+		indicesList, ok1 := indicesField.Type.(*arrow.ListType)
+		valuesList, ok2 := valuesField.Type.(*arrow.ListType)
+		if !ok1 || !ok2 {
+			return nil, merr.WrapErrParameterInvalidMsg("Indices type and values type of sparse vector should be list")
+		}
+		indexType := indicesList.Elem().ID()
+		valueType := valuesList.Elem().ID()
+
+		fields := []arrow.Field{indicesField, valuesField}
+		structType := arrow.StructOf(fields...)
+		builder := array.NewStructBuilder(mem, structType)
+		indicesBuilder := builder.FieldBuilder(0).(*array.ListBuilder)
+		valuesBuilder := builder.FieldBuilder(1).(*array.ListBuilder)
+
+		// The array.Uint32Builder/array.Int64Builder/array.Float32Builder/array.Float64Builder
+		// are derived from array.Builder, but array.Builder doesn't have Append() interface
+		// To call array.Uint32Builder.Value(uint32), we need to explicitly cast the indicesBuilder.ValueBuilder()
+		// to array.Uint32Builder
+		// So, we declare two methods here to avoid type casting in the "for" loop
+		type AppendIndex func(index uint32)
+		type AppendValue func(value float32)
+
+		var appendIndexFunc AppendIndex
+		switch indexType {
+		case arrow.INT32:
+			indicesArrayBuilder := indicesBuilder.ValueBuilder().(*array.Int32Builder)
+			appendIndexFunc = func(index uint32) {
+				indicesArrayBuilder.Append((int32)(index))
+			}
+		case arrow.UINT32:
+			indicesArrayBuilder := indicesBuilder.ValueBuilder().(*array.Uint32Builder)
+			appendIndexFunc = func(index uint32) {
+				indicesArrayBuilder.Append(index)
+			}
+		case arrow.INT64:
+			indicesArrayBuilder := indicesBuilder.ValueBuilder().(*array.Int64Builder)
+			appendIndexFunc = func(index uint32) {
+				indicesArrayBuilder.Append((int64)(index))
+			}
+		case arrow.UINT64:
+			indicesArrayBuilder := indicesBuilder.ValueBuilder().(*array.Uint64Builder)
+			appendIndexFunc = func(index uint32) {
+				indicesArrayBuilder.Append((uint64)(index))
+			}
+		default:
+			msg := fmt.Sprintf("Not able to write this type (%s) for sparse vector index", indexType.String())
+			return nil, merr.WrapErrImportFailed(msg)
+		}
+
+		var appendValueFunc AppendValue
+		switch valueType {
+		case arrow.FLOAT32:
+			valuesArrayBuilder := valuesBuilder.ValueBuilder().(*array.Float32Builder)
+			appendValueFunc = func(value float32) {
+				valuesArrayBuilder.Append(value)
+			}
+		case arrow.FLOAT64:
+			valuesArrayBuilder := valuesBuilder.ValueBuilder().(*array.Float64Builder)
+			appendValueFunc = func(value float32) {
+				valuesArrayBuilder.Append((float64)(value))
+			}
+		default:
+			msg := fmt.Sprintf("Not able to write this type (%s) for sparse vector index", indexType.String())
+			return nil, merr.WrapErrImportFailed(msg)
+		}
+
+		for i := 0; i < len(contents); i++ {
+			builder.Append(true)
+			indicesBuilder.Append(true)
+			valuesBuilder.Append(true)
+			rowVecData := contents[i]
+			elemCount := len(rowVecData) / 8
+			for j := 0; j < elemCount; j++ {
+				appendIndexFunc(common.Endian.Uint32(rowVecData[j*8:]))
+				appendValueFunc(math.Float32frombits(common.Endian.Uint32(rowVecData[j*8+4:])))
+			}
+		}
+		return builder.NewStructArray(), nil
+	}
+
+	return nil, merr.WrapErrParameterInvalidMsg("Invalid arrow data type for sparse vector")
+}
+
 func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.InsertData, useNullType bool) ([]arrow.Array, error) {
 	mem := memory.NewGoAllocator()
 	columns := make([]arrow.Array, 0, len(schema.Fields))
@@ -401,24 +514,12 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
 		case schemapb.DataType_SparseFloatVector:
-			builder := array.NewStringBuilder(mem)
 			contents := insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData).GetContents()
-			rows := len(contents)
-			jsonBytesData := make([][]byte, 0)
-			for i := 0; i < rows; i++ {
-				rowVecData := contents[i]
-				mapData := typeutil.SparseFloatBytesToMap(rowVecData)
-				// convert to JSON format
-				jsonBytes, err := json.Marshal(mapData)
-				if err != nil {
-					return nil, err
-				}
-				jsonBytesData = append(jsonBytesData, jsonBytes)
+			arr, err := BuildSparseVectorData(mem, contents, nil)
+			if err != nil {
+				return nil, err
 			}
-			builder.AppendValues(lo.Map(jsonBytesData, func(bs []byte, _ int) string {
-				return string(bs)
-			}), nil)
-			columns = append(columns, builder.NewStringArray())
+			columns = append(columns, arr)
 		case schemapb.DataType_JSON:
 			builder := array.NewStringBuilder(mem)
 			jsonData := insertData.Data[fieldID].(*storage.JSONFieldData).Data
