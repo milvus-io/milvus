@@ -382,7 +382,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	plan.BeginLogID = beginLogID
 
 	log.Info("Compaction handler refreshed mix compaction plan", zap.Int64("maxSize", plan.GetMaxSize()),
-		zap.Any("segID2DeltaLogs", segIDMap), zap.Any("PreAllocatedLogIDs", logIDRange))
+		zap.Any("PreAllocatedLogIDs", logIDRange), zap.Any("segID2DeltaLogs", segIDMap))
 	return plan, nil
 }
 
