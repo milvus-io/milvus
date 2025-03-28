@@ -920,7 +920,7 @@ func TestAddFieldTask(t *testing.T) {
 }
 
 func TestCreateCollectionTask(t *testing.T) {
-	rc := NewRootCoordMock()
+	mix := NewMixCoordMock()
 	ctx := context.Background()
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestCreateCollectionTask"
@@ -948,10 +948,10 @@ func TestCreateCollectionTask(t *testing.T) {
 			Schema:         marshaledSchema,
 			ShardsNum:      shardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
-		schema:    nil,
+		ctx:      ctx,
+		mixCoord: mix,
+		result:   nil,
+		schema:   nil,
 	}
 
 	t.Run("on enqueue", func(t *testing.T) {
@@ -1284,10 +1284,10 @@ func TestCreateCollectionTask(t *testing.T) {
 				Schema:         marshaledSchema,
 				ShardsNum:      shardsNum,
 			},
-			ctx:       ctx,
-			rootCoord: rc,
-			result:    nil,
-			schema:    nil,
+			ctx:      ctx,
+			mixCoord: rc,
+			result:   nil,
+			schema:   nil,
 		}
 
 		err = task2.OnEnqueue()
@@ -1328,10 +1328,10 @@ func TestCreateCollectionTask(t *testing.T) {
 				Schema:         marshaledSchema,
 				ShardsNum:      shardsNum,
 			},
-			ctx:       ctx,
-			rootCoord: rc,
-			result:    nil,
-			schema:    nil,
+			ctx:      ctx,
+			mixCoord: mix,
+			result:   nil,
+			schema:   nil,
 		}
 
 		err = task2.OnEnqueue()
@@ -1343,11 +1343,11 @@ func TestCreateCollectionTask(t *testing.T) {
 }
 
 func TestHasCollectionTask(t *testing.T) {
-	rc := NewRootCoordMock()
+	rc := NewMixCoordMock()
 
 	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	qc := getMixCoordClient()
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()

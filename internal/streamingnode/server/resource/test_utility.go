@@ -10,10 +10,8 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 // InitForTest initializes the singleton of resources for test.
@@ -28,15 +26,13 @@ func InitForTest(t *testing.T, opts ...optResourceInit) {
 		r.syncMgr = syncmgr.NewSyncManager(r.chunkManager)
 		r.wbMgr = writebuffer.NewManager(r.syncMgr)
 	}
-	if r.rootCoordClient != nil {
-		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
-		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
+	if r.mixCoordClient != nil {
+		r.timestampAllocator = idalloc.NewTSOAllocator(r.mixCoordClient)
+		r.idAllocator = idalloc.NewIDAllocator(r.mixCoordClient)
 	} else {
-		f := syncutil.NewFuture[types.RootCoordClient]()
-		f.Set(idalloc.NewMockRootCoordClient(t))
-		r.rootCoordClient = f
-		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
-		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
+		r.mixCoordClient = idalloc.NewMockRootCoordClient(t)
+		r.timestampAllocator = idalloc.NewTSOAllocator(r.mixCoordClient)
+		r.idAllocator = idalloc.NewIDAllocator(r.mixCoordClient)
 	}
 	r.segmentAssignStatsManager = stats.NewStatsManager()
 	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()

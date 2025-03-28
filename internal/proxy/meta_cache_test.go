@@ -50,7 +50,7 @@ import (
 var dbName = GetCurDBNameFromContextOrDefault(context.Background())
 
 type MockRootCoordClientInterface struct {
-	types.RootCoordClient
+	mixCoord    types.MixCoordClient
 	Error       bool
 	AccessCount int32
 
@@ -216,10 +216,9 @@ func (m *MockRootCoordClientInterface) ListPolicy(ctx context.Context, in *inter
 // Simulate the cache path and the
 func TestMetaCache_GetCollection(t *testing.T) {
 	ctx := context.Background()
-	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &mocks.MockQueryCoordClient{}
+	mixCoord := &MockRootCoordClientInterface{}
 
-	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	mixCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
@@ -1382,14 +1381,13 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 
 func TestMetaCache_Parallel(t *testing.T) {
 	ctx := context.Background()
-	rootCoord := mocks.NewMockRootCoordClient(t)
-	queryCoord := mocks.NewMockQueryCoordClient(t)
-	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	mixCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 		Status: merr.Success(),
 	}, nil).Maybe()
 	mgr := newShardClientMgr()
-	cache, err := NewMetaCache(rootCoord, queryCoord, mgr)
+	cache, err := NewMetaCache(mixCoord, mgr)
 	assert.NoError(t, err)
 
 	cacheVersion := uint64(100)
@@ -1397,7 +1395,7 @@ func TestMetaCache_Parallel(t *testing.T) {
 	cache.RemoveCollectionsByID(ctx, 111, cacheVersion+2, false)
 
 	// update cache, but version is smaller
-	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, option ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+	mixCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, option ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: merr.Success(),
 			Schema: &schemapb.CollectionSchema{

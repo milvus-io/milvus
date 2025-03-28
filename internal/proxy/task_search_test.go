@@ -58,18 +58,16 @@ func TestSearchTask_PostExecute(t *testing.T) {
 	var err error
 
 	var (
-		rc  = NewRootCoordMock()
-		qc  = mocks.NewMockQueryCoordClient(t)
+		qc  = mocks.NewMockMixCoordClient(t)
 		ctx = context.TODO()
 	)
 
-	defer rc.Close()
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 		Status: merr.Success(),
 	}, nil).Maybe()
-	err = InitMetaCache(ctx, rc, qc, mgr)
+	err = InitMetaCache(ctx, qc, mgr)
 	require.NoError(t, err)
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
@@ -84,8 +82,8 @@ func TestSearchTask_PostExecute(t *testing.T) {
 				Nq:             1,
 				SearchParams:   getBaseSearchParams(),
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			mixCoord: qc,
+			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -224,7 +222,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 	})
 }
 
-func createColl(t *testing.T, name string, rc types.RootCoordClient) *schemapb.CollectionSchema {
+func createColl(t *testing.T, name string, rc types.MixCoordClient) *schemapb.CollectionSchema {
 	schema := constructCollectionSchema(testInt64Field, testFloatVecField, testVecDim, name)
 	marshaledSchema, err := proto.Marshal(schema)
 	require.NoError(t, err)
@@ -237,8 +235,8 @@ func createColl(t *testing.T, name string, rc types.RootCoordClient) *schemapb.C
 			Schema:         marshaledSchema,
 			ShardsNum:      common.DefaultShardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
+		ctx:      ctx,
+		mixCoord: rc,
 	}
 
 	require.NoError(t, createColT.OnEnqueue())
@@ -313,16 +311,13 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	var err error
 
 	var (
-		rc  = NewRootCoordMock()
-		qc  = mocks.NewMockQueryCoordClient(t)
+		qc  = mocks.NewMockMixCoordClient(t)
 		ctx = context.TODO()
 	)
-
-	defer rc.Close()
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	err = InitMetaCache(ctx, rc, qc, mgr)
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	err = InitMetaCache(ctx, qc, mgr)
 	require.NoError(t, err)
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
@@ -334,8 +329,8 @@ func TestSearchTask_PreExecute(t *testing.T) {
 				CollectionName: collName,
 				Nq:             1,
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			mixCoord: qc,
+			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -350,8 +345,8 @@ func TestSearchTask_PreExecute(t *testing.T) {
 				CollectionName: collName,
 				Nq:             nq,
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			mixCoord: qc,
+			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -359,7 +354,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("bad nq 0", func(t *testing.T) {
 		collName := "test_bad_nq0_error" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 		// Nq must be in range [1, 16384].
 		task := getSearchTaskWithNq(t, collName, 0)
 		err = task.PreExecute(ctx)
@@ -368,7 +363,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("bad nq 16385", func(t *testing.T) {
 		collName := "test_bad_nq16385_error" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 
 		// Nq must be in range [1, 16384].
 		task := getSearchTaskWithNq(t, collName, 16384+1)
@@ -385,7 +380,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("invalid IgnoreGrowing param", func(t *testing.T) {
 		collName := "test_invalid_param" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 
 		task := getSearchTask(t, collName)
 		task.request.SearchParams = getInvalidSearchParams(IgnoreGrowingKey)
@@ -395,7 +390,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("search with timeout", func(t *testing.T) {
 		collName := "search_with_timeout" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 
 		task := getSearchTask(t, collName)
 		task.request.SearchParams = getValidSearchParams()
@@ -429,7 +424,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("search consistent iterator pre_ts", func(t *testing.T) {
 		collName := "search_with_timeout" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 
 		st := getSearchTask(t, collName)
 		st.request.SearchParams = getValidSearchParams()
@@ -453,7 +448,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("search consistent iterator post_ts", func(t *testing.T) {
 		collName := "search_with_timeout" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 
 		st := getSearchTask(t, collName)
 		st.request.SearchParams = getValidSearchParams()
@@ -478,7 +473,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("search inconsistent collection_id", func(t *testing.T) {
 		collName := "search_inconsistent_collection" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 
 		st := getSearchTask(t, collName)
 		st.request.SearchParams = getValidSearchParams()
@@ -566,16 +561,14 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 
 	var err error
 	var (
-		rc  = NewRootCoordMock()
-		qc  = mocks.NewMockQueryCoordClient(t)
+		qc  = mocks.NewMockMixCoordClient(t)
 		ctx = context.TODO()
 	)
 
-	defer rc.Close()
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	err = InitMetaCache(ctx, rc, qc, mgr)
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	err = InitMetaCache(ctx, qc, mgr)
 	require.NoError(t, err)
 
 	getSearchTask := func(t *testing.T, collName string, data []string) *searchTask {
@@ -606,8 +599,8 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 				},
 				PlaceholderGroup: holderByte,
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			mixCoord: qc,
+			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -692,8 +685,8 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 					{Key: LimitKey, Value: "10"},
 				},
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			mixCoord: qc,
+			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -746,17 +739,17 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	}
 }
 
-func getQueryCoord() *mocks.MockQueryCoord {
-	qc := &mocks.MockQueryCoord{}
-	qc.EXPECT().Start().Return(nil)
-	qc.EXPECT().Stop().Return(nil)
-	return qc
+func getMixCoord() *mocks.MixCoord {
+	mixc := &mocks.MixCoord{}
+	mixc.EXPECT().Start().Return(nil)
+	mixc.EXPECT().Stop().Return(nil)
+	return mixc
 }
 
-func getQueryCoordClient() *mocks.MockQueryCoordClient {
-	qc := &mocks.MockQueryCoordClient{}
-	qc.EXPECT().Close().Return(nil)
-	return qc
+func getMixCoordClient() *mocks.MockMixCoordClient {
+	mixc := &mocks.MockMixCoordClient{}
+	mixc.EXPECT().Close().Return(nil)
+	return mixc
 }
 
 func getQueryNode() *mocks.MockQueryNode {
@@ -775,17 +768,15 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 	var (
 		err error
 
-		rc  = NewRootCoordMock()
-		qc  = getQueryCoordClient()
+		qc  = getMixCoordClient()
 		ctx = context.TODO()
 
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 
-	defer rc.Close()
 	mgr := newShardClientMgr()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	err = InitMetaCache(ctx, rc, qc, mgr)
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	err = InitMetaCache(ctx, qc, mgr)
 	require.NoError(t, err)
 
 	defer qc.Close()
@@ -804,11 +795,11 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 		result: &milvuspb.SearchResults{
 			Status: &commonpb.Status{},
 		},
-		qc: qc,
-		tr: timerecord.NewTimeRecorder("search"),
+		mixCoord: qc,
+		tr:       timerecord.NewTimeRecorder("search"),
 	}
 	require.NoError(t, task.OnEnqueue())
-	createColl(t, collectionName, rc)
+	createColl(t, collectionName, qc)
 }
 
 func genSearchResultData(nq int64, topk int64, ids []int64, scores []float32) *schemapb.SearchResultData {
@@ -2489,8 +2480,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 		err error
 		ctx = context.TODO()
 
-		rc = NewRootCoordMock()
-		qc = getQueryCoordClient()
+		qc = getMixCoordClient()
 		qn = getQueryNodeClient()
 
 		shardsNum      = int32(2)
@@ -2498,7 +2488,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	)
 
 	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	mgr := NewMockShardClientManager(t)
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
@@ -2506,7 +2496,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 	defer qc.Close()
 
-	err = InitMetaCache(ctx, rc, qc, mgr)
+	err = InitMetaCache(ctx, qc, mgr)
 	assert.NoError(t, err)
 
 	fieldName2Types := map[string]schemapb.DataType{
@@ -2532,8 +2522,8 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 			Schema:         marshaledSchema,
 			ShardsNum:      shardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
+		ctx:      ctx,
+		mixCoord: qc,
 	}
 
 	require.NoError(t, createColT.OnEnqueue())
@@ -2556,7 +2546,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 			},
 		},
 	}, nil)
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 		Status:              successStatus,
 		CollectionIDs:       []int64{collectionID},
 		InMemoryPercentages: []int64{100},
@@ -2595,8 +2585,8 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 			Nq:             2,
 			DslType:        commonpb.DslType_BoolExprV1,
 		},
-		qc: qc,
-		lb: lb,
+		mixCoord: qc,
+		lb:       lb,
 	}
 	for i := 0; i < len(fieldName2Types); i++ {
 		task.SearchRequest.OutputFieldsId[i] = int64(common.StartOfUserFieldID + i)
@@ -3185,8 +3175,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	assert.NoError(t, err)
 	err = node.initRateCollector()
 	assert.NoError(t, err)
-	node.rootCoord = mocks.NewMockRootCoordClient(t)
-	node.queryCoord = mocks.NewMockQueryCoordClient(t)
+	node.mixCoord = mocks.NewMockMixCoordClient(t)
 
 	collectionName := "col"
 	collectionID := UniqueID(0)

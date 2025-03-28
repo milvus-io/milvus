@@ -24,7 +24,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -464,13 +463,13 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 				signal <- struct{}{}
 			})
 
-		qc := mocks.NewMockQueryCoordClient(t)
+		qc := mocks.NewMixCoord(t)
 		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		core := newTestCore(withTtSynchronizer(ticker),
 			withMeta(meta),
 			withTsoAllocator(tsoAllocator),
-			withQueryCoord(qc))
+			withMixCoord(qc))
 		gc := newBgGarbageCollector(core)
 		core.ddlTsLockManager = newDdlTsLockManager(tsoAllocator)
 		core.garbageCollector = gc
@@ -489,17 +488,17 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 		signal := make(chan struct{}, 1)
 		meta := mockrootcoord.NewIMetaTable(t)
 
-		qc := mocks.NewMockQueryCoordClient(t)
-		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).
+		qc := mocks.NewMixCoord(t)
+		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).
 			Return(merr.Success(), fmt.Errorf("mock err")).
-			Run(func(ctx context.Context, req *querypb.ReleasePartitionsRequest, opts ...grpc.CallOption) {
+			Run(func(ctx context.Context, req *querypb.ReleasePartitionsRequest) {
 				signal <- struct{}{}
 			})
 
 		core := newTestCore(withTtSynchronizer(ticker),
 			withMeta(meta),
 			withTsoAllocator(tsoAllocator),
-			withQueryCoord(qc))
+			withMixCoord(qc))
 		gc := newBgGarbageCollector(core)
 		core.ddlTsLockManager = newDdlTsLockManager(tsoAllocator)
 		core.garbageCollector = gc
@@ -523,13 +522,13 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 				signal <- struct{}{}
 			})
 
-		qc := mocks.NewMockQueryCoordClient(t)
-		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		qc := mocks.NewMixCoord(t)
+		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		core := newTestCore(withTtSynchronizer(ticker),
 			withMeta(meta),
 			withTsoAllocator(tsoAllocator),
-			withQueryCoord(qc))
+			withMixCoord(qc))
 		gc := newBgGarbageCollector(core)
 		core.ddlTsLockManager = newDdlTsLockManager(tsoAllocator)
 		core.garbageCollector = gc

@@ -65,10 +65,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	fieldName := funcutil.GenRandomStr()
 	indexName := ""
 	ctx := context.Background()
-
-	rootCoord := newMockRootCoord()
 	queryCoord := getMockQueryCoord()
-	datacoord := NewDataCoordMock()
 
 	gist := &getIndexStateTask{
 		GetIndexStateRequest: &milvuspb.GetIndexStateRequest{
@@ -78,9 +75,8 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 			FieldName:      fieldName,
 			IndexName:      indexName,
 		},
-		ctx:       ctx,
-		rootCoord: rootCoord,
-		dataCoord: datacoord,
+		ctx:      ctx,
+		mixCoord: queryCoord,
 		result: &milvuspb.GetIndexStateResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: "mock-1"},
 			State:  commonpb.IndexState_Unissued,
@@ -90,11 +86,11 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 
 	shardMgr := newShardClientMgr()
 	// failed to get collection id.
-	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
+	err := InitMetaCache(ctx, queryCoord, shardMgr)
 	assert.NoError(t, err)
 	assert.Error(t, gist.Execute(ctx))
 
-	rootCoord.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+	queryCoord.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
 			Status:         merr.Success(),
 			Schema:         newTestSchema(),
@@ -103,13 +99,13 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 		}, nil
 	}
 
-	rootCoord.ShowPartitionsFunc = func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+	queryCoord.ShowPartitionsFunc = func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
 		return &milvuspb.ShowPartitionsResponse{
 			Status: merr.Success(),
 		}, nil
 	}
 
-	datacoord.GetIndexStateFunc = func(ctx context.Context, request *indexpb.GetIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetIndexStateResponse, error) {
+	queryCoord.GetIndexStateFunc = func(ctx context.Context, request *indexpb.GetIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetIndexStateResponse, error) {
 		return &indexpb.GetIndexStateResponse{
 			Status:     merr.Success(),
 			State:      commonpb.IndexState_Finished,
@@ -129,7 +125,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 
 	paramtable.Init()
 	qc := getMockQueryCoord()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 		Status:        merr.Success(),
 		CollectionIDs: []int64{},
 	}, nil)
@@ -202,11 +198,11 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:        merr.Success(),
 			CollectionIDs: []int64{collectionID},
 		}, nil)
-		dit.queryCoord = qc
+		dit.mixCoord = qc
 
 		err := dit.PreExecute(ctx)
 		assert.Error(t, err)
@@ -226,12 +222,12 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:        merr.Success(),
 			CollectionIDs: []int64{collectionID},
 		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
-		dit.queryCoord = qc
+		dit.mixCoord = qc
 
 		err := dit.PreExecute(ctx)
 		assert.Error(t, err)
@@ -251,25 +247,25 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:        merr.Success(),
 			CollectionIDs: []int64{collectionID},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "fail reason",
 			},
 		}, nil)
-		dit.queryCoord = qc
+		dit.mixCoord = qc
 
 		err := dit.PreExecute(ctx)
 		assert.Error(t, err)
 	})
 }
 
-func getMockQueryCoord() *mocks.MockQueryCoordClient {
-	qc := &mocks.MockQueryCoordClient{}
+func getMockQueryCoord() *mocks.MockMixCoordClient {
+	qc := &mocks.MockMixCoordClient{}
 	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -282,7 +278,7 @@ func getMockQueryCoord() *mocks.MockQueryCoordClient {
 			},
 		},
 	}, nil)
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	return qc
 }
 

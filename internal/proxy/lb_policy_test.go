@@ -76,9 +76,9 @@ func (s *LBPolicySuite) SetupTest() {
 	}
 	s.channels = []string{"channel1", "channel2"}
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	qc := mocks.NewMockQueryCoordClient(s.T())
+	qc := mocks.NewMockMixCoordClient(s.T())
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
 	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 		Status: &successStatus,
@@ -95,7 +95,7 @@ func (s *LBPolicySuite) SetupTest() {
 			},
 		},
 	}, nil).Maybe()
-	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+	qc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 		Status:       merr.Success(),
 		PartitionIDs: []int64{1, 2, 3},
 	}, nil).Maybe()

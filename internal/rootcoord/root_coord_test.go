@@ -31,7 +31,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
@@ -1377,7 +1376,6 @@ func TestCore_sendMinDdlTsAsTt(t *testing.T) {
 		withScheduler(sched))
 
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
-	c.session.ServerID = TestRootCoordID
 
 	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TTMsgEnabled.Key, "false")
 	c.sendMinDdlTsAsTt() // disable ts msg
@@ -1431,7 +1429,6 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
 	paramtable.Init()
 	registry.ResetRegistration()
-	coordclient.ResetRegistration()
 	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
 	// Need to reset global etcd to follow new path
 	kvfactory.CloseEtcdClient()
@@ -1464,7 +1461,6 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	err = core.Init()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_StandBy, core.GetStateCode())
-	core.session.TriggerKill = false
 	err = core.Register()
 	assert.NoError(t, err)
 	err = core.Start()
@@ -1493,7 +1489,6 @@ func TestRootcoord_DisableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
 	paramtable.Init()
 	registry.ResetRegistration()
-	coordclient.ResetRegistration()
 	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
 	// Need to reset global etcd to follow new path
 	kvfactory.CloseEtcdClient()
@@ -1525,7 +1520,6 @@ func TestRootcoord_DisableActiveStandby(t *testing.T) {
 	assert.Equal(t, commonpb.StateCode_Initializing, core.GetStateCode())
 	err = core.Start()
 	assert.NoError(t, err)
-	core.session.TriggerKill = false
 	err = core.Register()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_Healthy, core.GetStateCode())
@@ -1634,15 +1628,13 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 	querynodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-1*time.Minute), 0)
 	datanodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-2*time.Minute), 0)
 
-	dcClient := mocks.NewMockDataCoordClient(t)
+	dcClient := mocks.NewMixCoord(t)
 	dcClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(getDataCoordMetricsFunc(datanodeTT))
-	qcClient := mocks.NewMockQueryCoordClient(t)
-	qcClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(getQueryCoordMetricsFunc(querynodeTT))
+	dcClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(getQueryCoordMetricsFunc(querynodeTT))
 
-	errDataCoordClient := mocks.NewMockDataCoordClient(t)
+	errDataCoordClient := mocks.NewMixCoord(t)
 	errDataCoordClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
-	errQueryCoordClient := mocks.NewMockQueryCoordClient(t)
-	errQueryCoordClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+	errDataCoordClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
@@ -1671,7 +1663,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 		Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, "6000")
 		defer Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, v)
 
-		c := newTestCore(withHealthyCode(), withInvalidProxyManager(), withDataCoord(dcClient), withQueryCoord(qcClient))
+		c := newTestCore(withHealthyCode(), withInvalidProxyManager(), withMixCoord(dcClient))
 
 		ctx := context.Background()
 		resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -1687,7 +1679,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 
 		{
 			c := newTestCore(withHealthyCode(),
-				withValidProxyManager(), withDataCoord(dcClient), withQueryCoord(errQueryCoordClient))
+				withValidProxyManager(), withMixCoord(dcClient))
 
 			ctx := context.Background()
 			resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -1698,7 +1690,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 
 		{
 			c := newTestCore(withHealthyCode(),
-				withValidProxyManager(), withDataCoord(errDataCoordClient), withQueryCoord(qcClient))
+				withValidProxyManager(), withMixCoord(errDataCoordClient))
 
 			ctx := context.Background()
 			resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -1714,7 +1706,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 		defer Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, v)
 
 		c := newTestCore(withHealthyCode(),
-			withValidProxyManager(), withDataCoord(dcClient), withQueryCoord(qcClient))
+			withValidProxyManager(), withMixCoord(dcClient))
 		ctx := context.Background()
 		resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -1728,7 +1720,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 		defer Params.Save(Params.QuotaConfig.MaxTimeTickDelay.Key, v)
 
 		c := newTestCore(withHealthyCode(),
-			withValidProxyManager(), withDataCoord(dcClient), withQueryCoord(qcClient))
+			withValidProxyManager(), withMixCoord(dcClient))
 		ctx := context.Background()
 		resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)

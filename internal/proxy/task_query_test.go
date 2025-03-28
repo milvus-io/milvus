@@ -49,8 +49,7 @@ func TestQueryTask_all(t *testing.T) {
 		err error
 		ctx = context.TODO()
 
-		rc = NewRootCoordMock()
-		qc = mocks.NewMockQueryCoordClient(t)
+		qc = mocks.NewMockMixCoordClient(t)
 		qn = getQueryNodeClient()
 
 		shardsNum      = common.DefaultShardsNum
@@ -74,7 +73,7 @@ func TestQueryTask_all(t *testing.T) {
 			},
 		},
 	}, nil).Maybe()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 		Status: &successStatus,
 	}, nil).Maybe()
 
@@ -82,8 +81,7 @@ func TestQueryTask_all(t *testing.T) {
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
 	lb := NewLBPolicyImpl(mgr)
 
-	defer rc.Close()
-	err = InitMetaCache(ctx, rc, qc, mgr)
+	err = InitMetaCache(ctx, qc, mgr)
 	assert.NoError(t, err)
 
 	fieldName2Types := map[string]schemapb.DataType{
@@ -109,8 +107,8 @@ func TestQueryTask_all(t *testing.T) {
 			Schema:         marshaledSchema,
 			ShardsNum:      shardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
+		ctx:      ctx,
+		mixCoord: qc,
 	}
 
 	require.NoError(t, createColT.OnEnqueue())
@@ -161,8 +159,8 @@ func TestQueryTask_all(t *testing.T) {
 					},
 				},
 			},
-			qc: qc,
-			lb: lb,
+			mixCoord: qc,
+			lb:       lb,
 		}
 
 		assert.NoError(t, task.OnEnqueue())
@@ -310,7 +308,7 @@ func TestQueryTask_all(t *testing.T) {
 					},
 				},
 			},
-			qc:        qc,
+			mixCoord:  qc,
 			lb:        lb,
 			resultBuf: &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
 		}
@@ -361,7 +359,7 @@ func TestQueryTask_all(t *testing.T) {
 				},
 				GuaranteeTimestamp: enqueTs,
 			},
-			qc:        qc,
+			mixCoord:  qc,
 			lb:        lb,
 			resultBuf: &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
 		}

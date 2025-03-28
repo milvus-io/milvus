@@ -12,10 +12,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestLocalAllocator(t *testing.T) {
@@ -65,26 +63,22 @@ func TestRemoteTSOAllocator(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	client := NewMockRootCoordClient(t)
-	f := syncutil.NewFuture[types.RootCoordClient]()
-	f.Set(client)
 
-	allocator := newTSOAllocator(f)
+	allocator := newTSOAllocator(client)
 	ts, count, err := allocator.batchAllocate(context.Background(), 100)
 	assert.NoError(t, err)
 	assert.NotZero(t, ts)
 	assert.Equal(t, count, 100)
 
 	// Test error.
-	client = mocks.NewMockRootCoordClient(t)
+	client = mocks.NewMockMixCoordClient(t)
 	client.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, atr *rootcoordpb.AllocTimestampRequest, co ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
 			return nil, errors.New("test")
 		},
 	)
-	f = syncutil.NewFuture[types.RootCoordClient]()
-	f.Set(client)
 
-	allocator = newTSOAllocator(f)
+	allocator = newTSOAllocator(client)
 	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 
@@ -98,10 +92,8 @@ func TestRemoteTSOAllocator(t *testing.T) {
 			}, nil
 		},
 	)
-	f = syncutil.NewFuture[types.RootCoordClient]()
-	f.Set(client)
 
-	allocator = newTSOAllocator(f)
+	allocator = newTSOAllocator(client)
 	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 }
@@ -111,10 +103,8 @@ func TestRemoteIDAllocator(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	client := NewMockRootCoordClient(t)
-	f := syncutil.NewFuture[types.RootCoordClient]()
-	f.Set(client)
 
-	allocator := newIDAllocator(f)
+	allocator := newIDAllocator(client)
 
 	ts, count, err := allocator.batchAllocate(context.Background(), 100)
 	assert.NoError(t, err)
@@ -122,16 +112,14 @@ func TestRemoteIDAllocator(t *testing.T) {
 	assert.Equal(t, count, 100)
 
 	// Test error.
-	client = mocks.NewMockRootCoordClient(t)
+	client = mocks.NewMockMixCoordClient(t)
 	client.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, atr *rootcoordpb.AllocIDRequest, co ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
 			return nil, errors.New("test")
 		},
 	)
-	f = syncutil.NewFuture[types.RootCoordClient]()
-	f.Set(client)
 
-	allocator = newIDAllocator(f)
+	allocator = newIDAllocator(client)
 	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 
@@ -145,10 +133,8 @@ func TestRemoteIDAllocator(t *testing.T) {
 			}, nil
 		},
 	)
-	f = syncutil.NewFuture[types.RootCoordClient]()
-	f.Set(client)
 
-	allocator = newIDAllocator(f)
+	allocator = newIDAllocator(client)
 	_, _, err = allocator.batchAllocate(context.Background(), 100)
 	assert.Error(t, err)
 }

@@ -1708,52 +1708,6 @@ func (_c *MockDataNode_SetAddress_Call) RunAndReturn(run func(string)) *MockData
 	return _c
 }
 
-// SetDataCoordClient provides a mock function with given fields: dataCoord
-func (_m *MockDataNode) SetDataCoordClient(dataCoord types.DataCoordClient) error {
-	ret := _m.Called(dataCoord)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SetDataCoordClient")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(types.DataCoordClient) error); ok {
-		r0 = rf(dataCoord)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockDataNode_SetDataCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetDataCoordClient'
-type MockDataNode_SetDataCoordClient_Call struct {
-	*mock.Call
-}
-
-// SetDataCoordClient is a helper method to define mock.On call
-//   - dataCoord types.DataCoordClient
-func (_e *MockDataNode_Expecter) SetDataCoordClient(dataCoord interface{}) *MockDataNode_SetDataCoordClient_Call {
-	return &MockDataNode_SetDataCoordClient_Call{Call: _e.mock.On("SetDataCoordClient", dataCoord)}
-}
-
-func (_c *MockDataNode_SetDataCoordClient_Call) Run(run func(dataCoord types.DataCoordClient)) *MockDataNode_SetDataCoordClient_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.DataCoordClient))
-	})
-	return _c
-}
-
-func (_c *MockDataNode_SetDataCoordClient_Call) Return(_a0 error) *MockDataNode_SetDataCoordClient_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockDataNode_SetDataCoordClient_Call) RunAndReturn(run func(types.DataCoordClient) error) *MockDataNode_SetDataCoordClient_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // SetEtcdClient provides a mock function with given fields: etcdClient
 func (_m *MockDataNode) SetEtcdClient(etcdClient *clientv3.Client) {
 	_m.Called(etcdClient)
@@ -1787,17 +1741,17 @@ func (_c *MockDataNode_SetEtcdClient_Call) RunAndReturn(run func(*clientv3.Clien
 	return _c
 }
 
-// SetRootCoordClient provides a mock function with given fields: rootCoord
-func (_m *MockDataNode) SetRootCoordClient(rootCoord types.RootCoordClient) error {
-	ret := _m.Called(rootCoord)
+// SetMixCoordClient provides a mock function with given fields: mixCoord
+func (_m *MockDataNode) SetMixCoordClient(mixCoord types.MixCoordClient) error {
+	ret := _m.Called(mixCoord)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SetRootCoordClient")
+		panic("no return value specified for SetMixCoordClient")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(types.RootCoordClient) error); ok {
-		r0 = rf(rootCoord)
+	if rf, ok := ret.Get(0).(func(types.MixCoordClient) error); ok {
+		r0 = rf(mixCoord)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -1805,30 +1759,30 @@ func (_m *MockDataNode) SetRootCoordClient(rootCoord types.RootCoordClient) erro
 	return r0
 }
 
-// MockDataNode_SetRootCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetRootCoordClient'
-type MockDataNode_SetRootCoordClient_Call struct {
+// MockDataNode_SetMixCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetMixCoordClient'
+type MockDataNode_SetMixCoordClient_Call struct {
 	*mock.Call
 }
 
-// SetRootCoordClient is a helper method to define mock.On call
-//   - rootCoord types.RootCoordClient
-func (_e *MockDataNode_Expecter) SetRootCoordClient(rootCoord interface{}) *MockDataNode_SetRootCoordClient_Call {
-	return &MockDataNode_SetRootCoordClient_Call{Call: _e.mock.On("SetRootCoordClient", rootCoord)}
+// SetMixCoordClient is a helper method to define mock.On call
+//   - mixCoord types.MixCoordClient
+func (_e *MockDataNode_Expecter) SetMixCoordClient(mixCoord interface{}) *MockDataNode_SetMixCoordClient_Call {
+	return &MockDataNode_SetMixCoordClient_Call{Call: _e.mock.On("SetMixCoordClient", mixCoord)}
 }
 
-func (_c *MockDataNode_SetRootCoordClient_Call) Run(run func(rootCoord types.RootCoordClient)) *MockDataNode_SetRootCoordClient_Call {
+func (_c *MockDataNode_SetMixCoordClient_Call) Run(run func(mixCoord types.MixCoordClient)) *MockDataNode_SetMixCoordClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.RootCoordClient))
+		run(args[0].(types.MixCoordClient))
 	})
 	return _c
 }
 
-func (_c *MockDataNode_SetRootCoordClient_Call) Return(_a0 error) *MockDataNode_SetRootCoordClient_Call {
+func (_c *MockDataNode_SetMixCoordClient_Call) Return(_a0 error) *MockDataNode_SetMixCoordClient_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockDataNode_SetRootCoordClient_Call) RunAndReturn(run func(types.RootCoordClient) error) *MockDataNode_SetRootCoordClient_Call {
+func (_c *MockDataNode_SetMixCoordClient_Call) RunAndReturn(run func(types.MixCoordClient) error) *MockDataNode_SetMixCoordClient_Call {
 	_c.Call.Return(run)
 	return _c
 }

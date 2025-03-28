@@ -53,7 +53,6 @@ type MixCoordClient struct {
 	rootcoordpb.RootCoordClient
 	datapb.DataCoordClient
 	querypb.QueryCoordClient
-	indexpb.IndexCoordClient
 }
 
 // Client grpc client

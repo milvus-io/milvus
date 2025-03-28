@@ -132,43 +132,20 @@ func TestDataNode(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	defer cancel()
-	t.Run("Test SetRootCoordClient", func(t *testing.T) {
+	t.Run("Test SetMixCoordClient", func(t *testing.T) {
 		emptyDN := &DataNode{}
 		tests := []struct {
-			inrc        types.RootCoordClient
+			inrc        types.MixCoordClient
 			isvalid     bool
 			description string
 		}{
 			{nil, false, "nil input"},
-			{mocks.NewMockRootCoordClient(t), true, "valid input"},
+			{mocks.NewMockMixCoordClient(t), true, "valid input"},
 		}
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				err := emptyDN.SetRootCoordClient(test.inrc)
-				if test.isvalid {
-					assert.NoError(t, err)
-				} else {
-					assert.Error(t, err)
-				}
-			})
-		}
-	})
-
-	t.Run("Test SetDataCoordClient", func(t *testing.T) {
-		emptyDN := &DataNode{}
-		tests := []struct {
-			inrc        types.DataCoordClient
-			isvalid     bool
-			description string
-		}{
-			{nil, false, "nil input"},
-			{mocks.NewMockDataCoordClient(t), true, "valid input"},
-		}
-
-		for _, test := range tests {
-			t.Run(test.description, func(t *testing.T) {
-				err := emptyDN.SetDataCoordClient(test.inrc)
+				err := emptyDN.SetMixCoordClient(test.inrc)
 				if test.isvalid {
 					assert.NoError(t, err)
 				} else {
