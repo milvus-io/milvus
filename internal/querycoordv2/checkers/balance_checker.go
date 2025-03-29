@@ -19,6 +19,7 @@ package checkers
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -85,24 +86,26 @@ func (b *BalanceChecker) readyToCheck(ctx context.Context, collectionID int64) b
 
 func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context) []int64 {
 	ids := b.meta.GetAll(ctx)
+
+	// Sort collections using the configured sort order
+	ids = b.sortCollections(ctx, ids)
+
 	if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
-		// balance collections influenced by stopping nodes
-		stoppingReplicas := make([]int64, 0)
 		for _, cid := range ids {
 			// if target and meta isn't ready, skip balance this collection
 			if !b.readyToCheck(ctx, cid) {
 				continue
 			}
 			replicas := b.meta.ReplicaManager.GetByCollection(ctx, cid)
+			stoppingReplicas := make([]int64, 0)
 			for _, replica := range replicas {
 				if replica.RONodesCount() > 0 {
 					stoppingReplicas = append(stoppingReplicas, replica.GetID())
 				}
 			}
-		}
-		// do stopping balance only in this round
-		if len(stoppingReplicas) > 0 {
-			return stoppingReplicas
+			if len(stoppingReplicas) > 0 {
+				return stoppingReplicas
+			}
 		}
 	}
 
@@ -123,9 +126,6 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context) []int64
 		collection := b.meta.GetCollection(ctx, cid)
 		return collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded
 	})
-	sort.Slice(loadedCollections, func(i, j int) bool {
-		return loadedCollections[i] < loadedCollections[j]
-	})
 
 	// Before performing balancing, check the CurrentTarget/LeaderView/Distribution for all collections.
 	// If any collection has unready info, skip the balance operation to avoid inconsistencies.
@@ -137,6 +137,9 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context) []int64
 		log.RatedInfo(10, "skip normal balance, cause collection not ready for balance", zap.Int64s("collectionIDs", notReadyCollections))
 		return nil
 	}
+
+	// Sort collections using the configured sort order
+	loadedCollections = b.sortCollections(ctx, loadedCollections)
 
 	// iterator one normal collection in one round
 	normalReplicasToBalance := make([]int64, 0)
@@ -187,6 +190,11 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	if len(stoppingReplicas) > 0 {
 		// check for stopping balance first
 		segmentPlans, channelPlans = b.balanceReplicas(ctx, stoppingReplicas)
+		// iterate all collection to find a collection to balance
+		for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.normalBalanceCollectionsCurrentRound.Len() > 0 {
+			replicasToBalance := b.getReplicaForStoppingBalance(ctx)
+			segmentPlans, channelPlans = b.balanceReplicas(ctx, replicasToBalance)
+		}
 	} else {
 		// then check for auto balance
 		if time.Since(b.autoBalanceTs) > paramtable.Get().QueryCoordCfg.AutoBalanceInterval.GetAsDuration(time.Millisecond) {
@@ -211,4 +219,38 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	task.SetReason("channel unbalanced", tasks...)
 	ret = append(ret, tasks...)
 	return ret
+}
+
+func (b *BalanceChecker) sortCollections(ctx context.Context, collections []int64) []int64 {
+	sortOrder := strings.ToLower(Params.QueryCoordCfg.BalanceTriggerOrder.GetValue())
+	if sortOrder == "" {
+		sortOrder = "byrowcount" // Default to ByRowCount
+	}
+
+	// Define sorting functions
+	sortByRowCount := func(i, j int) bool {
+		rowCount1 := b.targetMgr.GetCollectionRowCount(ctx, collections[i], meta.CurrentTargetFirst)
+		rowCount2 := b.targetMgr.GetCollectionRowCount(ctx, collections[j], meta.CurrentTargetFirst)
+		return rowCount1 > rowCount2 || (rowCount1 == rowCount2 && collections[i] < collections[j])
+	}
+
+	sortByCollectionID := func(i, j int) bool {
+		return collections[i] < collections[j]
+	}
+
+	// Select the appropriate sorting function
+	var sortFunc func(i, j int) bool
+	switch sortOrder {
+	case "byrowcount":
+		sortFunc = sortByRowCount
+	case "bycollectionid":
+		sortFunc = sortByCollectionID
+	default:
+		log.Warn("Invalid balance sort order configuration, using default ByRowCount", zap.String("sortOrder", sortOrder))
+		sortFunc = sortByRowCount
+	}
+
+	// Sort the collections
+	sort.Slice(collections, sortFunc)
+	return collections
 }
