@@ -34,7 +34,6 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, 31, mutableMessage.EstimateSize())
 	mutableMessage.WithTimeTick(123)
 	mutableMessage.WithBarrierTimeTick(456)
-	mutableMessage.WithWALTerm(1)
 	v, ok = mutableMessage.Properties().Get("_tt")
 	assert.True(t, ok)
 	tt, err := message.DecodeUint64(v)

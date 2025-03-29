@@ -114,9 +114,6 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		return nil, ctx.Err()
 	case <-w.interceptorBuildResult.Interceptor.Ready():
 	}
-	// Setup the term of wal.
-	msg = msg.WithWALTerm(w.Channel().Term)
-
 	appendMetrics := w.writeMetrics.StartAppend(msg)
 	ctx = utility.WithAppendMetricsContext(ctx, appendMetrics)
 
