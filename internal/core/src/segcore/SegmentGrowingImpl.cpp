@@ -103,17 +103,17 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                    fmt::format("can't find field {}", field_id.get()));
         auto data_offset = field_id_to_offset[field_id];
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
-            insert_record_.get_data_base(field_id)->set_data_raw(
-                reserved_offset,
-                num_rows,
-                &insert_record_proto->fields_data(data_offset),
-                field_meta);
             if (field_meta.is_nullable()) {
                 insert_record_.get_valid_data(field_id)->set_data_raw(
                     num_rows,
                     &insert_record_proto->fields_data(data_offset),
                     field_meta);
             }
+            insert_record_.get_data_base(field_id)->set_data_raw(
+                reserved_offset,
+                num_rows,
+                &insert_record_proto->fields_data(data_offset),
+                field_meta);
         }
         //insert vector data into index
         if (segcore_config_.get_enable_interim_segment_index()) {
@@ -240,12 +240,12 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         }
 
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
-            insert_record_.get_data_base(field_id)->set_data_raw(
-                reserved_offset, field_data);
             if (insert_record_.is_valid_data_exist(field_id)) {
                 insert_record_.get_valid_data(field_id)->set_data_raw(
                     field_data);
             }
+            insert_record_.get_data_base(field_id)->set_data_raw(
+                reserved_offset, field_data);
         }
         if (segcore_config_.get_enable_interim_segment_index()) {
             auto offset = reserved_offset;
