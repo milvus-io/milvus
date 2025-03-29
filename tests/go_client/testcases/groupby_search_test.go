@@ -474,7 +474,7 @@ func TestSearchGroupByUnsupportedDataType(t *testing.T) {
 		common.DefaultFloatFieldName, common.DefaultDoubleFieldName,
 		common.DefaultJSONFieldName, common.DefaultFloatVecFieldName, common.DefaultInt8ArrayField, common.DefaultFloatArrayField,
 	} {
-		_, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithGroupByField(unsupportedField).WithANNSField(common.DefaultFloatVecFieldName))
+		_, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithGroupByField(unsupportedField).WithANNSField(common.DefaultFloatVecFieldName).WithConsistencyLevel(entity.ClStrong))
 		common.CheckErr(t, err, false, "unsupported data type")
 	}
 }
@@ -495,7 +495,7 @@ func TestSearchGroupByRangeSearch(t *testing.T) {
 
 	// range search
 	_, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithGroupByField(common.DefaultVarcharFieldName).
-		WithANNSField(common.DefaultFloatVecFieldName).WithSearchParam("radius", "0").WithSearchParam("range_filter", "0.8"))
+		WithANNSField(common.DefaultFloatVecFieldName).WithSearchParam("radius", "0").WithSearchParam("range_filter", "0.8").WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, false, "Not allowed to do range-search when doing search-group-by")
 }
 

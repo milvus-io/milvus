@@ -34,6 +34,7 @@ type target struct {
 	ch       chan *MsgPack
 	subPos   SubPos
 	pos      *Pos
+	isLagged bool
 
 	closeMu         sync.Mutex
 	closeOnce       sync.Once
@@ -75,6 +76,7 @@ func (t *target) close() {
 		t.closed = true
 		t.timer.Stop()
 		close(t.ch)
+		log.Info("close target chan", zap.String("vchannel", t.vchannel))
 	})
 }
 
@@ -97,6 +99,7 @@ func (t *target) send(pack *MsgPack) error {
 		log.Info("target closed", zap.String("vchannel", t.vchannel))
 		return nil
 	case <-t.timer.C:
+		t.isLagged = true
 		return fmt.Errorf("send target timeout, vchannel=%s, timeout=%s, beginTs=%d, endTs=%d", t.vchannel, t.maxLag, pack.BeginTs, pack.EndTs)
 	case t.ch <- pack:
 		return nil
