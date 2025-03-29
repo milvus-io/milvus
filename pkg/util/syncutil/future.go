@@ -34,6 +34,14 @@ func (f *Future[T]) GetWithContext(ctx context.Context) (T, error) {
 	}
 }
 
+// MustGet retrieves the value of the future if set, otherwise panic if the ready yet.
+func (f *Future[T]) MustGet() T {
+	if !f.Ready() {
+		panic("future is not ready")
+	}
+	return f.Get()
+}
+
 // Get retrieves the value of the future if set, otherwise block until set.
 func (f *Future[T]) Get() T {
 	<-f.ch

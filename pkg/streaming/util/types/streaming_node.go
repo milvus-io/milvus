@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cockroachdb/errors"
 
@@ -63,6 +64,11 @@ func NewProtoFromStreamingNodeInfo(info StreamingNodeInfo) *streamingpb.Streamin
 type StreamingNodeInfo struct {
 	ServerID int64
 	Address  string
+}
+
+// String returns the string representation of the streaming node info.
+func (n StreamingNodeInfo) String() string {
+	return fmt.Sprintf("%d@%s", n.ServerID, n.Address)
 }
 
 // StreamingNodeStatus is the information of a streaming node.
