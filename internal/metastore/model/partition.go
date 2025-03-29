@@ -45,9 +45,13 @@ func CheckPartitionsEqual(partitionsA, partitionsB []*Partition) bool {
 	if len(partitionsA) != len(partitionsB) {
 		return false
 	}
-	l := len(partitionsA)
-	for i := 0; i < l; i++ {
-		if !partitionsA[i].Equal(*partitionsB[i]) {
+	mapA := make(map[string]*Partition)
+	for _, p := range partitionsA {
+		mapA[p.PartitionName] = p
+	}
+
+	for _, p := range partitionsB {
+		if other, exists := mapA[p.PartitionName]; !exists || !p.Equal(*other) {
 			return false
 		}
 	}
