@@ -39,7 +39,8 @@ struct TokenStream {
         return s;
     }
 
-    TantivyToken get_detailed_token() {
+    TantivyToken
+    get_detailed_token() {
         return tantivy_token_stream_get_detailed_token(ptr_);
     }
 

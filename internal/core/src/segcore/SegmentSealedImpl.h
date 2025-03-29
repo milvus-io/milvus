@@ -100,6 +100,12 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadTextIndex(FieldId field_id,
                   std::unique_ptr<index::TextMatchIndex> index) override;
 
+    void
+    load_field_data(const LoadFieldDataInfo& data);
+
+    void
+    load_field_group_data(const LoadFieldDataInfo& data);
+
  public:
     size_t
     GetMemoryUsageInBytes() const override {

@@ -17,10 +17,15 @@
 #include <string>
 #include <vector>
 
+#include "arrow/type.h"
 #include "common/Common.h"
+#include "common/Types.h"
 #include "common/FieldData.h"
 #include "common/Types.h"
 #include "index/ScalarIndex.h"
+#include "milvus-storage/common/type_fwd.h"
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "mmap/Utils.h"
 #include "log/Log.h"
 #include "storage/DataCodec.h"
@@ -925,6 +930,73 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
     }
 }
 
+// init segcore storage config first, and create default arrow file system
+// segcore use storage v2 file reader to load data from minio/s3
+void
+LoadArrowReaderFromStorageV2(const std::vector<std::string>& remote_files,
+                             std::shared_ptr<arrow::Schema> schema,
+                             std::shared_ptr<ArrowReaderChannel> channel,
+                             int64_t memory_limit,
+                             uint64_t parallel_degree) {
+    try {
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
+
+        std::vector<std::future<std::shared_ptr<milvus::ArrowDataWrapper>>>
+            futures;
+        futures.reserve(parallel_degree);
+        for (const auto& file : remote_files) {
+            auto file_reader =
+                std::make_shared<milvus_storage::FileRecordBatchReader>(
+                    fs, file, schema);
+            auto metadata = file_reader->file_metadata();
+            milvus_storage::RowGroupSizeVector row_group_sizes =
+                metadata->GetRowGroupSizeVector();
+            auto field_id_mapping = metadata->GetFieldIDMapping();
+            size_t start = 0;
+            size_t current_size = 0;
+
+            for (size_t i = 0; i < row_group_sizes.size(); ++i) {
+                current_size += row_group_sizes.Get(i);
+
+                if (current_size >= memory_limit ||
+                    i == row_group_sizes.size() - 1) {
+                    size_t row_group_offset = start;
+                    size_t row_group_num = i - start + 1;
+
+                    futures.emplace_back(std::async(std::launch::async, [=]() {
+                        auto row_group_reader = std::make_shared<
+                            milvus_storage::FileRecordBatchReader>(
+                            fs, file, schema);
+                        row_group_reader->SetRowGroupOffsetAndCount(
+                            row_group_offset, row_group_num);
+                        auto ret = std::make_shared<ArrowDataWrapper>();
+                        for (auto batch : *row_group_reader) {
+                            ret->record_batches.push_back(
+                                std::move(batch.ValueOrDie()));
+                        }
+                        return ret;
+                    }));
+
+                    start = i + 1;
+                    current_size = 0;
+                }
+            }
+        }
+
+        for (auto& future : futures) {
+            auto field_data = future.get();
+            channel->push(field_data);
+        }
+
+        channel->close();
+    } catch (std::exception& e) {
+        LOG_INFO("failed to load data from remote: {}", e.what());
+        channel->close();
+    }
+}
+
 void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                          FieldDataChannelPtr channel) {
@@ -957,6 +1029,7 @@ LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
         channel->close(std::current_exception());
     }
 }
+
 int64_t
 upper_bound(const ConcurrentVector<Timestamp>& timestamps,
             int64_t first,
@@ -973,4 +1046,89 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
     }
     return first;
 }
+
+void
+LoadFieldDatasFromStorageV2(
+    const std::vector<std::string>& remote_files,
+    SchemaPtr schema,
+    std::unordered_map<int64_t, FieldDataInfo>& field_data_infos,
+    int64_t memory_limit,
+    uint64_t parallel_degree) {
+    try {
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
+        std::vector<std::future<void>> futures;
+        futures.reserve(parallel_degree);
+        auto field_metas = schema->get_fields();
+        ArrowSchemaPtr arrow_schema = schema->ConvertToArrowSchema();
+        for (const auto& file_path : remote_files) {
+            auto file_reader =
+                std::make_shared<milvus_storage::FileRecordBatchReader>(
+                    fs, file_path, arrow_schema);
+            auto metadata = file_reader->file_metadata();
+            milvus_storage::RowGroupSizeVector row_group_sizes =
+                metadata->GetRowGroupSizeVector();
+            auto field_id_mapping = metadata->GetFieldIDMapping();
+            size_t start = 0;
+            size_t current_size = 0;
+
+            for (size_t i = 0; i < row_group_sizes.size(); ++i) {
+                current_size += row_group_sizes.Get(i);
+
+                if (current_size >= memory_limit ||
+                    i == row_group_sizes.size() - 1) {
+                    size_t row_group_offset = start;
+                    size_t row_group_num = i - start + 1;
+
+                    futures.emplace_back(std::async(std::launch::async, [=]() {
+                        auto row_group_reader = std::make_shared<
+                            milvus_storage::FileRecordBatchReader>(
+                            fs, file_path, arrow_schema);
+                        row_group_reader->SetRowGroupOffsetAndCount(
+                            row_group_offset, row_group_num);
+
+                        std::shared_ptr<arrow::RecordBatch> batch;
+                        while (file_reader->ReadNext(&batch).ok() &&
+                               batch != nullptr) {
+                            auto total_num_rows = batch->num_rows();
+                            for (auto& [field_id, field_data_info] :
+                                 field_data_infos) {
+                                for (auto& field : schema->get_fields()) {
+                                    if (field.second.get_id().get() !=
+                                        field_data_info.field_id) {
+                                        continue;
+                                    }
+                                    auto col_data = batch->GetColumnByName(
+                                        field.second.get_name().get());
+                                    auto field_data = storage::CreateFieldData(
+                                        field.second.get_data_type(),
+                                        field.second.is_vector()
+                                            ? field.second.get_dim()
+                                            : 0,
+                                        total_num_rows);
+                                    field_data->FillFieldData(col_data);
+                                    field_data_info.channel->push(field_data);
+                                }
+                            }
+                        }
+                    }));
+
+                    start = i + 1;
+                    current_size = 0;
+                }
+            }
+        }
+
+        for (auto& [_, field_data_info] : field_data_infos) {
+            field_data_info.channel->close();
+        }
+    } catch (std::exception& e) {
+        LOG_INFO("failed to load data from remote: {}", e.what());
+        for (auto& [_, field_data_info] : field_data_infos) {
+            field_data_info.channel->close(std::current_exception());
+        }
+    }
+}
+
 }  // namespace milvus::segcore
