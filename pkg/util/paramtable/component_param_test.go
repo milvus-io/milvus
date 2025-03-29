@@ -203,7 +203,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.ReplicaSelectionPolicy.GetValue(), "look_aside")
 		assert.Equal(t, Params.CheckQueryNodeHealthInterval.GetAsInt(), 1000)
 		assert.Equal(t, Params.CostMetricsExpireTime.GetAsInt(), 1000)
-		assert.Equal(t, Params.RetryTimesOnReplica.GetAsInt(), 2)
+		assert.Equal(t, Params.RetryTimesOnReplica.GetAsInt(), 5)
 		assert.EqualValues(t, Params.HealthCheckTimeout.GetAsInt64(), 3000)
 
 		params.Save("proxy.gracefulStopTimeout", "100")
