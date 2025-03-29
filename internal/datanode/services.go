@@ -320,6 +320,9 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 				future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
 					var val *pkoracle.BloomFilterSet
 					var err error
+					if Params.DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
+						return val, nil
+					}
 					err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
 					if err != nil {
 						log.Warn("failed to DecompressBinLog", zap.Error(err))
