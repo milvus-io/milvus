@@ -326,6 +326,61 @@ func (coord *RootCoordMock) GetTimeTickChannel(ctx context.Context, req *interna
 	}, nil
 }
 
+func (coord *RootCoordMock) AddCollectionField(ctx context.Context, req *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	code := coord.state.Load().(commonpb.StateCode)
+	if code != commonpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	coord.collMtx.Lock()
+	defer coord.collMtx.Unlock()
+
+	collID, exist := coord.collName2ID[req.CollectionName]
+
+	if !exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			Reason:    "collection not exist",
+		}, nil
+	}
+
+	collInfo, exist := coord.collID2Meta[collID]
+
+	if !exist {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
+			Reason:    "collection info not exist",
+		}, nil
+	}
+	fieldSchema := &schemapb.FieldSchema{}
+
+	err := proto.Unmarshal(req.Schema, fieldSchema)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "invalid parameter",
+		}, nil
+	}
+
+	fieldSchema.FieldID = int64(common.StartOfUserFieldID + len(collInfo.schema.Fields) + 1)
+	collInfo.schema.Fields = append(collInfo.schema.Fields, fieldSchema)
+	ts := uint64(time.Now().Nanosecond())
+	coord.collID2Meta[collID] = collectionMeta{
+		name:                 req.CollectionName,
+		id:                   collID,
+		schema:               collInfo.schema,
+		shardsNum:            collInfo.shardsNum,
+		virtualChannelNames:  collInfo.virtualChannelNames,
+		physicalChannelNames: collInfo.physicalChannelNames,
+		createdTimestamp:     ts,
+		createdUtcTimestamp:  ts,
+		properties:           collInfo.properties,
+	}
+	return merr.Success(), nil
+}
+
 func (coord *RootCoordMock) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	code := coord.state.Load().(commonpb.StateCode)
 	if code != commonpb.StateCode_Healthy {

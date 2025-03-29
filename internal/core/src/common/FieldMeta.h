@@ -41,8 +41,16 @@ class FieldMeta {
     FieldMeta&
     operator=(FieldMeta&&) = default;
 
-    FieldMeta(FieldName name, FieldId id, DataType type, bool nullable)
-        : name_(std::move(name)), id_(id), type_(type), nullable_(nullable) {
+    FieldMeta(FieldName name,
+              FieldId id,
+              DataType type,
+              bool nullable,
+              std::optional<DefaultValueType> default_value)
+        : name_(std::move(name)),
+          id_(id),
+          type_(type),
+          nullable_(nullable),
+          default_value_(std::move(default_value)) {
         Assert(!IsVectorDataType(type_));
     }
 
@@ -50,12 +58,14 @@ class FieldMeta {
               FieldId id,
               DataType type,
               int64_t max_length,
-              bool nullable)
+              bool nullable,
+              std::optional<DefaultValueType> default_value)
         : name_(std::move(name)),
           id_(id),
           type_(type),
           nullable_(nullable),
-          string_info_(StringInfo{max_length}) {
+          string_info_(StringInfo{max_length}),
+          default_value_(std::move(default_value)) {
         Assert(IsStringDataType(type_));
     }
 
@@ -66,13 +76,19 @@ class FieldMeta {
               bool nullable,
               bool enable_match,
               bool enable_analyzer,
-              std::map<std::string, std::string>& params)
+              std::map<std::string, std::string>& params,
+              std::optional<DefaultValueType> default_value)
         : name_(std::move(name)),
           id_(id),
           type_(type),
           nullable_(nullable),
           string_info_(StringInfo{
-              max_length, enable_match, enable_analyzer, std::move(params)}) {
+              max_length,
+              enable_match,
+              enable_analyzer,
+              std::move(params),
+          }),
+          default_value_(std::move(default_value)) {
         Assert(IsStringDataType(type_));
     }
 
@@ -80,12 +96,14 @@ class FieldMeta {
               FieldId id,
               DataType type,
               DataType element_type,
-              bool nullable)
+              bool nullable,
+              std::optional<DefaultValueType> default_value)
         : name_(std::move(name)),
           id_(id),
           type_(type),
           element_type_(element_type),
-          nullable_(nullable) {
+          nullable_(nullable),
+          default_value_(std::move(default_value)) {
         Assert(IsArrayDataType(type_));
     }
 
@@ -96,12 +114,14 @@ class FieldMeta {
               DataType type,
               int64_t dim,
               std::optional<knowhere::MetricType> metric_type,
-              bool nullable)
+              bool nullable,
+              std::optional<DefaultValueType> default_value)
         : name_(std::move(name)),
           id_(id),
           type_(type),
           nullable_(nullable),
-          vector_info_(VectorInfo{dim, std::move(metric_type)}) {
+          vector_info_(VectorInfo{dim, std::move(metric_type)}),
+          default_value_(std::move(default_value)) {
         Assert(IsVectorDataType(type_));
         Assert(!nullable);
     }
@@ -178,6 +198,16 @@ class FieldMeta {
         return nullable_;
     }
 
+    bool
+    has_default_value() const {
+        return default_value_.has_value();
+    }
+
+    std::optional<DefaultValueType>
+    default_value() const {
+        return default_value_;
+    }
+
     size_t
     get_sizeof() const {
         AssertInfo(!IsSparseFloatVectorDataType(type_),
@@ -217,6 +247,7 @@ class FieldMeta {
     DataType type_ = DataType::NONE;
     DataType element_type_ = DataType::NONE;
     bool nullable_;
+    std::optional<DefaultValueType> default_value_;
     std::optional<VectorInfo> vector_info_;
     std::optional<StringInfo> string_info_;
 };
