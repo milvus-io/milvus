@@ -27,7 +27,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -147,6 +146,13 @@ func (t *l0CompactionTask) processExecuting() bool {
 		UpdateCompactionSegmentSizeMetrics(result.GetSegments())
 		return t.processMetaSaved()
 	case datapb.CompactionTaskState_failed:
+		if len(t.GetTaskProto().GetResultSegments()) > 0 {
+			// we should retry the task when it failed, because the compaction task is from the import job
+			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
+			log.Info("l0CompactionTask retry the task when it failed")
+			return false
+		}
+
 		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed)); err != nil {
 			log.Warn("l0CompactionTask failed to set task failed state", zap.Error(err))
 			return false
@@ -236,16 +242,28 @@ func (t *l0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compac
 
 func (t *l0CompactionTask) selectSealedSegment() ([]int64, []*datapb.CompactionSegmentBinlogs) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
-	// Select sealed L1 segments for LevelZero compaction that meets the condition:
-	// dmlPos < triggerInfo.pos
-	sealedSegments := t.meta.SelectSegments(context.TODO(), WithCollection(taskProto.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
-			info.GetInsertChannel() == taskProto.GetChannel() &&
-			isFlushState(info.GetState()) &&
-			!info.GetIsImporting() &&
-			info.GetLevel() != datapb.SegmentLevel_L0 &&
-			info.GetStartPosition().GetTimestamp() < taskProto.GetPos().GetTimestamp()
-	}))
+	var sealedSegments []*SegmentInfo
+	if len(taskProto.GetResultSegments()) > 0 {
+		for _, segmentID := range taskProto.GetResultSegments() {
+			segmentInfo := t.meta.GetSegment(context.TODO(), segmentID)
+			if segmentInfo == nil {
+				log.Warn("l0CompactionTask selectSealedSegment failed to get segment info", zap.Int64("segmentID", segmentID))
+				continue
+			}
+			sealedSegments = append(sealedSegments, segmentInfo)
+		}
+	} else {
+		// Select sealed L1 segments for LevelZero compaction that meets the condition:
+		// dmlPos < triggerInfo.pos
+		sealedSegments = t.meta.SelectSegments(context.TODO(), WithCollection(taskProto.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
+			return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
+				info.GetInsertChannel() == taskProto.GetChannel() &&
+				isFlushState(info.GetState()) &&
+				!info.GetIsImporting() &&
+				info.GetLevel() != datapb.SegmentLevel_L0 &&
+				info.GetStartPosition().GetTimestamp() < taskProto.GetPos().GetTimestamp()
+		}))
+	}
 
 	sealedSegBinlogs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
 		return &datapb.CompactionSegmentBinlogs{
@@ -378,7 +396,7 @@ func (t *l0CompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult) 
 	}
 
 	for _, segID := range t.GetTaskProto().InputSegments {
-		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), UpdateCompactedOperator(segID))
+		operators = append(operators, SetSegmentIsInvisible(segID, true), UpdateCompactedOperator(segID))
 	}
 
 	log.Info("meta update: update segments info for level zero compaction",
