@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "arrow/type.h"
 #include "common/Common.h"
 #include "common/Types.h"
 #include "common/FieldData.h"
@@ -932,12 +933,11 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 // init segcore storage config first, and create default arrow file system
 // segcore use storage v2 file reader to load data from minio/s3
 void
-LoadArrowReaderFromStorageV2(
-    const std::vector<std::string>& remote_files,
-    SchemaPtr schema,
-    std::unordered_map<int64_t, FieldDataInfo>& field_data_infos,
-    int64_t memory_limit,
-    uint64_t parallel_degree) {
+LoadArrowReaderFromStorageV2(const std::vector<std::string>& remote_files,
+                             std::shared_ptr<arrow::Schema> schema,
+                             std::shared_ptr<ArrowReaderChannel> channel,
+                             int64_t memory_limit,
+                             uint64_t parallel_degree) {
     try {
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
@@ -946,11 +946,10 @@ LoadArrowReaderFromStorageV2(
         std::vector<std::future<std::shared_ptr<milvus::ArrowDataWrapper>>>
             futures;
         futures.reserve(parallel_degree);
-        ArrowSchemaPtr arrow_schema = schema->ConvertToArrowSchema();
         for (const auto& file : remote_files) {
             auto file_reader =
                 std::make_shared<milvus_storage::FileRecordBatchReader>(
-                    fs, file, arrow_schema);
+                    fs, file, schema);
             auto metadata = file_reader->file_metadata();
             milvus_storage::RowGroupSizeVector row_group_sizes =
                 metadata->GetRowGroupSizeVector();
@@ -969,11 +968,14 @@ LoadArrowReaderFromStorageV2(
                     futures.emplace_back(std::async(std::launch::async, [=]() {
                         auto row_group_reader = std::make_shared<
                             milvus_storage::FileRecordBatchReader>(
-                            fs, file, arrow_schema);
+                            fs, file, schema);
                         row_group_reader->SetRowGroupOffsetAndCount(
                             row_group_offset, row_group_num);
                         auto ret = std::make_shared<ArrowDataWrapper>();
-                        ret->reader = row_group_reader;
+                        for (auto batch : *row_group_reader) {
+                            ret->record_batches.push_back(
+                                std::move(batch.ValueOrDie()));
+                        }
                         return ret;
                     }));
 
@@ -984,27 +986,14 @@ LoadArrowReaderFromStorageV2(
         }
 
         for (auto& future : futures) {
-            auto arrow_data_wrapper = future.get();
-            for (auto& [field_id, field_data_info] : field_data_infos) {
-                for (auto& field : schema->get_fields()) {
-                    if (field.second.get_id().get() !=
-                        field_data_info.field_id) {
-                        continue;
-                    }
-                    field_data_info.arrow_reader_channel->push(
-                        arrow_data_wrapper);
-                }
-            }
+            auto field_data = future.get();
+            channel->push(field_data);
         }
 
-        for (auto& [_, field_data_info] : field_data_infos) {
-            field_data_info.arrow_reader_channel->close();
-        }
+        channel->close();
     } catch (std::exception& e) {
         LOG_INFO("failed to load data from remote: {}", e.what());
-        for (auto& [_, field_data_info] : field_data_infos) {
-            field_data_info.arrow_reader_channel->close();
-        }
+        channel->close();
     }
 }
 

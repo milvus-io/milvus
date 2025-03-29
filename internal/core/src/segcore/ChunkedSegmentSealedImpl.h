@@ -36,6 +36,8 @@
 #include "common/Types.h"
 #include "common/IndexMeta.h"
 
+#include "milvus-storage/common/metadata.h"
+
 namespace milvus::segcore {
 
 class ChunkedSegmentSealedImpl : public SegmentSealed {
@@ -100,10 +102,35 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   std::unique_ptr<index::TextMatchIndex> index) override;
 
     void
-    load_field_data(const LoadFieldDataInfo& load_info);
+    load_field_data_internal(const LoadFieldDataInfo& load_info);
 
     void
-    load_field_group_data(const LoadFieldDataInfo& load_info);
+    load_column_group_data_internal(const LoadFieldDataInfo& load_info);
+
+    void
+    load_column_in_memory(FieldId field_id,
+                          std::vector<arrow::ArrayVector> chunks,
+                          int64_t num_rows);
+
+    std::shared_ptr<ChunkedColumnBase>
+    load_variable_datatype_column(FieldId field_id,
+                                  milvus::DataType data_type,
+                                  const FieldMeta& field_meta,
+                                  std::vector<arrow::ArrayVector>& chunks,
+                                  int64_t& field_data_size,
+                                  SegmentStats& stats);
+
+    void
+    load_field_data_mmap(const FieldId field_id,
+                         size_t row_count,
+                         std::string mmap_dir_path,
+                         std::vector<arrow::ArrayVector> array_vec_chunks);
+
+    void
+    LoadColumnGroupData(FieldId column_group_id,
+                        FieldDataInfo& data,
+                        milvus_storage::FieldIDList field_ids,
+                        bool use_mmap);
 
  public:
     size_t

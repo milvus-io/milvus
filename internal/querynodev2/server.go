@@ -390,6 +390,13 @@ func (node *QueryNode) Init() error {
 			return
 		}
 
+		err = initcore.InitStorageV2FileSystem(paramtable.Get())
+		if err != nil {
+			log.Error("QueryNode init storage v2 file system failed", zap.Error(err))
+			initError = err
+			return
+		}
+
 		log.Info("query node init successfully",
 			zap.Int64("queryNodeID", node.GetNodeID()),
 			zap.String("Address", node.address),
