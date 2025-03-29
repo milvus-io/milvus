@@ -17,13 +17,13 @@ import (
 )
 
 // NewSessionDiscoverer returns a new Discoverer for the milvus session registration.
-func NewSessionDiscoverer(etcdCli *clientv3.Client, prefix string, exclusive bool, minimumVersion string) Discoverer {
+func NewSessionDiscoverer(etcdCli *clientv3.Client, prefix string, exclusive bool, semverRange string) Discoverer {
 	return &sessionDiscoverer{
 		etcdCli:      etcdCli,
 		prefix:       prefix,
 		exclusive:    exclusive,
-		versionRange: semver.MustParseRange(">=" + minimumVersion),
-		logger:       log.With(zap.String("prefix", prefix), zap.Bool("exclusive", exclusive), zap.String("expectedVersion", minimumVersion)),
+		versionRange: semver.MustParseRange(semverRange),
+		logger:       log.With(zap.String("prefix", prefix), zap.Bool("exclusive", exclusive), zap.String("semver", semverRange)),
 		revision:     0,
 		peerSessions: make(map[string]*sessionutil.SessionRaw),
 	}
@@ -38,14 +38,6 @@ type sessionDiscoverer struct {
 	versionRange semver.Range
 	revision     int64
 	peerSessions map[string]*sessionutil.SessionRaw // map[Key]SessionRaw, map the key path of session to session.
-}
-
-// NewVersionedState return the empty version state.
-func (sw *sessionDiscoverer) NewVersionedState() VersionedState {
-	return VersionedState{
-		Version: typeutil.VersionInt64(-1),
-		State:   resolver.State{},
-	}
 }
 
 // Discover watches the service discovery on these goroutine.

@@ -50,11 +50,11 @@ func TestManager(t *testing.T) {
 	assert.False(t, ok)
 
 	// Test CollectAllStatus
-	r.EXPECT().GetLatestState().RunAndReturn(func() discoverer.VersionedState {
+	r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(ctx context.Context) (discoverer.VersionedState, error) {
 		return discoverer.VersionedState{
 			Version: typeutil.VersionInt64(1),
 			State:   resolver.State{},
-		}
+		}, nil
 	})
 	// Not address here.
 	nodes, err := m.CollectAllStatus(context.Background())
@@ -75,11 +75,11 @@ func TestManager(t *testing.T) {
 		{1: false, 2: false, 3: true},
 		{1: true, 2: false},
 	}
-	r.EXPECT().GetLatestState().Unset()
-	r.EXPECT().GetLatestState().RunAndReturn(func() discoverer.VersionedState {
+	r.EXPECT().GetLatestState(mock.Anything).Unset()
+	r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(ctx context.Context) (discoverer.VersionedState, error) {
 		s := newVersionedState(int64(i), states[i])
 		i++
-		return s
+		return s, nil
 	})
 
 	nodes, err = m.CollectAllStatus(context.Background())

@@ -61,7 +61,10 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context) (map[int64]*ty
 	defer c.lifetime.Done()
 
 	// Get all discovered streamingnode.
-	state := c.rb.Resolver().GetLatestState()
+	state, err := c.rb.Resolver().GetLatestState(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if len(state.State.Addresses) == 0 {
 		return make(map[int64]*types.StreamingNodeStatus), nil
 	}
@@ -73,7 +76,10 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context) (map[int64]*ty
 	}
 
 	// Collect status may cost some time, so we need to check the lifetime again.
-	newState := c.rb.Resolver().GetLatestState()
+	newState, err := c.rb.Resolver().GetLatestState(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if newState.Version.GT(state.Version) {
 		newSession := newState.Sessions()
 		for serverID := range result {

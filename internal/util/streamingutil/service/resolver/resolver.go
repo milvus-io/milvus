@@ -34,7 +34,7 @@ type Builder interface {
 type Resolver interface {
 	// GetLatestState returns the latest state of the resolver.
 	// The returned state should be read only, applied any change to it will cause data race.
-	GetLatestState() VersionedState
+	GetLatestState(ctx context.Context) (VersionedState, error)
 
 	// Watch watch the state change of the resolver.
 	// cb will be called with latest state after call, and will be called with new state when state changed.

@@ -36,14 +36,8 @@ func TestChannelAssignmentDiscoverer(t *testing.T) {
 		})
 
 	d := NewChannelAssignmentDiscoverer(w)
-	s := d.NewVersionedState()
-	assert.True(t, s.Version.EQ(typeutil.VersionInt64Pair{Global: -1, Local: -1}))
 
 	expected := []*types.VersionedStreamingNodeAssignments{
-		{
-			Version:     typeutil.VersionInt64Pair{Global: -1, Local: -1},
-			Assignments: map[int64]types.StreamingNodeAssignment{},
-		},
 		{
 			Version: typeutil.VersionInt64Pair{
 				Global: 1,
@@ -81,6 +75,7 @@ func TestChannelAssignmentDiscoverer(t *testing.T) {
 		},
 	}
 
+	ch <- expected[0]
 	idx := 0
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

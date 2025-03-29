@@ -47,7 +47,7 @@ type ManagerClient interface {
 // NewManagerClient creates a new manager client.
 func NewManagerClient(etcdCli *clientv3.Client) ManagerClient {
 	role := sessionutil.GetSessionPrefixByRole(typeutil.StreamingNodeRole)
-	rb := resolver.NewSessionBuilder(etcdCli, role)
+	rb := resolver.NewSessionBuilder(etcdCli, role, ">=2.6.0-dev")
 	dialTimeout := paramtable.Get().StreamingNodeGrpcClientCfg.DialTimeout.GetAsDuration(time.Millisecond)
 	dialOptions := getDialOptions(rb)
 	conn := lazygrpc.NewConn(func(ctx context.Context) (*grpc.ClientConn, error) {
