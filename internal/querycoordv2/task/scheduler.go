@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	. "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -960,6 +961,14 @@ func (scheduler *taskScheduler) remove(task Task) {
 		log.Info("segment in target has been cleaned, trigger force update next target", zap.Int64("collectionID", task.CollectionID()))
 		// Avoid using task.Ctx as it may be canceled before remove is called.
 		scheduler.targetMgr.UpdateCollectionNextTarget(scheduler.ctx, task.CollectionID())
+	}
+
+	// if task failed due to segment request resource failed, suspend the node from loading for 1 min
+	if errors.Is(task.Err(), merr.ErrSegmentRequestResourceFailed) {
+		nodeID := task.Actions()[0].Node()
+		duration := paramtable.Get().QueryCoordCfg.ResourceExhaustionPenaltyDuration.GetAsDuration(time.Second)
+		scheduler.nodeMgr.MarkResourceExhaustion(nodeID, duration)
+		log.Info("mark resource exhaustion for node", zap.Int64("nodeID", nodeID), zap.Duration("duration", duration))
 	}
 
 	task.Cancel(nil)

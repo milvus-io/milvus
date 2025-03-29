@@ -101,11 +101,12 @@ var (
 	ErrChannelCPExceededMaxLag = newMilvusError("channel checkpoint exceed max lag", 504, false)
 
 	// Segment related
-	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
-	ErrSegmentNotLoaded   = newMilvusError("segment not loaded", 601, false)
-	ErrSegmentLack        = newMilvusError("segment lacks", 602, false)
-	ErrSegmentReduplicate = newMilvusError("segment reduplicates", 603, false)
-	ErrSegmentLoadFailed  = newMilvusError("segment load failed", 604, false)
+	ErrSegmentNotFound              = newMilvusError("segment not found", 600, false)
+	ErrSegmentNotLoaded             = newMilvusError("segment not loaded", 601, false)
+	ErrSegmentLack                  = newMilvusError("segment lacks", 602, false)
+	ErrSegmentReduplicate           = newMilvusError("segment reduplicates", 603, false)
+	ErrSegmentLoadFailed            = newMilvusError("segment load failed", 604, false)
+	ErrSegmentRequestResourceFailed = newMilvusError("segment request resource failed", 605, false)
 
 	// Index related
 	ErrIndexNotFound     = newMilvusError("index not found", 700, false)

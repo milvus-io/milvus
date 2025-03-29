@@ -52,6 +52,11 @@ func (b *RowCountBasedBalancer) AssignSegment(ctx context.Context, collectionID 
 		})
 	}
 
+	// filter out query node which resource exhausted
+	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
+		return !b.nodeManager.IsResourceExhausted(node)
+	})
+
 	nodeItems := b.convertToNodeItemsBySegment(nodes)
 	if len(nodeItems) == 0 {
 		return nil
@@ -76,7 +81,7 @@ func (b *RowCountBasedBalancer) AssignSegment(ctx context.Context, collectionID 
 			Segment: s,
 		}
 		plans = append(plans, plan)
-		if len(plans) > balanceBatchSize {
+		if len(plans) >= balanceBatchSize {
 			break
 		}
 		// change node's score and push back
@@ -101,6 +106,11 @@ func (b *RowCountBasedBalancer) AssignChannel(ctx context.Context, collectionID 
 			return info != nil && info.GetState() == session.NodeStateNormal && versionRangeFilter(info.Version())
 		})
 	}
+
+	// filter out query node which resource exhausted
+	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
+		return !b.nodeManager.IsResourceExhausted(node)
+	})
 
 	nodeItems := b.convertToNodeItemsByChannel(nodes)
 	if len(nodeItems) == 0 {

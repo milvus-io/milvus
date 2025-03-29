@@ -116,6 +116,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrSegmentNotLoaded(1, "failed to query"), ErrSegmentNotLoaded)
 	s.ErrorIs(WrapErrSegmentLack(1, "lack of segment"), ErrSegmentLack)
 	s.ErrorIs(WrapErrSegmentReduplicate(1, "redundancy of segment"), ErrSegmentReduplicate)
+	s.ErrorIs(WrapErrSegmentRequestResourceFailed("Memory", 100.0, 200.0, 300.0, 400.0, 0.8), ErrSegmentRequestResourceFailed)
 
 	// Index related
 	s.ErrorIs(WrapErrIndexNotFound("failed to get Index"), ErrIndexNotFound)
