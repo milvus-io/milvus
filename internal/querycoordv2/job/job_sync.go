@@ -96,5 +96,11 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		return errors.Wrap(err, msg)
 	}
 
-	return waitCurrentTargetUpdated(job.ctx, job.targetObserver, job.req.GetCollectionID())
+	// manual trigger update next target
+	_, err = job.targetObserver.UpdateNextTarget(job.req.CollectionID)
+	if err != nil {
+		log.Warn("failed to update next target for sync partition job", zap.Error(err))
+		return err
+	}
+	return nil
 }
