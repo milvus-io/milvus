@@ -58,7 +58,13 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	paramtable.Init()
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	// plan of the task is unset
-	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, nil, nil)
+	plan := &datapb.CompactionPlan{
+		PreAllocatedLogIDs: &datapb.IDRange{
+			Begin: 200,
+			End:   2000,
+		},
+	}
+	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, nil, plan)
 
 	pk2ts := map[int64]uint64{
 		1: 20000,
@@ -270,7 +276,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 				},
 			},
 		},
-		BeginLogID: 11111,
+		PreAllocatedLogIDs: &datapb.IDRange{Begin: 11111, End: 21111},
 	}
 
 	s.task.plan = plan
@@ -379,7 +385,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 				},
 			},
 		},
-		BeginLogID: 11111,
+		PreAllocatedLogIDs: &datapb.IDRange{Begin: 11111, End: 21111},
 	}
 
 	s.task.plan = plan
@@ -441,7 +447,7 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 				SegmentID: 100,
 			},
 		},
-		BeginLogID: 11111,
+		PreAllocatedLogIDs: &datapb.IDRange{Begin: 11111, End: 21111},
 	}
 
 	s.Run("serializeUpload allocator Alloc failed", func() {

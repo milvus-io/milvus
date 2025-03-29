@@ -85,9 +85,6 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 			InputSegments:  []int64{200, 201},
 			ResultSegments: []int64{100, 200},
 		}, nil, s.mockMeta, nil)
-		alloc := allocator.NewMockAllocator(s.T())
-		alloc.EXPECT().AllocN(int64(1)).Return(19530, 99999, nil)
-		task.allocator = alloc
 		_, err := task.BuildCompactionRequest()
 		s.Error(err)
 		s.ErrorIs(err, merr.ErrSegmentNotFound)

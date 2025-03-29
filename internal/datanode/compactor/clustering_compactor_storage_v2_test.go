@@ -114,6 +114,10 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 		Begin: 1,
 		End:   101,
 	}
+	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
+		Begin: 200,
+		End:   2000,
+	}
 
 	compactionResultV2, err := s.task.Compact()
 	s.Require().NoError(err)
@@ -170,6 +174,10 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 	s.task.plan.PreAllocatedSegmentIDs = &datapb.IDRange{
 		Begin: 1,
 		End:   101,
+	}
+	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
+		Begin: 200,
+		End:   2000,
 	}
 
 	compactionResult, err := s.task.Compact()

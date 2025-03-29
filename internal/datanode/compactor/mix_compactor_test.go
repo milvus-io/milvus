@@ -83,8 +83,8 @@ func (s *MixCompactionTaskSuite) setupTest() {
 		TimeoutInSeconds:       10,
 		Type:                   datapb.CompactionType_MixCompaction,
 		Schema:                 s.meta.GetSchema(),
-		BeginLogID:             19530,
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
+		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
 		MaxSize:                64 * 1024 * 1024,
 	}
 
@@ -110,8 +110,8 @@ func (s *MixCompactionTaskSuite) SetupBM25() {
 		TimeoutInSeconds:       10,
 		Type:                   datapb.CompactionType_MixCompaction,
 		Schema:                 s.meta.GetSchema(),
-		BeginLogID:             19530,
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
+		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
 		MaxSize:                64 * 1024 * 1024,
 	}
 

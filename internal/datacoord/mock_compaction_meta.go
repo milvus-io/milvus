@@ -682,6 +682,54 @@ func (_c *MockCompactionMeta_GetSegment_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// GetSegmentInfos provides a mock function with given fields: segIDs
+func (_m *MockCompactionMeta) GetSegmentInfos(segIDs []int64) []*SegmentInfo {
+	ret := _m.Called(segIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSegmentInfos")
+	}
+
+	var r0 []*SegmentInfo
+	if rf, ok := ret.Get(0).(func([]int64) []*SegmentInfo); ok {
+		r0 = rf(segIDs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*SegmentInfo)
+		}
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_GetSegmentInfos_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSegmentInfos'
+type MockCompactionMeta_GetSegmentInfos_Call struct {
+	*mock.Call
+}
+
+// GetSegmentInfos is a helper method to define mock.On call
+//   - segIDs []int64
+func (_e *MockCompactionMeta_Expecter) GetSegmentInfos(segIDs interface{}) *MockCompactionMeta_GetSegmentInfos_Call {
+	return &MockCompactionMeta_GetSegmentInfos_Call{Call: _e.mock.On("GetSegmentInfos", segIDs)}
+}
+
+func (_c *MockCompactionMeta_GetSegmentInfos_Call) Run(run func(segIDs []int64)) *MockCompactionMeta_GetSegmentInfos_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetSegmentInfos_Call) Return(_a0 []*SegmentInfo) *MockCompactionMeta_GetSegmentInfos_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetSegmentInfos_Call) RunAndReturn(run func([]int64) []*SegmentInfo) *MockCompactionMeta_GetSegmentInfos_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveCompactionTask provides a mock function with given fields: ctx, task
 func (_m *MockCompactionMeta) SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
 	ret := _m.Called(ctx, task)
