@@ -150,7 +150,10 @@ func RegisterWebUIHandler() {
 	httpFS := http.FS(staticFiles)
 	fileServer := http.FileServer(httpFS)
 	serveIndex := serveFile(RouteWebUI+"index.html", httpFS)
-	http.Handle(RouteWebUI, handleNotFound(fileServer, serveIndex))
+	Register(&Handler{
+		Path:    RouteWebUI,
+		Handler: handleNotFound(fileServer, serveIndex),
+	})
 }
 
 type responseInterceptor struct {
