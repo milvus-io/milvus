@@ -16,13 +16,11 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestAck(t *testing.T) {
@@ -32,7 +30,7 @@ func TestAck(t *testing.T) {
 	ctx := context.Background()
 
 	counter := atomic.NewUint64(1)
-	rc := mocks.NewMockRootCoordClient(t)
+	rc := mocks.NewMockMixCoordClient(t)
 	rc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, atr *rootcoordpb.AllocTimestampRequest, co ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
 			if atr.Count > 1000 {
@@ -46,9 +44,7 @@ func TestAck(t *testing.T) {
 			}, nil
 		},
 	)
-	f := syncutil.NewFuture[types.RootCoordClient]()
-	f.Set(rc)
-	resource.InitForTest(t, resource.OptRootCoordClient(f))
+	resource.InitForTest(t, resource.OptMixCoordClient(rc))
 
 	ackManager := NewAckManager(0, nil, metricsutil.NewTimeTickMetrics("test"))
 
@@ -151,7 +147,7 @@ func TestAckManager(t *testing.T) {
 	ctx := context.Background()
 
 	counter := atomic.NewUint64(1)
-	rc := mocks.NewMockRootCoordClient(t)
+	rc := mocks.NewMockMixCoordClient(t)
 	rc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, atr *rootcoordpb.AllocTimestampRequest, co ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
 			if atr.Count > 1000 {
@@ -165,9 +161,7 @@ func TestAckManager(t *testing.T) {
 			}, nil
 		},
 	)
-	f := syncutil.NewFuture[types.RootCoordClient]()
-	f.Set(rc)
-	resource.InitForTest(t, resource.OptRootCoordClient(f))
+	resource.InitForTest(t, resource.OptMixCoordClient(rc))
 
 	ackManager := NewAckManager(0, walimplstest.NewTestMessageID(0), metricsutil.NewTimeTickMetrics("test"))
 

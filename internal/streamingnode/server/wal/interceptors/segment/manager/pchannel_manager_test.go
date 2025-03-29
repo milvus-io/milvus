@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -302,8 +301,9 @@ func initializeTestState(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableStorageV2.Key, "true")
 
 	streamingNodeCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
-	dataCoordClient := mocks.NewMockDataCoordClient(t)
-	dataCoordClient.EXPECT().AllocSegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, asr *datapb.AllocSegmentRequest, co ...grpc.CallOption) (*datapb.AllocSegmentResponse, error) {
+
+	rootCoordClient := idalloc.NewMockRootCoordClient(t)
+	rootCoordClient.EXPECT().AllocSegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, asr *datapb.AllocSegmentRequest, co ...grpc.CallOption) (*datapb.AllocSegmentResponse, error) {
 		return &datapb.AllocSegmentResponse{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:           asr.GetSegmentId(),
@@ -313,10 +313,6 @@ func initializeTestState(t *testing.T) {
 			Status: merr.Success(),
 		}, nil
 	})
-	fDataCoordClient := syncutil.NewFuture[internaltypes.DataCoordClient]()
-	fDataCoordClient.Set(dataCoordClient)
-
-	rootCoordClient := idalloc.NewMockRootCoordClient(t)
 	rootCoordClient.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{
 		Collections: []*rootcoordpb.CollectionInfoOnPChannel{
 			{
@@ -334,8 +330,7 @@ func initializeTestState(t *testing.T) {
 
 	resource.InitForTest(t,
 		resource.OptStreamingNodeCatalog(streamingNodeCatalog),
-		resource.OptDataCoordClient(fDataCoordClient),
-		resource.OptRootCoordClient(fRootCoordClient),
+		resource.OptMixCoordClient(rootCoordClient),
 	)
 	streamingNodeCatalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(
 		[]*streamingpb.SegmentAssignmentMeta{

@@ -11,12 +11,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestMain(m *testing.M) {
@@ -25,17 +23,11 @@ func TestMain(m *testing.M) {
 }
 
 func TestManager(t *testing.T) {
-	rootcoord := mocks.NewMockRootCoordClient(t)
-	fRootcoord := syncutil.NewFuture[internaltypes.RootCoordClient]()
-	fRootcoord.Set(rootcoord)
-	datacoord := mocks.NewMockDataCoordClient(t)
-	fDatacoord := syncutil.NewFuture[internaltypes.DataCoordClient]()
-	fDatacoord.Set(datacoord)
+	rootcoord := mocks.NewMockMixCoordClient(t)
 
 	resource.InitForTest(
 		t,
-		resource.OptRootCoordClient(fRootcoord),
-		resource.OptDataCoordClient(fDatacoord),
+		resource.OptMixCoordClient(rootcoord),
 	)
 
 	opener := mock_wal.NewMockOpener(t)

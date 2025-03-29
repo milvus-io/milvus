@@ -7,11 +7,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestMain(m *testing.M) {
@@ -22,7 +21,7 @@ func TestMain(m *testing.M) {
 func TestApply(t *testing.T) {
 	Apply()
 	Apply(OptETCD(&clientv3.Client{}))
-	Apply(OptRootCoordClient(syncutil.NewFuture[types.RootCoordClient]()))
+	Apply(OptMixCoordClient(mocks.NewMockMixCoordClient(t)))
 
 	assert.Panics(t, func() {
 		Done()
@@ -31,15 +30,14 @@ func TestApply(t *testing.T) {
 	Apply(
 		OptChunkManager(mock_storage.NewMockChunkManager(t)),
 		OptETCD(&clientv3.Client{}),
-		OptRootCoordClient(syncutil.NewFuture[types.RootCoordClient]()),
-		OptDataCoordClient(syncutil.NewFuture[types.DataCoordClient]()),
+		OptMixCoordClient(mocks.NewMockMixCoordClient(t)),
 		OptStreamingNodeCatalog(mock_metastore.NewMockStreamingNodeCataLog(t)),
 	)
 	Done()
 
 	assert.NotNil(t, Resource().TSOAllocator())
 	assert.NotNil(t, Resource().ETCD())
-	assert.NotNil(t, Resource().RootCoordClient())
+	assert.NotNil(t, Resource().MixCoordClient())
 	Release()
 }
 

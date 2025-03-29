@@ -8,11 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestServer(t *testing.T) {
@@ -29,7 +28,7 @@ func TestServer(t *testing.T) {
 	b := NewServerBuilder()
 	metaKV := etcdkv.NewEtcdKV(c, "test")
 	s := sessionutil.NewMockSession(t)
-	f := syncutil.NewFuture[types.MixCoordClient]()
+	f := mocks.NewMockMixCoordClient(t)
 	newServer := b.WithETCD(c).
 		WithMetaKV(metaKV).
 		WithSession(s).

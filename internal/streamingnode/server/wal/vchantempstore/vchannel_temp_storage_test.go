@@ -10,14 +10,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestVChannelTempStorage(t *testing.T) {
-	rcf := syncutil.NewFuture[types.RootCoordClient]()
-	ts := NewVChannelTempStorage(rcf)
+	rc := mocks.NewMockMixCoordClient(t)
+	ts := NewVChannelTempStorage(rc)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -25,15 +23,12 @@ func TestVChannelTempStorage(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 
-	ctx = context.Background()
-	rc := mocks.NewMockRootCoordClient(t)
 	rc.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:               merr.Success(),
 		CollectionID:         1,
 		PhysicalChannelNames: []string{"test1", "test2"},
 		VirtualChannelNames:  []string{"test1-v0", "test2-v0"},
 	}, nil)
-	rcf.Set(rc)
 
 	v, err := ts.GetVChannelByPChannelOfCollection(ctx, 1, "test1")
 	assert.NoError(t, err)
