@@ -5164,7 +5164,7 @@ the pchannel count will more evenly distributed if the weight is greater, 0.4 by
 		Key:     "streaming.walBalancer.balancePolicy.vchannelFair.vchannelWeight",
 		Version: "2.6.0",
 		Doc: `The weight of vchannel count in vchannelFair balance policy, 
-the vchannel count will more evenly distributed if the weight is greater, 0.6 by default`,
+the vchannel count will more evenly distributed if the weight is greater, 0.3 by default`,
 		DefaultValue: "0.3",
 		Export:       true,
 	}

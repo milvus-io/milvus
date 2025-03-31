@@ -1145,7 +1145,7 @@ streaming:
         # the pchannel count will more evenly distributed if the weight is greater, 0.4 by default
         pchannelWeight: 0.4
         # The weight of vchannel count in vchannelFair balance policy, 
-        # the vchannel count will more evenly distributed if the weight is greater, 0.6 by default
+        # the vchannel count will more evenly distributed if the weight is greater, 0.3 by default
         vchannelWeight: 0.3
         # The weight of affinity in vchannelFair balance policy, 
         # the fewer VChannels belonging to the same Collection between two PChannels, the higher the affinity,

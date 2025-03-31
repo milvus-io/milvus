@@ -1,4 +1,4 @@
-package policy
+package vchannelfair
 
 import (
 	"testing"
@@ -12,7 +12,7 @@ import (
 func TestVChannelFairPolicy(t *testing.T) {
 	paramtable.Init()
 
-	policy := &vchannelFairPolicy{}
+	policy := &policy{}
 	assert.Equal(t, policy.Name(), "vchannelFair")
 	_, err := policy.Balance(balancer.CurrentLayout{})
 	assert.Error(t, err)

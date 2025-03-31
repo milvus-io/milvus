@@ -1,4 +1,4 @@
-package policy
+package vchannelfair
 
 import (
 	"testing"
@@ -14,7 +14,7 @@ import (
 func TestPChannelCountFair(t *testing.T) {
 	paramtable.Init()
 
-	policy := &vchannelFairPolicy{}
+	policy := &policy{}
 	expected, err := policy.Balance(newLayout(map[string]int{
 		"c1":  2,
 		"c3":  2,
