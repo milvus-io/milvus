@@ -36,7 +36,7 @@ func TestDispatcher(t *testing.T) {
 	ctx := context.Background()
 	t.Run("test base", func(t *testing.T) {
 		d, err := NewDispatcher(ctx, newMockFactory(), time.Now().UnixNano(), "mock_pchannel_0",
-			nil, common.SubscriptionPositionEarliest, 0)
+			nil, common.SubscriptionPositionEarliest, false, 0)
 		assert.NoError(t, err)
 		assert.NotPanics(t, func() {
 			d.Handle(start)
@@ -65,7 +65,7 @@ func TestDispatcher(t *testing.T) {
 			},
 		}
 		d, err := NewDispatcher(ctx, factory, time.Now().UnixNano(), "mock_pchannel_0",
-			nil, common.SubscriptionPositionEarliest, 0)
+			nil, common.SubscriptionPositionEarliest, false, 0)
 
 		assert.Error(t, err)
 		assert.Nil(t, d)
@@ -73,7 +73,7 @@ func TestDispatcher(t *testing.T) {
 
 	t.Run("test target", func(t *testing.T) {
 		d, err := NewDispatcher(ctx, newMockFactory(), time.Now().UnixNano(), "mock_pchannel_0",
-			nil, common.SubscriptionPositionEarliest, 0)
+			nil, common.SubscriptionPositionEarliest, false, 0)
 		assert.NoError(t, err)
 		output := make(chan *msgstream.MsgPack, 1024)
 
@@ -128,7 +128,7 @@ func TestDispatcher(t *testing.T) {
 
 func BenchmarkDispatcher_handle(b *testing.B) {
 	d, err := NewDispatcher(context.Background(), newMockFactory(), time.Now().UnixNano(), "mock_pchannel_0",
-		nil, common.SubscriptionPositionEarliest, 0)
+		nil, common.SubscriptionPositionEarliest, false, 0)
 	assert.NoError(b, err)
 
 	for i := 0; i < b.N; i++ {
@@ -143,7 +143,7 @@ func BenchmarkDispatcher_handle(b *testing.B) {
 
 func TestGroupMessage(t *testing.T) {
 	d, err := NewDispatcher(context.Background(), newMockFactory(), time.Now().UnixNano(), "mock_pchannel_0",
-		nil, common.SubscriptionPositionEarliest, 0)
+		nil, common.SubscriptionPositionEarliest, false, 0)
 	assert.NoError(t, err)
 	d.AddTarget(newTarget(&StreamConfig{VChannel: "mock_pchannel_0_1v0"}))
 	d.AddTarget(newTarget(&StreamConfig{
