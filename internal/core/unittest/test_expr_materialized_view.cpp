@@ -30,7 +30,7 @@
 #include "query/ExecPlanNodeVisitor.h"
 #include "plan/PlanNode.h"
 #include "segcore/SegmentSealed.h"
-#include "segcore/SegmentSealedImpl.h"
+
 #include "test_utils/DataGen.h"
 
 using DataType = milvus::DataType;

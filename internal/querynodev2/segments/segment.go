@@ -346,7 +346,6 @@ func NewSegment(ctx context.Context,
 			SegmentID:     loadInfo.GetSegmentID(),
 			SegmentType:   segmentType,
 			IsSorted:      loadInfo.GetIsSorted(),
-			EnableChunked: paramtable.Get().QueryNodeCfg.MultipleChunkedEnable.GetAsBool(),
 		})
 		return nil, err
 	}).Await(); err != nil {

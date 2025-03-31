@@ -15,7 +15,7 @@
 #include "pb/plan.pb.h"
 #include "index/InvertedIndexTantivy.h"
 #include "common/Schema.h"
-#include "segcore/SegmentSealedImpl.h"
+
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "query/PlanProto.h"
@@ -155,7 +155,7 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayContainsAny) {
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
-    auto segpromote = dynamic_cast<SegmentSealedImpl*>(this->seg_.get());
+    auto segpromote = dynamic_cast<ChunkedSegmentSealedImpl*>(this->seg_.get());
     BitsetType final;
     final = ExecuteQueryExpr(parsed, segpromote, this->N_, MAX_TIMESTAMP);
 
@@ -203,7 +203,7 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayContainsAll) {
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
-    auto segpromote = dynamic_cast<SegmentSealedImpl*>(this->seg_.get());
+    auto segpromote = dynamic_cast<ChunkedSegmentSealedImpl*>(this->seg_.get());
     BitsetType final;
     final = ExecuteQueryExpr(parsed, segpromote, this->N_, MAX_TIMESTAMP);
 
@@ -259,7 +259,7 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayEqual) {
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
-    auto segpromote = dynamic_cast<SegmentSealedImpl*>(this->seg_.get());
+    auto segpromote = dynamic_cast<ChunkedSegmentSealedImpl*>(this->seg_.get());
     BitsetType final;
     final = ExecuteQueryExpr(parsed, segpromote, this->N_, MAX_TIMESTAMP);
 

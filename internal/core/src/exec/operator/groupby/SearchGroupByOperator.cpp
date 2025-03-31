@@ -15,7 +15,6 @@
 // limitations under the License.
 #include "SearchGroupByOperator.h"
 #include "common/Consts.h"
-#include "segcore/SegmentSealedImpl.h"
 #include "query/Utils.h"
 
 namespace milvus {

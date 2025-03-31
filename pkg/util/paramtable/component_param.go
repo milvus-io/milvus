@@ -2645,7 +2645,6 @@ type queryNodeConfig struct {
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
-	MultipleChunkedEnable         ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -2860,15 +2859,6 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.InterimIndexBuildParallelRate.Init(base.mgr)
-
-	p.MultipleChunkedEnable = ParamItem{
-		Key:          "queryNode.segcore.multipleChunkedEnable",
-		Version:      "2.0.0",
-		DefaultValue: "true",
-		Doc:          "Enable multiple chunked search",
-		Export:       true,
-	}
-	p.MultipleChunkedEnable.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",
