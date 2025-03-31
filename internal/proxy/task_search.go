@@ -89,6 +89,9 @@ type searchTask struct {
 	groupScorer func(group *Group) error
 
 	isIterator bool
+	// we always remove pk field from output fields, as search result already contains pk field.
+	// if the user explicitly set pk field in output fields, we add it back to the result.
+	userRequestedPkFieldExplicitly bool
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -164,7 +167,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	t.request.OutputFields, t.userOutputFields, t.userDynamicFields, err = translateOutputFields(t.request.OutputFields, t.schema, false)
+	t.request.OutputFields, t.userOutputFields, t.userDynamicFields, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
 	if err != nil {
 		log.Warn("translate output fields failed", zap.Error(err))
 		return err
@@ -355,7 +358,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	// fetch search_growing from search param
 	t.SearchRequest.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
-	queryFieldIds := []int64{}
+	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
 		plan, queryInfo, offset, _, err := t.tryGeneratePlan(subReq.GetSearchParams(), subReq.GetDsl(), subReq.GetExprTemplateValues())
 		if err != nil {
@@ -386,7 +389,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
-		queryFieldIds = append(queryFieldIds, internalSubReq.FieldId)
+		queryFieldIDs = append(queryFieldIDs, internalSubReq.FieldId)
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
 			// isolation has tighter constraint, check first
@@ -429,7 +432,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	}
 
 	var err error
-	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIds) {
+	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
 		defer sp.End()
 		exec, err := function.NewFunctionExecutor(t.schema.CollectionSchema)
@@ -818,6 +821,33 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 	t.result.Results.OutputFields = t.userOutputFields
 	t.result.CollectionName = t.request.GetCollectionName()
+	if t.userRequestedPkFieldExplicitly {
+		t.result.Results.OutputFields = append(t.result.Results.OutputFields, primaryFieldSchema.GetName())
+		var scalars *schemapb.ScalarField
+		if primaryFieldSchema.GetDataType() == schemapb.DataType_Int64 {
+			scalars = &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: t.result.Results.Ids.GetIntId(),
+				},
+			}
+		} else {
+			scalars = &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: t.result.Results.Ids.GetStrId(),
+				},
+			}
+		}
+		pkFieldData := &schemapb.FieldData{
+			FieldName: primaryFieldSchema.GetName(),
+			FieldId:   primaryFieldSchema.GetFieldID(),
+			Type:      primaryFieldSchema.GetDataType(),
+			IsDynamic: false,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: scalars,
+			},
+		}
+		t.result.Results.FieldsData = append(t.result.Results.FieldsData, pkFieldData)
+	}
 	if t.isIterator && len(t.queryInfos) == 1 && t.queryInfos[0] != nil {
 		if iterInfo := t.queryInfos[0].GetSearchIteratorV2Info(); iterInfo != nil {
 			t.result.Results.SearchIteratorV2Results = &schemapb.SearchIteratorV2Results{

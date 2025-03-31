@@ -351,6 +351,11 @@ func WriteYaml(w io.Writer) {
 			header: `
 # Any configuration related to the knowhere vector search engine`,
 		},
+		{
+			name: "function",
+			header: `
+# Any configuration related to functions`,
+		},
 	}
 	marshller := YamlMarshaller{w, groups, result}
 	marshller.writeYamlRecursive(lo.Filter(result, func(d DocContent, _ int) bool {

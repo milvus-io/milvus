@@ -128,7 +128,7 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 		for c, builder := range builders {
 			fid := schema.Fields[c].FieldID
 			defaultValue := schema.Fields[c].GetDefaultValue()
-			if err := AppendValueAt(builder, records[idx.ri].Column(fid), idx.i, defaultValue); err != nil {
+			if err := appendValueAt(builder, records[idx.ri].Column(fid), idx.i, defaultValue); err != nil {
 				return 0, err
 			}
 		}
@@ -266,53 +266,15 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 	//	small batch size will cause write performance degradation. To work around this issue, we accumulate
 	//	records and write them in batches. This requires additional memory copy.
 	batchSize := 100000
-	builders := make([]array.Builder, len(schema.Fields))
-	for i, f := range schema.Fields {
-		var b array.Builder
-		if recs[0].Column(f.FieldID) == nil {
-			b = array.NewBuilder(memory.DefaultAllocator, MilvusDataTypeToArrowType(f.GetDataType(), 1))
-		} else {
-			b = array.NewBuilder(memory.DefaultAllocator, recs[0].Column(f.FieldID).DataType())
-		}
-		b.Reserve(batchSize)
-		builders[i] = b
-	}
+	rb := NewRecordBuilder(schema)
 
-	writeRecord := func(rowNum int64) {
-		arrays := make([]arrow.Array, len(builders))
-		fields := make([]arrow.Field, len(builders))
-		field2Col := make(map[FieldID]int, len(builders))
-
-		for c, builder := range builders {
-			arrays[c] = builder.NewArray()
-			fid := schema.Fields[c].FieldID
-			fields[c] = arrow.Field{
-				Name:     strconv.Itoa(int(fid)),
-				Type:     arrays[c].DataType(),
-				Nullable: true, // No nullable check here.
-			}
-			field2Col[fid] = c
-		}
-
-		rec := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, rowNum), field2Col)
-		rw.Write(rec)
-		rec.Release()
-	}
-
-	rc := 0
 	for pq.Len() > 0 {
 		idx := pq.Dequeue()
-
-		for c, builder := range builders {
-			fid := schema.Fields[c].FieldID
-			defaultValue := schema.Fields[c].GetDefaultValue()
-			AppendValueAt(builder, recs[idx.ri].Column(fid), idx.i, defaultValue)
-		}
-		if (rc+1)%batchSize == 0 {
-			writeRecord(int64(batchSize))
-			rc = 0
-		} else {
-			rc++
+		rb.Append(recs[idx.ri], idx.i, idx.i+1)
+		if rb.GetRowNum()%batchSize == 0 {
+			if err := rw.Write(rb.Build()); err != nil {
+				return 0, err
+			}
 		}
 
 		// If poped idx reaches end of segment, invalidate cache and advance to next segment
@@ -329,8 +291,10 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 	}
 
 	// write the last batch
-	if rc > 0 {
-		writeRecord(int64(rc))
+	if rb.GetRowNum() > 0 {
+		if err := rw.Write(rb.Build()); err != nil {
+			return 0, err
+		}
 	}
 
 	return numRows, nil

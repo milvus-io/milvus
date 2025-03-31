@@ -236,7 +236,7 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
     if (expr_->is_in_field_) {
         return ExecTermJsonVariableInField<ValueType>(context);
     } else {
-        if (is_index_mode_) {
+        if (is_index_mode_ && !has_offset_input_) {
             // we create double index for json int64 field for now
             using GetType =
                 std::conditional_t<std::is_same_v<ValueType, int64_t>,

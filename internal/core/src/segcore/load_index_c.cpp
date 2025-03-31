@@ -14,6 +14,7 @@
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/EasyAssert.h"
+#include "common/JsonCastType.h"
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "index/Index.h"
@@ -335,8 +336,8 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
         if (load_index_info->field_type == milvus::DataType::JSON) {
-            index_info.json_cast_type = static_cast<milvus::DataType>(
-                std::stoi(config.at(JSON_CAST_TYPE).get<std::string>()));
+            index_info.json_cast_type = milvus::ConvertToJsonCastType(
+                config.at(JSON_CAST_TYPE).get<std::string>());
             index_info.json_path = config.at(JSON_PATH).get<std::string>();
         }
         milvus::storage::FileManagerContext fileManagerContext(

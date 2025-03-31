@@ -78,9 +78,7 @@ func TestServerIDInterceptor(t *testing.T) {
 			return nil, nil
 		}
 		serverInfo := &grpc.UnaryServerInfo{FullMethod: method}
-		interceptor := ServerIDValidationUnaryServerInterceptor(func() int64 {
-			return paramtable.GetNodeID()
-		})
+		interceptor := ServerIDValidationUnaryServerInterceptor(paramtable.GetNodeID)
 
 		// no md in context
 		_, err := interceptor(context.Background(), req, serverInfo, handler)
@@ -114,9 +112,7 @@ func TestServerIDInterceptor(t *testing.T) {
 		handler := func(srv interface{}, stream grpc.ServerStream) error {
 			return nil
 		}
-		interceptor := ServerIDValidationStreamServerInterceptor(func() int64 {
-			return paramtable.GetNodeID()
-		})
+		interceptor := ServerIDValidationStreamServerInterceptor(paramtable.GetNodeID)
 
 		// no md in context
 		err := interceptor(nil, newMockSS(context.Background()), nil, handler)

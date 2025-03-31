@@ -443,11 +443,7 @@ func ValueSerializer(v []*Value, fieldSchema []*schemapb.FieldSchema) (Record, e
 		builder := builders[field.FieldID]
 		arrays[i] = builder.NewArray()
 		builder.Release()
-		fields[i] = arrow.Field{
-			Name:     field.Name,
-			Type:     arrays[i].DataType(),
-			Metadata: arrow.NewMetadata([]string{"FieldID"}, []string{strconv.Itoa(int(field.FieldID))}),
-		}
+		fields[i] = ConvertToArrowField(field, arrays[i].DataType())
 		field2Col[field.FieldID] = i
 	}
 	return NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(len(v))), field2Col), nil
@@ -1083,7 +1079,7 @@ func (dsw *MultiFieldDeltalogStreamWriter) GetRecordWriter() (RecordWriter, erro
 		return dsw.rw, nil
 	}
 
-	fieldIds := []FieldID{common.RowIDField, common.TimeStampField} // Not used.
+	fieldIDs := []FieldID{common.RowIDField, common.TimeStampField} // Not used.
 	fields := []arrow.Field{
 		{
 			Name:     "pk",
@@ -1097,7 +1093,7 @@ func (dsw *MultiFieldDeltalogStreamWriter) GetRecordWriter() (RecordWriter, erro
 		},
 	}
 
-	rw, err := newMultiFieldRecordWriter(fieldIds, fields, &dsw.buf)
+	rw, err := newMultiFieldRecordWriter(fieldIDs, fields, &dsw.buf)
 	if err != nil {
 		return nil, err
 	}

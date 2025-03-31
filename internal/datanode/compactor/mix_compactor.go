@@ -206,23 +206,13 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
-	reader, err := storage.NewBinlogRecordReader(ctx, seg.GetFieldBinlogs(), t.plan.GetSchema(), storage.WithDownloader(t.binlogIO.Download))
+	reader, err := storage.NewBinlogRecordReader(ctx, seg.GetFieldBinlogs(), t.plan.GetSchema(), storage.WithDownloader(t.binlogIO.Download), storage.WithVersion(seg.GetStorageVersion()))
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 		return
 	}
 	defer reader.Close()
 
-	writeSlice := func(r storage.Record, start, end int) error {
-		sliced := r.Slice(start, end)
-		defer sliced.Release()
-		err = mWriter.Write(sliced)
-		if err != nil {
-			log.Warn("compact wrong, failed to writer row", zap.Error(err))
-			return err
-		}
-		return nil
-	}
 	for {
 		var r storage.Record
 		r, err = reader.Next()
@@ -235,12 +225,15 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				return
 			}
 		}
-		pkArray := r.Column(pkField.FieldID)
-		tsArray := r.Column(common.TimeStampField).(*array.Int64)
 
-		sliceStart := -1
-		rows := r.Len()
-		for i := 0; i < rows; i++ {
+		var (
+			pkArray    = r.Column(pkField.FieldID)
+			tsArray    = r.Column(common.TimeStampField).(*array.Int64)
+			sliceStart = -1
+			rb         *storage.RecordBuilder
+		)
+
+		for i := range r.Len() {
 			// Filtering deleted entities
 			var pk any
 			switch pkField.DataType {
@@ -253,13 +246,13 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			}
 			ts := typeutil.Timestamp(tsArray.Value(i))
 			if entityFilter.Filtered(pk, ts) {
-				if sliceStart != -1 {
-					err = writeSlice(r, sliceStart, i)
-					if err != nil {
-						return
-					}
-					sliceStart = -1
+				if rb == nil {
+					rb = storage.NewRecordBuilder(t.plan.GetSchema())
 				}
+				if sliceStart != -1 {
+					rb.Append(r, sliceStart, i)
+				}
+				sliceStart = -1
 				continue
 			}
 
@@ -268,11 +261,15 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			}
 		}
 
-		if sliceStart != -1 {
-			err = writeSlice(r, sliceStart, r.Len())
-			if err != nil {
-				return
+		if rb != nil {
+			if sliceStart != -1 {
+				rb.Append(r, sliceStart, r.Len())
 			}
+			if rb.GetRowNum() > 0 {
+				mWriter.Write(rb.Build())
+			}
+		} else {
+			mWriter.Write(r)
 		}
 	}
 
@@ -312,16 +309,12 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, err
 	}
 	// Unable to deal with all empty segments cases, so return error
-	isEmpty := func() bool {
-		for _, seg := range t.plan.GetSegmentBinlogs() {
-			for _, field := range seg.GetFieldBinlogs() {
-				if len(field.GetBinlogs()) > 0 {
-					return false
-				}
-			}
-		}
-		return true
-	}()
+	isEmpty := lo.EveryBy(lo.FlatMap(t.plan.GetSegmentBinlogs(), func(seg *datapb.CompactionSegmentBinlogs, _ int) []*datapb.FieldBinlog {
+		return seg.GetFieldBinlogs()
+	}), func(field *datapb.FieldBinlog) bool {
+		return len(field.GetBinlogs()) == 0
+	})
+
 	if isEmpty {
 		log.Warn("compact wrong, all segments' binlogs are empty")
 		return nil, errors.New("illegal compaction plan")

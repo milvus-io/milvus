@@ -65,14 +65,14 @@ func TestQueryVarcharPkDefault(t *testing.T) {
 
 	// query
 	expr := fmt.Sprintf("%s in ['0', '1', '2', '3', '4']", common.DefaultVarcharFieldName)
-	queryRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr))
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{insertRes.IDs.Slice(0, 5)})
 
 	// get ids -> same result with query
 	varcharValues := []string{"0", "1", "2", "3", "4"}
 	ids := column.NewColumnVarChar(common.DefaultVarcharFieldName, varcharValues)
-	getRes, errGet := mc.Get(ctx, client.NewQueryOption(schema.CollectionName).WithIDs(ids))
+	getRes, errGet := mc.Get(ctx, client.NewQueryOption(schema.CollectionName).WithIDs(ids).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, errGet, true)
 	common.CheckQueryResult(t, getRes.Fields, []column.Column{insertRes.IDs.Slice(0, 5)})
 }
@@ -801,7 +801,7 @@ func TestQueryObjectJsonExpr(t *testing.T) {
 		"varchar": map[string]string{
 			"a":        "b",
 			"π":        "π",
-			"asd ":     " ",
+			"asd ":     " ", //nolint
 			"utf8":     "€𝄞",
 			"comments": "a/*b*/c/*d//e",
 			"unicode":  "\u041f\u043e\u043b\u0442\u043e\u0440\u0430", // "Полтора"
@@ -1094,12 +1094,12 @@ func TestQueryWithTemplateParam(t *testing.T) {
 	}
 	// default
 	queryRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
-		WithFilter(fmt.Sprintf("%s in {int64Values}", common.DefaultInt64FieldName)).WithTemplateParam("int64Values", int64Values))
+		WithFilter(fmt.Sprintf("%s in {int64Values}", common.DefaultInt64FieldName)).WithTemplateParam("int64Values", int64Values).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, queryRes.Fields, []column.Column{column.NewColumnInt64(common.DefaultInt64FieldName, int64Values)})
 
 	// cover keys
-	res, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("int64 < {k2}").WithTemplateParam("k2", 10).WithTemplateParam("k2", 5))
+	res, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("int64 < {k2}").WithTemplateParam("k2", 10).WithTemplateParam("k2", 5).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	require.Equal(t, 5, res.ResultCount)
 
@@ -1107,14 +1107,14 @@ func TestQueryWithTemplateParam(t *testing.T) {
 	anyValues := []int64{0.0, 100.0, 10000.0}
 	countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
 		WithFilter(fmt.Sprintf("json_contains_any (%s, {any_values})", common.DefaultFloatArrayField)).WithTemplateParam("any_values", anyValues).
-		WithOutputFields(common.QueryCountFieldName))
+		WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ := countRes.Fields[0].GetAsInt64(0)
 	require.EqualValues(t, 101, count)
 
 	// dynamic
 	countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
-		WithFilter("dynamicNumber % 2 == {v}").WithTemplateParam("v", 0).WithOutputFields(common.QueryCountFieldName))
+		WithFilter("dynamicNumber % 2 == {v}").WithTemplateParam("v", 0).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ = countRes.Fields[0].GetAsInt64(0)
 	require.EqualValues(t, 1500, count)
@@ -1123,7 +1123,8 @@ func TestQueryWithTemplateParam(t *testing.T) {
 	countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
 		WithFilter(fmt.Sprintf("%s['bool'] == {v}", common.DefaultJSONFieldName)).
 		WithTemplateParam("v", false).
-		WithOutputFields(common.QueryCountFieldName))
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ = countRes.Fields[0].GetAsInt64(0)
 	require.EqualValues(t, 1500/2, count)
@@ -1132,7 +1133,8 @@ func TestQueryWithTemplateParam(t *testing.T) {
 	countRes, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
 		WithFilter(fmt.Sprintf("%s == {v}", common.DefaultBoolFieldName)).
 		WithTemplateParam("v", true).
-		WithOutputFields(common.QueryCountFieldName))
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ = countRes.Fields[0].GetAsInt64(0)
 	require.EqualValues(t, common.DefaultNb/2, count)
@@ -1141,7 +1143,8 @@ func TestQueryWithTemplateParam(t *testing.T) {
 	res, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).
 		WithFilter(fmt.Sprintf("%s >= {k1} && %s < {k2}", common.DefaultInt64FieldName, common.DefaultInt64FieldName)).
 		WithTemplateParam("v", 0).WithTemplateParam("k1", 1000).
-		WithTemplateParam("k2", 2000))
+		WithTemplateParam("k2", 2000).
+		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	require.EqualValues(t, 1000, res.ResultCount)
 }

@@ -36,11 +36,11 @@ func send(req *http.Request) ([]byte, error) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("Call service faild, read response failed, errs:[%v]", err)
+		return nil, fmt.Errorf("Call service failed, read response failed, errs:[%v]", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Call service faild, errs:[%s, %s]", resp.Status, body)
+		return nil, fmt.Errorf("Call service failed, errs:[%s, %s]", resp.Status, body)
 	}
 	return body, nil
 }

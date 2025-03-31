@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -77,7 +76,7 @@ func createVoyageAIProvider(url string, schema *schemapb.FieldSchema, providerNa
 	}
 	switch providerName {
 	case voyageAIProvider:
-		return NewVoyageAIEmbeddingProvider(schema, functionSchema)
+		return NewVoyageAIEmbeddingProvider(schema, functionSchema, map[string]string{})
 	default:
 		return nil, fmt.Errorf("Unknow provider")
 	}
@@ -282,11 +281,6 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 func (s *VoyageAITextEmbeddingProviderSuite) TestCreateVoyageAIEmbeddingClient() {
 	_, err := createVoyageAIEmbeddingClient("", "")
 	s.Error(err)
-
-	os.Setenv(voyageAIAKEnvStr, "mockKey")
-	defer os.Unsetenv(voyageAIAKEnvStr)
-	_, err = createVoyageAIEmbeddingClient("", "")
-	s.NoError(err)
 }
 
 func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() {
@@ -305,7 +299,7 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() 
 			{Key: truncationParamKey, Value: "true"},
 		},
 	}
-	provider, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	provider, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(1024))
 	s.True(provider.MaxBatch() > 0)
@@ -313,7 +307,7 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() 
 	// Invalid truncation
 	{
 		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: truncationParamKey, Value: "Invalid"}
-		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 		s.Error(err)
 		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: truncationParamKey, Value: "false"}
 	}
@@ -321,14 +315,14 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() 
 	// Invalid dim
 	{
 		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "9"}
-		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 		s.Error(err)
 	}
 
 	// Invalid dim type
 	{
 		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalied"}
-		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 		s.Error(err)
 	}
 }

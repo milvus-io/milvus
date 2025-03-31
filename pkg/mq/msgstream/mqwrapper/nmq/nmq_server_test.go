@@ -31,19 +31,21 @@ import (
 var natsServerAddress string
 
 func TestMain(m *testing.M) {
-	paramtable.Init()
+	exitCode := func() int {
+		paramtable.Init()
+		storeDir, _ := os.MkdirTemp("", "milvus_mq_nmq")
+		defer os.RemoveAll(storeDir)
 
-	storeDir, _ := os.MkdirTemp("", "milvus_mq_nmq")
-	defer os.RemoveAll(storeDir)
+		cfg := ParseServerOption(paramtable.Get())
+		cfg.Opts.Port = server.RANDOM_PORT
+		cfg.Opts.StoreDir = storeDir
+		MustInitNatsMQ(cfg)
+		defer CloseNatsMQ()
 
-	cfg := ParseServerOption(paramtable.Get())
-	cfg.Opts.Port = server.RANDOM_PORT
-	cfg.Opts.StoreDir = storeDir
-	MustInitNatsMQ(cfg)
-	defer CloseNatsMQ()
+		natsServerAddress = Nmq.ClientURL()
+		return m.Run()
+	}()
 
-	natsServerAddress = Nmq.ClientURL()
-	exitCode := m.Run()
 	os.Exit(exitCode)
 }
 

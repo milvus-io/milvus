@@ -77,13 +77,11 @@ func (s *ExcludedSegments) CleanInvalid(ts uint64) {
 
 	for _, segmentID := range invalidExcludedInfos {
 		delete(s.segments, segmentID)
-		log.Info("remove segment from exclude info", zap.Int64("segmentID", segmentID))
+		log.Ctx(context.TODO()).Info("remove segment from exclude info", zap.Int64("segmentID", segmentID))
 	}
 	s.lastClean.Store(time.Now())
 }
 
 func (s *ExcludedSegments) ShouldClean() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	return time.Since(s.lastClean.Load()) > s.cleanInterval
 }

@@ -15,6 +15,7 @@
 // limitations under the License.
 #pragma once
 
+#include "common/JsonCastType.h"
 #include "common/Types.h"
 
 namespace milvus::index {
@@ -27,7 +28,7 @@ struct CreateIndexInfo {
     std::string field_name;
     int64_t dim;
     int32_t scalar_index_engine_version{1};
-    uint32_t tantivy_index_version{7};
+    JsonCastType json_cast_type;
     DataType json_cast_type;
     std::string json_path;
 };
