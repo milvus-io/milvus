@@ -52,7 +52,8 @@ class PhyExistsFilterExpr : public SegmentExpr {
                       DataType::NONE,
                       active_count,
                       batch_size,
-                      consistency_level),
+                      consistency_level,
+                      true),
           expr_(expr) {
     }
 
@@ -80,6 +81,9 @@ class PhyExistsFilterExpr : public SegmentExpr {
 
     VectorPtr
     EvalJsonExistsForDataSegmentForIndex();
+
+    VectorPtr
+    EvalJsonExistsForIndex();
 
  private:
     std::shared_ptr<const milvus::expr::ExistsExpr> expr_;

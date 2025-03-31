@@ -16709,5 +16709,79 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
     auto final =
         ExecuteQueryExpr(plan, seg.get(), 2 * json_strs.size(), MAX_TIMESTAMP);
-    EXPECT_EQ(final.count(), 2 * json_strs.size() - 2);
+    EXPECT_EQ(final.count(), 2 * json_strs.size() - 4);
+}
+
+TEST(JsonIndexTest, TestExistsExpr) {
+    std::unordered_map<std::string, bool> json_strs_match = {
+        {R"({"a": 1.0})", true},
+        {R"({"a": "abc"})", true},
+        {R"({"a": 3.0})", true},
+        {R"({"a": true})", true},
+        {R"({"a": {"b": 1}})", true},
+        {R"({"a": []})", true},
+        {R"({"a": ["a", "b"]})", true},
+        {R"({"a": null})", false},  // exists null
+        {R"(1)", false},
+        {R"("abc")", false},
+        {R"(1.0)", false},
+        {R"(true)", false},
+        {R"([1, 2, 3])", false},
+        {R"({"a": 1, "b": 2})", true}};
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    segcore::LoadIndexInfo load_index_info;
+
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
+    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        index::INVERTED_INDEX_TYPE,
+        JsonCastType::DOUBLE,
+        "/a",
+        file_manager_ctx);
+
+    using json_index_type = index::JsonInvertedIndex<double>;
+    auto json_index = std::unique_ptr<json_index_type>(
+        static_cast<json_index_type*>(inv_index.release()));
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    std::vector<milvus::Json> jsons;
+    BitsetType expect;
+    expect.resize(json_strs_match.size());
+    int i = 0;
+    for (auto& [json_str, match] : json_strs_match) {
+        jsons.push_back(milvus::Json(simdjson::padded_string(json_str)));
+        expect.set(i, match);
+        i++;
+    }
+    json_field->add_json_data(jsons);
+
+    json_index->BuildWithFieldData({json_field});
+    json_index->finish();
+    json_index->create_reader();
+
+    load_index_info.field_id = json_fid.get();
+    load_index_info.field_type = DataType::JSON;
+    load_index_info.index = std::move(json_index);
+    load_index_info.index_params = {{JSON_PATH, "/a"}};
+    seg->LoadIndex(load_index_info);
+
+    auto exists_expr = std::make_shared<expr::ExistsExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true));
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       exists_expr);
+    auto result = ExecuteQueryExpr(
+        plan, seg.get(), json_strs_match.size(), MAX_TIMESTAMP);
+    EXPECT_TRUE(result == expect);
 }

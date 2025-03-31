@@ -20,7 +20,7 @@ using namespace milvus;
 using namespace milvus::index;
 
 TEST(JsonIndexTest, TestBuildNonExistJsonPath) {
-    std::string json_path = "hello";
+    std::string json_path = "/hello";
     auto schema = std::make_shared<Schema>();
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     auto file_manager_ctx = storage::FileManagerContext();
@@ -96,6 +96,6 @@ TEST(JsonIndexTest, TestJSONErrRecorder) {
 
     auto error_map = json_index->GetErrorRecorder().GetErrorMap();
     EXPECT_EQ(error_map.size(), 2);
-    EXPECT_EQ(error_map[simdjson::error_code::INCORRECT_TYPE].count, 6);
-    EXPECT_EQ(error_map[simdjson::error_code::INVALID_JSON_POINTER].count, 1);
+    EXPECT_EQ(error_map[simdjson::error_code::INCORRECT_TYPE].count, 5);
+    EXPECT_EQ(error_map[simdjson::error_code::NO_SUCH_FIELD].count, 2);
 }

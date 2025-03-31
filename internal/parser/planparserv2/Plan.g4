@@ -35,8 +35,8 @@ expr:
 	| expr BOR expr											                     # BitOr
 	| expr AND expr											                     # LogicalAnd
 	| expr OR expr											                     # LogicalOr
-	| Identifier ISNULL                                                          # IsNull
-	| Identifier ISNOTNULL                                                       # IsNotNull;
+	| (Identifier | JSONIdentifier) ISNULL                                                          # IsNull
+	| (Identifier | JSONIdentifier) ISNOTNULL                                                       # IsNotNull;
 
 // typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
 
