@@ -43,16 +43,15 @@ type getStatisticsTask struct {
 	// partition ids that are not loaded into query node, require get statistics from DataCoord
 	unloadedPartitionIDs []UniqueID
 
-	ctx context.Context
-	dc  types.DataCoordClient
-	tr  *timerecord.TimeRecorder
+	ctx  context.Context
+	mixc types.MixCoordClient
+	tr   *timerecord.TimeRecorder
 
 	fromDataCoord bool
 	fromQueryNode bool
 
 	// if query from shard
 	*internalpb.GetStatisticsRequest
-	qc        types.QueryCoordClient
 	resultBuf *typeutil.ConcurrentSet[*internalpb.GetStatisticsResponse]
 
 	lb LBPolicy
@@ -131,7 +130,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	}
 
 	// check if collection/partitions are loaded into query node
-	loaded, unloaded, err := checkFullLoaded(ctx, g.qc, g.request.GetDbName(), g.collectionName, g.GetStatisticsRequest.CollectionID, partIDs)
+	loaded, unloaded, err := checkFullLoaded(ctx, g.mixc, g.request.GetDbName(), g.collectionName, g.GetStatisticsRequest.CollectionID, partIDs)
 	log := log.Ctx(ctx).With(
 		zap.String("collectionName", g.collectionName),
 		zap.Int64("collectionID", g.CollectionID),
@@ -237,7 +236,7 @@ func (g *getStatisticsTask) getStatisticsFromDataCoord(ctx context.Context) erro
 		PartitionIDs: partIDs,
 	}
 
-	result, err := g.dc.GetPartitionStatistics(ctx, req)
+	result, err := g.mixc.GetPartitionStatistics(ctx, req)
 	if err != nil {
 		return err
 	}

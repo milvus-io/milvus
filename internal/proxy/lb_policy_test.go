@@ -44,8 +44,7 @@ import (
 
 type LBPolicySuite struct {
 	suite.Suite
-	rc types.RootCoordClient
-	qc *mocks.MockQueryCoordClient
+	qc *mocks.MockMixCoordClient
 	qn *mocks.MockQueryNodeClient
 
 	mgr        *MockShardClientManager
@@ -101,7 +100,6 @@ func (s *LBPolicySuite) SetupTest() {
 	}, nil).Maybe()
 
 	s.qc = qc
-	s.rc = NewRootCoordMock()
 
 	s.qn = mocks.NewMockQueryNodeClient(s.T())
 	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -115,7 +113,7 @@ func (s *LBPolicySuite) SetupTest() {
 		return s.lbBalancer
 	}
 
-	err := InitMetaCache(context.Background(), s.rc, s.qc, s.mgr)
+	err := InitMetaCache(context.Background(), s.qc, s.mgr)
 	s.NoError(err)
 
 	s.collectionName = "test_lb_policy"
@@ -148,8 +146,8 @@ func (s *LBPolicySuite) loadCollection() {
 			Schema:         marshaledSchema,
 			ShardsNum:      common.DefaultShardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: s.rc,
+		ctx:      ctx,
+		mixCoord: s.qc,
 	}
 
 	s.NoError(createColT.OnEnqueue())

@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/mock_walimpls"
@@ -45,8 +44,12 @@ func TestWALFlusher(t *testing.T) {
 	streamingutil.SetStreamingServiceEnabled()
 	defer streamingutil.UnsetStreamingServiceEnabled()
 
-	rootCoord := mocks.NewMockRootCoordClient(t)
-	rootCoord.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{
+	snMeta := mock_metastore.NewMockStreamingNodeCataLog(t)
+	snMeta.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil)
+	snMeta.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	mixcoord := newMockMixcoord(t, false)
+	mixcoord.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
@@ -61,19 +64,9 @@ func TestWALFlusher(t *testing.T) {
 			},
 		},
 	}, nil)
-	snMeta := mock_metastore.NewMockStreamingNodeCataLog(t)
-	snMeta.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil)
-	snMeta.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-
-	datacoord := newMockDatacoord(t, false)
-	fDatacoord := syncutil.NewFuture[internaltypes.DataCoordClient]()
-	fDatacoord.Set(datacoord)
-	fRootCoord := syncutil.NewFuture[internaltypes.RootCoordClient]()
-	fRootCoord.Set(rootCoord)
 	resource.InitForTest(
 		t,
-		resource.OptDataCoordClient(fDatacoord),
-		resource.OptRootCoordClient(fRootCoord),
+		resource.OptMixCoordClient(mixcoord),
 		resource.OptStreamingNodeCatalog(snMeta),
 		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
 	)
@@ -91,8 +84,8 @@ func TestWALFlusher(t *testing.T) {
 	flusher.Close()
 }
 
-func newMockDatacoord(t *testing.T, maybe bool) *mocks.MockDataCoordClient {
-	datacoord := mocks.NewMockDataCoordClient(t)
+func newMockMixcoord(t *testing.T, maybe bool) *mocks.MockMixCoordClient {
+	datacoord := mocks.NewMockMixCoordClient(t)
 	failureCnt := atomic.NewInt32(2)
 	datacoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},

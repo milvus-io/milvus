@@ -1195,6 +1195,10 @@ func (coord *MixCoordMock) AlterDatabase(ctx context.Context, in *rootcoordpb.Al
 	return &commonpb.Status{}, nil
 }
 
+func (coord *MixCoordMock) GetChannelRecoveryInfo(ctx context.Context, in *datapb.GetChannelRecoveryInfoRequest, opts ...grpc.CallOption) (*datapb.GetChannelRecoveryInfoResponse, error) {
+	return &datapb.GetChannelRecoveryInfoResponse{}, nil
+}
+
 func (coord *MixCoordMock) BackupRBAC(ctx context.Context, in *milvuspb.BackupRBACMetaRequest, opts ...grpc.CallOption) (*milvuspb.BackupRBACMetaResponse, error) {
 	return &milvuspb.BackupRBACMetaResponse{}, nil
 }
@@ -1333,6 +1337,9 @@ func (coord *MixCoordMock) AlterIndex(ctx context.Context, req *indexpb.AlterInd
 }
 
 func (coord *MixCoordMock) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest, opts ...grpc.CallOption) (*indexpb.ListIndexesResponse, error) {
+	return &indexpb.ListIndexesResponse{
+		Status: merr.Success(),
+	}, nil
 }
 
 func (coord *MixCoordMock) GcConfirm(ctx context.Context, in *datapb.GcConfirmRequest, opts ...grpc.CallOption) (*datapb.GcConfirmResponse, error) {
@@ -1677,6 +1684,6 @@ func (m *mockRootCoord) ListDatabases(ctx context.Context, in *milvuspb.ListData
 	return &milvuspb.ListDatabasesResponse{}, nil
 }
 
-func newMockRootCoord() *mockRootCoord {
-	return &mockRootCoord{}
+func (coord *MixCoordMock) GetRecoveryInfoV2(ctx context.Context, in *datapb.GetRecoveryInfoRequestV2, opts ...grpc.CallOption) (*datapb.GetRecoveryInfoResponseV2, error) {
+	return &datapb.GetRecoveryInfoResponseV2{}, nil
 }

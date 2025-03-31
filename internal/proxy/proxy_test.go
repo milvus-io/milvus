@@ -4424,7 +4424,7 @@ func testProxyRefreshPolicyInfoCacheFail(ctx context.Context, t *testing.T, prox
 
 func Test_GetCompactionState(t *testing.T) {
 	t.Run("get compaction state", func(t *testing.T) {
-		mixCoord := &MixCoordMock{}
+		mixCoord := mocks.NewMockMixCoordClient(t)
 		proxy := &Proxy{mixCoord: mixCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.GetCompactionState(context.TODO(), nil)
@@ -4432,7 +4432,7 @@ func Test_GetCompactionState(t *testing.T) {
 	})
 
 	t.Run("get compaction state with unhealthy proxy", func(t *testing.T) {
-		mixCoord := &MixCoordMock{}
+		mixCoord := mocks.NewMockMixCoordClient(t)
 		proxy := &Proxy{mixCoord: mixCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := proxy.GetCompactionState(context.TODO(), nil)
@@ -4443,14 +4443,14 @@ func Test_GetCompactionState(t *testing.T) {
 
 func Test_ManualCompaction(t *testing.T) {
 	t.Run("test manual compaction", func(t *testing.T) {
-		mixCoord := &MixCoordMock{}
+		mixCoord := mocks.NewMockMixCoordClient(t)
 		proxy := &Proxy{mixCoord: mixCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.ManualCompaction(context.TODO(), nil)
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 	t.Run("test manual compaction with unhealthy", func(t *testing.T) {
-		mixCoord := &MixCoordMock{}
+		mixCoord := mocks.NewMockMixCoordClient(t)
 		proxy := &Proxy{mixCoord: mixCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := proxy.ManualCompaction(context.TODO(), nil)
@@ -4461,14 +4461,14 @@ func Test_ManualCompaction(t *testing.T) {
 
 func Test_GetCompactionStateWithPlans(t *testing.T) {
 	t.Run("test get compaction state with plans", func(t *testing.T) {
-		mixCoord := &MixCoordMock{}
+		mixCoord := mocks.NewMockMixCoordClient(t)
 		proxy := &Proxy{mixCoord: mixCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), nil)
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 	t.Run("test get compaction state with plans with unhealthy proxy", func(t *testing.T) {
-		mixCoord := &MixCoordMock{}
+		mixCoord := mocks.NewMockMixCoordClient(t)
 		proxy := &Proxy{mixCoord: mixCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), nil)
@@ -4491,7 +4491,7 @@ func Test_GetFlushState(t *testing.T) {
 			globalMetaCache = originCache
 		}()
 
-		mixCoord := &MixCoordMock{}
+		mixCoord := mocks.NewMockMixCoordClient(t)
 		proxy := &Proxy{mixCoord: mixCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := proxy.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{
@@ -4501,7 +4501,7 @@ func Test_GetFlushState(t *testing.T) {
 	})
 
 	t.Run("test get flush state with unhealthy proxy", func(t *testing.T) {
-		mixCoord := &MixCoordMock{}
+		mixCoord := mocks.NewMockMixCoordClient(t)
 		proxy := &Proxy{mixCoord: mixCoord}
 		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := proxy.GetFlushState(context.TODO(), nil)

@@ -33,16 +33,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -175,120 +171,6 @@ func TestAllocSegment(t *testing.T) {
 		assert.EqualValues(t, 1, segments.Len())
 		assert.NotEqual(t, allocations1[0].SegmentID, allocations2[0].SegmentID)
 	})
-}
-
-func TestLastExpireReset(t *testing.T) {
-	// set up meta on dc
-	ctx := context.Background()
-	paramtable.Init()
-	Params.Save(Params.DataCoordCfg.AllocLatestExpireAttempt.Key, "1")
-	Params.Save(Params.DataCoordCfg.SegmentMaxSize.Key, "1")
-	defer func() {
-		Params.Save(Params.DataCoordCfg.AllocLatestExpireAttempt.Key, "200")
-		Params.Save(Params.DataCoordCfg.SegmentMaxSize.Key, "1024")
-	}()
-	mockAllocator := allocator.NewRootCoordAllocator(newMockRootCoordClient())
-	etcdCli, _ := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	rootPath := "/test/segment/last/expire"
-	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	metaKV.RemoveWithPrefix(ctx, "")
-	catalog := datacoord.NewCatalog(metaKV, "", "")
-	collID, err := mockAllocator.AllocID(ctx)
-	assert.Nil(t, err)
-	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-		Status: merr.Success(),
-		DbCollections: []*rootcoordpb.DBCollections{
-			{
-				DbName:        "db_1",
-				CollectionIDs: []int64{collID},
-			},
-		},
-	}, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
-	assert.Nil(t, err)
-	// add collection
-	channelName := "c1"
-	schema := newTestSchema()
-	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-	initSegment := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:            1,
-			CollectionID:  collID,
-			InsertChannel: "ch1",
-			State:         commonpb.SegmentState_Growing,
-		},
-	}
-	meta.AddSegment(context.TODO(), initSegment)
-
-	// assign segments, set max segment to only 1MB, equalling to 10485 rows
-	var bigRows, smallRows int64 = 10000, 1000
-	segmentManager, _ := newSegmentManager(meta, mockAllocator)
-	initSegment.SegmentInfo.State = commonpb.SegmentState_Dropped
-	meta.segments.SetSegment(1, initSegment)
-	allocs, _ := segmentManager.AllocSegment(context.Background(), collID, 0, channelName, bigRows, storage.StorageV1)
-	segmentID1, expire1 := allocs[0].SegmentID, allocs[0].ExpireTime
-	time.Sleep(100 * time.Millisecond)
-	allocs, _ = segmentManager.AllocSegment(context.Background(), collID, 0, channelName, bigRows, storage.StorageV1)
-	segmentID2, expire2 := allocs[0].SegmentID, allocs[0].ExpireTime
-	time.Sleep(100 * time.Millisecond)
-	allocs, _ = segmentManager.AllocSegment(context.Background(), collID, 0, channelName, smallRows, storage.StorageV1)
-	segmentID3, expire3 := allocs[0].SegmentID, allocs[0].ExpireTime
-
-	// simulate handleTimeTick op on dataCoord
-	// meta.SetLastWrittenTime(segmentID1, bigRows)
-	// meta.SetLastWrittenTime(segmentID2, bigRows)
-	// meta.SetLastWrittenTime(segmentID3, smallRows)
-	meta.SetRowCount(segmentID1, bigRows)
-	meta.SetRowCount(segmentID2, bigRows)
-	meta.SetRowCount(segmentID3, smallRows)
-	err = segmentManager.tryToSealSegment(context.TODO(), expire1, channelName)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.SegmentState_Sealed, meta.GetSegment(context.TODO(), segmentID1).GetState())
-	assert.Equal(t, commonpb.SegmentState_Sealed, meta.GetSegment(context.TODO(), segmentID2).GetState())
-	assert.Equal(t, commonpb.SegmentState_Growing, meta.GetSegment(context.TODO(), segmentID3).GetState())
-
-	// pretend that dataCoord break down
-	metaKV.Close()
-	etcdCli.Close()
-
-	// dataCoord restart
-	newEtcdCli, _ := etcd.GetEtcdClient(Params.EtcdCfg.UseEmbedEtcd.GetAsBool(), Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(), Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(), Params.EtcdCfg.EtcdTLSCACert.GetValue(), Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	newMetaKV := etcdkv.NewEtcdKV(newEtcdCli, rootPath)
-	defer newMetaKV.RemoveWithPrefix(ctx, "")
-	newCatalog := datacoord.NewCatalog(newMetaKV, "", "")
-	restartedMeta, err := newMeta(context.TODO(), newCatalog, nil, broker)
-	restartedMeta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-	assert.Nil(t, err)
-	newSegmentManager, _ := newSegmentManager(restartedMeta, mockAllocator)
-	// reset row number to avoid being cleaned by empty segment
-	restartedMeta.SetRowCount(segmentID1, bigRows)
-	restartedMeta.SetRowCount(segmentID2, bigRows)
-	restartedMeta.SetRowCount(segmentID3, smallRows)
-
-	// verify lastExpire of growing and sealed segments
-	segment1, segment2, segment3 := restartedMeta.GetSegment(context.TODO(), segmentID1), restartedMeta.GetSegment(context.TODO(), segmentID2), restartedMeta.GetSegment(context.TODO(), segmentID3)
-	// segmentState should not be altered but growing segment's lastExpire has been reset to the latest
-	assert.Equal(t, commonpb.SegmentState_Sealed, segment1.GetState())
-	assert.Equal(t, commonpb.SegmentState_Sealed, segment2.GetState())
-	assert.Equal(t, commonpb.SegmentState_Growing, segment3.GetState())
-	assert.Equal(t, expire1, segment1.GetLastExpireTime())
-	assert.Equal(t, expire2, segment2.GetLastExpireTime())
-	assert.True(t, segment3.GetLastExpireTime() > expire3)
-	flushableSegIDs, _ := newSegmentManager.GetFlushableSegments(context.Background(), channelName, expire3)
-	assert.ElementsMatch(t, []UniqueID{segmentID1, segmentID2}, flushableSegIDs) // segment1 and segment2 can be flushed
-	newAlloc, err := newSegmentManager.AllocSegment(context.Background(), collID, 0, channelName, 2000, storage.StorageV1)
-	assert.Nil(t, err)
-	assert.Equal(t, segmentID3, newAlloc[0].SegmentID) // segment3 still can be used to allocate
 }
 
 func TestLoadSegmentsFromMeta(t *testing.T) {

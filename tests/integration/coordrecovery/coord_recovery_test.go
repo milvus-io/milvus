@@ -30,7 +30,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -239,20 +238,13 @@ func (s *CoordSwitchSuite) switchCoord() float64 {
 	start := time.Now()
 	log.Info("=========================Stopping Coordinators========================")
 	c.StopRootCoord()
-	c.StopDataCoord()
-	c.StopQueryCoord()
 	log.Info("=========================Coordinators stopped=========================", zap.Duration("elapsed", time.Since(start)))
 	start = time.Now()
 
 	registry.ResetRegistration()
-	coordclient.ResetRegistration()
 
 	c.StartRootCoord()
 	log.Info("=========================RootCoord restarted=========================")
-	c.StartDataCoord()
-	log.Info("=========================DataCoord restarted=========================")
-	c.StartQueryCoord()
-	log.Info("=========================QueryCoord restarted=========================")
 
 	for i := 0; i < 1000; i++ {
 		time.Sleep(time.Second)

@@ -39,8 +39,7 @@ import (
 
 type StatisticTaskSuite struct {
 	suite.Suite
-	rc types.RootCoordClient
-	qc types.QueryCoordClient
+	rc types.MixCoordClient
 	qn *mocks.MockQueryNodeClient
 
 	lb LBPolicy
@@ -55,7 +54,7 @@ func (s *StatisticTaskSuite) SetupSuite() {
 
 func (s *StatisticTaskSuite) SetupTest() {
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	qc := mocks.NewMockQueryCoordClient(s.T())
+	qc := mocks.NewMockMixCoordClient(s.T())
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
 
 	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -68,14 +67,13 @@ func (s *StatisticTaskSuite) SetupTest() {
 			},
 		},
 	}, nil).Maybe()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	qc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 		Status:       merr.Success(),
 		PartitionIDs: []int64{1, 2, 3},
 	}, nil).Maybe()
 
-	s.qc = qc
-	s.rc = NewRootCoordMock()
+	s.rc = qc
 	s.qn = mocks.NewMockQueryNodeClient(s.T())
 
 	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -83,7 +81,7 @@ func (s *StatisticTaskSuite) SetupTest() {
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil).Maybe()
 	s.lb = NewLBPolicyImpl(mgr)
 
-	err := InitMetaCache(context.Background(), s.rc, s.qc, mgr)
+	err := InitMetaCache(context.Background(), s.rc, mgr)
 	s.NoError(err)
 
 	s.collectionName = "test_statistics_task"
@@ -115,8 +113,8 @@ func (s *StatisticTaskSuite) loadCollection() {
 			Schema:         marshaledSchema,
 			ShardsNum:      common.DefaultShardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: s.rc,
+		ctx:      ctx,
+		mixCoord: s.rc,
 	}
 
 	s.NoError(createColT.OnEnqueue())
@@ -127,7 +125,7 @@ func (s *StatisticTaskSuite) loadCollection() {
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), s.collectionName)
 	s.NoError(err)
 
-	status, err := s.qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
+	status, err := s.rc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_LoadCollection,
 			SourceID: paramtable.GetNodeID(),
@@ -175,8 +173,8 @@ func (s *StatisticTaskSuite) getStatisticsTask(ctx context.Context) *getStatisti
 			},
 			CollectionName: s.collectionName,
 		},
-		qc: s.qc,
-		lb: s.lb,
+		mixc: s.rc,
+		lb:   s.lb,
 	}
 }
 

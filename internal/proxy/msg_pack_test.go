@@ -47,7 +47,7 @@ func TestRepackInsertData(t *testing.T) {
 
 	ctx := context.Background()
 
-	rc := NewRootCoordMock()
+	rc := &mocks.MockMixCoordClient{}
 	defer rc.Close()
 
 	cache := NewMockCache(t)
@@ -153,15 +153,13 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 	ctx := context.Background()
 	dbName := GetCurDBNameFromContextOrDefault(ctx)
 
-	rc := NewRootCoordMock()
-	defer rc.Close()
-	qc := &mocks.MockQueryCoordClient{}
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	qc := &mocks.MockMixCoordClient{}
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 
-	err := InitMetaCache(ctx, rc, qc, nil)
+	err := InitMetaCache(ctx, qc, nil)
 	assert.NoError(t, err)
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
+	idAllocator, err := allocator.NewIDAllocator(ctx, qc, paramtable.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
@@ -182,7 +180,7 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 
-		resp, err := rc.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		resp, err := qc.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,

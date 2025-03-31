@@ -1121,7 +1121,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 		Condition: NewTaskCondition(ctx),
 		ctx:       ctx,
 		tr:        tr,
-		dc:        node.mixCoord,
+		mixc:      node.mixCoord,
 		lb:        node.lbPolicy,
 	}
 

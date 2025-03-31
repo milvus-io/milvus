@@ -92,7 +92,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		collName := "test_collection_empty_result" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 		qt := getSearchTask(t, collName)
 		err = qt.PreExecute(ctx)
 		assert.NoError(t, err)
@@ -113,7 +113,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		)
 
 		collName := "test_collection_search_iterator_v2" + funcutil.GenRandomStr()
-		collSchema := createColl(t, collName, rc)
+		collSchema := createColl(t, collName, qc)
 
 		createIteratorSearchTask := func(t *testing.T, metricType string, rows int) *searchTask {
 			ids := make([]int64, rows)

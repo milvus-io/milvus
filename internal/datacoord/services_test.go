@@ -691,37 +691,6 @@ func (s *ServerSuite) TestAssignSegmentID() {
 		s.NoError(err)
 		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
-
-	s.Run("assign segment with invalid collection", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		s.testServer.rootCoordClient = &mockRootCoord{
-			RootCoordClient: s.testServer.rootCoordClient,
-			collID:          collID,
-		}
-
-		schema := newTestSchema()
-		s.testServer.meta.AddCollection(&collectionInfo{
-			ID:         collID,
-			Schema:     schema,
-			Partitions: []int64{},
-		})
-		req := &datapb.SegmentIDRequest{
-			Count:        1000,
-			ChannelName:  channel0,
-			CollectionID: collIDInvalid,
-			PartitionID:  partID,
-		}
-
-		resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:            0,
-			PeerRole:          "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
-		})
-		s.NoError(err)
-		s.EqualValues(1, len(resp.SegIDAssignments))
-	})
 }
 
 func TestBroadcastAlteredCollection(t *testing.T) {

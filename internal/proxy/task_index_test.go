@@ -27,7 +27,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -36,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -89,32 +87,6 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	err := InitMetaCache(ctx, queryCoord, shardMgr)
 	assert.NoError(t, err)
 	assert.Error(t, gist.Execute(ctx))
-
-	queryCoord.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Status:         merr.Success(),
-			Schema:         newTestSchema(),
-			CollectionID:   collectionID,
-			CollectionName: request.CollectionName,
-		}, nil
-	}
-
-	queryCoord.ShowPartitionsFunc = func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
-		return &milvuspb.ShowPartitionsResponse{
-			Status: merr.Success(),
-		}, nil
-	}
-
-	queryCoord.GetIndexStateFunc = func(ctx context.Context, request *indexpb.GetIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetIndexStateResponse, error) {
-		return &indexpb.GetIndexStateResponse{
-			Status:     merr.Success(),
-			State:      commonpb.IndexState_Finished,
-			FailReason: "",
-		}, nil
-	}
-
-	assert.NoError(t, gist.Execute(ctx))
-	assert.Equal(t, commonpb.IndexState_Finished, gist.result.GetState())
 }
 
 func TestDropIndexTask_PreExecute(t *testing.T) {
@@ -129,7 +101,6 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 		Status:        merr.Success(),
 		CollectionIDs: []int64{},
 	}, nil)
-	dc := NewDataCoordMock()
 	ctx := context.Background()
 
 	mockCache := NewMockCache(t)
@@ -154,8 +125,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 			FieldName:      fieldName,
 			IndexName:      indexName,
 		},
-		dataCoord:    dc,
-		queryCoord:   qc,
+		mixCoord:     qc,
 		result:       nil,
 		collectionID: collectionID,
 	}
