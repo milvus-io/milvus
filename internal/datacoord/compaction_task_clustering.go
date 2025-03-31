@@ -190,10 +190,6 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	if err != nil {
 		return nil, err
 	}
-	beginLogID, _, err := t.allocator.AllocN(1)
-	if err != nil {
-		return nil, err
-	}
 	plan := &datapb.CompactionPlan{
 		PlanID:                 taskProto.GetPlanID(),
 		StartTime:              taskProto.GetStartTime(),
@@ -208,7 +204,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		PreferSegmentRows:      taskProto.GetPreferSegmentRows(),
 		AnalyzeResultPath:      path.Join(t.meta.(*meta).chunkManager.RootPath(), common.AnalyzeStatsPath, metautil.JoinIDPath(taskProto.AnalyzeTaskID, taskProto.AnalyzeVersion)),
 		AnalyzeSegmentIds:      taskProto.GetInputSegments(),
-		BeginLogID:             beginLogID,
+		BeginLogID:             logIDRange.Begin, // BeginLogID is deprecated, but still assign it for compatibility.
 		PreAllocatedSegmentIDs: taskProto.GetPreAllocatedSegmentIDs(),
 		PreAllocatedLogIDs:     logIDRange,
 		SlotUsage:              t.GetSlotUsage(),
