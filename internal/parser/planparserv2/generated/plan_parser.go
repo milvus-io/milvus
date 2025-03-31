@@ -15,7 +15,7 @@ var _ = reflect.Copy
 var _ = strconv.Itoa
 
 var parserATN = []uint16{
-	3, 24715, 42794, 33075, 47597, 16764, 15335, 30598, 22884, 3, 50, 122,
+	3, 24715, 42794, 33075, 47597, 16764, 15335, 30598, 22884, 3, 51, 122,
 	4, 2, 9, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2,
 	3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 7, 2, 23, 10, 2, 12, 2,
 	14, 2, 26, 11, 2, 3, 2, 5, 2, 29, 10, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2,
@@ -27,12 +27,12 @@ var parserATN = []uint16{
 	3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2,
 	3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 7, 2,
 	117, 10, 2, 12, 2, 14, 2, 120, 11, 2, 3, 2, 2, 3, 2, 3, 2, 2, 15, 3, 2,
-	45, 46, 4, 2, 18, 19, 31, 32, 4, 2, 35, 35, 38, 38, 4, 2, 36, 36, 39, 39,
-	4, 2, 37, 37, 40, 40, 4, 2, 45, 45, 48, 48, 3, 2, 20, 22, 3, 2, 18, 19,
+	46, 47, 4, 2, 18, 19, 31, 32, 4, 2, 35, 35, 38, 38, 4, 2, 36, 36, 39, 39,
+	4, 2, 37, 37, 40, 40, 4, 2, 46, 46, 49, 49, 3, 2, 20, 22, 3, 2, 18, 19,
 	3, 2, 24, 25, 3, 2, 10, 11, 3, 2, 12, 13, 3, 2, 10, 13, 3, 2, 14, 15, 2,
 	153, 2, 62, 3, 2, 2, 2, 4, 5, 8, 2, 1, 2, 5, 63, 7, 43, 2, 2, 6, 63, 7,
-	44, 2, 2, 7, 63, 7, 42, 2, 2, 8, 63, 7, 47, 2, 2, 9, 63, 9, 2, 2, 2, 10,
-	63, 7, 48, 2, 2, 11, 12, 7, 8, 2, 2, 12, 13, 7, 45, 2, 2, 13, 63, 7, 9,
+	45, 2, 2, 7, 63, 7, 42, 2, 2, 8, 63, 7, 48, 2, 2, 9, 63, 9, 2, 2, 2, 10,
+	63, 7, 49, 2, 2, 11, 12, 7, 8, 2, 2, 12, 13, 7, 46, 2, 2, 13, 63, 7, 9,
 	2, 2, 14, 15, 7, 3, 2, 2, 15, 16, 5, 2, 2, 2, 16, 17, 7, 4, 2, 2, 17, 63,
 	3, 2, 2, 2, 18, 19, 7, 5, 2, 2, 19, 24, 5, 2, 2, 2, 20, 21, 7, 6, 2, 2,
 	21, 23, 5, 2, 2, 2, 22, 20, 3, 2, 2, 2, 23, 26, 3, 2, 2, 2, 24, 22, 3,
@@ -67,7 +67,7 @@ var parserATN = []uint16{
 	105, 106, 7, 27, 2, 2, 106, 117, 5, 2, 2, 7, 107, 108, 12, 5, 2, 2, 108,
 	109, 7, 29, 2, 2, 109, 117, 5, 2, 2, 6, 110, 111, 12, 4, 2, 2, 111, 112,
 	7, 30, 2, 2, 112, 117, 5, 2, 2, 5, 113, 114, 12, 23, 2, 2, 114, 115, 7,
-	16, 2, 2, 115, 117, 7, 47, 2, 2, 116, 64, 3, 2, 2, 2, 116, 67, 3, 2, 2,
+	16, 2, 2, 115, 117, 7, 48, 2, 2, 116, 64, 3, 2, 2, 2, 116, 67, 3, 2, 2,
 	2, 116, 70, 3, 2, 2, 2, 116, 73, 3, 2, 2, 2, 116, 76, 3, 2, 2, 2, 116,
 	82, 3, 2, 2, 2, 116, 87, 3, 2, 2, 2, 116, 92, 3, 2, 2, 2, 116, 95, 3, 2,
 	2, 2, 116, 98, 3, 2, 2, 2, 116, 101, 3, 2, 2, 2, 116, 104, 3, 2, 2, 2,
@@ -79,7 +79,7 @@ var literalNames = []string{
 	"", "'('", "')'", "'['", "','", "']'", "'{'", "'}'", "'<'", "'<='", "'>'",
 	"'>='", "'=='", "'!='", "", "", "'+'", "'-'", "'*'", "'/'", "'%'", "'**'",
 	"'<<'", "'>>'", "'&'", "'|'", "'^'", "", "", "'~'", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "'$meta'",
+	"", "", "", "", "", "", "", "'-9223372036854775808'", "", "", "'$meta'",
 }
 var symbolicNames = []string{
 	"", "", "", "", "", "", "LBRACE", "RBRACE", "LT", "LE", "GT", "GE", "EQ",
@@ -87,8 +87,8 @@ var symbolicNames = []string{
 	"SHR", "BAND", "BOR", "BXOR", "AND", "OR", "BNOT", "NOT", "IN", "EmptyArray",
 	"JSONContains", "JSONContainsAll", "JSONContainsAny", "ArrayContains",
 	"ArrayContainsAll", "ArrayContainsAny", "ArrayLength", "BooleanConstant",
-	"IntegerConstant", "FloatingConstant", "Identifier", "Meta", "StringLiteral",
-	"JSONIdentifier", "Whitespace", "Newline",
+	"IntegerConstant", "MIN_INT64", "FloatingConstant", "Identifier", "Meta",
+	"StringLiteral", "JSONIdentifier", "Whitespace", "Newline",
 }
 
 var ruleNames = []string{
@@ -168,13 +168,14 @@ const (
 	PlanParserArrayLength      = 39
 	PlanParserBooleanConstant  = 40
 	PlanParserIntegerConstant  = 41
-	PlanParserFloatingConstant = 42
-	PlanParserIdentifier       = 43
-	PlanParserMeta             = 44
-	PlanParserStringLiteral    = 45
-	PlanParserJSONIdentifier   = 46
-	PlanParserWhitespace       = 47
-	PlanParserNewline          = 48
+	PlanParserMIN_INT64        = 42
+	PlanParserFloatingConstant = 43
+	PlanParserIdentifier       = 44
+	PlanParserMeta             = 45
+	PlanParserStringLiteral    = 46
+	PlanParserJSONIdentifier   = 47
+	PlanParserWhitespace       = 48
+	PlanParserNewline          = 49
 )
 
 // PlanParserRULE_expr is the PlanParser rule.

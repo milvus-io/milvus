@@ -89,10 +89,11 @@ ArrayLength: 'array_length' | 'ARRAY_LENGTH';
 BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
 
 IntegerConstant:
-	DecimalConstant
+	(DecimalConstant
 	| OctalConstant
 	| HexadecimalConstant
-	| BinaryConstant;
+	| BinaryConstant) | MIN_INT64;
+MIN_INT64 : '-9223372036854775808';
 
 FloatingConstant:
 	DecimalFloatingConstant
