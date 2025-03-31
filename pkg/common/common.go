@@ -190,6 +190,13 @@ const (
 	DatabaseForceDenyWritingKey = "database.force.deny.writing"
 	DatabaseForceDenyReadingKey = "database.force.deny.reading"
 
+	DatabaseForceDenyDDLKey           = "database.force.deny.ddl" // all ddl
+	DatabaseForceDenyCollectionDDLKey = "database.force.deny.collectionDDL"
+	DatabaseForceDenyPartitionDDLKey  = "database.force.deny.partitionDDL"
+	DatabaseForceDenyIndexDDLKey      = "database.force.deny.index"
+	DatabaseForceDenyFlushDDLKey      = "database.force.deny.flush"
+	DatabaseForceDenyCompactionDDLKey = "database.force.deny.compaction"
+
 	// collection level load properties
 	CollectionReplicaNumber  = "collection.replica.number"
 	CollectionResourceGroups = "collection.resource_groups"

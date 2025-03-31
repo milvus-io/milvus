@@ -320,7 +320,6 @@ func (s *DataSyncServiceSuite) SetupTest() {
 	s.chunkManager = mocks.NewChunkManager(s.T())
 
 	s.broker = broker.NewMockBroker(s.T())
-	s.broker.EXPECT().UpdateSegmentStatistics(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	s.allocator = allocator.NewMockAllocator(s.T())
 	s.wbManager = writebuffer.NewMockBufferManager(s.T())
@@ -337,7 +336,7 @@ func (s *DataSyncServiceSuite) SetupTest() {
 	s.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(s.ms, nil)
 	s.ms.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	s.ms.EXPECT().Chan().Return(s.msChan)
-	s.ms.EXPECT().Close().Return()
+	s.ms.EXPECT().Close().Return().Maybe()
 
 	s.pipelineParams = &util2.PipelineParams{
 		Ctx:                context.TODO(),

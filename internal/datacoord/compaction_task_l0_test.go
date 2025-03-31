@@ -129,9 +129,6 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SegmentNotFoundL0() {
 		NodeID:        1,
 		State:         datapb.CompactionTaskState_executing,
 	}, nil, s.mockMeta, nil)
-	alloc := allocator.NewMockAllocator(s.T())
-	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
-	task.allocator = alloc
 
 	_, err := task.BuildCompactionRequest()
 	s.Error(err)
@@ -162,9 +159,6 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 		State:         datapb.CompactionTaskState_executing,
 		InputSegments: []int64{100, 101},
 	}, nil, s.mockMeta, nil)
-	alloc := allocator.NewMockAllocator(s.T())
-	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
-	task.allocator = alloc
 	_, err := task.BuildCompactionRequest()
 	s.Error(err)
 }
@@ -174,23 +168,31 @@ func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 
 	s.mockAlloc.EXPECT().AllocN(mock.Anything).Return(100, 200, errors.New("mock alloc err"))
 
+	meta, err := newMemoryMeta(s.T())
+	s.NoError(err)
 	task = &l0CompactionTask{
 		allocator: s.mockAlloc,
+		meta:      meta,
 	}
-	_, err := task.BuildCompactionRequest()
+	task.SetTask(&datapb.CompactionTask{})
+	_, err = task.BuildCompactionRequest()
 	s.T().Logf("err=%v", err)
 	s.Error(err)
 
 	task = &mixCompactionTask{
 		allocator: s.mockAlloc,
+		meta:      meta,
 	}
+	task.SetTask(&datapb.CompactionTask{})
 	_, err = task.BuildCompactionRequest()
 	s.T().Logf("err=%v", err)
 	s.Error(err)
 
 	task = &clusteringCompactionTask{
 		allocator: s.mockAlloc,
+		meta:      meta,
 	}
+	task.SetTask(&datapb.CompactionTask{})
 	_, err = task.BuildCompactionRequest()
 	s.T().Logf("err=%v", err)
 	s.Error(err)

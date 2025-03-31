@@ -379,6 +379,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Len(t, Params.ClusterLevelLoadResourceGroups.GetAsStrings(), 0)
 
 		assert.Equal(t, 10, Params.CollectionChannelCountFactor.GetAsInt())
+		assert.Equal(t, 3000, Params.AutoBalanceInterval.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -516,6 +517,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, float64(100), Params.CompactionGCIntervalInSeconds.GetAsDuration(time.Second).Seconds())
 		params.Save("dataCoord.compaction.dropTolerance", "100")
 		assert.Equal(t, float64(100), Params.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds())
+		assert.Equal(t, int64(100), Params.CompactionPreAllocateIDExpansionFactor.GetAsInt64())
 
 		params.Save("dataCoord.compaction.clustering.enable", "true")
 		assert.Equal(t, true, Params.ClusteringCompactionEnable.GetAsBool())

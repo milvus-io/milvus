@@ -460,6 +460,87 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     expr->Reorder(reorder);
 }
 
+inline std::shared_ptr<PhyTermFilterExpr>
+ConvertMultiOrToInExpr(std::vector<std::shared_ptr<Expr>>& exprs,
+                       std::vector<size_t> indices,
+                       ExecContext* context) {
+    std::vector<proto::plan::GenericValue> values;
+    bool get_value_type = false;
+    auto type = proto::plan::GenericValue::ValCase::VAL_NOT_SET;
+    for (auto& i : indices) {
+        auto expr = std::static_pointer_cast<PhyUnaryRangeFilterExpr>(exprs[i])
+                        ->GetLogicalExpr();
+        if (type == proto::plan::GenericValue::ValCase::VAL_NOT_SET) {
+            type = expr->val_.val_case();
+        }
+        if (type != expr->val_.val_case()) {
+            return nullptr;
+        }
+        values.push_back(expr->val_);
+    }
+    auto logical_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        exprs[indices[0]]->GetColumnInfo().value(), values);
+    auto query_context = context->get_query_context();
+    return std::make_shared<PhyTermFilterExpr>(
+        std::vector<std::shared_ptr<Expr>>{},
+        logical_expr,
+        "PhyTermFilterExpr",
+        query_context->get_segment(),
+        query_context->get_active_count(),
+        query_context->get_query_timestamp(),
+        query_context->query_config()->get_expr_batch_size(),
+        query_context->get_consistency_level());
+}
+
+inline void
+RewriteConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
+                    ExecContext* context) {
+    if (expr->IsOr()) {
+        auto& inputs = expr->GetInputsRef();
+        std::map<expr::ColumnInfo, std::vector<size_t>> expr_indices;
+        for (size_t i = 0; i < inputs.size(); i++) {
+            auto input = inputs[i];
+            if (input->name() == "PhyUnaryRangeFilterExpr") {
+                auto phy_expr =
+                    std::static_pointer_cast<PhyUnaryRangeFilterExpr>(input);
+                if (phy_expr->GetOpType() == proto::plan::OpType::Equal) {
+                    auto column = phy_expr->GetColumnInfo().value();
+                    if (expr_indices.find(column) != expr_indices.end()) {
+                        expr_indices[column].push_back(i);
+                    } else {
+                        expr_indices[column] = {i};
+                    }
+                }
+            }
+
+            if (input->name() == "PhyConjunctFilterExpr") {
+                auto expr = std::static_pointer_cast<
+                    milvus::exec::PhyConjunctFilterExpr>(input);
+                RewriteConjunctExpr(expr, context);
+            }
+        }
+
+        for (auto& [column, indices] : expr_indices) {
+            // For numeric type, if or column greater than 150, then using in expr replace.
+            // For other type, all convert to in expr.
+            if ((IsNumericDataType(column.data_type_) &&
+                 indices.size() > DEFAULT_CONVERT_OR_TO_IN_NUMERIC_LIMIT) ||
+                (!IsNumericDataType(column.data_type_) && indices.size() > 1)) {
+                auto new_expr =
+                    ConvertMultiOrToInExpr(inputs, indices, context);
+                if (new_expr) {
+                    inputs[indices[0]] = new_expr;
+                    for (size_t j = 1; j < indices.size(); j++) {
+                        inputs[indices[j]] = nullptr;
+                    }
+                }
+            }
+        }
+        inputs.erase(std::remove(inputs.begin(), inputs.end(), nullptr),
+                     inputs.end());
+    }
+}
+
 inline void
 OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs) {
     std::chrono::high_resolution_clock::time_point start =
@@ -469,6 +550,7 @@ OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs) {
             LOG_DEBUG("before reoder filter expression: {}", expr->ToString());
             auto conjunct_expr =
                 std::static_pointer_cast<PhyConjunctFilterExpr>(expr);
+            RewriteConjunctExpr(conjunct_expr, context);
             bool has_heavy_operation = false;
             ReorderConjunctExpr(conjunct_expr, context, has_heavy_operation);
             LOG_DEBUG("after reorder filter expression: {}", expr->ToString());

@@ -131,7 +131,7 @@ func (t *mixCompactionTask) preCompact() error {
 
 func (t *mixCompactionTask) mergeSplit(
 	ctx context.Context,
-	insertPaths map[int64][]string,
+	insertPaths map[int64][][]string,
 	deltaPaths map[int64][]string,
 ) ([]*datapb.CompactionSegment, error) {
 	_ = t.tr.RecordSpan()
@@ -142,7 +142,7 @@ func (t *mixCompactionTask) mergeSplit(
 	log := log.With(zap.Int64("planID", t.GetPlanID()))
 
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
-	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetBeginLogID(), math.MaxInt64)
+	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
 	mWriter := NewMultiSegmentWriter(t.binlogIO, compAlloc, t.plan, t.maxRows, t.partitionID, t.collectionID, t.bm25FieldIDs)
 
@@ -154,14 +154,23 @@ func (t *mixCompactionTask) mergeSplit(
 		log.Warn("failed to get pk field from schema")
 		return nil, err
 	}
-	for segId, binlogPaths := range insertPaths {
+	for segId, binlogBatches := range insertPaths {
 		deltaPaths := deltaPaths[segId]
-		del, exp, err := t.writeSegment(ctx, binlogPaths, deltaPaths, mWriter, pkField)
+		delta, err := mergeDeltalogs(ctx, t.binlogIO, deltaPaths)
 		if err != nil {
+			log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
 			return nil, err
 		}
-		deletedRowCount += del
-		expiredRowCount += exp
+		entityFilter := newEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
+
+		for _, batchPaths := range binlogBatches {
+			del, exp, err := t.writeSegment(ctx, batchPaths, entityFilter, mWriter, pkField)
+			if err != nil {
+				return nil, err
+			}
+			deletedRowCount += del
+			expiredRowCount += exp
+		}
 	}
 	res, err := mWriter.Finish()
 	if err != nil {
@@ -180,27 +189,20 @@ func (t *mixCompactionTask) mergeSplit(
 }
 
 func (t *mixCompactionTask) writeSegment(ctx context.Context,
-	binlogPaths []string,
-	deltaPaths []string,
+	batchPaths []string,
+	entityFilter *EntityFilter,
 	mWriter *MultiSegmentWriter, pkField *schemapb.FieldSchema,
 ) (deletedRowCount, expiredRowCount int64, err error) {
-	log := log.With(zap.Strings("paths", binlogPaths))
-	allValues, err := t.binlogIO.Download(ctx, binlogPaths)
+	log := log.With(zap.Strings("paths", batchPaths))
+	allValues, err := t.binlogIO.Download(ctx, batchPaths)
 	if err != nil {
 		log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
 		return
 	}
 
 	blobs := lo.Map(allValues, func(v []byte, i int) *storage.Blob {
-		return &storage.Blob{Key: binlogPaths[i], Value: v}
+		return &storage.Blob{Key: batchPaths[i], Value: v}
 	})
-
-	delta, err := mergeDeltalogs(ctx, t.binlogIO, deltaPaths)
-	if err != nil {
-		log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
-		return
-	}
-	entityFilter := newEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
 	reader, err := storage.NewCompositeBinlogRecordReader(blobs)
 	if err != nil {
@@ -272,7 +274,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		}
 	}
 
-	deltalogDeleteEntriesCount := len(delta)
+	deltalogDeleteEntriesCount := entityFilter.GetDeltalogDeleteCount()
 	deletedRowCount = int64(entityFilter.GetDeletedCount())
 	expiredRowCount = int64(entityFilter.GetExpiredCount())
 

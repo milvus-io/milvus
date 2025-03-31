@@ -426,7 +426,7 @@ var (
 			Name:      "search_sparse_num_non_zeros",
 			Help:      "the number of non-zeros in each sparse search task",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, collectionName})
+		}, []string{nodeIDLabelName, collectionName, queryTypeLabelName, fieldIDLabelName})
 
 	ProxyParseExpressionLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{

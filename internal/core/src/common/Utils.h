@@ -42,6 +42,8 @@ namespace milvus {
 #define VEC_FIELD_DATA(data_array, type) \
     (data_array->vectors().type##_vector().data())
 
+using CheckDataValid = std::function<bool(size_t)>;
+
 inline DatasetPtr
 GenDataset(const int64_t nb, const int64_t dim, const void* xb) {
     return knowhere::GenDataSet(nb, dim, xb);

@@ -32,6 +32,7 @@ type GrantItem struct {
 	RoleName   string
 	Grantor    string
 	Privilege  string
+	DbName     string
 }
 
 type UserInfo struct {

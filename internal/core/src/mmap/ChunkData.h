@@ -65,7 +65,10 @@ struct VariableLengthChunk {
         data_ = FixedVector<ChunkViewType<Type>>(size);
     };
     inline void
-    set(const Type* src, uint32_t begin, uint32_t length) {
+    set(const Type* src,
+        uint32_t begin,
+        uint32_t length,
+        const std::optional<CheckDataValid>& check_data_valid = std::nullopt) {
         throw std::runtime_error(
             "set should be a template specialization function");
     }
@@ -91,9 +94,11 @@ struct VariableLengthChunk {
 // Template specialization for string
 template <>
 inline void
-VariableLengthChunk<std::string>::set(const std::string* src,
-                                      uint32_t begin,
-                                      uint32_t length) {
+VariableLengthChunk<std::string>::set(
+    const std::string* src,
+    uint32_t begin,
+    uint32_t length,
+    const std::optional<CheckDataValid>& check_data_valid) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
     AssertInfo(
         begin + length <= size_,
@@ -110,9 +115,14 @@ VariableLengthChunk<std::string>::set(const std::string* src,
     AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
     for (auto i = 0, offset = 0; i < length; i++) {
         auto data_size = src[i].size() + padding_size;
-        char* data_ptr = buf + offset;
-        std::strcpy(data_ptr, src[i].c_str());
-        data_[i + begin] = std::string_view(data_ptr, src[i].size());
+        // string/varchar has default value, only take care of empty case
+        if (src[i].empty()) {
+            data_[i + begin] = std::string_view("");
+        } else {
+            char* data_ptr = buf + offset;
+            std::strcpy(data_ptr, src[i].c_str());
+            data_[i + begin] = std::string_view(data_ptr, src[i].size());
+        }
         offset += data_size;
     }
 }
@@ -123,7 +133,8 @@ inline void
 VariableLengthChunk<knowhere::sparse::SparseRow<float>>::set(
     const knowhere::sparse::SparseRow<float>* src,
     uint32_t begin,
-    uint32_t length) {
+    uint32_t length,
+    const std::optional<CheckDataValid>& check_data_valid) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
     AssertInfo(
         begin + length <= size_,
@@ -151,9 +162,11 @@ VariableLengthChunk<knowhere::sparse::SparseRow<float>>::set(
 // Template specialization for json
 template <>
 inline void
-VariableLengthChunk<Json>::set(const Json* src,
-                               uint32_t begin,
-                               uint32_t length) {
+VariableLengthChunk<Json>::set(
+    const Json* src,
+    uint32_t begin,
+    uint32_t length,
+    const std::optional<CheckDataValid>& check_data_valid) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
     AssertInfo(
         begin + length <= size_,
@@ -170,9 +183,15 @@ VariableLengthChunk<Json>::set(const Json* src,
     AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
     for (auto i = 0, offset = 0; i < length; i++) {
         auto data_size = src[i].size() + padding_size;
-        char* data_ptr = buf + offset;
-        std::strcpy(data_ptr, src[i].c_str());
-        data_[i + begin] = Json(data_ptr, src[i].size());
+        if ((check_data_valid.has_value() &&
+             !check_data_valid.value()(i + begin)) ||
+            src[i].size() == 0) {
+            data_[i + begin] = Json();
+        } else {
+            char* data_ptr = buf + offset;
+            std::strcpy(data_ptr, src[i].c_str());
+            data_[i + begin] = Json(data_ptr, src[i].size());
+        }
         offset += data_size;
     }
 }
@@ -180,9 +199,11 @@ VariableLengthChunk<Json>::set(const Json* src,
 // Template specialization for array
 template <>
 inline void
-VariableLengthChunk<Array>::set(const Array* src,
-                                uint32_t begin,
-                                uint32_t length) {
+VariableLengthChunk<Array>::set(
+    const Array* src,
+    uint32_t begin,
+    uint32_t length,
+    const std::optional<CheckDataValid>& check_data_valid) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
     AssertInfo(
         begin + length <= size_,
@@ -191,21 +212,42 @@ VariableLengthChunk<Array>::set(const Array* src,
         begin,
         size_);
     size_t total_size = 0;
-    size_t padding_size = 0;
     for (auto i = 0; i < length; i++) {
-        total_size += src[i].byte_size() + padding_size;
+        total_size += src[i].byte_size();
     }
+    if (length > 0 && IsVariableDataType(src[0].get_element_type())) {
+        for (auto i = 0; i < length; i++) {
+            total_size += (src[i].length() * sizeof(uint32_t));
+        }
+    }
+
     auto buf = (char*)mcm->Allocate(mmap_descriptor_, total_size);
     AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
-    for (auto i = 0, offset = 0; i < length; i++) {
-        auto data_size = src[i].byte_size() + padding_size;
-        char* data_ptr = buf + offset;
-        std::copy(src[i].data(), src[i].data() + src[i].byte_size(), data_ptr);
-        data_[i + begin] = ArrayView(data_ptr,
-                                     data_size,
-                                     src[i].get_element_type(),
-                                     src[i].get_offsets_in_copy());
-        offset += data_size;
+    char* data_ptr = buf;
+    for (auto i = 0; i < length; i++) {
+        auto element_type = src[i].get_element_type();
+        if ((check_data_valid.has_value() &&
+             !check_data_valid.value()(i + begin)) ||
+            element_type == DataType::NONE) {
+            data_[i + begin] = ArrayView();
+        } else {
+            int length = src[i].length();
+            uint32_t* src_offsets_ptr = src[i].get_offsets_data();
+            // need copy offsets for variable types
+            uint32_t* target_offsets_ptr = nullptr;
+            if (IsVariableDataType(element_type)) {
+                target_offsets_ptr = reinterpret_cast<uint32_t*>(data_ptr);
+                std::copy(src_offsets_ptr,
+                          src_offsets_ptr + length,
+                          target_offsets_ptr);
+                data_ptr += length * sizeof(uint32_t);
+            }
+            auto data_size = src[i].byte_size();
+            std::copy(src[i].data(), src[i].data() + data_size, data_ptr);
+            data_[i + begin] = ArrayView(
+                data_ptr, length, data_size, element_type, target_offsets_ptr);
+            data_ptr += data_size;
+        }
     }
 }
 

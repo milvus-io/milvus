@@ -34,3 +34,12 @@ func TestVersion(t *testing.T) {
 	assert.True(t, VersionV1.GT(VersionOld))
 	assert.True(t, VersionV2.GT(VersionV1))
 }
+
+// TestCheckIfMessageFromStreaming tests CheckIfMessageFromStreaming function.
+func TestCheckIfMessageFromStreaming(t *testing.T) {
+	assert.False(t, CheckIfMessageFromStreaming(nil))
+	assert.False(t, CheckIfMessageFromStreaming(map[string]string{}))
+	assert.True(t, CheckIfMessageFromStreaming(map[string]string{
+		messageVersion: "1",
+	}))
+}

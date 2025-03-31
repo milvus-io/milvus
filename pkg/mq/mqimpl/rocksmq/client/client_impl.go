@@ -159,7 +159,7 @@ func (c *client) consume(consumer *consumer) {
 		case _, ok := <-newIncomingMsgCh:
 			if !ok {
 				// consumer MsgMutex closed, goroutine exit
-				log.Info("Consumer MsgMutex closed")
+				log.Info("Consumer MsgMutex closed", zap.String("topic", consumer.topic), zap.String("groupName", consumer.consumerName))
 				return
 			}
 		}

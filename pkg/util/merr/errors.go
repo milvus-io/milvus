@@ -140,11 +140,10 @@ var (
 	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)
 
 	// Message queue related
-	ErrMqTopicNotFound  = newMilvusError("topic not found", 1300, false)
-	ErrMqTopicNotEmpty  = newMilvusError("topic not empty", 1301, false)
-	ErrMqInternal       = newMilvusError("message queue internal error", 1302, false)
-	ErrDenyProduceMsg   = newMilvusError("deny to write the message to mq", 1303, false)
-	ErrTooManyConsumers = newMilvusError("consumer number limit exceeded", 1304, false)
+	ErrMqTopicNotFound = newMilvusError("topic not found", 1300, false)
+	ErrMqTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
+	ErrMqInternal      = newMilvusError("message queue internal error", 1302, false)
+	ErrDenyProduceMsg  = newMilvusError("deny to write the message to mq", 1303, false)
 
 	// Privilege related
 	// this operation is denied because the user not authorized, user need to login in first
@@ -218,7 +217,8 @@ var (
 	ErrDuplicatedCompactionTask                   = newMilvusError("duplicated compaction task", 2315, false)
 	ErrCleanPartitionStatsFail                    = newMilvusError("fail to clean partition Stats", 2316, true)
 
-	ErrDataNodeSlotExhausted = newMilvusError("datanode slot exhausted", 2401, false)
+	ErrDataNodeSlotExhausted  = newMilvusError("datanode slot exhausted", 2401, false)
+	ErrIndexNodeSlotExhausted = newMilvusError("indexnode slot exhausted", 2402, false)
 
 	// General
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)

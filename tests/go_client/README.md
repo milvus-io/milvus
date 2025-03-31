@@ -178,6 +178,22 @@ go test -run TestYourFeature ./testcases/
 
 # Run with verbose output
 go test -v ./testcases/...
+
+# gotestsum
+Recommend you to use gotestsum https://github.com/gotestyourself/gotestsum
+
+# Run all default cases
+gotestsum --format testname --hide-summary=output -v ./testcases/... --addr=127.0.0.1:19530 -timeout=30m
+
+# Run a specified file
+gotestsum --format testname --hide-summary=output ./testcases/collection_test.go ./testcases/main_test.go --addr=127.0.0.1:19530
+
+# Run L3 rg cases
+gotestsum --format testname --hide-summary=output -v ./testcases/advcases/... --addr=127.0.0.1:19530 -timeout=30m -tags=rg
+
+# Run advanced rg cases and default cases
+# rg cases conflicts with default cases, so -p=1 is required
+gotestsum --format testname --hide-summary=output -v ./testcases/... --addr=127.0.0.1:19530 -timeout=30m -tags=rg -p 1
 ```
 
 ## Contributing

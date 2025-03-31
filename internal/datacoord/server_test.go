@@ -1724,13 +1724,9 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.compactionTrigger = &mockCompactionTrigger{
-			methods: map[string]interface{}{
-				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
-					return 1, nil
-				},
-			},
-		}
+		mockTrigger := NewMockTrigger(t)
+		svr.compactionTrigger = mockTrigger
+		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(1, nil)
 
 		mockHandler := NewMockCompactionPlanContext(t)
 		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
@@ -1746,13 +1742,10 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction failure", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.compactionTrigger = &mockCompactionTrigger{
-			methods: map[string]interface{}{
-				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
-					return 0, errors.New("mock error")
-				},
-			},
-		}
+		mockTrigger := NewMockTrigger(t)
+		svr.compactionTrigger = mockTrigger
+		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(0, errors.New("mock error"))
+
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
 			Timetravel:   1,
@@ -1764,13 +1757,9 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction with closed server", func(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Abnormal)
-		svr.compactionTrigger = &mockCompactionTrigger{
-			methods: map[string]interface{}{
-				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
-					return 1, nil
-				},
-			},
-		}
+		mockTrigger := NewMockTrigger(t)
+		svr.compactionTrigger = mockTrigger
+		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(1, nil).Maybe()
 
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
@@ -2264,62 +2253,6 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	})
 }
 
-func TestDataCoord_SegmentStatistics(t *testing.T) {
-	t.Run("test update imported segment stat", func(t *testing.T) {
-		svr := newTestServer(t)
-
-		seg1 := &datapb.SegmentInfo{
-			ID:        100,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(101, 1, 1)},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 3)},
-			State:     commonpb.SegmentState_Importing,
-		}
-
-		info := NewSegmentInfo(seg1)
-		svr.meta.AddSegment(context.TODO(), info)
-
-		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-			Stats: []*commonpb.SegmentStats{{
-				SegmentID: 100,
-				NumRows:   int64(1),
-			}},
-		})
-		assert.NoError(t, err)
-
-		assert.Equal(t, svr.meta.GetHealthySegment(context.TODO(), 100).currRows, int64(1))
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-		closeTestServer(t, svr)
-	})
-
-	t.Run("test update flushed segment stat", func(t *testing.T) {
-		svr := newTestServer(t)
-
-		seg1 := &datapb.SegmentInfo{
-			ID:        100,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(101, 1, 1)},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 3)},
-			State:     commonpb.SegmentState_Flushed,
-		}
-
-		info := NewSegmentInfo(seg1)
-		svr.meta.AddSegment(context.TODO(), info)
-
-		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-			Stats: []*commonpb.SegmentStats{{
-				SegmentID: 100,
-				NumRows:   int64(1),
-			}},
-		})
-		assert.NoError(t, err)
-
-		assert.Equal(t, svr.meta.GetHealthySegment(context.TODO(), 100).currRows, int64(0))
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-		closeTestServer(t, svr)
-	})
-}
-
 func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 	mockVChannel := "fake-by-dev-rootcoord-dml-1-testchannelcp-v0"
 
@@ -2535,13 +2468,12 @@ func Test_CheckHealth(t *testing.T) {
 		return channelManager
 	}
 
-	collections := map[UniqueID]*collectionInfo{
-		449684528748778322: {
-			ID:            449684528748778322,
-			VChannelNames: []string{"ch1", "ch2"},
-		},
-		2: nil,
-	}
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(449684528748778322, &collectionInfo{
+		ID:            449684528748778322,
+		VChannelNames: []string{"ch1", "ch2"},
+	})
+	collections.Insert(2, nil)
 
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
@@ -2704,7 +2636,7 @@ func TestLoadCollectionFromRootCoord(t *testing.T) {
 	broker := broker.NewMockBroker(t)
 	s := &Server{
 		broker: broker,
-		meta:   &meta{collections: make(map[UniqueID]*collectionInfo)},
+		meta:   &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
 	}
 
 	t.Run("has collection fail with error", func(t *testing.T) {
@@ -2745,8 +2677,8 @@ func TestLoadCollectionFromRootCoord(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
 		assert.NoError(t, err)
-		assert.Equal(t, 1, len(s.meta.collections))
-		_, ok := s.meta.collections[1]
+		assert.Equal(t, 1, s.meta.collections.Len())
+		_, ok := s.meta.collections.Get(1)
 		assert.True(t, ok)
 	})
 }

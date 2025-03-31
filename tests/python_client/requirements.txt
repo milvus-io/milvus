@@ -15,7 +15,7 @@ pytest-level==0.1.1
 pytest-xdist==2.5.0
 
 pytest-rerunfailures==14.0
-git+https://github.com/Projectplace/pytest-tags
+pytest_tagging==1.6.0
 ndg-httpsclient
 pyopenssl
 pyasn1
@@ -28,8 +28,8 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.5.5rc17
-pymilvus[bulk_writer]==2.5.5rc17
+pymilvus==2.5.6rc6
+pymilvus[bulk_writer]==2.5.6rc6
 
 # for customize config test
 python-benedict==0.24.3

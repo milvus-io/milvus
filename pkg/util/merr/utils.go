@@ -1000,14 +1000,6 @@ func WrapErrMqInternal(err error, msg ...string) error {
 	return err
 }
 
-func WrapErrTooManyConsumers(vchannel string, msg ...string) error {
-	err := wrapFields(ErrTooManyConsumers, value("vchannel", vchannel))
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "->"))
-	}
-	return err
-}
-
 func WrapErrPrivilegeNotAuthenticated(fmt string, args ...any) error {
 	err := errors.Wrapf(ErrPrivilegeNotAuthenticated, fmt, args...)
 	return err
@@ -1226,6 +1218,14 @@ func WrapErrCompactionResult(msg ...string) error {
 
 func WrapErrDataNodeSlotExhausted(msg ...string) error {
 	err := error(ErrDataNodeSlotExhausted)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrIndexNodeSlotExhausted(msg ...string) error {
+	err := error(ErrIndexNodeSlotExhausted)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}

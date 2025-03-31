@@ -29,6 +29,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+const (
+	sparseVectorIndice = "indices"
+	sparseVectorValues = "values"
+)
+
 func WrapTypeErr(expect string, actual string, field *schemapb.FieldSchema) error {
 	return merr.WrapErrImportFailed(
 		fmt.Sprintf("expect '%s' type for field '%s', but got '%s' type",
@@ -139,9 +144,47 @@ func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, field *s
 	case arrow.NULL:
 		// if nullable==true or has set default_value, can use null type
 		return field.GetNullable() || field.GetDefaultValue() != nil
+	case arrow.STRUCT:
+		if field.GetDataType() == schemapb.DataType_SparseFloatVector {
+			valid, _ := IsValidSparseVectorSchema(src)
+			return valid
+		}
+		return false
 	default:
 		return false
 	}
+}
+
+// This method returns two booleans
+// The first boolean value means the arrowType is a valid sparse vector schema
+// The second boolean value: true means the sparse vector is stored as JSON-format string,
+// false means the sparse vector is stored as parquet struct
+func IsValidSparseVectorSchema(arrowType arrow.DataType) (bool, bool) {
+	arrowID := arrowType.ID()
+	if arrowID == arrow.STRUCT {
+		arrType := arrowType.(*arrow.StructType)
+		indicesType, ok1 := arrType.FieldByName(sparseVectorIndice)
+		valuesType, ok2 := arrType.FieldByName(sparseVectorValues)
+		if !ok1 || !ok2 {
+			return false, false
+		}
+
+		// indices can be uint32 list or int64 list
+		// values can be float32 list or float64 list
+		isValidType := func(finger string, expectedType arrow.DataType) bool {
+			return finger == arrow.ListOf(expectedType).Fingerprint()
+		}
+		indicesFinger := indicesType.Type.Fingerprint()
+		valuesFinger := valuesType.Type.Fingerprint()
+		indicesTypeIsOK := (isValidType(indicesFinger, arrow.PrimitiveTypes.Int32) ||
+			isValidType(indicesFinger, arrow.PrimitiveTypes.Uint32) ||
+			isValidType(indicesFinger, arrow.PrimitiveTypes.Int64) ||
+			isValidType(indicesFinger, arrow.PrimitiveTypes.Uint64))
+		valuesTypeIsOK := (isValidType(valuesFinger, arrow.PrimitiveTypes.Float32) ||
+			isValidType(valuesFinger, arrow.PrimitiveTypes.Float64))
+		return indicesTypeIsOK && valuesTypeIsOK, false
+	}
+	return arrowID == arrow.STRING, true
 }
 
 func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.DataType, error) {

@@ -371,7 +371,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	resp := &datapb.GetCollectionStatisticsResponse{
 		Status: merr.Success(),
 	}
-	nums := s.meta.GetNumRowsOfCollection(req.CollectionID)
+	nums := s.meta.GetNumRowsOfCollection(ctx, req.CollectionID)
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
 	log.Info("success to get collection statistics", zap.Any("response", resp))
 	return resp, nil
@@ -395,7 +395,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 	}
 	nums := int64(0)
 	if len(req.GetPartitionIDs()) == 0 {
-		nums = s.meta.GetNumRowsOfCollection(req.CollectionID)
+		nums = s.meta.GetNumRowsOfCollection(ctx, req.CollectionID)
 	}
 	for _, partID := range req.GetPartitionIDs() {
 		num := s.meta.GetNumRowsOfPartition(ctx, req.CollectionID, partID)
@@ -428,16 +428,38 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	}
 	infos := make([]*datapb.SegmentInfo, 0, len(req.GetSegmentIDs()))
 	channelCPs := make(map[string]*msgpb.MsgPosition)
+
+	var getChildrenDelta func(id UniqueID) ([]*datapb.FieldBinlog, error)
+	getChildrenDelta = func(id UniqueID) ([]*datapb.FieldBinlog, error) {
+		children, ok := s.meta.GetCompactionTo(id)
+		// double-check the segment, maybe the segment is being dropped concurrently.
+		if !ok {
+			log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
+			err := merr.WrapErrSegmentNotFound(id)
+			return nil, err
+		}
+		allDeltaLogs := make([]*datapb.FieldBinlog, 0)
+		for _, child := range children {
+			clonedChild := child.Clone()
+			// child segment should decompress binlog path
+			binlog.DecompressBinLog(storage.DeleteBinlog, clonedChild.GetCollectionID(), clonedChild.GetPartitionID(), clonedChild.GetID(), clonedChild.GetDeltalogs())
+			allDeltaLogs = append(allDeltaLogs, clonedChild.GetDeltalogs()...)
+			allChildrenDeltas, err := getChildrenDelta(child.GetID())
+			if err != nil {
+				return nil, err
+			}
+			allDeltaLogs = append(allDeltaLogs, allChildrenDeltas...)
+		}
+
+		return allDeltaLogs, nil
+	}
+
 	for _, id := range req.SegmentIDs {
 		var info *SegmentInfo
 		if req.IncludeUnHealthy {
 			info = s.meta.GetSegment(ctx, id)
-			// TODO: GetCompactionTo should be removed and add into GetSegment method and protected by lock.
-			// Too much modification need to be applied to SegmentInfo, a refactor is needed.
-			children, ok := s.meta.GetCompactionTo(id)
-
 			// info may be not-nil, but ok is false when the segment is being dropped concurrently.
-			if info == nil || !ok {
+			if info == nil {
 				log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
 				err := merr.WrapErrSegmentNotFound(id)
 				resp.Status = merr.Status(err)
@@ -445,13 +467,14 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			}
 
 			clonedInfo := info.Clone()
-			for _, child := range children {
-				clonedChild := child.Clone()
-				// child segment should decompress binlog path
-				binlog.DecompressBinLog(storage.DeleteBinlog, clonedChild.GetCollectionID(), clonedChild.GetPartitionID(), clonedChild.GetID(), clonedChild.GetDeltalogs())
-				clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, clonedChild.GetDeltalogs()...)
-				clonedInfo.DmlPosition = clonedChild.GetDmlPosition()
+			// We should retrieve the deltalog of all child segments,
+			// but due to the compaction constraint based on indexed segment, there will be at most two generations.
+			allChildrenDeltalogs, err := getChildrenDelta(id)
+			if err != nil {
+				resp.Status = merr.Status(err)
+				return resp, nil
 			}
+			clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, allChildrenDeltalogs...)
 			segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
 			infos = append(infos, clonedInfo.SegmentInfo)
 		} else {
@@ -566,6 +589,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
+
+	s.meta.SetLastWrittenTime(req.GetSegmentID())
 	log.Info("SaveBinlogPaths sync segment with meta",
 		zap.Any("binlogs", req.GetField2BinlogPaths()),
 		zap.Any("deltalogs", req.GetDeltalogs()),
@@ -585,8 +610,12 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.flushCh <- req.SegmentID
 
 		// notify compaction
-		err := s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
-			req.GetSegmentID(), req.GetChannel(), false)
+		_, err := s.compactionTrigger.TriggerCompaction(ctx,
+			NewCompactionSignal().
+				WithWaitResult(false).
+				WithCollectionID(req.GetCollectionID()).
+				WithPartitionID(req.GetPartitionID()).
+				WithChannel(req.GetChannel()))
 		if err != nil {
 			log.Warn("failed to trigger single compaction")
 		}
@@ -1155,7 +1184,13 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	if req.MajorCompaction {
 		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction())
 	} else {
-		id, err = s.compactionTrigger.triggerManualCompaction(req.CollectionID)
+		id, err = s.compactionTrigger.TriggerCompaction(ctx, NewCompactionSignal().
+			WithIsForce(true).
+			WithCollectionID(req.GetCollectionID()).
+			WithPartitionID(req.GetPartitionId()).
+			WithChannel(req.GetChannel()).
+			WithSegmentIDs(req.GetSegmentIds()...),
+		)
 	}
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Error(err))
@@ -1404,12 +1439,12 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 	return resp, nil
 }
 
+// Deprecated
 // UpdateSegmentStatistics updates a segment's stats.
 func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	s.updateSegmentStatistics(ctx, req.GetStats())
 	return merr.Success(), nil
 }
 
@@ -1488,10 +1523,9 @@ func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 
 func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeTtMsg) error {
 	var (
-		channel      = ttMsg.GetChannelName()
-		ts           = ttMsg.GetTimestamp()
-		sourceID     = ttMsg.GetBase().GetSourceID()
-		segmentStats = ttMsg.GetSegmentsStats()
+		channel  = ttMsg.GetChannelName()
+		ts       = ttMsg.GetTimestamp()
+		sourceID = ttMsg.GetBase().GetSourceID()
 	)
 
 	physical, _ := tsoutil.ParseTS(ts)
@@ -1515,8 +1549,6 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 	metrics.DataCoordConsumeDataNodeTimeTickLag.
 		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pChannelName).
 		Set(float64(sub))
-
-	s.updateSegmentStatistics(ctx, segmentStats)
 
 	s.segmentManager.ExpireAllocations(ctx, channel, ts)
 

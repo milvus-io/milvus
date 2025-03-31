@@ -81,8 +81,8 @@ func (s *MixCompactionTaskSuite) SetupTest() {
 		TimeoutInSeconds:       10,
 		Type:                   datapb.CompactionType_MixCompaction,
 		Schema:                 s.meta.GetSchema(),
-		BeginLogID:             19530,
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
+		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
 		MaxSize:                64 * 1024 * 1024,
 	}
 
@@ -105,8 +105,8 @@ func (s *MixCompactionTaskSuite) SetupBM25() {
 		TimeoutInSeconds:       10,
 		Type:                   datapb.CompactionType_MixCompaction,
 		Schema:                 s.meta.GetSchema(),
-		BeginLogID:             19530,
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
+		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
 		MaxSize:                64 * 1024 * 1024,
 	}
 
@@ -357,7 +357,7 @@ func (s *MixCompactionTaskSuite) TestSplitMergeEntityExpired() {
 	s.task.partitionID = PartitionID
 	s.task.maxRows = 1000
 
-	compactionSegments, err := s.task.mergeSplit(s.task.ctx, map[int64][]string{s.segWriter.segmentID: lo.Keys(kvs)}, nil)
+	compactionSegments, err := s.task.mergeSplit(s.task.ctx, map[int64][][]string{s.segWriter.segmentID: {lo.Keys(kvs)}}, nil)
 	s.NoError(err)
 	s.Equal(1, len(compactionSegments))
 	s.EqualValues(0, compactionSegments[0].GetNumOfRows())
@@ -410,7 +410,7 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
 			s.task.collectionID = CollectionID
 			s.task.partitionID = PartitionID
 			s.task.maxRows = 1000
-			res, err := s.task.mergeSplit(s.task.ctx, map[int64][]string{s.segWriter.segmentID: insertPaths}, deletePaths)
+			res, err := s.task.mergeSplit(s.task.ctx, map[int64][][]string{s.segWriter.segmentID: {insertPaths}}, deletePaths)
 			s.NoError(err)
 			s.EqualValues(test.expectedRes, len(res))
 			s.EqualValues(test.leftNumRows, res[0].GetNumOfRows())

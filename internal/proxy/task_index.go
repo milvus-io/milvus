@@ -517,6 +517,9 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 
 func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	collName := cit.req.GetCollectionName()
+	if err := validateCollectionName(collName); err != nil {
+		return err
+	}
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, cit.req.GetDbName(), collName)
 	if err != nil {

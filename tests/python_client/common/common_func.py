@@ -3327,3 +3327,13 @@ def gen_unicode_string_batch(nb, string_len: int = 1):
 def gen_unicode_string_array_batch(nb, string_len: int = 1, max_capacity: int = ct.default_max_capacity):
     return [[''.join([gen_unicode_string() for _ in range(min(random.randint(1, string_len), 50))]) for _ in
              range(random.randint(0, max_capacity))] for _ in range(nb)]
+
+
+def iter_insert_list_data(data: list, batch: int, total_len: int):
+    nb_list = [batch for _ in range(int(total_len / batch))]
+    if total_len % batch > 0:
+        nb_list.append(total_len % batch)
+
+    data_obj = [iter(d) for d in data]
+    for n in nb_list:
+        yield [[next(o) for _ in range(n)] for o in data_obj]

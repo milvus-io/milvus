@@ -61,6 +61,8 @@ type taskScheduler struct {
 	allocator                 allocator.Allocator
 	compactionHandler         compactionPlanContext
 
+	slotsMutex sync.RWMutex
+
 	taskStats *expirable.LRU[UniqueID, Task]
 }
 
@@ -125,6 +127,7 @@ func (s *taskScheduler) reloadFromMeta() {
 					State:      segIndex.IndexState,
 					FailReason: segIndex.FailReason,
 				},
+				taskSlot: calculateIndexTaskSlot(segment.getSegmentSize()),
 				req: &workerpb.CreateJobRequest{
 					ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 					BuildID:   segIndex.BuildID,
@@ -170,6 +173,11 @@ func (s *taskScheduler) reloadFromMeta() {
 
 	allStatsTasks := s.meta.statsTaskMeta.GetAllTasks()
 	for taskID, t := range allStatsTasks {
+		segment := s.meta.GetHealthySegment(s.ctx, t.GetSegmentID())
+		taskSlot := int64(0)
+		if segment != nil {
+			taskSlot = calculateStatsTaskSlot(segment.getSegmentSize())
+		}
 		task := &statsTask{
 			taskID:          taskID,
 			segmentID:       t.GetSegmentID(),
@@ -184,6 +192,7 @@ func (s *taskScheduler) reloadFromMeta() {
 				ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 				TaskID:    taskID,
 			},
+			taskSlot:   taskSlot,
 			queueTime:  time.Now(),
 			startTime:  time.Now(),
 			endTime:    time.Now(),
@@ -243,8 +252,8 @@ func (s *taskScheduler) enqueue(task Task) {
 	taskID := task.GetTaskID()
 	_, ok := s.runningTasks.Get(taskID)
 	if !ok {
-		s.pendingTasks.Push(task)
 		task.SetQueueTime(time.Now())
+		s.pendingTasks.Push(task)
 		log.Ctx(s.ctx).Info("taskScheduler enqueue task", zap.Int64("taskID", taskID))
 	}
 }
@@ -278,7 +287,7 @@ func (s *taskScheduler) schedule() {
 	for {
 		select {
 		case <-s.ctx.Done():
-			log.Ctx(s.ctx).Warn("task scheduler ctx done")
+			log.Ctx(s.ctx).Warn("task scheduler ctx done, exit schedule")
 			return
 		case _, ok := <-s.notifyChan:
 			if ok {
@@ -299,7 +308,7 @@ func (s *taskScheduler) checkProcessingTasksLoop() {
 	for {
 		select {
 		case <-s.ctx.Done():
-			log.Ctx(s.ctx).Warn("task scheduler ctx done")
+			log.Ctx(s.ctx).Warn("task scheduler ctx done, exit checkProcessingTasksLoop")
 			return
 		case <-ticker.C:
 			s.checkProcessingTasks()
@@ -356,15 +365,11 @@ func (s *taskScheduler) run() {
 		return
 	}
 
-	// 1. pick an indexNode client
-	nodeSlots := s.nodeManager.QuerySlots()
-	log.Ctx(s.ctx).Info("task scheduler", zap.Int("task num", pendingTaskNum), zap.Any("nodeSlots", nodeSlots))
+	workerSlots := s.nodeManager.QuerySlots()
+	log.Ctx(s.ctx).Info("task scheduler", zap.Int("task num", pendingTaskNum), zap.Any("workerSlots", workerSlots))
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, 100)
 	for {
-		nodeID := pickNode(nodeSlots)
-		if nodeID == -1 {
-			log.Ctx(s.ctx).Debug("pick node failed")
+		if !s.hasAvailableSlots(workerSlots) {
 			break
 		}
 
@@ -373,17 +378,18 @@ func (s *taskScheduler) run() {
 			break
 		}
 
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(task Task, nodeID int64) {
-			defer wg.Done()
-			defer func() {
-				<-sem
-			}()
+		taskSlot := task.GetTaskSlot()
+		nodeID := s.pickNode(workerSlots, taskSlot)
 
-			s.taskLock.Lock(task.GetTaskID())
-			s.process(task, nodeID)
-			s.taskLock.Unlock(task.GetTaskID())
+		wg.Add(1)
+		go func(task Task, nodeID UniqueID) {
+			defer wg.Done()
+
+			if nodeID != -1 {
+				s.taskLock.Lock(task.GetTaskID())
+				s.process(task, nodeID)
+				s.taskLock.Unlock(task.GetTaskID())
+			}
 
 			switch task.GetState() {
 			case indexpb.JobState_JobStateNone:
@@ -401,12 +407,9 @@ func (s *taskScheduler) run() {
 }
 
 func (s *taskScheduler) process(task Task, nodeID int64) bool {
-	if !task.CheckTaskHealthy(s.meta) {
-		task.SetState(indexpb.JobState_JobStateNone, "task not healthy")
-		return true
-	}
 	log.Ctx(s.ctx).Info("task is processing", zap.Int64("taskID", task.GetTaskID()),
-		zap.String("task type", task.GetTaskType()), zap.String("state", task.GetState().String()))
+		zap.Int64("nodeID", nodeID), zap.String("task type", task.GetTaskType()),
+		zap.String("state", task.GetState().String()))
 
 	switch task.GetState() {
 	case indexpb.JobState_JobStateNone:
@@ -427,7 +430,7 @@ func (s *taskScheduler) collectTaskMetrics() {
 	for {
 		select {
 		case <-s.ctx.Done():
-			log.Warn("task scheduler context done")
+			log.Warn("task scheduler context done, exit collectTaskMetrics")
 			return
 		case <-ticker.C:
 			maxTaskQueueingTime := make(map[string]int64)
@@ -508,7 +511,6 @@ func (s *taskScheduler) processInit(task Task, nodeID int64) bool {
 	if !checkPass {
 		return true
 	}
-
 	client, exist := s.nodeManager.GetClientByID(nodeID)
 	if !exist || client == nil {
 		log.Ctx(s.ctx).Debug("get indexnode client failed", zap.Int64("nodeID", nodeID))
@@ -619,12 +621,39 @@ func (s *taskScheduler) processInProgress(task Task) bool {
 	return false
 }
 
-func pickNode(nodeSlots map[int64]int64) int64 {
-	for w, slots := range nodeSlots {
-		if slots >= 1 {
-			nodeSlots[w] = slots - 1
-			return w
+func (s *taskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, taskSlot int64) int64 {
+	s.slotsMutex.Lock()
+	defer s.slotsMutex.Unlock()
+
+	var fallbackNodeID int64 = -1
+	var maxAvailable int64 = -1
+
+	for nodeID, ws := range workerSlots {
+		if ws.AvailableSlots >= taskSlot {
+			ws.AvailableSlots -= taskSlot
+			return nodeID
+		}
+		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
+			maxAvailable = ws.AvailableSlots
+			fallbackNodeID = nodeID
 		}
 	}
+
+	if fallbackNodeID != -1 {
+		workerSlots[fallbackNodeID].AvailableSlots = 0
+		return fallbackNodeID
+	}
 	return -1
+}
+
+func (s *taskScheduler) hasAvailableSlots(workerSlots map[int64]*session.WorkerSlots) bool {
+	s.slotsMutex.RLock()
+	defer s.slotsMutex.RUnlock()
+
+	for _, ws := range workerSlots {
+		if ws.AvailableSlots > 0 {
+			return true
+		}
+	}
+	return false
 }

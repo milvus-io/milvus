@@ -105,9 +105,6 @@ extraConfigFiles:
         interval: 1
       scheduler:
         interval: 100
-    indexNode:
-      scheduler:
-        buildParallel: 4
     queryNode:
       mmap:
         vectorField: true

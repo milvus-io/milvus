@@ -322,3 +322,134 @@ func (mc *MilvusClient) HybridSearch(ctx context.Context, option client.HybridSe
 	resultSets, err := mc.mClient.HybridSearch(ctx, option, callOptions...)
 	return resultSets, err
 }
+
+// ListResourceGroups list all resource groups
+func (mc *MilvusClient) ListResourceGroups(ctx context.Context, option client.ListResourceGroupsOption, callOptions ...grpc.CallOption) ([]string, error) {
+	resourceGroups, err := mc.mClient.ListResourceGroups(ctx, option, callOptions...)
+	return resourceGroups, err
+}
+
+// CreateResourceGroup create resource group
+func (mc *MilvusClient) CreateResourceGroup(ctx context.Context, option client.CreateResourceGroupOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.CreateResourceGroup(ctx, option, callOptions...)
+	return err
+}
+
+// DropResourceGroup drop resource group
+func (mc *MilvusClient) DropResourceGroup(ctx context.Context, option client.DropResourceGroupOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.DropResourceGroup(ctx, option, callOptions...)
+	return err
+}
+
+// DescribeResourceGroup describe resource group
+func (mc *MilvusClient) DescribeResourceGroup(ctx context.Context, option client.DescribeResourceGroupOption, callOptions ...grpc.CallOption) (*entity.ResourceGroup, error) {
+	resourceGroup, err := mc.mClient.DescribeResourceGroup(ctx, option, callOptions...)
+	return resourceGroup, err
+}
+
+// UpdateResourceGroup update resource group
+func (mc *MilvusClient) UpdateResourceGroup(ctx context.Context, option client.UpdateResourceGroupOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.UpdateResourceGroup(ctx, option, callOptions...)
+	return err
+}
+
+// TransferReplica transfer replica
+func (mc *MilvusClient) TransferReplica(ctx context.Context, option client.TransferReplicaOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.TransferReplica(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) CreateUser(ctx context.Context, option client.CreateUserOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.CreateUser(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) UpdatePassword(ctx context.Context, option client.UpdatePasswordOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.UpdatePassword(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) DropUser(ctx context.Context, option client.DropUserOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.DropUser(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) ListUsers(ctx context.Context, option client.ListUserOption, callOptions ...grpc.CallOption) ([]string, error) {
+	users, err := mc.mClient.ListUsers(ctx, option, callOptions...)
+	return users, err
+}
+
+func (mc *MilvusClient) DescribeUser(ctx context.Context, option client.DescribeUserOption, callOptions ...grpc.CallOption) (*entity.User, error) {
+	user, err := mc.mClient.DescribeUser(ctx, option, callOptions...)
+	return user, err
+}
+
+func (mc *MilvusClient) ListRoles(ctx context.Context, option client.ListRoleOption, callOptions ...grpc.CallOption) ([]string, error) {
+	roles, err := mc.mClient.ListRoles(ctx, option, callOptions...)
+	return roles, err
+}
+
+func (mc *MilvusClient) CreateRole(ctx context.Context, option client.CreateRoleOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.CreateRole(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) GrantRole(ctx context.Context, option client.GrantRoleOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.GrantRole(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) RevokeRole(ctx context.Context, option client.RevokeRoleOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.RevokeRole(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) DropRole(ctx context.Context, option client.DropRoleOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.DropRole(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) DescribeRole(ctx context.Context, option client.DescribeRoleOption, callOptions ...grpc.CallOption) (*entity.Role, error) {
+	role, err := mc.mClient.DescribeRole(ctx, option, callOptions...)
+	return role, err
+}
+
+func (mc *MilvusClient) GrantPrivilege(ctx context.Context, option client.GrantPrivilegeOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.GrantPrivilege(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) RevokePrivilege(ctx context.Context, option client.RevokePrivilegeOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.RevokePrivilege(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) GrantPrivilegeV2(ctx context.Context, option client.GrantPrivilegeV2Option, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.GrantPrivilegeV2(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) RevokePrivilegeV2(ctx context.Context, option client.RevokePrivilegeV2Option, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.RevokePrivilegeV2(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) CreatePrivilegeGroup(ctx context.Context, option client.CreatePrivilegeGroupOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.CreatePrivilegeGroup(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) DropPrivilegeGroup(ctx context.Context, option client.DropPrivilegeGroupOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.DropPrivilegeGroup(ctx, option, callOptions...)
+	return err
+}
+
+func (mc *MilvusClient) ListPrivilegeGroups(ctx context.Context, option client.ListPrivilegeGroupsOption, callOptions ...grpc.CallOption) ([]*entity.PrivilegeGroup, error) {
+	privilegeGroups, err := mc.mClient.ListPrivilegeGroups(ctx, option, callOptions...)
+	return privilegeGroups, err
+}
+
+func (mc *MilvusClient) OperatePrivilegeGroup(ctx context.Context, option client.OperatePrivilegeGroupOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.OperatePrivilegeGroup(ctx, option, callOptions...)
+	return err
+}

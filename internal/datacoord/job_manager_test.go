@@ -41,38 +41,39 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 
-	mt := &meta{
-		collections: map[UniqueID]*collectionInfo{
-			1: {
-				Schema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(1, &collectionInfo{
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "pk",
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  101,
+					Name:     "var",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
 						{
-							FieldID:  100,
-							Name:     "pk",
-							DataType: schemapb.DataType_Int64,
+							Key: "enable_match", Value: "true",
 						},
 						{
-							FieldID:  101,
-							Name:     "var",
-							DataType: schemapb.DataType_VarChar,
-							TypeParams: []*commonpb.KeyValuePair{
-								{
-									Key: "enable_match", Value: "true",
-								},
-								{
-									Key: "enable_analyzer", Value: "true",
-								},
-							},
-						},
-						{
-							FieldID:  102,
-							Name:     "json",
-							DataType: schemapb.DataType_JSON,
+							Key: "enable_analyzer", Value: "true",
 						},
 					},
 				},
+				{
+					FieldID:  102,
+					Name:     "json",
+					DataType: schemapb.DataType_JSON,
+				},
 			},
 		},
+	})
+
+	mt := &meta{
+		collections: collections,
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
 				10: {

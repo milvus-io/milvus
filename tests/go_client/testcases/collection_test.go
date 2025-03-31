@@ -23,7 +23,7 @@ var prefix = "collection"
 func TestCreateCollection(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	for _, collectionFieldsType := range []hp.CollectionFieldsType{hp.Int64Vec, hp.VarcharBinary, hp.Int64VarcharSparseVec, hp.AllFields} {
 		fields := hp.FieldsFact.GenFieldsForCollection(collectionFieldsType, hp.TNewFieldsOption())
 		schema := hp.GenSchema(hp.TNewSchemaOption().TWithFields(fields))
@@ -46,7 +46,7 @@ func TestCreateCollection(t *testing.T) {
 func TestCreateCollectionFast(t *testing.T) {
 	// test collection property mmap
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection option: WithConsistencyLevel Strong,
 	collName := common.GenRandomString("alter", 6)
@@ -76,7 +76,7 @@ func TestCreateCollectionFastOption(t *testing.T) {
 	// test create collection fast with option: ConsistencyLevel, varcharPk, indexOption
 	// Collection AutoID not works !!!, please set it on the field side~
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection option: WithConsistencyLevel Strong,
 	collName := common.GenRandomString("alter", 6)
@@ -112,7 +112,7 @@ func TestCreateCollectionFastOption(t *testing.T) {
 
 func TestCreateAutoIdCollectionField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)
@@ -140,7 +140,7 @@ func TestCreateAutoIdCollectionField(t *testing.T) {
 // create collection and specify shard num
 func TestCreateCollectionShards(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)
@@ -165,7 +165,7 @@ func TestCreateCollectionShards(t *testing.T) {
 func TestCreateAutoIdCollectionSchema(t *testing.T) {
 	t.Skip("waiting for valid AutoId from schema params")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
@@ -194,7 +194,7 @@ func TestCreateAutoIdCollectionSchema(t *testing.T) {
 func TestCreateAutoIdCollection(t *testing.T) {
 	t.Skip("https://github.com/milvus-io/milvus/issues/39523")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
@@ -221,7 +221,7 @@ func TestCreateAutoIdCollection(t *testing.T) {
 
 func TestCreateJsonCollection(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
@@ -241,7 +241,7 @@ func TestCreateJsonCollection(t *testing.T) {
 
 func TestCreateArrayCollections(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
@@ -270,7 +270,7 @@ func TestCreateArrayCollections(t *testing.T) {
 // test create collection with partition key not supported field type
 func TestCreateCollectionPartitionKey(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
@@ -303,7 +303,7 @@ func TestCreateCollectionPartitionKey(t *testing.T) {
 func TestCreateCollectionPartitionKeyNumPartition(t *testing.T) {
 	t.Skip("Waiting for WithPartitionNum")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
@@ -326,7 +326,7 @@ func TestCreateCollectionPartitionKeyNumPartition(t *testing.T) {
 
 func TestCreateCollectionDynamicSchema(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
@@ -358,7 +358,7 @@ func TestCreateCollectionDynamicSchema(t *testing.T) {
 func TestCreateCollectionDynamic(t *testing.T) {
 	t.Skip("waiting for dynamicField alignment")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
@@ -390,7 +390,7 @@ func TestCreateCollectionDynamic(t *testing.T) {
 
 func TestCreateCollectionAllFields(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 	schema := entity.NewSchema().WithName(collName)
@@ -413,7 +413,7 @@ func TestCreateCollectionAllFields(t *testing.T) {
 
 func TestCreateCollectionSparseVector(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 	sparseVecField := entity.NewField().WithName(common.DefaultSparseVecFieldName).WithDataType(entity.FieldTypeSparseVector)
@@ -434,7 +434,7 @@ func TestCreateCollectionWithValidFieldName(t *testing.T) {
 	t.Parallel()
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection with valid field name
 	for _, name := range common.GenValidNames() {
@@ -469,7 +469,7 @@ func TestCreateCollectionWithValidName(t *testing.T) {
 	t.Parallel()
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, name := range common.GenValidNames() {
 		schema := genDefaultSchema().WithName(name)
@@ -490,7 +490,7 @@ func TestCreateCollectionWithInvalidFieldName(t *testing.T) {
 	t.Parallel()
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection with invalid field name
 	for _, invalidName := range common.GenInvalidNames() {
@@ -514,7 +514,7 @@ func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 	t.Parallel()
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection and schema no name
 	schema := genDefaultSchema()
@@ -536,7 +536,7 @@ func TestCreateCollectionWithInvalidCollectionName(t *testing.T) {
 // create collection missing pk field or vector field
 func TestCreateCollectionInvalidFields(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	type invalidFieldsStruct struct {
 		fields []*entity.Field
@@ -572,7 +572,7 @@ func TestCreateCollectionInvalidFields(t *testing.T) {
 // create autoID or not collection with non-int64 and non-varchar field
 func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection with autoID true or not
 	collName := common.GenRandomString(prefix, 6)
@@ -592,7 +592,7 @@ func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
 // test create collection with duplicate field name
 func TestCreateCollectionDuplicateField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// duplicate field
 	pkField := entity.NewField().WithName("id").WithDataType(entity.FieldTypeVarChar).WithIsPrimaryKey(true)
@@ -614,7 +614,7 @@ func TestCreateCollectionDuplicateField(t *testing.T) {
 // test create collection with partition key not supported field type
 func TestCreateCollectionInvalidPartitionKeyType(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
@@ -635,7 +635,7 @@ func TestCreateCollectionInvalidPartitionKeyType(t *testing.T) {
 // partition key field cannot be primary field, d can only be one partition key field
 func TestCreateCollectionPartitionKeyPk(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsPartitionKey(true)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
@@ -649,7 +649,7 @@ func TestCreateCollectionPartitionKeyPk(t *testing.T) {
 // can only be one partition key field
 func TestCreateCollectionPartitionKeyNum(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
@@ -666,7 +666,7 @@ func TestCreateCollectionPartitionKeyNum(t *testing.T) {
 func TestPartitionKeyInvalidNumPartition(t *testing.T) {
 	t.Skip("Waiting for num partition")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// prepare field and schema
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
@@ -693,7 +693,7 @@ func TestPartitionKeyInvalidNumPartition(t *testing.T) {
 // test create collection with multi auto id
 func TestCreateCollectionMultiAutoId(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 	schema := entity.NewSchema().WithField(
@@ -708,7 +708,7 @@ func TestCreateCollectionMultiAutoId(t *testing.T) {
 // test create collection with different autoId between pk field and schema
 func TestCreateCollectionInconsistentAutoId(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, autoId := range []bool{true, false} {
 		log.Debug("TestCreateCollectionInconsistentAutoId", zap.Bool("autoId", autoId))
@@ -738,7 +738,7 @@ func TestCreateCollectionInconsistentAutoId(t *testing.T) {
 // create collection with field or schema description
 func TestCreateCollectionDescription(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// gen field with description
 	pkDesc := "This is pk field"
@@ -781,7 +781,7 @@ func TestCreateBinaryCollectionInvalidDim(t *testing.T) {
 	}
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, invalidDim := range invalidDims {
 		log.Debug("TestCreateBinaryCollectionInvalidDim", zap.Int64("dim", invalidDim.dim))
@@ -816,7 +816,7 @@ func TestCreateFloatCollectionInvalidDim(t *testing.T) {
 	}
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	for _, vecType := range []entity.FieldType{entity.FieldTypeFloatVector, entity.FieldTypeFloat16Vector, entity.FieldTypeBFloat16Vector} {
 		for _, invalidDim := range invalidDims {
@@ -837,7 +837,7 @@ func TestCreateFloatCollectionInvalidDim(t *testing.T) {
 
 func TestCreateVectorWithoutDim(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collName := common.GenRandomString(prefix, 6)
 
 	vecFieldName := "vec"
@@ -853,7 +853,7 @@ func TestCreateVectorWithoutDim(t *testing.T) {
 // specify dim for sparse vector -> error
 func TestCreateCollectionSparseVectorWithDim(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	collName := common.GenRandomString(prefix, 6)
 
 	schema := entity.NewSchema().WithField(
@@ -868,7 +868,7 @@ func TestCreateCollectionSparseVectorWithDim(t *testing.T) {
 
 func TestCreateArrayFieldInvalidCapacity(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 
@@ -892,7 +892,7 @@ func TestCreateArrayFieldInvalidCapacity(t *testing.T) {
 // test create collection varchar array with invalid max length
 func TestCreateVarcharArrayInvalidLength(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 
@@ -915,7 +915,7 @@ func TestCreateVarcharArrayInvalidLength(t *testing.T) {
 // test create collection varchar array with invalid max length
 func TestCreateVarcharInvalidLength(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 
@@ -936,7 +936,7 @@ func TestCreateVarcharInvalidLength(t *testing.T) {
 
 func TestCreateArrayNotSupportedFieldType(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 	// not supported ElementType: Array, Json, FloatVector, BinaryVector
@@ -953,7 +953,7 @@ func TestCreateArrayNotSupportedFieldType(t *testing.T) {
 // the num of vector fields > default limit=4
 func TestCreateMultiVectorExceed(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
@@ -969,7 +969,7 @@ func TestCreateMultiVectorExceed(t *testing.T) {
 // func TestCreateCollection(t *testing.T) {}
 func TestCreateCollectionInvalidShards(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 	int64Field := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)
@@ -984,7 +984,7 @@ func TestCreateCollectionInvalidShards(t *testing.T) {
 
 func TestCreateCollectionInvalid(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	collName := common.GenRandomString(prefix, 6)
 	type mSchemaErr struct {
@@ -1008,7 +1008,7 @@ func TestCreateCollectionInvalid(t *testing.T) {
 // test rename collection
 func TestRenameCollection(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -1044,7 +1044,7 @@ func TestRenameCollection(t *testing.T) {
 // There are collections with the same name in different db. Rename one of them.
 func TestRenameCollectionDb(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	collectionName := common.GenRandomString("re", 6)
@@ -1075,7 +1075,7 @@ func TestRenameCollectionDb(t *testing.T) {
 func TestRenameCollectionInvalidName(t *testing.T) {
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	collectionName := common.GenRandomString("re", 6)
@@ -1096,7 +1096,7 @@ func TestRenameCollectionInvalidName(t *testing.T) {
 func TestRenameCollectionAdvanced(t *testing.T) {
 	// connect
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create 2 collections
 	name1 := common.GenRandomString("name1", 6)
@@ -1121,7 +1121,7 @@ func TestRenameCollectionAdvanced(t *testing.T) {
 func TestCollectionPropertyTtl(t *testing.T) {
 	// test collection property ttl
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
@@ -1154,7 +1154,7 @@ func TestCollectionPropertyTtl(t *testing.T) {
 func TestCollectionWithPropertyAlterMmap(t *testing.T) {
 	// test collection property mmap
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec),
@@ -1183,7 +1183,7 @@ func TestCollectionWithPropertyAlterMmap(t *testing.T) {
 func TestCollectionPropertyMmap(t *testing.T) {
 	// test collection property mmap
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec),
@@ -1218,7 +1218,7 @@ func TestCollectionPropertyMmap(t *testing.T) {
 func TestCollectionFakeProperties(t *testing.T) {
 	// test collection property mmap
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection with fake property
 	collName := common.GenRandomString("alter", 6)

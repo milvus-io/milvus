@@ -1,6 +1,8 @@
 cluster:
   enabled: true
 common:
+  enabledJSONKeyStats: true
+  enabledGrowingSegmentJSONKeyStats: true
   security:
     authorizationEnabled: false
 dataCoordinator:

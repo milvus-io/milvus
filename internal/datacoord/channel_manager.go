@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -196,18 +197,7 @@ func (m *ChannelManagerImpl) AddNode(nodeID UniqueID) error {
 	log.Info("register node", zap.Int64("registered node", nodeID))
 
 	m.store.AddNode(nodeID)
-	updates := m.assignPolicy(m.store.GetNodesChannels(), m.store.GetBufferChannelInfo(), m.legacyNodes.Collect())
-
-	if updates == nil {
-		log.Info("register node with no reassignment", zap.Int64("registered node", nodeID))
-		return nil
-	}
-
-	err := m.execute(updates)
-	if err != nil {
-		log.Warn("fail to update channel operation updates into meta", zap.Error(err))
-	}
-	return err
+	return nil
 }
 
 // Release writes ToRelease channel watch states for a channel
@@ -545,7 +535,15 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 			zap.Int("total operation count", len(nodeAssign.Channels)),
 			zap.Strings("channel names", chNames),
 		)
-		for _, ch := range nodeAssign.Channels {
+
+		// Sort watch tasks by seek position to minimize lag between
+		// positions during batch subscription in the dispatcher.
+		channels := lo.Values(nodeAssign.Channels)
+		sort.Slice(channels, func(i, j int) bool {
+			return channels[i].GetWatchInfo().GetVchan().GetSeekPosition().GetTimestamp() <
+				channels[j].GetWatchInfo().GetVchan().GetSeekPosition().GetTimestamp()
+		})
+		for _, ch := range channels {
 			innerCh := ch
 			tmpWatchInfo := typeutil.Clone(innerCh.GetWatchInfo())
 			tmpWatchInfo.Vchan = m.h.GetDataVChanPositions(innerCh, allPartitionID)

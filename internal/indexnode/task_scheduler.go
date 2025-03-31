@@ -22,8 +22,10 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -44,6 +46,8 @@ type TaskQueue interface {
 	PopActiveTask(tName string) task
 	Enqueue(t task) error
 	GetTaskNum() (int, int)
+	GetUsingSlot() int64
+	GetActiveSlot() int64
 }
 
 // BaseTaskQueue is a basic instance of TaskQueue.
@@ -57,6 +61,7 @@ type IndexTaskQueue struct {
 	maxTaskNum int64
 
 	utBufChan chan struct{} // to block scheduler
+	usingSlot atomic.Int64
 
 	sched *TaskScheduler
 }
@@ -86,6 +91,21 @@ func (queue *IndexTaskQueue) addUnissuedTask(t task) error {
 	default:
 	}
 	return nil
+}
+
+func (queue *IndexTaskQueue) GetUsingSlot() int64 {
+	return queue.usingSlot.Load()
+}
+
+func (queue *IndexTaskQueue) GetActiveSlot() int64 {
+	queue.atLock.Lock()
+	defer queue.atLock.Unlock()
+
+	slots := int64(0)
+	for _, t := range queue.activeTasks {
+		slots += t.GetSlot()
+	}
+	return slots
 }
 
 // PopUnissuedTask pops a task from tasks queue.
@@ -125,6 +145,7 @@ func (queue *IndexTaskQueue) PopActiveTask(tName string) task {
 	t, ok := queue.activeTasks[tName]
 	if ok {
 		delete(queue.activeTasks, tName)
+		queue.usingSlot.Sub(t.GetSlot())
 		return t
 	}
 	log.Ctx(queue.sched.ctx).Debug("IndexNode task was not found in the active task list", zap.String("TaskName", tName))
@@ -137,7 +158,12 @@ func (queue *IndexTaskQueue) Enqueue(t task) error {
 	if err != nil {
 		return err
 	}
-	return queue.addUnissuedTask(t)
+	if err = queue.addUnissuedTask(t); err != nil {
+		return err
+	}
+
+	queue.usingSlot.Add(t.GetSlot())
+	return nil
 }
 
 func (queue *IndexTaskQueue) GetTaskNum() (int, int) {
@@ -166,6 +192,8 @@ func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 
 		utBufChan: make(chan struct{}, 1024),
 		sched:     sched,
+
+		usingSlot: atomic.Int64{},
 	}
 }
 
@@ -173,35 +201,21 @@ func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 type TaskScheduler struct {
 	TaskQueue TaskQueue
 
-	buildParallel int
-	wg            sync.WaitGroup
-	ctx           context.Context
-	cancel        context.CancelFunc
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewTaskScheduler creates a new task scheduler of indexing tasks.
 func NewTaskScheduler(ctx context.Context) *TaskScheduler {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
-		ctx:           ctx1,
-		cancel:        cancel,
-		buildParallel: Params.IndexNodeCfg.BuildParallel.GetAsInt(),
+		ctx:    ctx1,
+		cancel: cancel,
 	}
 	s.TaskQueue = NewIndexBuildTaskQueue(s)
 
 	return s
-}
-
-func (sched *TaskScheduler) scheduleIndexBuildTask() []task {
-	ret := make([]task, 0)
-	for i := 0; i < sched.buildParallel; i++ {
-		t := sched.TaskQueue.PopUnissuedTask()
-		if t == nil {
-			return ret
-		}
-		ret = append(ret, t)
-	}
-	return ret
 }
 
 func getStateFromError(err error) indexpb.JobState {
@@ -256,16 +270,18 @@ func (sched *TaskScheduler) indexBuildLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.TaskQueue.utChan():
-			tasks := sched.scheduleIndexBuildTask()
-			var wg sync.WaitGroup
-			for _, t := range tasks {
-				wg.Add(1)
-				go func(group *sync.WaitGroup, t task) {
-					defer group.Done()
-					sched.processTask(t, sched.TaskQueue)
-				}(&wg, t)
+			t := sched.TaskQueue.PopUnissuedTask()
+			for {
+				totalSlot := calculateNodeSlots()
+				availableSlot := totalSlot - sched.TaskQueue.GetActiveSlot()
+				if availableSlot >= t.GetSlot() || totalSlot == availableSlot {
+					go func(t task) {
+						sched.processTask(t, sched.TaskQueue)
+					}(t)
+					break
+				}
+				time.Sleep(time.Millisecond * 50)
 			}
-			wg.Wait()
 		}
 	}
 }
