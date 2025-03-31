@@ -18,8 +18,9 @@ package grpcmixcoordclient
 
 import (
 	"context"
-	"errors"
 	"fmt"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
