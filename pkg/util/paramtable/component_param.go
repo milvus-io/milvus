@@ -84,6 +84,7 @@ type ComponentParam struct {
 	RoleCfg        roleConfig
 	RbacConfig     rbacConfig
 	StreamingCfg   streamingConfig
+	FunctionCfg    functionConfig
 
 	InternalTLSCfg InternalTLSConfig
 
@@ -138,6 +139,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.RbacConfig.init(bt)
 	p.GpuConfig.init(bt)
 	p.KnowhereConfig.init(bt)
+	p.FunctionCfg.init(bt)
 
 	p.InternalTLSCfg.Init(bt)
 
@@ -2717,8 +2719,8 @@ type queryNodeConfig struct {
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
-	EnableSegmentPrune                      ParamItem `refreshable:"false"`
-	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
+	EnableSegmentPrune                      ParamItem `refreshable:"true"`
+	DefaultSegmentFilterRatio               ParamItem `refreshable:"true"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
 	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`

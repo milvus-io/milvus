@@ -500,6 +500,17 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForArray(OffsetVector* input = nullptr);
 
+    template <typename T>
+    bool
+    CanUseIndex() {
+        if (is_index_mode_ && IndexHasRawData<T>()) {
+            use_index_ = true;
+            return true;
+        }
+        use_index_ = false;
+        return false;
+    }
+
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;
     SingleElement right_operand_arg_;

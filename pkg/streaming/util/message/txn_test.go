@@ -87,4 +87,6 @@ func TestAsImmutableTxnMessage(t *testing.T) {
 	assert.NotNil(t, txnMsg.Commit())
 	assert.Equal(t, 1, txnMsg.Size())
 	assert.NotNil(t, txnMsg.Begin())
+	assert.NotNil(t, message.AsImmutableTxnMessage(txnMsg))
+	assert.Nil(t, message.AsImmutableTxnMessage(beginMsg))
 }

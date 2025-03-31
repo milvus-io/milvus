@@ -211,7 +211,12 @@ func GenText(lang string) string {
 		object = chineseObjects[rand.Intn(len(chineseObjects))]
 		return fmt.Sprintf("%s%s%s", topic, verb, object)
 	default:
-		return "Unsupported language"
+		// Fallback to en for unsupported languages
+		log.Warn("Unsupported language, fallback to English", zap.String("language", lang))
+		topic = englishTopics[rand.Intn(len(englishTopics))]
+		verb = englishVerbs[rand.Intn(len(englishVerbs))]
+		object = englishObjects[rand.Intn(len(englishObjects))]
+		return fmt.Sprintf("%s %s %s", topic, verb, object)
 	}
 }
 

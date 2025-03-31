@@ -52,13 +52,6 @@ type ResourceKey struct {
 	Key    string
 }
 
-func (rk *ResourceKey) IntoResourceKey() *messagespb.ResourceKey {
-	return &messagespb.ResourceKey{
-		Domain: rk.Domain,
-		Key:    rk.Key,
-	}
-}
-
 // NewImportJobIDResourceKey creates a key for import job resource.
 func NewImportJobIDResourceKey(importJobID int64) ResourceKey {
 	return ResourceKey{

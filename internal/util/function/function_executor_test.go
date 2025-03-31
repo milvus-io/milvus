@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestFunctionExecutor(t *testing.T) {
@@ -44,6 +45,10 @@ func TestFunctionExecutor(t *testing.T) {
 
 type FunctionExecutorSuite struct {
 	suite.Suite
+}
+
+func (s *FunctionExecutorSuite) SetupTest() {
+	paramtable.Init()
 }
 
 func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSchema {

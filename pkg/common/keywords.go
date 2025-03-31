@@ -29,4 +29,10 @@ var FieldNameKeywords = map[string]struct{}{
 	"false":              {},
 	"False":              {},
 	"FALSE":              {},
+	"text_match":         {},
+	"TEXT_MATCH":         {},
+	"phrase_match":       {},
+	"PHRASE_MATCH":       {},
+	"random_sample":      {},
+	"RANDOM_SAMPLE":      {},
 }

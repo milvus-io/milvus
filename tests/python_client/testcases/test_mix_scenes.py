@@ -34,7 +34,7 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
         self._connect(self)
 
         # init params
-        self.primary_field, self.nb = "int64_pk", 3000
+        self.primary_field, self.nb = "int64_pk", 10000
 
         # create a collection with fields
         self.collection_wrap.init_collection(
@@ -59,7 +59,8 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
-        self.collection_wrap.insert(data=list(self.insert_data.values()), check_task=CheckTasks.check_insert_result)
+        for d in cf.iter_insert_list_data(list(self.insert_data.values()), batch=3000, total_len=self.nb):
+            self.collection_wrap.insert(data=d, check_task=CheckTasks.check_insert_result)
 
         # flush collection, segment sealed
         self.collection_wrap.flush()
@@ -278,7 +279,7 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         self._connect(self)
 
         # init params
-        self.primary_field, self.nb = "int64_pk", 3000
+        self.primary_field, self.nb = "int64_pk", 10000
         self.all_fields = [self.primary_field, DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
                            DataType.SPARSE_FLOAT_VECTOR.name, DataType.BINARY_VECTOR.name,
                            'VARCHAR_1', *self().all_scalar_fields]
@@ -306,7 +307,8 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
-        self.collection_wrap.insert(data=list(self.insert_data.values()), check_task=CheckTasks.check_insert_result)
+        for d in cf.iter_insert_list_data(list(self.insert_data.values()), batch=3000, total_len=self.nb):
+            self.collection_wrap.insert(data=d, check_task=CheckTasks.check_insert_result)
 
         # flush collection, segment sealed
         self.collection_wrap.flush()
@@ -613,7 +615,7 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         self._connect(self)
 
         # init params
-        self.primary_field, self.nb = "int64_pk", 3000
+        self.primary_field, self.nb = "int64_pk", 10000
         self.all_fields = [self.primary_field, DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
                            DataType.SPARSE_FLOAT_VECTOR.name, DataType.BINARY_VECTOR.name,
                            'VARCHAR_1', *self().all_scalar_fields]
@@ -641,7 +643,8 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
-        self.collection_wrap.insert(data=list(self.insert_data.values()), check_task=CheckTasks.check_insert_result)
+        for d in cf.iter_insert_list_data(list(self.insert_data.values()), batch=3000, total_len=self.nb):
+            self.collection_wrap.insert(data=d, check_task=CheckTasks.check_insert_result)
 
         # flush collection, segment sealed
         self.collection_wrap.flush()
@@ -914,7 +917,7 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         self._connect(self)
 
         # init params
-        self.primary_field, self.nb = "int64_pk", 3000
+        self.primary_field, self.nb = "int64_pk", 10000
         self.all_fields = [self.primary_field, DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
                            DataType.SPARSE_FLOAT_VECTOR.name, DataType.BINARY_VECTOR.name,
                            "VARCHAR_1", *self().all_scalar_fields]
@@ -942,7 +945,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_data(self):
-        self.collection_wrap.insert(data=list(self.insert_data.values()), check_task=CheckTasks.check_insert_result)
+        for d in cf.iter_insert_list_data(list(self.insert_data.values()), batch=3000, total_len=self.nb):
+            self.collection_wrap.insert(data=d, check_task=CheckTasks.check_insert_result)
 
         # flush collection, segment sealed
         self.collection_wrap.flush()

@@ -2822,6 +2822,82 @@ class TestCollectionSearch(TestcaseBase):
             for hits in search_res:
                 ids = hits.ids
                 assert set(ids).issubset(filter_ids_set)
+                 # 6. search again with expression template and hint
+            search_params = default_search_params.copy()
+            search_params.update({"hints": "iterative_filter"})
+            search_res, _ = collection_w.search(search_vectors[:default_nq], default_search_field,
+                                                search_params,
+                                                limit=nb, expr=expr, expr_params=expr_params,
+                                                check_task=CheckTasks.check_search_results,
+                                                check_items={"nq": default_nq,
+                                                             "ids": insert_ids,
+                                                             "limit": min(nb, len(filter_ids))})
+            filter_ids_set = set(filter_ids)
+            for hits in search_res:
+                ids = hits.ids
+                log.info("binbin2")
+                log.info(ids)
+                log.info(filter_ids_set)
+                assert set(ids).issubset(filter_ids_set)
+            # 7. create json index
+            default_json_path_index = {"index_type": "INVERTED", "params": {"json_cast_type": DataType.DOUBLE,
+                                                                            "json_path": f"{ct.default_json_field_name}['number']"}}
+            collection_w.create_index(ct.default_json_field_name, default_json_path_index, index_name = f"{ct.default_json_field_name}_0")
+            default_json_path_index = {"index_type": "INVERTED", "params": {"json_cast_type": DataType.DOUBLE,
+                                                                            "json_path": f"{ct.default_json_field_name}['float']"}}
+            collection_w.create_index(ct.default_json_field_name, default_json_path_index, index_name = f"{ct.default_json_field_name}_1")
+            # 8. release and load to make sure the new index is loaded
+            collection_w.release()
+            collection_w.load()
+            # 9. search expressions after json path index
+            expr = expressions[0].replace("&&", "and").replace("||", "or")
+            search_res, _ = collection_w.search(search_vectors[:default_nq], default_search_field,
+                                                default_search_params,
+                                                limit=nb, expr=expr,
+                                                check_task=CheckTasks.check_search_results,
+                                                check_items={"nq": default_nq,
+                                                             "ids": insert_ids,
+                                                             "limit": min(nb, len(filter_ids))})
+            filter_ids_set = set(filter_ids)
+            for hits in search_res:
+                ids = hits.ids
+                assert set(ids).issubset(filter_ids_set)
+
+            # 10. search again with expression template after json path index
+            expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
+            expr_params = cf.get_expr_params_from_template(expressions[1])
+            search_res, _ = collection_w.search(search_vectors[:default_nq], default_search_field,
+                                                default_search_params,
+                                                limit=nb, expr=expr, expr_params=expr_params,
+                                                check_task=CheckTasks.check_search_results,
+                                                check_items={"nq": default_nq,
+                                                             "ids": insert_ids,
+                                                             "limit": min(nb, len(filter_ids))})
+            filter_ids_set = set(filter_ids)
+            for hits in search_res:
+                ids = hits.ids
+                assert set(ids).issubset(filter_ids_set)
+
+            # 11. search again with expression template and hint after json path index
+            search_params = default_search_params.copy()
+            search_params.update({"hints": "iterative_filter"})
+            log.info("binbin")
+            log.info(expr)
+            log.info(expr_params)
+            log.info(search_params)
+            search_res, _ = collection_w.search(search_vectors[:default_nq], default_search_field,
+                                                search_params,
+                                                limit=nb, expr=expr, expr_params=expr_params,
+                                                check_task=CheckTasks.check_search_results,
+                                                check_items={"nq": default_nq,
+                                                             "ids": insert_ids,
+                                                             "limit": min(nb, len(filter_ids))})
+            filter_ids_set = set(filter_ids)
+            for hits in search_res:
+                ids = hits.ids
+                log.info(ids)
+                log.info(filter_ids_set)
+                assert set(ids).issubset(filter_ids_set)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_expression_all_data_type(self, nq, _async, null_data_percent):

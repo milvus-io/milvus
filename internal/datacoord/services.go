@@ -257,6 +257,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 }
 
 // AllocSegment alloc a new growing segment, add it into segment meta.
+// Only used by Streamingnode, should be deprecated in the future after growing segment fully managed by streaming node.
 func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentRequest) (*datapb.AllocSegmentResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.AllocSegmentResponse{Status: merr.Status(err)}, nil
@@ -273,7 +274,17 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 	}
 
 	// Alloc new growing segment and return the segment info.
-	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(ctx, req.GetCollectionId(), req.GetPartitionId(), req.GetSegmentId(), req.GetVchannel(), req.GetStorageVersion())
+	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(
+		ctx,
+		AllocNewGrowingSegmentRequest{
+			CollectionID:         req.GetCollectionId(),
+			PartitionID:          req.GetPartitionId(),
+			SegmentID:            req.GetSegmentId(),
+			ChannelName:          req.GetVchannel(),
+			StorageVersion:       req.GetStorageVersion(),
+			IsCreatedByStreaming: req.GetIsCreatedByStreaming(),
+		},
+	)
 	if err != nil {
 		return &datapb.AllocSegmentResponse{Status: merr.Status(err)}, nil
 	}
@@ -371,7 +382,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	resp := &datapb.GetCollectionStatisticsResponse{
 		Status: merr.Success(),
 	}
-	nums := s.meta.GetNumRowsOfCollection(req.CollectionID)
+	nums := s.meta.GetNumRowsOfCollection(ctx, req.CollectionID)
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
 	log.Info("success to get collection statistics", zap.Any("response", resp))
 	return resp, nil
@@ -395,7 +406,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 	}
 	nums := int64(0)
 	if len(req.GetPartitionIDs()) == 0 {
-		nums = s.meta.GetNumRowsOfCollection(req.CollectionID)
+		nums = s.meta.GetNumRowsOfCollection(ctx, req.CollectionID)
 	}
 	for _, partID := range req.GetPartitionIDs() {
 		num := s.meta.GetNumRowsOfPartition(ctx, req.CollectionID, partID)
@@ -587,8 +598,12 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.flushCh <- req.SegmentID
 
 		// notify compaction
-		err := s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
-			req.GetSegmentID(), req.GetChannel(), false)
+		_, err := s.compactionTrigger.TriggerCompaction(ctx,
+			NewCompactionSignal().
+				WithWaitResult(false).
+				WithCollectionID(req.GetCollectionID()).
+				WithPartitionID(req.GetPartitionID()).
+				WithChannel(req.GetChannel()))
 		if err != nil {
 			log.Warn("failed to trigger single compaction")
 		}
@@ -1166,7 +1181,13 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	if req.MajorCompaction {
 		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction())
 	} else {
-		id, err = s.compactionTrigger.triggerManualCompaction(req.CollectionID)
+		id, err = s.compactionTrigger.TriggerCompaction(ctx, NewCompactionSignal().
+			WithIsForce(true).
+			WithCollectionID(req.GetCollectionID()).
+			WithPartitionID(req.GetPartitionId()).
+			WithChannel(req.GetChannel()).
+			WithSegmentIDs(req.GetSegmentIds()...),
+		)
 	}
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Error(err))
