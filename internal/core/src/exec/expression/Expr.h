@@ -736,23 +736,24 @@ class SegmentExpr : public Expr {
                 const bool* valid_data;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json>) {
-                    if (segment_->type() == SegmentType::Sealed) {
-                        valid_data = segment_
-                                         ->get_batch_views<T>(
-                                             field_id_, i, data_pos, size)
-                                         .second.data();
-                    }
+                    auto batch_views = segment_->get_batch_views<T>(
+                        field_id_, i, data_pos, size);
+                    valid_data = batch_views.second.data();
+                    ApplyValidData(valid_data,
+                                   res + processed_size,
+                                   valid_res + processed_size,
+                                   size);
                 } else {
                     auto chunk = segment_->chunk_data<T>(field_id_, i);
                     valid_data = chunk.valid_data();
                     if (valid_data != nullptr) {
                         valid_data += data_pos;
                     }
+                    ApplyValidData(valid_data,
+                                   res + processed_size,
+                                   valid_res + processed_size,
+                                   size);
                 }
-                ApplyValidData(valid_data,
-                               res + processed_size,
-                               valid_res + processed_size,
-                               size);
             }
 
             processed_size += size;

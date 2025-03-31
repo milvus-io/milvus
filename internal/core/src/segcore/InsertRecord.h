@@ -384,39 +384,6 @@ struct InsertRecord {
     }
 
     void
-    insert_pks(milvus::DataType data_type,
-               const std::shared_ptr<SingleChunkColumnBase>& data) {
-        std::lock_guard lck(shared_mutex_);
-        int64_t offset = 0;
-        switch (data_type) {
-            case DataType::INT64: {
-                auto column =
-                    std::dynamic_pointer_cast<SingleChunkColumn>(data);
-                auto pks = reinterpret_cast<const int64_t*>(column->Data(0));
-                for (int i = 0; i < column->NumRows(); ++i) {
-                    pk2offset_->insert(pks[i], offset++);
-                }
-                break;
-            }
-            case DataType::VARCHAR: {
-                auto column = std::dynamic_pointer_cast<
-                    SingleChunkVariableColumn<std::string>>(data);
-                auto pks = column->Views();
-
-                for (int i = 0; i < column->NumRows(); ++i) {
-                    pk2offset_->insert(std::string(pks[i]), offset++);
-                }
-                break;
-            }
-            default: {
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported primary key data type",
-                                      data_type));
-            }
-        }
-    }
-
-    void
     insert_pks(const std::vector<FieldDataPtr>& field_datas) {
         std::lock_guard lck(shared_mutex_);
         int64_t offset = 0;

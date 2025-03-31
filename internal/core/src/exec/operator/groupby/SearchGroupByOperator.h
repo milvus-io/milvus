@@ -20,10 +20,10 @@
 #include "knowhere/index/index_node.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "segcore/SegmentSealedImpl.h"
 #include "segcore/ConcurrentVector.h"
 #include "common/Span.h"
 #include "query/Utils.h"
+#include "segcore/SegmentSealed.h"
 
 namespace milvus {
 namespace exec {
