@@ -1994,11 +1994,66 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         dataset->SetIsOwner(false);
         dataset->SetIsSparse(is_sparse);
 
-        index::IndexBasePtr vec_index =
-            std::make_unique<index::VectorMemIndex<float>>(
+        index::IndexBasePtr vec_index = nullptr;
+        if (!is_sparse) {
+            size_t data_size;
+            if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
+                data_size = dim * sizeof(knowhere::fp32);
+                knowhere::ViewDataOp view_data = [field_raw_data_ptr = vec_data,
+                                                  data_size =
+                                                      data_size](size_t id) {
+                    return ((const char*)field_raw_data_ptr->Data() +
+                            data_size * id);
+                };
+                vec_index = std::make_unique<index::VectorMemIndex<float>>(
+                    field_binlog_config->GetIndexType(),
+                    index_metric,
+                    knowhere::Version::GetCurrentVersion().VersionNumber(),
+                    false,
+                    view_data);
+            } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
+                data_size = dim * sizeof(knowhere::fp16);
+                knowhere::ViewDataOp view_data = [field_raw_data_ptr = vec_data,
+                                                  data_size =
+                                                      data_size](size_t id) {
+                    return ((const char*)field_raw_data_ptr->Data() +
+                            data_size * id);
+                };
+                vec_index =
+                    std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
+                        field_binlog_config->GetIndexType(),
+                        index_metric,
+                        knowhere::Version::GetCurrentVersion().VersionNumber(),
+                        false,
+                        view_data);
+            } else if (field_meta.get_data_type() ==
+                       DataType::VECTOR_BFLOAT16) {
+                data_size = dim * sizeof(knowhere::bf16);
+                knowhere::ViewDataOp view_data = [field_raw_data_ptr = vec_data,
+                                                  data_size =
+                                                      data_size](size_t id) {
+                    return ((const char*)field_raw_data_ptr->Data() +
+                            data_size * id);
+                };
+                vec_index =
+                    std::make_unique<index::VectorMemIndex<knowhere::bf16>>(
+                        field_binlog_config->GetIndexType(),
+                        index_metric,
+                        knowhere::Version::GetCurrentVersion().VersionNumber(),
+                        false,
+                        view_data);
+            }
+        } else {
+            vec_index = std::make_unique<index::VectorMemIndex<float>>(
                 field_binlog_config->GetIndexType(),
                 index_metric,
-                knowhere::Version::GetCurrentVersion().VersionNumber());
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                false);
+        }
+        if (vec_index == nullptr) {
+            LOG_INFO("fail to generate intermin index, invalid data type.");
+            return false;
+        }
         vec_index->BuildWithDataset(dataset, build_config);
         if (enable_binlog_index()) {
             std::unique_lock lck(mutex_);
