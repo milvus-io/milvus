@@ -549,6 +549,8 @@ func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkora
 		if segment.Partition() == partitionID || segment.Partition() == common.AllPartitionsID {
 			segmentPks, segmentTss := segment.DeleteRecords()
 			batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+			bfHitRowInL0 := int64(0)
+			start := time.Now()
 			for idx := 0; idx < len(segmentPks); idx += batchSize {
 				endIdx := idx + batchSize
 				if endIdx > len(segmentPks) {
@@ -559,12 +561,22 @@ func (sd *shardDelegator) rangeHitL0Deletions(partitionID int64, candidate pkora
 				hits := candidate.BatchPkExist(lc)
 				for i, hit := range hits {
 					if hit {
+						bfHitRowInL0 += 1
 						if err := fn(segmentPks[idx+i], segmentTss[idx+i]); err != nil {
 							return err
 						}
 					}
 				}
 			}
+
+			log.Info("forward delete to worker...",
+				zap.Int64("L0SegmentID", segment.ID()),
+				zap.Int64("segmentID", candidate.ID()),
+				zap.String("channel", segment.LoadInfo().GetInsertChannel()),
+				zap.Int("totalDeleteRowsInL0", len(segmentPks)),
+				zap.Int64("bfHitRowsInL0", bfHitRowInL0),
+				zap.Int64("bfCost", time.Since(start).Milliseconds()),
+			)
 		}
 	}
 	return nil
@@ -658,6 +670,8 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		// list buffered delete
 		deleteRecords := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
 		tsHitDeleteRows := int64(0)
+		bfHitDeleteRows := int64(0)
+		start := time.Now()
 		for _, entry := range deleteRecords {
 			for _, record := range entry.Data {
 				tsHitDeleteRows += int64(len(record.DeleteData.Pks))
@@ -676,6 +690,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 					hits := candidate.BatchPkExist(lc)
 					for i, hit := range hits {
 						if hit {
+							bfHitDeleteRows += 1
 							err := bufferedForwarder.Buffer(pks[idx+i], record.DeleteData.Tss[idx+i])
 							if err != nil {
 								return err
@@ -685,6 +700,14 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 				}
 			}
 		}
+		log.Info("forward delete to worker...",
+			zap.String("channel", info.InsertChannel),
+			zap.Int64("segmentID", info.GetSegmentID()),
+			zap.Time("startPosition", tsoutil.PhysicalTime(info.GetStartPosition().GetTimestamp())),
+			zap.Int64("tsHitDeleteRowNum", tsHitDeleteRows),
+			zap.Int64("bfHitDeleteRowNum", bfHitDeleteRows),
+			zap.Int64("bfCost", time.Since(start).Milliseconds()),
+		)
 		err := bufferedForwarder.Flush()
 		if err != nil {
 			return err
@@ -992,16 +1015,20 @@ func (sd *shardDelegator) SyncTargetVersion(
 	sd.distribution.SyncTargetVersion(newVersion, partitions, growingInTarget, sealedInTarget, redundantGrowingIDs)
 	start := time.Now()
 	sizeBeforeClean, _ := sd.deleteBuffer.Size()
+	l0NumBeforeClean := len(sd.deleteBuffer.ListL0())
 	sd.deleteBuffer.UnRegister(deleteSeekPos.GetTimestamp())
 	sizeAfterClean, _ := sd.deleteBuffer.Size()
+	l0NumAfterClean := len(sd.deleteBuffer.ListL0())
 
-	if sizeAfterClean < sizeBeforeClean {
+	if sizeAfterClean < sizeBeforeClean || l0NumAfterClean < l0NumBeforeClean {
 		log.Info("clean delete buffer",
 			zap.String("channel", sd.vchannelName),
 			zap.Time("deleteSeekPos", tsoutil.PhysicalTime(deleteSeekPos.GetTimestamp())),
 			zap.Time("channelCP", tsoutil.PhysicalTime(checkpoint.GetTimestamp())),
 			zap.Int64("sizeBeforeClean", sizeBeforeClean),
 			zap.Int64("sizeAfterClean", sizeAfterClean),
+			zap.Int("l0NumBeforeClean", l0NumBeforeClean),
+			zap.Int("l0NumAfterClean", l0NumAfterClean),
 			zap.Duration("cost", time.Since(start)),
 		)
 	}
@@ -1063,7 +1090,7 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 	}
 
 	for _, idf := range idfSparseVector {
-		metrics.QueryNodeSearchFTSNumTokens.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(sd.collectionID)).Observe(float64(typeutil.SparseFloatRowElementCount(idf)))
+		metrics.QueryNodeSearchFTSNumTokens.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(sd.collectionID), fmt.Sprint(req.GetFieldId())).Observe(float64(typeutil.SparseFloatRowElementCount(idf)))
 	}
 
 	err = SetBM25Params(req, avgdl)

@@ -31,8 +31,6 @@
 #include "exec/operator/GroupByNode.h"
 #include "exec/Task.h"
 
-#include "common/EasyAssert.h"
-
 namespace milvus {
 namespace exec {
 
@@ -181,24 +179,18 @@ Driver::Next(std::shared_ptr<BlockingState>& blocking_state) {
 #define CALL_OPERATOR(call_func, operator, method_name)                        \
     try {                                                                      \
         call_func;                                                             \
-    } catch (SegcoreError & e) {                                               \
+    } catch (std::exception & e) {                                             \
+        std::string stack_trace = milvus::impl::EasyStackTrace();              \
         auto err_msg = fmt::format(                                            \
             "Operator::{} failed for [Operator:{}, plan node id: "             \
-            "{}] : {}",                                                        \
+            "{}] : {}\nStack trace: {}",                                       \
             method_name,                                                       \
-            operator->get_operator_type(),                                     \
+            operator->ToString() ,                                             \
             operator->get_plannode_id(),                                       \
-            e.what());                                                         \
+            e.what(),                                                          \
+            stack_trace);                                                      \
         LOG_ERROR(err_msg);                                                    \
         throw ExecOperatorException(err_msg);                                  \
-    } catch (std::exception & e) {                                             \
-        throw ExecOperatorException(                                           \
-            fmt::format("Operator::{} failed for [Operator:{}, plan node id: " \
-                        "{}] : {}",                                            \
-                        method_name,                                           \
-                        operator->get_operator_type(),                         \
-                        operator->get_plannode_id(),                           \
-                        e.what()));                                            \
     }
 
 StopReason

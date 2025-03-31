@@ -66,7 +66,7 @@ type PChannelInfo struct {
 	// and it will fence the old rw wal impls or wait the old rw wal impls close.
 }
 
-func (c *PChannelInfo) String() string {
+func (c PChannelInfo) String() string {
 	return fmt.Sprintf("%s:%s@%d", c.Name, c.AccessMode, c.Term)
 }
 

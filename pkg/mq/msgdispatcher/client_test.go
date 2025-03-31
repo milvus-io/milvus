@@ -110,7 +110,7 @@ func TestClient_Concurrency(t *testing.T) {
 	// Verify registered targets number.
 	actual := 0
 	c.managers.Range(func(pchannel string, manager DispatcherManager) bool {
-		actual += manager.(*dispatcherManager).registeredTargets.Len()
+		actual += manager.NumTarget()
 		return true
 	})
 	assert.Equal(t, expected, actual)
@@ -120,7 +120,14 @@ func TestClient_Concurrency(t *testing.T) {
 		actual = 0
 		c.managers.Range(func(pchannel string, manager DispatcherManager) bool {
 			m := manager.(*dispatcherManager)
-			actual += int(m.numActiveTarget.Load())
+			m.mu.RLock()
+			defer m.mu.RUnlock()
+			if m.mainDispatcher != nil {
+				actual += m.mainDispatcher.targets.Len()
+			}
+			for _, d := range m.deputyDispatchers {
+				actual += d.targets.Len()
+			}
 			return true
 		})
 		t.Logf("expect = %d, actual = %d\n", expected, actual)
@@ -256,9 +263,9 @@ func (suite *SimulationSuite) TestMerge() {
 	suite.Eventually(func() bool {
 		for pchannel := range suite.pchannel2Producer {
 			manager, ok := suite.client.(*client).managers.Get(pchannel)
-			suite.T().Logf("dispatcherNum = %d, pchannel = %s\n", manager.(*dispatcherManager).numConsumer.Load(), pchannel)
+			suite.T().Logf("dispatcherNum = %d, pchannel = %s\n", manager.NumConsumer(), pchannel)
 			suite.True(ok)
-			if manager.(*dispatcherManager).numConsumer.Load() != 1 { // expected all merged, only mainDispatcher exist
+			if manager.NumConsumer() != 1 { // expected all merged, only mainDispatcher exist
 				return false
 			}
 		}
@@ -323,9 +330,9 @@ func (suite *SimulationSuite) TestSplit() {
 	suite.Eventually(func() bool {
 		for pchannel := range suite.pchannel2Producer {
 			manager, ok := suite.client.(*client).managers.Get(pchannel)
-			suite.T().Logf("verifing dispatchers merged, dispatcherNum = %d, pchannel = %s\n", manager.(*dispatcherManager).numConsumer.Load(), pchannel)
+			suite.T().Logf("verifing dispatchers merged, dispatcherNum = %d, pchannel = %s\n", manager.NumConsumer(), pchannel)
 			suite.True(ok)
-			if manager.(*dispatcherManager).numConsumer.Load() != 1 { // expected all merged, only mainDispatcher exist
+			if manager.NumConsumer() != 1 { // expected all merged, only mainDispatcher exist
 				return false
 			}
 		}
@@ -371,8 +378,8 @@ func (suite *SimulationSuite) TestSplit() {
 			manager, ok := suite.client.(*client).managers.Get(pchannel)
 			suite.True(ok)
 			suite.T().Logf("verifing split, dispatcherNum = %d, splitNum+1 = %d, pchannel = %s\n",
-				manager.(*dispatcherManager).numConsumer.Load(), splitNumPerPchannel+1, pchannel)
-			if manager.(*dispatcherManager).numConsumer.Load() < 1 { // expected 1 mainDispatcher and 1 or more split deputyDispatchers
+				manager.NumConsumer(), splitNumPerPchannel+1, pchannel)
+			if manager.NumConsumer() < 1 { // expected 1 mainDispatcher and 1 or more split deputyDispatchers
 				return false
 			}
 		}
@@ -393,9 +400,9 @@ func (suite *SimulationSuite) TestSplit() {
 	suite.Eventually(func() bool {
 		for pchannel := range suite.pchannel2Producer {
 			manager, ok := suite.client.(*client).managers.Get(pchannel)
-			suite.T().Logf("verifing dispatchers merged again, dispatcherNum = %d, pchannel = %s\n", manager.(*dispatcherManager).numConsumer.Load(), pchannel)
+			suite.T().Logf("verifing dispatchers merged again, dispatcherNum = %d, pchannel = %s\n", manager.NumConsumer(), pchannel)
 			suite.True(ok)
-			if manager.(*dispatcherManager).numConsumer.Load() != 1 { // expected all merged, only mainDispatcher exist
+			if manager.NumConsumer() != 1 { // expected all merged, only mainDispatcher exist
 				return false
 			}
 		}

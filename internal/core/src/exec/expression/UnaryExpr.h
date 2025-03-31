@@ -41,15 +41,20 @@ struct UnaryElementFuncForMatch {
 
     void
     operator()(const T* src,
-
                size_t size,
                IndexInnerType val,
                TargetBitmapView res,
-               int64_t* offsets = nullptr) {
+               const TargetBitmap& bitmap_input,
+               int start_cursor,
+               const int32_t* offsets = nullptr) {
         PatternMatchTranslator translator;
         auto regex_pattern = translator(val);
         RegexMatcher matcher(regex_pattern);
+        bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
+            if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
+                continue;
+            }
             if constexpr (filter_type == FilterType::random) {
                 res[i] = matcher(src[offsets ? offsets[i] : i]);
             } else {
@@ -69,17 +74,25 @@ struct UnaryElementFunc {
                size_t size,
                IndexInnerType val,
                TargetBitmapView res,
+               const TargetBitmap& bitmap_input,
+               size_t start_cursor,
                const int32_t* offsets = nullptr) {
+        bool has_bitmap_input = !bitmap_input.empty();
         if constexpr (op == proto::plan::OpType::Match) {
             UnaryElementFuncForMatch<T, filter_type> func;
-            func(src, size, val, res);
+            func(src, size, val, res, bitmap_input, start_cursor, offsets);
             return;
         }
 
         // This is the original code, which is kept for the documentation purposes
         // also, for iterative filter
-        if constexpr (filter_type == FilterType::random) {
+        if constexpr (filter_type == FilterType::random ||
+                      std::is_same_v<T, std::string_view> ||
+                      std::is_same_v<T, std::string>) {
             for (int i = 0; i < size; ++i) {
+                if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
+                    continue;
+                }
                 auto offset = (offsets != nullptr) ? offsets[i] : i;
                 if constexpr (op == proto::plan::OpType::Equal) {
                     res[i] = src[offset] == val;
@@ -164,7 +177,10 @@ struct UnaryElementFuncForArray {
                int index,
                TargetBitmapView res,
                TargetBitmapView valid_res,
+               const TargetBitmap& bitmap_input,
+               size_t start_cursor,
                const int32_t* offsets = nullptr) {
+        bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
@@ -172,6 +188,9 @@ struct UnaryElementFuncForArray {
             }
             if (valid_data != nullptr && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
                 continue;
             }
             if constexpr (op == proto::plan::OpType::Equal) {
@@ -340,10 +359,45 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         return true;
     }
 
+    std::string
+    ToString() const {
+        return fmt::format("{}", expr_->ToString());
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return expr_->column_;
+    }
+
+    bool
+    IsSource() const override {
+        return true;
+    }
+
+    std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr>
+    GetLogicalExpr() {
+        return expr_;
+    }
+
+    proto::plan::OpType
+    GetOpType() {
+        return expr_->op_type_;
+    }
+
+    FieldId
+    GetFieldId() {
+        return expr_->column_.field_id_;
+    }
+
+    DataType
+    GetFieldType() {
+        return expr_->column_.data_type_;
+    }
+
  private:
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImpl(OffsetVector* input = nullptr);
+    ExecRangeVisitorImpl(EvalCtx& context);
 
     template <typename T>
     VectorPtr
@@ -351,23 +405,23 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImplForData(OffsetVector* input = nullptr);
+    ExecRangeVisitorImplForData(EvalCtx& context);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecRangeVisitorImplJson(OffsetVector* input = nullptr);
+    ExecRangeVisitorImplJson(EvalCtx& context);
 
     template <typename ExprValueType>
     VectorPtr
-    ExecRangeVisitorImplArray(OffsetVector* input = nullptr);
+    ExecRangeVisitorImplArray(EvalCtx& context);
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImplArrayForIndex();
+    ExecRangeVisitorImplArrayForIndex(EvalCtx& context);
 
     template <typename T>
     VectorPtr
-    ExecArrayEqualForIndex(bool reverse);
+    ExecArrayEqualForIndex(EvalCtx& context, bool reverse);
 
     // Check overflow and cache result for performace
     template <typename T>

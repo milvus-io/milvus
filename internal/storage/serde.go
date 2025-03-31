@@ -17,7 +17,7 @@
 package storage
 
 import (
-	"encoding/binary"
+	"fmt"
 	"io"
 	"math"
 	"strconv"
@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -39,7 +40,6 @@ type Record interface {
 	Len() int
 	Release()
 	Retain()
-	Slice(start, end int) Record
 }
 
 type RecordReader interface {
@@ -89,18 +89,6 @@ func (r *compositeRecord) Release() {
 func (r *compositeRecord) Retain() {
 	for _, rec := range r.recs {
 		rec.Retain()
-	}
-}
-
-func (r *compositeRecord) Slice(start, end int) Record {
-	slices := make([]arrow.Array, len(r.recs))
-	for i, rec := range r.recs {
-		d := array.NewSliceData(rec.Data(), int64(start), int64(end))
-		slices[i] = array.MakeFromData(d)
-	}
-	return &compositeRecord{
-		index: r.index,
-		recs:  slices,
 	}
 }
 
@@ -590,56 +578,6 @@ func (r *selectiveRecord) Retain() {
 	// do nothing
 }
 
-func (r *selectiveRecord) Slice(start, end int) Record {
-	panic("not implemented")
-}
-
-func calculateArraySize(a arrow.Array) int {
-	if a == nil || a.Data() == nil || a.Data().Buffers() == nil {
-		return 0
-	}
-
-	var totalSize int
-	offset := a.Data().Offset()
-	length := a.Len()
-
-	if len(a.NullBitmapBytes()) > 0 {
-		totalSize += (length + 7) / 8
-	}
-
-	for i, buf := range a.Data().Buffers() {
-		if buf == nil {
-			continue
-		}
-
-		switch i {
-		case 0:
-			// Handle bitmap buffer, already handled
-		case 1:
-			switch a.DataType().ID() {
-			case arrow.STRING, arrow.BINARY:
-				// Handle variable-length types like STRING/BINARY
-				startOffset := int(binary.LittleEndian.Uint32(buf.Bytes()[offset*4:]))
-				endOffset := int(binary.LittleEndian.Uint32(buf.Bytes()[(offset+length)*4:]))
-				totalSize += endOffset - startOffset
-			case arrow.LIST:
-				// Handle nest types like list
-				for i := 0; i < length; i++ {
-					startOffset := int(binary.LittleEndian.Uint32(buf.Bytes()[(offset+i)*4:]))
-					endOffset := int(binary.LittleEndian.Uint32(buf.Bytes()[(offset+i+1)*4:]))
-					elementSize := a.DataType().(*arrow.ListType).Elem().(arrow.FixedWidthDataType).Bytes()
-					totalSize += (endOffset - startOffset) * elementSize
-				}
-			default:
-				// Handle fixed-length types
-				elementSize := a.DataType().(arrow.FixedWidthDataType).Bytes()
-				totalSize += elementSize * length
-			}
-		}
-	}
-	return totalSize
-}
-
 func newSelectiveRecord(r Record, selectedFieldId FieldID) Record {
 	return &selectiveRecord{
 		r:       r,
@@ -715,7 +653,7 @@ func (sfw *singleFieldRecordWriter) Write(r Record) error {
 	sfw.numRows += r.Len()
 	a := r.Column(sfw.fieldId)
 
-	sfw.writtenUncompressed += uint64(calculateArraySize(a))
+	sfw.writtenUncompressed += a.Data().SizeInBytes()
 	rec := array.NewRecord(sfw.schema, []arrow.Array{a}, int64(r.Len()))
 	defer rec.Release()
 	return sfw.fw.WriteBuffered(rec)
@@ -777,7 +715,7 @@ var _ RecordWriter = (*multiFieldRecordWriter)(nil)
 
 type multiFieldRecordWriter struct {
 	fw       *pqarrow.FileWriter
-	fieldIds []FieldID
+	fieldIDs []FieldID
 	schema   *arrow.Schema
 
 	numRows             int
@@ -786,10 +724,10 @@ type multiFieldRecordWriter struct {
 
 func (mfw *multiFieldRecordWriter) Write(r Record) error {
 	mfw.numRows += r.Len()
-	columns := make([]arrow.Array, len(mfw.fieldIds))
-	for i, fieldId := range mfw.fieldIds {
+	columns := make([]arrow.Array, len(mfw.fieldIDs))
+	for i, fieldId := range mfw.fieldIDs {
 		columns[i] = r.Column(fieldId)
-		mfw.writtenUncompressed += uint64(calculateArraySize(columns[i]))
+		mfw.writtenUncompressed += columns[i].Data().SizeInBytes()
 	}
 	rec := array.NewRecord(mfw.schema, columns, int64(r.Len()))
 	defer rec.Release()
@@ -804,7 +742,7 @@ func (mfw *multiFieldRecordWriter) Close() error {
 	return mfw.fw.Close()
 }
 
-func newMultiFieldRecordWriter(fieldIds []FieldID, fields []arrow.Field, writer io.Writer) (*multiFieldRecordWriter, error) {
+func newMultiFieldRecordWriter(fieldIDs []FieldID, fields []arrow.Field, writer io.Writer) (*multiFieldRecordWriter, error) {
 	schema := arrow.NewSchema(fields, nil)
 	fw, err := pqarrow.NewFileWriter(schema, writer,
 		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(math.MaxInt64)), // No additional grouping for now.
@@ -814,7 +752,7 @@ func newMultiFieldRecordWriter(fieldIds []FieldID, fields []arrow.Field, writer 
 	}
 	return &multiFieldRecordWriter{
 		fw:       fw,
-		fieldIds: fieldIds,
+		fieldIDs: fieldIDs,
 		schema:   schema,
 	}, nil
 }
@@ -912,14 +850,29 @@ func (sr *simpleArrowRecord) ArrowSchema() *arrow.Schema {
 	return sr.r.Schema()
 }
 
-func (sr *simpleArrowRecord) Slice(start, end int) Record {
-	s := sr.r.NewSlice(int64(start), int64(end))
-	return NewSimpleArrowRecord(s, sr.field2Col)
-}
-
 func NewSimpleArrowRecord(r arrow.Record, field2Col map[FieldID]int) *simpleArrowRecord {
 	return &simpleArrowRecord{
 		r:         r,
 		field2Col: field2Col,
 	}
+}
+
+func BuildRecord(b *array.RecordBuilder, data *InsertData, fields []*schemapb.FieldSchema) error {
+	if data == nil {
+		return nil
+	}
+	for i, field := range fields {
+		fBuilder := b.Field(i)
+		typeEntry, ok := serdeMap[field.DataType]
+		if !ok {
+			panic("unknown type")
+		}
+		for j := 0; j < data.Data[field.FieldID].RowNum(); j++ {
+			ok = typeEntry.serialize(fBuilder, data.Data[field.FieldID].GetRow(j))
+			if !ok {
+				return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", field.DataType.String()))
+			}
+		}
+	}
+	return nil
 }

@@ -64,7 +64,7 @@ class Expr {
     }
 
     std::string
-    get_name() {
+    name() {
         return name_;
     }
 
@@ -88,9 +88,29 @@ class Expr {
         return true;
     }
 
+    virtual std::string
+    ToString() const {
+        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+    }
+
+    virtual bool
+    IsSource() const {
+        return false;
+    }
+
+    virtual std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const {
+        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+    }
+
+    std::vector<std::shared_ptr<Expr>>&
+    GetInputsRef() {
+        return inputs_;
+    }
+
  protected:
     DataType type_;
-    const std::vector<std::shared_ptr<Expr>> inputs_;
+    std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
     // NOTE: unused
     std::shared_ptr<VectorFunction> vector_func_;
@@ -165,6 +185,11 @@ class SegmentExpr : public Expr {
                 num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
             }
         }
+    }
+
+    virtual bool
+    IsSource() const override {
+        return true;
     }
 
     void
@@ -1141,6 +1166,9 @@ class SegmentExpr : public Expr {
     // Cache for text match.
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};
 };
+
+bool
+IsLikeExpr(std::shared_ptr<Expr> expr);
 
 void
 OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs);

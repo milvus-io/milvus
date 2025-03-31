@@ -53,8 +53,6 @@ image:
     tag: PR-35426-20240812-46dadb120
 indexCoordinator:
   enabled: false
-  gc:
-    interval: 1
   resources:
     limits:
       cpu: "1"
@@ -107,11 +105,20 @@ log:
 extraConfigFiles:
   user.yaml: |+
     indexCoord:
+      gc:
+        interval: 1
       scheduler:
         interval: 100
     indexNode:
       scheduler:
         buildParallel: 4
+    queryNode:
+      mmap:
+        vectorField: true
+        vectorIndex: true
+        scalarField: true
+        scalarIndex: true
+        growingMmapEnabled: true
 metrics:
   serviceMonitor:
     enabled: true
@@ -260,12 +267,6 @@ queryNode:
     requests:
       cpu: "0.5"
       memory: 500Mi
-  mmap:
-    vectorField: true
-    vectorIndex: true
-    scalarField: true
-    scalarIndex: true
-    growingMmapEnabled: true
 rootCoordinator:
   resources:
     limits:

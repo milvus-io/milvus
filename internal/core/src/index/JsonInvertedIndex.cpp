@@ -37,7 +37,7 @@ JsonInvertedIndex<T>::build_index_for_json(
             if (this->schema_.nullable() && !data->is_valid(i)) {
                 {
                     folly::SharedMutex::WriteHolder lock(this->mutex_);
-                    this->null_offset_.push_back(i);
+                    this->null_offset_.push_back(offset);
                 }
                 this->wrapper_->template add_array_data<T>(
                     nullptr, 0, offset++);
@@ -54,14 +54,10 @@ JsonInvertedIndex<T>::build_index_for_json(
                     err,
                     *json_column,
                     nested_path_);
-                if (err == simdjson::INVALID_JSON_POINTER) {
-                    LOG_WARN("Invalid json pointer, json: {}, pointer: {}",
-                             *json_column,
-                             nested_path_);
-                }
-                {
+                if (err == simdjson::NO_SUCH_FIELD ||
+                    err == simdjson::INVALID_JSON_POINTER) {
                     folly::SharedMutex::WriteHolder lock(this->mutex_);
-                    this->null_offset_.push_back(i);
+                    this->null_offset_.push_back(offset);
                 }
                 this->wrapper_->template add_array_data<T>(
                     nullptr, 0, offset++);

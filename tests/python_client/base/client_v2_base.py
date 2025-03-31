@@ -90,7 +90,7 @@ class TestMilvusClientV2Base(Base):
                                        collection_name=collection_name, dimension=dimension,
                                        **kwargs).run()
 
-        self.tear_down_collection_names.append(collection_name)
+        # self.tear_down_collection_names.append(collection_name)
         return res, check_result
 
     def has_collection(self, client, collection_name, timeout=None, check_task=None,

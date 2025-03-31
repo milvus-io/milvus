@@ -3,8 +3,6 @@ package message
 import (
 	"strconv"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -54,13 +52,6 @@ type ResourceKey struct {
 	Key    string
 }
 
-func (rk *ResourceKey) IntoResourceKey() *messagespb.ResourceKey {
-	return &messagespb.ResourceKey{
-		Domain: rk.Domain,
-		Key:    rk.Key,
-	}
-}
-
 // NewImportJobIDResourceKey creates a key for import job resource.
 func NewImportJobIDResourceKey(importJobID int64) ResourceKey {
 	return ResourceKey{
@@ -74,38 +65,5 @@ func NewCollectionNameResourceKey(collectionName string) ResourceKey {
 	return ResourceKey{
 		Domain: messagespb.ResourceDomain_ResourceDomainCollectionName,
 		Key:    collectionName,
-	}
-}
-
-type BroadcastEvent = messagespb.BroadcastEvent
-
-// UniqueKeyOfBroadcastEvent returns a unique key for a broadcast event.
-func UniqueKeyOfBroadcastEvent(ev *BroadcastEvent) string {
-	s, err := proto.Marshal(ev)
-	if err != nil {
-		panic(err)
-	}
-	return string(s)
-}
-
-// NewResourceKeyAckOneBroadcastEvent creates a broadcast event for acking one key.
-func NewResourceKeyAckOneBroadcastEvent(rk ResourceKey) *BroadcastEvent {
-	return &BroadcastEvent{
-		Event: &messagespb.BroadcastEvent_ResourceKeyAckOne{
-			ResourceKeyAckOne: &messagespb.BroadcastResourceKeyAckOne{
-				ResourceKey: rk.IntoResourceKey(),
-			},
-		},
-	}
-}
-
-// NewResourceKeyAckAllBroadcastEvent creates a broadcast event for ack all vchannel.
-func NewResourceKeyAckAllBroadcastEvent(rk ResourceKey) *BroadcastEvent {
-	return &BroadcastEvent{
-		Event: &messagespb.BroadcastEvent_ResourceKeyAckAll{
-			ResourceKeyAckAll: &messagespb.BroadcastResourceKeyAckAll{
-				ResourceKey: rk.IntoResourceKey(),
-			},
-		},
 	}
 }

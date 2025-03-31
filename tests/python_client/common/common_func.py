@@ -3215,7 +3215,7 @@ def gen_fp16_vectors(num, dim):
     return raw_vectors, fp16_vectors
 
 
-def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
+def gen_sparse_vectors(nb, dim=1000, sparse_format="dok", empty_percentage=0):
     # default sparse format is dok, dict of keys
     # another option is coo, coordinate List
 
@@ -3223,6 +3223,11 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
     vectors = [{
         d: rng.random() for d in list(set(random.sample(range(dim), random.randint(20, 30)) + [0, 1]))
     } for _ in range(nb)]
+    if empty_percentage > 0:
+        empty_nb = int(nb * empty_percentage / 100)
+        empty_ids = random.sample(range(nb), empty_nb)
+        for i in empty_ids:
+            vectors[i] = {}
     if sparse_format == "coo":
         vectors = [
             {"indices": list(x.keys()), "values": list(x.values())} for x in vectors
@@ -3352,3 +3357,13 @@ def gen_unicode_string_batch(nb, string_len: int = 1):
 def gen_unicode_string_array_batch(nb, string_len: int = 1, max_capacity: int = ct.default_max_capacity):
     return [[''.join([gen_unicode_string() for _ in range(min(random.randint(1, string_len), 50))]) for _ in
              range(random.randint(0, max_capacity))] for _ in range(nb)]
+
+
+def iter_insert_list_data(data: list, batch: int, total_len: int):
+    nb_list = [batch for _ in range(int(total_len / batch))]
+    if total_len % batch > 0:
+        nb_list.append(total_len % batch)
+
+    data_obj = [iter(d) for d in data]
+    for n in nb_list:
+        yield [[next(o) for _ in range(n)] for o in data_obj]

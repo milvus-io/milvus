@@ -30,6 +30,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -52,14 +53,7 @@ type BedrockEmbeddingProvider struct {
 
 func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey string, region string) (*bedrockruntime.Client, error) {
 	if awsAccessKeyId == "" {
-		awsAccessKeyId = os.Getenv(bedrockAccessKeyId)
-	}
-	if awsAccessKeyId == "" {
 		return nil, fmt.Errorf("Missing credentials. Please pass `aws_access_key_id`, or configure the %s environment variable in the Milvus service.", bedrockAccessKeyId)
-	}
-
-	if awsSecretAccessKey == "" {
-		awsSecretAccessKey = os.Getenv(bedrockSAKEnvStr)
 	}
 	if awsSecretAccessKey == "" {
 		return nil, fmt.Errorf("Missing credentials. Please pass `aws_secret_access_key`, or configure the %s environment variable in the Milvus service.", bedrockSAKEnvStr)
@@ -79,12 +73,47 @@ func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey stri
 	return bedrockruntime.NewFromConfig(cfg), nil
 }
 
-func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c BedrockClient) (*BedrockEmbeddingProvider, error) {
+func parseAccessInfo(params []*commonpb.KeyValuePair, confParams map[string]string) (string, string) {
+	// function param > env > yaml
+	var awsAccessKeyId, awsSecretAccessKey string
+
+	// from function params
+	if isEnableVerifiInfoInParamsKey(confParams) {
+		for _, param := range params {
+			switch strings.ToLower(param.Key) {
+			case awsAKIdParamKey:
+				awsAccessKeyId = param.Value
+			case awsSAKParamKey:
+				awsSecretAccessKey = param.Value
+			}
+		}
+	}
+
+	// from milvus.yaml
+	if awsAccessKeyId == "" {
+		awsAccessKeyId = confParams[awsAKIdParamKey]
+	}
+	if awsSecretAccessKey == "" {
+		awsSecretAccessKey = confParams[awsSAKParamKey]
+	}
+
+	// from env
+	if awsAccessKeyId == "" {
+		awsAccessKeyId = os.Getenv(bedrockAccessKeyId)
+	}
+	if awsSecretAccessKey == "" {
+		awsSecretAccessKey = os.Getenv(bedrockSAKEnvStr)
+	}
+
+	return awsAccessKeyId, awsSecretAccessKey
+}
+
+func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c BedrockClient, params map[string]string) (*BedrockEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	var awsAccessKeyId, awsSecretAccessKey, region, modelName string
+	var region, modelName string
 	var dim int64
 	normalize := true
 
@@ -96,14 +125,6 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 			dim, err = parseAndCheckFieldDim(param.Value, fieldDim, fieldSchema.Name)
 			if err != nil {
 				return nil, err
-			}
-		case awsAKIdParamKey:
-			if strings.ToLower(os.Getenv(enableConfigAKAndURL)) != "false" {
-				awsAccessKeyId = param.Value
-			}
-		case awsSAKParamKey:
-			if strings.ToLower(os.Getenv(enableConfigAKAndURL)) != "false" {
-				awsSecretAccessKey = param.Value
 			}
 		case regionParamKey:
 			region = param.Value
@@ -119,6 +140,8 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 		default:
 		}
 	}
+
+	awsAccessKeyId, awsSecretAccessKey := parseAccessInfo(functionSchema.Params, params)
 
 	var client BedrockClient
 	if c == nil {

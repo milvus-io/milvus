@@ -32,6 +32,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
@@ -44,7 +45,7 @@ import (
 
 func TestBinlogDeserializeReader(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
-		reader, err := NewBinlogDeserializeReader(nil, func() ([]*Blob, error) {
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), func() ([]*Blob, error) {
 			return nil, io.EOF
 		})
 		assert.NoError(t, err)
@@ -184,7 +185,7 @@ func TestBinlogSerializeWriter(t *testing.T) {
 
 func TestBinlogValueWriter(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
-		reader, err := NewBinlogDeserializeReader(nil, func() ([]*Blob, error) {
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), func() ([]*Blob, error) {
 			return nil, io.EOF
 		})
 		assert.NoError(t, err)
@@ -707,4 +708,109 @@ func readDeltaLog(size int, blob *Blob) error {
 		}
 	}
 	return nil
+}
+
+func TestMakeBlobsReader(t *testing.T) {
+	type args struct {
+		blobs []string
+	}
+	tests := []struct {
+		name string
+		args args
+		want [][]string
+	}{
+		{
+			name: "test empty",
+			args: args{
+				blobs: nil,
+			},
+			want: nil,
+		},
+		{
+			name: "test aligned",
+			args: args{
+				blobs: []string{
+					"x/1/1/1/1/1",
+					"x/1/1/1/2/2",
+					"x/1/1/1/3/3",
+					"x/1/1/1/1/4",
+					"x/1/1/1/2/5",
+					"x/1/1/1/3/6",
+					"x/1/1/1/1/7",
+					"x/1/1/1/2/8",
+					"x/1/1/1/3/9",
+				},
+			},
+			want: [][]string{
+				{"x/1/1/1/1/1", "x/1/1/1/2/2", "x/1/1/1/3/3"},
+				{"x/1/1/1/1/4", "x/1/1/1/2/5", "x/1/1/1/3/6"},
+				{"x/1/1/1/1/7", "x/1/1/1/2/8", "x/1/1/1/3/9"},
+			},
+		},
+		{
+			name: "test added field",
+			args: args{
+				blobs: []string{
+					"x/1/1/1/1/1",
+					"x/1/1/1/2/2",
+					"x/1/1/1/1/3",
+					"x/1/1/1/2/4",
+					"x/1/1/1/1/5",
+					"x/1/1/1/2/6",
+					"x/1/1/1/3/7",
+				},
+			},
+
+			want: [][]string{
+				{"x/1/1/1/1/1", "x/1/1/1/2/2"},
+				{"x/1/1/1/1/3", "x/1/1/1/2/4"},
+				{"x/1/1/1/1/5", "x/1/1/1/2/6", "x/1/1/1/3/7"},
+			},
+		},
+		{
+			name: "test if there is a hole",
+			args: args{
+				blobs: []string{
+					"x/1/1/1/1/1",
+					"x/1/1/1/2/2",
+					"x/1/1/1/3/3",
+					"x/1/1/1/1/4",
+					"x/1/1/1/2/5",
+					"x/1/1/1/1/6",
+					"x/1/1/1/2/7",
+					"x/1/1/1/3/8",
+				},
+			},
+
+			want: [][]string{
+				{"x/1/1/1/1/1", "x/1/1/1/2/2", "x/1/1/1/3/3"},
+				{"x/1/1/1/1/4", "x/1/1/1/2/5"},
+				{"x/1/1/1/1/6", "x/1/1/1/2/7", "x/1/1/1/3/8"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			blobs := lo.Map(tt.args.blobs, func(item string, index int) *Blob {
+				return &Blob{
+					Key: item,
+				}
+			})
+			reader := MakeBlobsReader(blobs)
+			got := make([][]string, 0)
+			for {
+				bs, err := reader()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					assert.Fail(t, err.Error())
+				}
+				got = append(got, lo.Map(bs, func(item *Blob, index int) string {
+					return item.Key
+				}))
+			}
+			assert.ElementsMatch(t, tt.want, got)
+		})
+	}
 }

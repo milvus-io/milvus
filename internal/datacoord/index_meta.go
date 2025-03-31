@@ -679,6 +679,8 @@ func (m *indexMeta) IsUnIndexedSegment(collectionID UniqueID, segID UniqueID) bo
 }
 
 func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
 	segmentsIndexes := make(map[int64]map[UniqueID]*model.SegmentIndex)
 	for _, segmentID := range segIDs {
 		segmentsIndexes[segmentID] = m.getSegmentIndexes(collectionID, segmentID)
@@ -687,6 +689,8 @@ func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID)
 }
 
 func (m *indexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
 	return m.getSegmentIndexes(collectionID, segID)
 }
 
@@ -915,7 +919,7 @@ func (m *indexMeta) GetAllSegIndexes() map[int64]*model.SegmentIndex {
 }
 
 // SetStoredIndexFileSizeMetric returns the total index files size of all segment for each collection.
-func (m *indexMeta) SetStoredIndexFileSizeMetric(collections map[UniqueID]*collectionInfo) uint64 {
+func (m *indexMeta) SetStoredIndexFileSizeMetric(collections *typeutil.ConcurrentMap[UniqueID, *collectionInfo]) uint64 {
 	m.fieldIndexLock.Lock()
 	defer m.fieldIndexLock.Unlock()
 
@@ -923,7 +927,7 @@ func (m *indexMeta) SetStoredIndexFileSizeMetric(collections map[UniqueID]*colle
 	metrics.DataCoordStoredIndexFilesSize.Reset()
 
 	for _, segmentIdx := range m.segmentBuildInfo.List() {
-		coll, ok := collections[segmentIdx.CollectionID]
+		coll, ok := collections.Get(segmentIdx.CollectionID)
 		if ok {
 			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName, coll.Schema.GetName(),
 				fmt.Sprint(segmentIdx.CollectionID)).Add(float64(segmentIdx.IndexSerializedSize))

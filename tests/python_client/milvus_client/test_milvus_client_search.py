@@ -305,6 +305,21 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, id_type="invalid",
                                check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_string_auto_id(self):
+        """
+        target: test high level api: client.create_collection
+        method: create collection with auto id on string primary key without mx length
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for the "
+                                                 f"field({default_primary_key_field_name}) of collection {collection_name}"}
+        self.create_collection(client, collection_name, default_dim, id_type="string", auto_id=True,
+                               check_task=CheckTasks.err_res, check_items=error)
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_create_same_collection_different_params(self):
         """
@@ -1452,7 +1467,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         index_params.add_index(field_name=nullable_field_name, index_name="json_index", index_type="INVERTED",
-                               params={"json_cast_type": DataType.INT64, "json_path": f"{nullable_field_name}['a']['b']"})
+                               params={"json_cast_type": "double", "json_path": f"{nullable_field_name}['a']['b']"})
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)

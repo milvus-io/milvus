@@ -8,6 +8,8 @@
 #include "rust-binding.h"
 
 namespace milvus::tantivy {
+
+using Token = TantivyToken;
 struct TokenStream {
  public:
     NO_COPY_OR_ASSIGN(TokenStream);
@@ -35,6 +37,10 @@ struct TokenStream {
         std::string s(token);
         free_rust_string(token);
         return s;
+    }
+
+    TantivyToken get_detailed_token() {
+        return tantivy_token_stream_get_detailed_token(ptr_);
     }
 
     // Note: the returned token must be freed by calling `free_rust_string`.

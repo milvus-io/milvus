@@ -47,9 +47,12 @@ def pytest_addoption(parser):
     parser.addoption('--field_name', action='store', default="field_name", help="field_name of index")
     parser.addoption('--replica_num', action='store', default=ct.default_replica_num, help="memory replica number")
     parser.addoption('--minio_host', action='store', default="localhost", help="minio service's ip")
+    parser.addoption('--minio_bucket', action='store', default="milvus-bucket", help="minio bucket name")
     parser.addoption('--uri', action='store', default="", help="uri for milvus client")
     parser.addoption('--token', action='store', default="root:Milvus", help="token for milvus client")
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
+    # a tei endpoint for text embedding, default is http://10.104.26.196:80 which is deployed in house
+    parser.addoption("--tei_endpoint", action="store", default="http://10.104.26.196:80", help="tei endpoint")
 
 
 @pytest.fixture
@@ -188,6 +191,10 @@ def field_name(request):
 def minio_host(request):
     return request.config.getoption("--minio_host")
 
+@pytest.fixture
+def minio_bucket(request):
+    return request.config.getoption("--minio_bucket")
+
 
 @pytest.fixture
 def uri(request):
@@ -203,6 +210,9 @@ def token(request):
 def request_duration(request):
     return request.config.getoption("--request_duration")
 
+@pytest.fixture
+def tei_endpoint(request):
+    return request.config.getoption("--tei_endpoint")
 
 """ fixture func """
 

@@ -100,7 +100,6 @@ func (s *ChannelSuite) TestCompare() {
 	channel3, err := ParseChannel(virtualName1, mapper)
 	s.Require().NoError(err)
 
-	s.True(channel1.Equal(channel1))
 	s.False(channel1.Equal(channel2))
 	s.False(channel2.Equal(channel1))
 	s.True(channel1.Equal(channel3))

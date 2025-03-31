@@ -66,7 +66,7 @@ func (s *ResultCacheServerSuite) TestSend() {
 	s.Equal(6, len(msg.GetIds().GetIntId().GetData()))
 }
 
-func generateIntIds(num int) *schemapb.IDs {
+func generateIntIDs(num int) *schemapb.IDs {
 	data := make([]int64, num)
 	for i := 0; i < num; i++ {
 		data[i] = int64(i)
@@ -77,7 +77,7 @@ func generateIntIds(num int) *schemapb.IDs {
 	}
 }
 
-func generateStrIds(num int) *schemapb.IDs {
+func generateStrIDs(num int) *schemapb.IDs {
 	data := make([]string, num)
 	for i := 0; i < num; i++ {
 		data[i] = strconv.FormatInt(int64(i), 10)
@@ -98,7 +98,7 @@ func (s *ResultCacheServerSuite) TestSplit() {
 		cacheSrv := NewResultCacheServer(srv, 1024, 1024)
 
 		err := cacheSrv.Send(&internalpb.RetrieveResults{
-			Ids: generateIntIds(1024),
+			Ids: generateIntIDs(1024),
 		})
 		s.NoError(err)
 
@@ -130,7 +130,7 @@ func (s *ResultCacheServerSuite) TestSplit() {
 		cacheSrv := NewResultCacheServer(srv, 1024, 1024)
 
 		err := cacheSrv.Send(&internalpb.RetrieveResults{
-			Ids: generateStrIds(2048),
+			Ids: generateStrIDs(2048),
 		})
 		s.NoError(err)
 
