@@ -60,12 +60,19 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 		Position:  pack.checkpoint,
 	})
 
-	startPos := lo.Map(pack.metacache.GetSegmentsBy(metacache.WithStartPosNotRecorded()), func(info *metacache.SegmentInfo, _ int) *datapb.SegmentStartPosition {
-		return &datapb.SegmentStartPosition{
-			SegmentID:     info.SegmentID(),
-			StartPosition: info.StartPosition(),
-		}
-	})
+	startPos := lo.Map(pack.metacache.GetSegmentsBy(
+		metacache.WithStartPosNotRecorded(), metacache.WithLevel(datapb.SegmentLevel_L1)),
+		func(info *metacache.SegmentInfo, _ int) *datapb.SegmentStartPosition {
+			return &datapb.SegmentStartPosition{
+				SegmentID:     info.SegmentID(),
+				StartPosition: info.StartPosition(),
+			}
+		})
+	// L0 brings its own start position
+	if segment.Level() == datapb.SegmentLevel_L0 {
+		startPos = append(startPos, &datapb.SegmentStartPosition{SegmentID: pack.segmentID, StartPosition: pack.StartPosition()})
+	}
+
 	getBinlogNum := func(fBinlog *datapb.FieldBinlog) int { return len(fBinlog.GetBinlogs()) }
 	log.Info("SaveBinlogPath",
 		zap.Int64("SegmentID", pack.segmentID),
