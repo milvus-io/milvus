@@ -1966,6 +1966,7 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
                     field_binlog_config->GetIndexType(),
                     index_metric,
                     knowhere::Version::GetCurrentVersion().VersionNumber(),
+                    false,
                     view_data);
             } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
                 data_size = dim * sizeof(knowhere::fp16);
@@ -1980,6 +1981,7 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
                         field_binlog_config->GetIndexType(),
                         index_metric,
                         knowhere::Version::GetCurrentVersion().VersionNumber(),
+                        false,
                         view_data);
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_BFLOAT16) {
@@ -1995,13 +1997,15 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
                         field_binlog_config->GetIndexType(),
                         index_metric,
                         knowhere::Version::GetCurrentVersion().VersionNumber(),
+                        false,
                         view_data);
             }
         } else {
             vec_index = std::make_unique<index::VectorMemIndex<float>>(
                 field_binlog_config->GetIndexType(),
                 index_metric,
-                knowhere::Version::GetCurrentVersion().VersionNumber());
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                false);
         }
         if (vec_index == nullptr) {
             LOG_INFO("fail to generate intermin index, invalid data type.");

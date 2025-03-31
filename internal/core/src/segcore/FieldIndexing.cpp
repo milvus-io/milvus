@@ -49,7 +49,8 @@ VectorFieldIndexing::recreate_index(DataType data_type,
         index_ = std::make_unique<index::VectorMemIndex<float>>(
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber());
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false);
     } else if (data_type == DataType::VECTOR_FLOAT) {
         auto concurrent_fp32_vec =
             reinterpret_cast<const ConcurrentVector<FloatVector>*>(
@@ -65,6 +66,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             config_->GetIndexType(),
             config_->GetMetricType(),
             knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false,
             view_data);
     } else if (data_type == DataType::VECTOR_FLOAT16) {
         auto concurrent_fp16_vec =
@@ -81,6 +83,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             config_->GetIndexType(),
             config_->GetMetricType(),
             knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false,
             view_data);
     } else if (data_type == DataType::VECTOR_BFLOAT16) {
         auto concurrent_bf16_vec =
@@ -97,6 +100,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             config_->GetIndexType(),
             config_->GetMetricType(),
             knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false,
             view_data);
     }
 }
@@ -126,17 +130,20 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
             indexing = std::make_unique<index::VectorMemIndex<float>>(
                 knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
                 knowhere::metric::L2,
-                knowhere::Version::GetCurrentVersion().VersionNumber());
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                false);
         } else if (field_meta_.get_data_type() == DataType::VECTOR_FLOAT16) {
             indexing = std::make_unique<index::VectorMemIndex<float16>>(
                 knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
                 knowhere::metric::L2,
-                knowhere::Version::GetCurrentVersion().VersionNumber());
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                false);
         } else {
             indexing = std::make_unique<index::VectorMemIndex<bfloat16>>(
                 knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
                 knowhere::metric::L2,
-                knowhere::Version::GetCurrentVersion().VersionNumber());
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                false);
         }
         auto dataset = knowhere::GenDataSet(
             vec_base->get_size_per_chunk(), dim, chunk_data);

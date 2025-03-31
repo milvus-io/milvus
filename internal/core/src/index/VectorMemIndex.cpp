@@ -59,8 +59,10 @@ VectorMemIndex<T>::VectorMemIndex(
     const IndexType& index_type,
     const MetricType& metric_type,
     const IndexVersion& version,
+    bool use_knowhere_build_pool,
     const storage::FileManagerContext& file_manager_context)
-    : VectorIndex(index_type, metric_type) {
+    : VectorIndex(index_type, metric_type),
+      use_knowhere_build_pool_(use_knowhere_build_pool) {
     CheckMetricTypeSupport<T>(metric_type);
     AssertInfo(!is_unsupported(index_type, metric_type),
                index_type + " doesn't support metric: " + metric_type);
@@ -87,8 +89,10 @@ template <typename T>
 VectorMemIndex<T>::VectorMemIndex(const IndexType& index_type,
                                   const MetricType& metric_type,
                                   const IndexVersion& version,
+                                  bool use_knowhere_build_pool,
                                   const knowhere::ViewDataOp view_data)
-    : VectorIndex(index_type, metric_type) {
+    : VectorIndex(index_type, metric_type),
+      use_knowhere_build_pool_(use_knowhere_build_pool) {
     CheckMetricTypeSupport<T>(metric_type);
     AssertInfo(!is_unsupported(index_type, metric_type),
                index_type + " doesn't support metric: " + metric_type);
@@ -291,7 +295,7 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     SetDim(dataset->GetDim());
 
     knowhere::TimeRecorder rc("BuildWithoutIds", 1);
-    auto stat = index_.Build(dataset, index_config);
+    auto stat = index_.Build(dataset, index_config, use_knowhere_build_pool_);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::IndexBuildError,
                   "failed to build index, " + KnowhereStatusString(stat));
@@ -394,7 +398,7 @@ VectorMemIndex<T>::AddWithDataset(const DatasetPtr& dataset,
     index_config.update(config);
 
     knowhere::TimeRecorder rc("AddWithDataset", 1);
-    auto stat = index_.Add(dataset, index_config);
+    auto stat = index_.Add(dataset, index_config, use_knowhere_build_pool_);
     if (stat != knowhere::Status::success)
         PanicInfo(ErrorCode::IndexBuildError,
                   "failed to append index, " + KnowhereStatusString(stat));
