@@ -16467,21 +16467,26 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
 }
 
 TEST(JsonIndexTest, TestExistsExpr) {
-    std::unordered_map<std::string, bool> json_strs_match = {
-        {R"({"a": 1.0})", true},
-        {R"({"a": "abc"})", true},
-        {R"({"a": 3.0})", true},
-        {R"({"a": true})", true},
-        {R"({"a": {"b": 1}})", true},
-        {R"({"a": []})", true},
-        {R"({"a": ["a", "b"]})", true},
-        {R"({"a": null})", false},  // exists null
-        {R"(1)", false},
-        {R"("abc")", false},
-        {R"(1.0)", false},
-        {R"(true)", false},
-        {R"([1, 2, 3])", false},
-        {R"({"a": 1, "b": 2})", true}};
+    std::vector<std::string> json_strs_match = {
+        R"({"a": 1.0})",
+        R"({"a": "abc"})",
+        R"({"a": 3.0})",
+        R"({"a": true})",
+        R"({"a": {"b": 1}})",
+        R"({"a": []})",
+        R"({"a": ["a", "b"]})",
+        R"({"a": null})",  // exists null
+        R"(1)",
+        R"("abc")",
+        R"(1.0)",
+        R"(true)",
+        R"([1, 2, 3])",
+        R"({"a": 1, "b": 2})"};
+
+    std::vector<std::pair<std::vector<std::string>, uint32_t>> path_to_matched_res =
+    { {{"a"}, 0b11111110000001},
+      {{"a", "0"}, 0b00000010000000},
+    };
 
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
@@ -16511,13 +16516,8 @@ TEST(JsonIndexTest, TestExistsExpr) {
     auto json_field =
         std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
     std::vector<milvus::Json> jsons;
-    BitsetType expect;
-    expect.resize(json_strs_match.size());
-    int i = 0;
-    for (auto& [json_str, match] : json_strs_match) {
+    for (auto& json_str : json_strs_match) {
         jsons.push_back(milvus::Json(simdjson::padded_string(json_str)));
-        expect.set(i, match);
-        i++;
     }
     json_field->add_json_data(jsons);
 
@@ -16531,11 +16531,23 @@ TEST(JsonIndexTest, TestExistsExpr) {
     load_index_info.index_params = {{JSON_PATH, "/a"}};
     seg->LoadIndex(load_index_info);
 
-    auto exists_expr = std::make_shared<expr::ExistsExpr>(
-        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true));
-    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
-                                                       exists_expr);
-    auto result = ExecuteQueryExpr(
-        plan, seg.get(), json_strs_match.size(), MAX_TIMESTAMP);
-    EXPECT_TRUE(result == expect);
+    for (auto& [path, matched_res] : path_to_matched_res) {
+        BitsetType expect;
+        expect.resize(json_strs_match.size());
+        expect.reset();
+
+        for (int i = 0; i < json_strs_match.size(); ++i) {
+            if (matched_res & (1 << i)) {
+                expect.set(i);
+            }
+        }
+
+        auto exists_expr = std::make_shared<expr::ExistsExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, path, true));
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           exists_expr);
+        auto result = ExecuteQueryExpr(
+            plan, seg.get(), json_strs_match.size(), MAX_TIMESTAMP);
+        EXPECT_TRUE(result == expect);
+    }
 }

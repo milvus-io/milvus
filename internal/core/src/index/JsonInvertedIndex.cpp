@@ -122,7 +122,7 @@ JsonInvertedIndex<T>::build_index_for_json(
                 error_recorder_.Record(
                     *json_column, nested_path_, simdjson::NO_SUCH_FIELD);
                 this->null_offset_.push_back(offset);
-                this->wrapper_->template add_multi_data<T>(
+                this->wrapper_->template add_array_data<T>(
                     nullptr, 0, offset++);
                 continue;
             }
