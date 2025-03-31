@@ -366,11 +366,8 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		return nil, err
 	}
 	plan.PreAllocatedLogIDs = logIDRange
-	beginLogID, _, err := t.allocator.AllocN(1)
-	if err != nil {
-		return nil, err
-	}
-	plan.BeginLogID = beginLogID
+	// BeginLogID is deprecated, but still assign it for compatibility.
+	plan.BeginLogID = logIDRange.Begin
 
 	plan.SegmentBinlogs = append(plan.SegmentBinlogs, sealedSegBinlogs...)
 	log.Info("l0CompactionTask refreshed level zero compaction plan",
