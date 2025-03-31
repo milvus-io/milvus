@@ -87,6 +87,7 @@ func NewDispatcher(
 	pchannel string,
 	position *Pos,
 	subPos SubPos,
+	includeCurrentMsg bool,
 	pullbackEndTs typeutil.Timestamp,
 ) (*Dispatcher, error) {
 	subName := fmt.Sprintf("%s-%d-%d", pchannel, id, time.Now().UnixNano())
@@ -116,7 +117,7 @@ func NewDispatcher(
 			return nil, err
 		}
 		log.Info("as consumer done", zap.Any("position", position))
-		err = stream.Seek(ctx, []*Pos{position}, false)
+		err = stream.Seek(ctx, []*Pos{position}, includeCurrentMsg)
 		if err != nil {
 			log.Error("seek failed", zap.Error(err))
 			return nil, err
