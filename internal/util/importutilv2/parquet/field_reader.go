@@ -576,10 +576,14 @@ func ReadVarcharData(pcr *FieldReader, count int64) (any, error) {
 			return nil, WrapTypeErr("string", chunk.DataType().Name(), pcr.field)
 		}
 		for i := 0; i < dataNums; i++ {
-			if err = common.CheckVarcharLength(stringReader.Value(i), maxLength, pcr.field); err != nil {
+			value := stringReader.Value(i)
+			if err = common.CheckValidUTF8(value, pcr.field); err != nil {
 				return nil, err
 			}
-			data = append(data, stringReader.Value(i))
+			if err = common.CheckVarcharLength(value, maxLength, pcr.field); err != nil {
+				return nil, err
+			}
+			data = append(data, value)
 		}
 	}
 	if len(data) == 0 {
@@ -617,10 +621,14 @@ func ReadNullableVarcharData(pcr *FieldReader, count int64) (any, []bool, error)
 					data = append(data, "")
 					continue
 				}
-				if err = common.CheckVarcharLength(stringReader.Value(i), maxLength, pcr.field); err != nil {
+				value := stringReader.ValueStr(i)
+				if err = common.CheckValidUTF8(value, pcr.field); err != nil {
 					return nil, nil, err
 				}
-				data = append(data, stringReader.ValueStr(i))
+				if err = common.CheckVarcharLength(value, maxLength, pcr.field); err != nil {
+					return nil, nil, err
+				}
+				data = append(data, value)
 			}
 		}
 	}
@@ -1193,6 +1201,10 @@ func ReadNullableIntegerOrFloatArrayData[T constraints.Integer | constraints.Flo
 }
 
 func ReadStringArrayData(pcr *FieldReader, count int64) (any, error) {
+	maxLength, err := parameterutil.GetMaxLength(pcr.field)
+	if err != nil {
+		return nil, err
+	}
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, err
@@ -1212,7 +1224,14 @@ func ReadStringArrayData(pcr *FieldReader, count int64) (any, error) {
 			start, end := offsets[i-1], offsets[i]
 			elementData := make([]string, 0, end-start)
 			for j := start; j < end; j++ {
-				elementData = append(elementData, stringReader.Value(int(j)))
+				value := stringReader.Value(int(j))
+				if err = common.CheckValidUTF8(value, pcr.field); err != nil {
+					return nil, err
+				}
+				if err = common.CheckVarcharLength(value, maxLength, pcr.field); err != nil {
+					return nil, err
+				}
+				elementData = append(elementData, value)
 			}
 			data = append(data, elementData)
 		}

@@ -530,6 +530,13 @@ func (r *rowParser) parseNullableEntity(fieldID int64, obj any) (any, error) {
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
+		maxLength, err := parameterutil.GetMaxLength(r.id2Field[fieldID])
+		if err != nil {
+			return nil, err
+		}
+		if err = common.CheckVarcharLength(value, maxLength, r.id2Field[fieldID]); err != nil {
+			return nil, err
+		}
 		return value, nil
 	case schemapb.DataType_JSON:
 		if obj == nil {

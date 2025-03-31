@@ -1,15 +1,85 @@
 package parquet
 
 import (
+	"context"
+	"fmt"
+	"math/rand"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/apache/arrow/go/v12/parquet"
+	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+func TestInvalidUTF8(t *testing.T) {
+	const (
+		fieldID = int64(100)
+		numRows = 100
+	)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:    fieldID,
+				Name:       "str",
+				DataType:   schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "256"}},
+			},
+		},
+	}
+
+	data := make([]string, numRows)
+	for i := 0; i < numRows-1; i++ {
+		data[i] = randomString(16)
+	}
+	data[numRows-1] = "\xc3\x28" // invalid utf-8
+
+	filePath := fmt.Sprintf("test_%d_reader.parquet", rand.Int())
+	defer os.Remove(filePath)
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	assert.NoError(t, err)
+
+	pqSchema, err := ConvertToArrowSchema(schema, false)
+	assert.NoError(t, err)
+	fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(numRows)), pqarrow.DefaultWriterProps())
+	assert.NoError(t, err)
+
+	insertData, err := storage.NewInsertData(schema)
+	assert.NoError(t, err)
+	err = insertData.Data[fieldID].AppendDataRows(data)
+	assert.NoError(t, err)
+
+	columns, err := testutil.BuildArrayData(schema, insertData, false)
+	assert.NoError(t, err)
+
+	recordBatch := array.NewRecord(pqSchema, columns, numRows)
+	err = fw.Write(recordBatch)
+	assert.NoError(t, err)
+	fw.Close()
+
+	ctx := context.Background()
+	f := storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus_test/test_parquet_reader/"))
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	assert.NoError(t, err)
+	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+	assert.NoError(t, err)
+
+	_, err = reader.Read()
+	assert.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "contains invalid UTF-8 data"))
+}
 
 // TestParseSparseFloatRowVector tests the parseSparseFloatRowVector function
 func TestParseSparseFloatRowVector(t *testing.T) {

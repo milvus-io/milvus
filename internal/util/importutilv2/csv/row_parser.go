@@ -241,6 +241,9 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 		if nullable && obj == r.nullkey {
 			return nil, nil
 		}
+		if err := common.CheckValidUTF8(obj, field); err != nil {
+			return nil, err
+		}
 		maxLength, err := parameterutil.GetMaxLength(field)
 		if err != nil {
 			return nil, err
@@ -355,7 +358,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 			return nil, err
 		}
 		// elements in array not support null value
-		scalarFieldData, err := r.arrayToFieldData(vec, field.GetElementType())
+		scalarFieldData, err := r.arrayToFieldData(vec, field)
 		if err != nil {
 			return nil, err
 		}
@@ -366,7 +369,8 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string) (any, e
 	}
 }
 
-func (r *rowParser) arrayToFieldData(arr []interface{}, eleType schemapb.DataType) (*schemapb.ScalarField, error) {
+func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSchema) (*schemapb.ScalarField, error) {
+	eleType := field.GetElementType()
 	switch eleType {
 	case schemapb.DataType_Bool:
 		values := make([]bool, len(arr))
@@ -477,6 +481,16 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, eleType schemapb.DataTyp
 			value, ok := v.(string)
 			if !ok {
 				return nil, r.wrapArrayValueTypeError(arr, eleType)
+			}
+			if err := common.CheckValidUTF8(value, field); err != nil {
+				return nil, err
+			}
+			maxLength, err := parameterutil.GetMaxLength(field)
+			if err != nil {
+				return nil, err
+			}
+			if err := common.CheckVarcharLength(value, maxLength, field); err != nil {
+				return nil, err
 			}
 			values[i] = value
 		}

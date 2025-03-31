@@ -18,6 +18,7 @@ package typeutil
 
 import (
 	"strings"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -64,4 +65,12 @@ func UnsafeStr2bytes(s string) []byte {
 /* #nosec G103 */
 func UnsafeBytes2str(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
+}
+
+func IsUTF8(s string) bool {
+	return utf8.ValidString(s)
+}
+
+func IsUTF8Bytes(b []byte) bool {
+	return utf8.Valid(b)
 }
