@@ -304,15 +304,6 @@ func (c *Core) initKVCreator() {
 	}
 }
 
-func (c *Core) initStreamingCoord() {
-	// c.streamingCoord = streamingcoord.NewServerBuilder().
-	// 	WithETCD(c.etcdCli).
-	// 	WithMetaKV(c.metaKVCreator()).
-	// 	WithSession(c.session).
-	// 	WithMixCoordClient(mixcoord).
-	// 	Build()
-}
-
 func (c *Core) initMetaTable(initCtx context.Context) error {
 	fn := func() error {
 		var catalog metastore.RootCoordCatalog
@@ -485,7 +476,6 @@ func (c *Core) Init() error {
 	c.registerMetricsRequest()
 	c.factory.Init(Params)
 	c.initKVCreator()
-	c.initStreamingCoord()
 
 	if c.enableActiveStandBy {
 		c.activateFunc = func() error {
