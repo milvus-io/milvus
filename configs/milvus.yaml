@@ -413,6 +413,7 @@ queryNode:
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
+    multipleChunkedEnable: true # Deprecated. Multiple chunked segment will be enabled by default.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
