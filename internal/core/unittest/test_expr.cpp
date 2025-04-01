@@ -16465,3 +16465,26 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
         ExecuteQueryExpr(plan, seg.get(), 2 * json_strs.size(), MAX_TIMESTAMP);
     EXPECT_EQ(final.count(), 2 * json_strs.size() - 2);
 }
+
+TEST(JsonIndexTest, TestBinaryRangeExpr) {
+    auto json_strs = std::vector<std::string>{
+        R"({"a": 1})",
+        R"({"a": 2})",
+        R"({"a": 3})",
+        R"({"a": 4})",
+
+        R"({"a": 1.0})",
+        R"({"a": 2.0})",
+        R"({"a": 3.0})",
+        R"({"a": 4.0})",
+
+        R"({"a": "1"})",
+        R"({"a": "2"})",
+        R"({"a": "3"})",
+        R"({"a": "4"})",
+
+        R"({"a": null})",
+        R"({"a": true})",
+        R"({"a": false})",
+    };
+}
