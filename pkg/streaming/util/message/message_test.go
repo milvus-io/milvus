@@ -114,3 +114,12 @@ func TestCiper(t *testing.T) {
 	assert.Equal(t, body.ShardName, "123123")
 	assert.Equal(t, msg2.EstimateSize(), 36)
 }
+
+// TestCheckIfMessageFromStreaming tests CheckIfMessageFromStreaming function.
+func TestCheckIfMessageFromStreaming(t *testing.T) {
+	assert.False(t, CheckIfMessageFromStreaming(nil))
+	assert.False(t, CheckIfMessageFromStreaming(map[string]string{}))
+	assert.True(t, CheckIfMessageFromStreaming(map[string]string{
+		messageVersion: "1",
+	}))
+}
