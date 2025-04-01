@@ -92,6 +92,10 @@ func (s *ClusteringCompactionTaskSuite) setupTest() {
 		}},
 		TimeoutInSeconds: 10,
 		Type:             datapb.CompactionType_ClusteringCompaction,
+		PreAllocatedLogIDs: &datapb.IDRange{
+			Begin: 200,
+			End:   2000,
+		},
 	}
 	s.task.plan = s.plan
 }
@@ -221,6 +225,10 @@ func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 		Begin: 1,
 		End:   101,
 	}
+	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
+		Begin: 200,
+		End:   2000,
+	}
 }
 
 func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
@@ -308,6 +316,10 @@ func (s *ClusteringCompactionTaskSuite) prepareScalarCompactionNormalByMemoryLim
 		Begin: 1,
 		End:   1000,
 	}
+	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
+		Begin: 1001,
+		End:   2000,
+	}
 }
 
 func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit() {
@@ -385,6 +397,10 @@ func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() 
 	s.task.plan.PreAllocatedSegmentIDs = &datapb.IDRange{
 		Begin: 1,
 		End:   1000,
+	}
+	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
+		Begin: 1001,
+		End:   2000,
 	}
 }
 
