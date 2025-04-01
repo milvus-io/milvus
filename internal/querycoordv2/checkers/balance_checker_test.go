@@ -290,9 +290,31 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	suite.checker.meta.ReplicaManager.Put(ctx, mr2.IntoReplica())
 
 	// test stopping balance
+	// First round: check replica1
 	idsToBalance := []int64{int64(replicaID1)}
 	replicasToBalance := suite.checker.getReplicaForStoppingBalance(ctx)
 	suite.ElementsMatch(idsToBalance, replicasToBalance)
+	suite.True(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(int64(cid1)))
+	suite.False(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(int64(cid2)))
+
+	// Second round: should skip replica1, check replica2
+	idsToBalance = []int64{int64(replicaID2)}
+	replicasToBalance = suite.checker.getReplicaForStoppingBalance(ctx)
+	suite.ElementsMatch(idsToBalance, replicasToBalance)
+	suite.True(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(int64(cid1)))
+	suite.True(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(int64(cid2)))
+
+	// Third round: all collections checked, should return nil and clear the set
+	replicasToBalance = suite.checker.getReplicaForStoppingBalance(ctx)
+	suite.Empty(replicasToBalance)
+	suite.False(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(int64(cid1)))
+	suite.False(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(int64(cid2)))
+
+	// reset meta for Check test
+	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
+	mr1 = replica1.CopyForWrite()
+	mr1.AddRONode(1)
+	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
 
 	// checker check
 	segPlans, chanPlans := make([]balance.SegmentAssignPlan, 0), make([]balance.ChannelAssignPlan, 0)
