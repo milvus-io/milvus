@@ -75,6 +75,9 @@ func (p *policy) Balance(currentLayout balancer.CurrentLayout) (balancer.Expecte
 	snapshot := expectedLayout.AssignmentSnapshot()
 	reassignChannelIDs := make([]types.ChannelID, 0, p.cfg.RebalanceMaxStep)
 	for i := 0; i < p.cfg.RebalanceMaxStep; i++ {
+		if len(expectedLayout.Assignments) == 0 {
+			break
+		}
 		channelID := expectedLayout.FindTheLeastUnbalanceScoreIncrementChannel()
 		expectedLayout.Unassign(channelID)
 		reassignChannelIDs = append(reassignChannelIDs, channelID)
@@ -85,9 +88,27 @@ func (p *policy) Balance(currentLayout balancer.CurrentLayout) (balancer.Expecte
 	greatestSnapshot := snapshot
 	p.assignChannels(expectedLayout, reassignChannelIDs, &greatestSnapshot)
 	if greatestSnapshot.GlobalUnbalancedScore < snapshot.GlobalUnbalancedScore-p.cfg.RebalanceTolerance {
+		if p.Logger().Level().Enabled(zap.DebugLevel) {
+			p.Logger().Debug(
+				"vchannel fair policy rebalance result found",
+				zap.Stringers("reassignChannelIDs", reassignChannelIDs),
+				zap.Float64("current", snapshot.GlobalUnbalancedScore),
+				zap.Float64("greatest", greatestSnapshot.GlobalUnbalancedScore),
+				zap.Float64("tolerance", p.cfg.RebalanceTolerance),
+			)
+		}
 		return balancer.ExpectedLayout{
 			ChannelAssignment: greatestSnapshot.Assignments,
 		}, nil
+	}
+	if p.Logger().Level().Enabled(zap.DebugLevel) {
+		p.Logger().Debug(
+			"vchannel fair policy rebalance result ignored with rebalance tolerance",
+			zap.Stringers("reassignChannelIDs", reassignChannelIDs),
+			zap.Float64("current", snapshot.GlobalUnbalancedScore),
+			zap.Float64("greatest", greatestSnapshot.GlobalUnbalancedScore),
+			zap.Float64("tolerance", p.cfg.RebalanceTolerance),
+		)
 	}
 	return balancer.ExpectedLayout{
 		ChannelAssignment: snapshot.Assignments,
