@@ -16480,8 +16480,13 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     load_index_info.index_params = {{JSON_PATH, "/a"}};
     seg->LoadIndex(load_index_info);
 
-    auto json_field_data_info = FieldDataInfo(
-        json_fid.get(), 2 * json_strs.size(), {json_field, json_field2});
+    auto json_field_data_info =
+        FieldDataInfo(json_fid.get(), 2 * json_strs.size());
+    json_field_data_info.arrow_reader_channel->push(
+        storage::ConvertFieldDataToArrowDataWrapper(json_field));
+    json_field_data_info.arrow_reader_channel->push(
+        storage::ConvertFieldDataToArrowDataWrapper(json_field2));
+    json_field_data_info.arrow_reader_channel->close();
     seg->LoadFieldData(json_fid, json_field_data_info);
 
     proto::plan::GenericValue val;
