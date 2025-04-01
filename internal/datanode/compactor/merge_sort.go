@@ -3,7 +3,6 @@ package compactor
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -40,7 +39,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	log := log.With(zap.Int64("planID", plan.GetPlanID()))
 
 	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
-	logIDAlloc := allocator.NewLocalAllocator(plan.GetBeginLogID(), math.MaxInt64)
+	logIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
 	writer := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), plan.GetSchema(), maxRows, partitionID, collectionID, plan.GetChannel(), 4096)
 
