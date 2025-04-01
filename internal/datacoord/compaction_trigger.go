@@ -385,7 +385,8 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 
 			// TODO[GOOSE], 11 = 1 planID + 10 segmentID, this is a hack need to be removed.
 			// Any plan that output segment number greater than 10 will be marked as invalid plan for now.
-			startID, endID, err := t.allocator.AllocN(11)
+			n := 11 * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
+			startID, endID, err := t.allocator.AllocN(n)
 			if err != nil {
 				log.Warn("fail to allocate id", zap.Error(err))
 				return err

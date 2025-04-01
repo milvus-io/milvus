@@ -36,10 +36,12 @@ func (d *channelAssignmentDiscoverer) NewVersionedState() VersionedState {
 
 // channelAssignmentDiscoverer implements the resolver.Discoverer interface.
 func (d *channelAssignmentDiscoverer) Discover(ctx context.Context, cb func(VersionedState) error) error {
-	// Always send the current state first.
-	// Outside logic may lost the last state before retry Discover function.
-	if err := cb(d.parseState()); err != nil {
-		return err
+	if d.lastDiscovery != nil {
+		// Always send the current state first if there's.
+		// Outside logic may lost the last state before retry Discover function.
+		if err := cb(d.parseState()); err != nil {
+			return err
+		}
 	}
 	return d.assignmentWatcher.AssignmentDiscover(ctx, func(assignments *types.VersionedStreamingNodeAssignments) error {
 		d.lastDiscovery = assignments
@@ -50,10 +52,6 @@ func (d *channelAssignmentDiscoverer) Discover(ctx context.Context, cb func(Vers
 // parseState parses the addresses from the discovery response.
 // Always perform a copy here.
 func (d *channelAssignmentDiscoverer) parseState() VersionedState {
-	if d.lastDiscovery == nil {
-		return d.NewVersionedState()
-	}
-
 	addrs := make([]resolver.Address, 0, len(d.lastDiscovery.Assignments))
 	for _, assignment := range d.lastDiscovery.Assignments {
 		assignment := assignment
