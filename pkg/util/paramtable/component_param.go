@@ -3525,11 +3525,12 @@ type dataCoordConfig struct {
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
 
 	// compaction
-	EnableCompaction            ParamItem `refreshable:"false"`
-	EnableAutoCompaction        ParamItem `refreshable:"true"`
-	IndexBasedCompaction        ParamItem `refreshable:"true"`
-	CompactionTaskPrioritizer   ParamItem `refreshable:"true"`
-	CompactionTaskQueueCapacity ParamItem `refreshable:"false"`
+	EnableCompaction                       ParamItem `refreshable:"false"`
+	EnableAutoCompaction                   ParamItem `refreshable:"true"`
+	IndexBasedCompaction                   ParamItem `refreshable:"true"`
+	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
+	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
+	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
 	CompactionRPCTimeout             ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
@@ -3854,6 +3855,14 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Export:       true,
 	}
 	p.CompactionTaskQueueCapacity.Init(base.mgr)
+
+	p.CompactionPreAllocateIDExpansionFactor = ParamItem{
+		Key:          "dataCoord.compaction.preAllocateIDExpansionFactor",
+		Version:      "2.5.8",
+		DefaultValue: "100",
+		Doc:          `The expansion factor for pre-allocating IDs during compaction.`,
+	}
+	p.CompactionPreAllocateIDExpansionFactor.Init(base.mgr)
 
 	p.CompactionRPCTimeout = ParamItem{
 		Key:          "dataCoord.compaction.rpcTimeout",

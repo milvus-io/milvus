@@ -69,51 +69,6 @@ func (_c *MockDiscoverer_Discover_Call) RunAndReturn(run func(context.Context, f
 	return _c
 }
 
-// NewVersionedState provides a mock function with given fields:
-func (_m *MockDiscoverer) NewVersionedState() discoverer.VersionedState {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for NewVersionedState")
-	}
-
-	var r0 discoverer.VersionedState
-	if rf, ok := ret.Get(0).(func() discoverer.VersionedState); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(discoverer.VersionedState)
-	}
-
-	return r0
-}
-
-// MockDiscoverer_NewVersionedState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NewVersionedState'
-type MockDiscoverer_NewVersionedState_Call struct {
-	*mock.Call
-}
-
-// NewVersionedState is a helper method to define mock.On call
-func (_e *MockDiscoverer_Expecter) NewVersionedState() *MockDiscoverer_NewVersionedState_Call {
-	return &MockDiscoverer_NewVersionedState_Call{Call: _e.mock.On("NewVersionedState")}
-}
-
-func (_c *MockDiscoverer_NewVersionedState_Call) Run(run func()) *MockDiscoverer_NewVersionedState_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockDiscoverer_NewVersionedState_Call) Return(_a0 discoverer.VersionedState) *MockDiscoverer_NewVersionedState_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockDiscoverer_NewVersionedState_Call) RunAndReturn(run func() discoverer.VersionedState) *MockDiscoverer_NewVersionedState_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // NewMockDiscoverer creates a new instance of MockDiscoverer. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockDiscoverer(t interface {
