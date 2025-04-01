@@ -276,7 +276,7 @@ class MilvusCDCPerformance:
         schema = CollectionSchema(fields, "Milvus CDC test collection")
         c_name = "milvus_cdc_perf_test" + datetime.now().strftime("%Y%m%d%H%M%S")
         # Create collections
-        self.source_collection = Collection(c_name, schema, using=self.source_alias, num_shards=2)
+        self.source_collection = Collection(c_name, schema, using=self.source_alias, num_shards=4)
         time.sleep(5)
         self.target_collection = Collection(c_name, using=self.target_alias)
         index_params = {
