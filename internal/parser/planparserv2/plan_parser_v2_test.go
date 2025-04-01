@@ -1710,14 +1710,14 @@ func TestNestedPathWithChinese(t *testing.T) {
 func Test_JSONPathNullExpr(t *testing.T) {
 	schema := newTestSchemaHelper(t)
 
-	expr_pairs := [][]string{
+	exprPairs := [][]string{
 		{`A["a"] is null`, `not exists A["a"]`},
 		{`A["a"] is not null`, `exists A["a"]`},
 		{`dyn_field is null`, `not exists dyn_field`},
 		{`dyn_field is not null`, `exists dyn_field`},
 	}
 
-	for _, expr := range expr_pairs {
+	for _, expr := range exprPairs {
 		plan, err := CreateSearchPlan(schema, expr[0], "FloatVectorField", &planpb.QueryInfo{
 			Topk:         0,
 			MetricType:   "",
@@ -1736,10 +1736,10 @@ func Test_JSONPathNullExpr(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, plan2)
 
-		plan_str, err := proto.Marshal(plan)
+		planStr, err := proto.Marshal(plan)
 		assert.NoError(t, err)
-		plan2_str, err := proto.Marshal(plan2)
+		plan2Str, err := proto.Marshal(plan2)
 		assert.NoError(t, err)
-		assert.Equal(t, plan_str, plan2_str)
+		assert.Equal(t, planStr, plan2Str)
 	}
 }
