@@ -16903,3 +16903,26 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
         EXPECT_TRUE(result == expect_res);
     }
 }
+
+TEST(JsonIndexTest, TestBinaryRangeExpr) {
+    auto json_strs = std::vector<std::string>{
+        R"({"a": 1})",
+        R"({"a": 2})",
+        R"({"a": 3})",
+        R"({"a": 4})",
+
+        R"({"a": 1.0})",
+        R"({"a": 2.0})",
+        R"({"a": 3.0})",
+        R"({"a": 4.0})",
+
+        R"({"a": "1"})",
+        R"({"a": "2"})",
+        R"({"a": "3"})",
+        R"({"a": "4"})",
+
+        R"({"a": null})",
+        R"({"a": true})",
+        R"({"a": false})",
+    };
+}
