@@ -25,10 +25,7 @@ func TestSessionDiscoverer(t *testing.T) {
 	etcdClient, err := etcd.GetEmbedEtcdClient()
 	assert.NoError(t, err)
 	targetVersion := "0.1.0"
-	d := NewSessionDiscoverer(etcdClient, "session/", false, targetVersion)
-
-	s := d.NewVersionedState()
-	assert.True(t, s.Version.EQ(typeutil.VersionInt64(-1)))
+	d := NewSessionDiscoverer(etcdClient, "session/", false, ">="+targetVersion)
 
 	expected := []map[int64]*sessionutil.SessionRaw{
 		{},
@@ -95,7 +92,7 @@ func TestSessionDiscoverer(t *testing.T) {
 	assert.ErrorIs(t, err, io.EOF)
 
 	// Do a init discover here.
-	d = NewSessionDiscoverer(etcdClient, "session/", false, targetVersion)
+	d = NewSessionDiscoverer(etcdClient, "session/", false, ">="+targetVersion)
 	err = d.Discover(ctx, func(state VersionedState) error {
 		// balance attributes
 		sessions := state.Sessions()

@@ -22,22 +22,32 @@ func (_m *MockResolver) EXPECT() *MockResolver_Expecter {
 	return &MockResolver_Expecter{mock: &_m.Mock}
 }
 
-// GetLatestState provides a mock function with given fields:
-func (_m *MockResolver) GetLatestState() discoverer.VersionedState {
-	ret := _m.Called()
+// GetLatestState provides a mock function with given fields: ctx
+func (_m *MockResolver) GetLatestState(ctx context.Context) (discoverer.VersionedState, error) {
+	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetLatestState")
 	}
 
 	var r0 discoverer.VersionedState
-	if rf, ok := ret.Get(0).(func() discoverer.VersionedState); ok {
-		r0 = rf()
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (discoverer.VersionedState, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) discoverer.VersionedState); ok {
+		r0 = rf(ctx)
 	} else {
 		r0 = ret.Get(0).(discoverer.VersionedState)
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockResolver_GetLatestState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLatestState'
@@ -46,23 +56,24 @@ type MockResolver_GetLatestState_Call struct {
 }
 
 // GetLatestState is a helper method to define mock.On call
-func (_e *MockResolver_Expecter) GetLatestState() *MockResolver_GetLatestState_Call {
-	return &MockResolver_GetLatestState_Call{Call: _e.mock.On("GetLatestState")}
+//   - ctx context.Context
+func (_e *MockResolver_Expecter) GetLatestState(ctx interface{}) *MockResolver_GetLatestState_Call {
+	return &MockResolver_GetLatestState_Call{Call: _e.mock.On("GetLatestState", ctx)}
 }
 
-func (_c *MockResolver_GetLatestState_Call) Run(run func()) *MockResolver_GetLatestState_Call {
+func (_c *MockResolver_GetLatestState_Call) Run(run func(ctx context.Context)) *MockResolver_GetLatestState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		run(args[0].(context.Context))
 	})
 	return _c
 }
 
-func (_c *MockResolver_GetLatestState_Call) Return(_a0 discoverer.VersionedState) *MockResolver_GetLatestState_Call {
-	_c.Call.Return(_a0)
+func (_c *MockResolver_GetLatestState_Call) Return(_a0 discoverer.VersionedState, _a1 error) *MockResolver_GetLatestState_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockResolver_GetLatestState_Call) RunAndReturn(run func() discoverer.VersionedState) *MockResolver_GetLatestState_Call {
+func (_c *MockResolver_GetLatestState_Call) RunAndReturn(run func(context.Context) (discoverer.VersionedState, error)) *MockResolver_GetLatestState_Call {
 	_c.Call.Return(run)
 	return _c
 }

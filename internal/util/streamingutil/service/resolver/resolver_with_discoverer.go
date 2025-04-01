@@ -24,7 +24,7 @@ func newResolverWithDiscoverer(d discoverer.Discoverer, retryInterval time.Durat
 		discoverer:      d,
 		retryInterval:   retryInterval,
 		latestStateCond: syncutil.NewContextCond(&sync.Mutex{}),
-		latestState:     d.NewVersionedState(),
+		latestState:     nil,
 	}
 	r.SetLogger(logger)
 	go r.doDiscover()
@@ -48,20 +48,44 @@ type resolverWithDiscoverer struct {
 	retryInterval time.Duration
 
 	latestStateCond *syncutil.ContextCond
-	latestState     discoverer.VersionedState
+	latestState     *discoverer.VersionedState
 }
 
 // GetLatestState returns the latest state of the resolver.
-func (r *resolverWithDiscoverer) GetLatestState() VersionedState {
+func (r *resolverWithDiscoverer) GetLatestState(ctx context.Context) (VersionedState, error) {
 	r.latestStateCond.L.Lock()
+	for r.latestState == nil {
+		if err := r.latestStateCond.Wait(ctx); err != nil {
+			return discoverer.VersionedState{}, err
+		}
+	}
 	state := r.latestState
 	r.latestStateCond.L.Unlock()
-	return state
+	return *state, nil
+}
+
+// getLatestState returns the latest state of the resolver.
+func (r *resolverWithDiscoverer) getLatestState() *VersionedState {
+	r.latestStateCond.L.Lock()
+	defer r.latestStateCond.L.Unlock()
+	return r.latestState
+}
+
+// mustGetLastestState returns the latest state of the resolver.
+func (r *resolverWithDiscoverer) mustGetLastestState() VersionedState {
+	state := r.getLatestState()
+	if state == nil {
+		panic("latest state is nil")
+	}
+	return *state
 }
 
 // Watch watch the state change of the resolver.
 func (r *resolverWithDiscoverer) Watch(ctx context.Context, cb func(VersionedState) error) error {
-	state := r.GetLatestState()
+	state, err := r.GetLatestState(ctx)
+	if err != nil {
+		return errors.Mark(err, ErrCanceled)
+	}
 	if err := cb(state); err != nil {
 		return errors.Mark(err, ErrInterrupted)
 	}
@@ -70,7 +94,7 @@ func (r *resolverWithDiscoverer) Watch(ctx context.Context, cb func(VersionedSta
 		if err := r.watchStateChange(ctx, version); err != nil {
 			return errors.Mark(err, ErrCanceled)
 		}
-		state := r.GetLatestState()
+		state := r.mustGetLastestState()
 		if err := cb(state); err != nil {
 			return errors.Mark(err, ErrInterrupted)
 		}
@@ -133,10 +157,14 @@ func (r *resolverWithDiscoverer) doDiscover() {
 				watcher.Logger().Info("new grpc resolver registered")
 				// New grpc resolver registered.
 				// Trigger the latest state to the new grpc resolver.
-				if err := watcher.Update(r.GetLatestState()); err != nil {
+				grpcResolvers[watcher] = struct{}{}
+				state := r.getLatestState()
+				if state == nil {
+					continue
+				}
+				if err := watcher.Update(*state); err != nil {
 					r.Logger().Info("resolver is closed, ignore the new grpc resolver", zap.Error(err))
-				} else {
-					grpcResolvers[watcher] = struct{}{}
+					delete(grpcResolvers, watcher)
 				}
 			case stateWithError := <-ch:
 				if stateWithError.err != nil {
@@ -151,8 +179,8 @@ func (r *resolverWithDiscoverer) doDiscover() {
 
 				// Check if the state is the newer.
 				state := stateWithError.state
-				latestState := r.GetLatestState()
-				if !state.Version.GT(latestState.Version) {
+				latestState := r.getLatestState()
+				if latestState != nil && !state.Version.GT(latestState.Version) {
 					// Ignore the old version.
 					r.Logger().Info("service discover update, ignore old version", zap.Any("state", state))
 					continue
@@ -171,7 +199,7 @@ func (r *resolverWithDiscoverer) doDiscover() {
 				r.Logger().Info("update resolver done")
 				// Update the latest state and notify all resolver watcher should be executed after the all grpc watcher updated.
 				r.latestStateCond.LockAndBroadcast()
-				r.latestState = state
+				r.latestState = &state
 				r.latestStateCond.L.Unlock()
 			}
 		}
