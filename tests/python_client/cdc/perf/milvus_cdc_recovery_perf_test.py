@@ -326,7 +326,8 @@ class MilvusCDCPerformance:
                             results = self.target_collection.query(
                                 expr=f"timestamp == {latest_insert_ts}",
                                 output_fields=["timestamp"],
-                                limit=1
+                                limit=1,
+                                consistency_level="Bounded"
                             )
                         except Exception as e:
                             logger.debug(f"Query failed: {e}")
@@ -356,7 +357,8 @@ class MilvusCDCPerformance:
                 results = self.target_collection.query(
                     expr="",
                     output_fields=["count(*)"],
-                    timeout=10
+                    timeout=10,
+                    consistency_level="Bounded"
                 )
                 tt = time.time() - t0
                 self.target_count = results[0]['count(*)']
@@ -370,7 +372,8 @@ class MilvusCDCPerformance:
                 results = self.source_collection.query(
                     expr="",
                     output_fields=["count(*)"],
-                    timeout=10
+                    timeout=10,
+                    consistency_level="Bounded"
                 )
                 tt = time.time() - t0
                 self.source_count = results[0]['count(*)']
@@ -380,6 +383,7 @@ class MilvusCDCPerformance:
         previous_count = self.target_collection.query(
                     expr="",
                     output_fields=["count(*)"],
+                    consistency_level="Bounded"
                 )[0]['count(*)']
         while not self.stop_query:
             try:
