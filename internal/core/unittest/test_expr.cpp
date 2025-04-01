@@ -3442,9 +3442,10 @@ TEST_P(ExprTest, TestReorder) {
 
         auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
         auto field_meta = fields.at(FieldId(field_id));
-        info.channel->push(
+        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
             CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.channel->close();
+        info.arrow_reader_channel->push(arrow_data_wrapper);
+        info.arrow_reader_channel->close();
 
         seg->LoadFieldData(FieldId(field_id), info);
     }
@@ -3895,9 +3896,10 @@ TEST_P(ExprTest, TestMutiInConvert) {
 
         auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
         auto field_meta = fields.at(FieldId(field_id));
-        info.channel->push(
+        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
             CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.channel->close();
+        info.arrow_reader_channel->push(arrow_data_wrapper);
+        info.arrow_reader_channel->close();
 
         seg->LoadFieldData(FieldId(field_id), info);
     }
