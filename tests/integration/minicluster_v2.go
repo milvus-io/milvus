@@ -344,14 +344,14 @@ func (cluster *MiniClusterV2) Start() error {
 	return nil
 }
 
-func (cluster *MiniClusterV2) StopRootCoord() {
+func (cluster *MiniClusterV2) StopMixCoord() {
 	if err := cluster.MixCoord.Stop(); err != nil {
 		panic(err)
 	}
 	cluster.MixCoord = nil
 }
 
-func (cluster *MiniClusterV2) StartRootCoord() {
+func (cluster *MiniClusterV2) StartMixCoord() {
 	if cluster.MixCoord == nil {
 		var err error
 		if cluster.MixCoord, err = grpcmixcoord.NewServer(cluster.ctx, cluster.factory); err != nil {

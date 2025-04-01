@@ -283,7 +283,7 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 	start := time.Now()
 
 	log.Info("=========================Root Coordinators stopped=========================")
-	c.StopRootCoord()
+	c.StopMixCoord()
 	params.Save(params.CommonCfg.GracefulTime.Key, "60000")
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
@@ -295,7 +295,7 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 	registry.ResetRegistration()
 
 	log.Info("=========================restart Root Coordinators=========================")
-	c.StartRootCoord()
+	c.StartMixCoord()
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)

@@ -237,13 +237,13 @@ func (s *CoordSwitchSuite) switchCoord() float64 {
 	c := s.Cluster
 	start := time.Now()
 	log.Info("=========================Stopping Coordinators========================")
-	c.StopRootCoord()
+	c.StopMixCoord()
 	log.Info("=========================Coordinators stopped=========================", zap.Duration("elapsed", time.Since(start)))
 	start = time.Now()
 
 	registry.ResetRegistration()
 
-	c.StartRootCoord()
+	c.StartMixCoord()
 	log.Info("=========================RootCoord restarted=========================")
 
 	for i := 0; i < 1000; i++ {

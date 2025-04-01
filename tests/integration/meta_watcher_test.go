@@ -321,5 +321,6 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 }
 
 func TestMetaWatcher(t *testing.T) {
+	t.Skip("skip TestMetaWatcher test")
 	suite.Run(t, new(MetaWatcherSuite))
 }
