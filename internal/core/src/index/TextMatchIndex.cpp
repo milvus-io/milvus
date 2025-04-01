@@ -20,6 +20,7 @@
 namespace milvus::index {
 constexpr const char* TMP_TEXT_LOG_PREFIX = "/tmp/milvus/text-log/";
 
+// for growing segment.
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* unique_id,
                                const char* tokenizer_name,
@@ -28,9 +29,17 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Text;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        unique_id, true, "", tokenizer_name, analyzer_params);
+        unique_id,
+        true,
+        "",
+        milvus::tantivy::DEFAULT_NUM_THREADS_FOR_QUERY_NODE,
+        milvus::tantivy::DEFAULT_NUM_THREADS_FOR_QUERY_NODE *
+            milvus::tantivy::DEFAULT_MEMORY_BUDGET_PER_THREAD,
+        tokenizer_name,
+        analyzer_params);
 }
 
+// for sealed segment.
 TextMatchIndex::TextMatchIndex(const std::string& path,
                                const char* unique_id,
                                const char* tokenizer_name,
@@ -43,9 +52,17 @@ TextMatchIndex::TextMatchIndex(const std::string& path,
     path_ = (prefix / sub_path).string();
     boost::filesystem::create_directories(path_);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        unique_id, false, path_.c_str(), tokenizer_name, analyzer_params);
+        unique_id,
+        false,
+        path_.c_str(),
+        milvus::tantivy::DEFAULT_NUM_THREADS_FOR_QUERY_NODE,
+        milvus::tantivy::DEFAULT_NUM_THREADS_FOR_QUERY_NODE *
+            milvus::tantivy::DEFAULT_MEMORY_BUDGET_PER_THREAD,
+        tokenizer_name,
+        analyzer_params);
 }
 
+// for building index.
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
                                const char* tokenizer_name,
                                const char* analyzer_params)
@@ -62,13 +79,18 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
     d_type_ = TantivyDataType::Text;
     std::string field_name =
         std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(field_name.c_str(),
-                                                     false,
-                                                     path_.c_str(),
-                                                     tokenizer_name,
-                                                     analyzer_params);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        field_name.c_str(),
+        false,
+        path_.c_str(),
+        milvus::tantivy::DEFAULT_NUM_THREADS_FOR_INDEX_NODE,
+        milvus::tantivy::DEFAULT_NUM_THREADS_FOR_INDEX_NODE *
+            milvus::tantivy::DEFAULT_MEMORY_BUDGET_PER_THREAD,
+        tokenizer_name,
+        analyzer_params);
 }
 
+// for loading index
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
