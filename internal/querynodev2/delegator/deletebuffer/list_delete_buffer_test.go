@@ -148,7 +148,11 @@ func (s *ListDeleteBufferSuite) TestL0SegmentOperations() {
 	})
 
 	seg3 := segments.NewMockSegment(s.T())
+	seg3.On("ID").Return(int64(3))
 	seg3.On("Release", mock.Anything).Return()
+	seg3.On("StartPosition").Return(&msgpb.MsgPosition{
+		Timestamp: 30,
+	})
 
 	// Test RegisterL0 with multiple segments
 	buffer.RegisterL0(seg1, seg2)
@@ -167,7 +171,10 @@ func (s *ListDeleteBufferSuite) TestL0SegmentOperations() {
 	s.Equal(0, len(emptyBuffer.ListL0()))
 
 	// Test UnRegister
-	buffer.UnRegister(15)
+	buffer.UnRegister(seg1.StartPosition().GetTimestamp())
+	segments = buffer.ListL0()
+	s.Equal(2, len(segments))
+	buffer.UnRegister(seg1.StartPosition().GetTimestamp() + 1)
 	segments = buffer.ListL0()
 	s.Equal(1, len(segments))
 	s.Equal(int64(2), segments[0].ID())

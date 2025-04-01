@@ -418,6 +418,7 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingBF() {
 	s.Require().NoError(err)
 	s.delegator.deleteBuffer.RegisterL0(l0Segment)
 
+	seg.EXPECT().ID().Return(1)
 	seg.EXPECT().Partition().Return(100)
 	seg.EXPECT().BatchPkExist(mock.Anything).Return(lo.RepeatBy(n, func(i int) bool { return true }))
 	seg.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pk storage.PrimaryKeys, u []uint64) error {

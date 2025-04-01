@@ -213,16 +213,6 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	defer reader.Close()
 
-	writeSlice := func(r storage.Record, start, end int) error {
-		sliced := r.Slice(start, end)
-		defer sliced.Release()
-		err = mWriter.Write(sliced)
-		if err != nil {
-			log.Warn("compact wrong, failed to writer row", zap.Error(err))
-			return err
-		}
-		return nil
-	}
 	for {
 		var r storage.Record
 		r, err = reader.Next()
@@ -235,12 +225,15 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				return
 			}
 		}
-		pkArray := r.Column(pkField.FieldID)
-		tsArray := r.Column(common.TimeStampField).(*array.Int64)
 
-		sliceStart := -1
-		rows := r.Len()
-		for i := 0; i < rows; i++ {
+		var (
+			pkArray    = r.Column(pkField.FieldID)
+			tsArray    = r.Column(common.TimeStampField).(*array.Int64)
+			sliceStart = -1
+			rb         *storage.RecordBuilder
+		)
+
+		for i := range r.Len() {
 			// Filtering deleted entities
 			var pk any
 			switch pkField.DataType {
@@ -253,13 +246,13 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			}
 			ts := typeutil.Timestamp(tsArray.Value(i))
 			if entityFilter.Filtered(pk, ts) {
-				if sliceStart != -1 {
-					err = writeSlice(r, sliceStart, i)
-					if err != nil {
-						return
-					}
-					sliceStart = -1
+				if rb == nil {
+					rb = storage.NewRecordBuilder(t.plan.GetSchema())
 				}
+				if sliceStart != -1 {
+					rb.Append(r, sliceStart, i)
+				}
+				sliceStart = -1
 				continue
 			}
 
@@ -268,11 +261,15 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			}
 		}
 
-		if sliceStart != -1 {
-			err = writeSlice(r, sliceStart, r.Len())
-			if err != nil {
-				return
+		if rb != nil {
+			if sliceStart != -1 {
+				rb.Append(r, sliceStart, r.Len())
 			}
+			if rb.GetRowNum() > 0 {
+				mWriter.Write(rb.Build())
+			}
+		} else {
+			mWriter.Write(r)
 		}
 	}
 

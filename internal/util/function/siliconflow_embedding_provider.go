@@ -20,7 +20,6 @@ package function
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -41,9 +40,6 @@ type SiliconflowEmbeddingProvider struct {
 
 func createSiliconflowEmbeddingClient(apiKey string, url string) (*siliconflow.SiliconflowEmbedding, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv(siliconflowAKEnvStr)
-	}
-	if apiKey == "" {
 		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", siliconflowAKEnvStr)
 	}
 
@@ -55,12 +51,12 @@ func createSiliconflowEmbeddingClient(apiKey string, url string) (*siliconflow.S
 	return c, nil
 }
 
-func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema) (*SiliconflowEmbeddingProvider, error) {
+func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*SiliconflowEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	apiKey, url := parseAKAndURL(functionSchema.Params)
+	apiKey, url := parseAKAndURL(functionSchema.Params, params, siliconflowAKEnvStr)
 	var modelName string
 
 	for _, param := range functionSchema.Params {

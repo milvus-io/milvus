@@ -21,7 +21,7 @@ Want to use Milvus with zero setup? Try out [Zilliz Cloud ☁️](https://cloud.
 For questions about how to use Milvus, join the community on [Discord](https://discord.gg/33mfvwep3J) to get help. For reporting problems, file bugs and feature requests in GitHub [Issues](https://github.com/milvus-io/milvus/issues) or ask in [Discussions](https://github.com/milvus-io/milvus/discussions).
 
 The Milvus open-source project is
-under [LF AI & Data Foundation](https://lfaidata.foundation/projects/milvus/), distributed with [Apache 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) License.
+under [LF AI & Data Foundation](https://lfaidata.foundation/projects/milvus/), distributed with [Apache 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) License, with Zilliz as its major contributor.
 
 ## Quickstart
 
@@ -51,7 +51,7 @@ With the client, you can create collection:
 ```python
 client.create_collection(
     collection_name="demo_collection",
-    dimension=768,  # The vectors we will use in this demo has 768 dimensions
+    dimension=768,  # The vectors we will use in this demo have 768 dimensions
 )
 ```
 

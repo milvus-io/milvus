@@ -31,6 +31,18 @@ func (m *messageImpl) Version() Version {
 
 // Payload returns payload of current message.
 func (m *messageImpl) Payload() []byte {
+	if ch := m.cipherHeader(); ch != nil {
+		cipher := mustGetCipher()
+		decryptor, err := cipher.GetDecryptor(ch.EzId, ch.SafeKey)
+		if err != nil {
+			panic(fmt.Sprintf("can not get decryptor for message: %s", err))
+		}
+		payload, err := decryptor.Decrypt(m.payload)
+		if err != nil {
+			panic(fmt.Sprintf("can not decrypt message: %s", err))
+		}
+		return payload
+	}
 	return m.payload
 }
 
@@ -41,6 +53,10 @@ func (m *messageImpl) Properties() RProperties {
 
 // EstimateSize returns the estimated size of current message.
 func (m *messageImpl) EstimateSize() int {
+	if ch := m.cipherHeader(); ch != nil {
+		// if it's a cipher message, we need to estimate the size of payload before encryption.
+		return int(ch.PayloadBytes) + m.properties.EstimateSize()
+	}
 	// TODO: more accurate size estimation.
 	return len(m.payload) + m.properties.EstimateSize()
 }
@@ -193,6 +209,19 @@ func (m *messageImpl) broadcastHeader() *messagespb.BroadcastHeader {
 	header := &messagespb.BroadcastHeader{}
 	if err := DecodeProto(value, header); err != nil {
 		panic("can not decode broadcast header")
+	}
+	return header
+}
+
+// cipherHeader returns the cipher header of current message.
+func (m *messageImpl) cipherHeader() *messagespb.CipherHeader {
+	value, ok := m.properties.Get(messageCipherHeader)
+	if !ok {
+		return nil
+	}
+	header := &messagespb.CipherHeader{}
+	if err := DecodeProto(value, header); err != nil {
+		panic("can not decode cipher header")
 	}
 	return header
 }
