@@ -36,7 +36,6 @@ import (
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -88,23 +87,6 @@ func TestMain(m *testing.M) {
 		code = m.Run()
 	}
 	os.Exit(code)
-}
-
-type mockRootCoord struct {
-	types.RootCoordClient
-	collID UniqueID
-}
-
-func (r *mockRootCoord) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-	if req.CollectionID != r.collID {
-		return &milvuspb.DescribeCollectionResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "Collection not found",
-			},
-		}, nil
-	}
-	return r.RootCoordClient.DescribeCollection(ctx, req)
 }
 
 func TestGetTimeTickChannel(t *testing.T) {
@@ -1166,11 +1148,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
-
 		mockHandler := NewNMockHandler(t)
 		mockHandler.EXPECT().GetQueryVChanPositions(mock.Anything, mock.Anything).Return(&datapb.VchannelInfo{})
 		svr.handler = mockHandler
@@ -1214,11 +1194,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 	t.Run("test get earliest position of flushed segments as seek position", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
-
 		svr.meta.AddCollection(&collectionInfo{
 			Schema: newTestSchema(),
 		})
@@ -1323,11 +1301,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 	t.Run("test get recovery of unflushed segments ", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
-
 		svr.meta.AddCollection(&collectionInfo{
 			ID:     0,
 			Schema: newTestSchema(),
@@ -1398,14 +1374,12 @@ func TestGetRecoveryInfo(t *testing.T) {
 	t.Run("test get binlogs", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
+		}
 		svr.meta.AddCollection(&collectionInfo{
 			Schema: newTestSchema(),
 		})
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
-		}
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
 			SegmentID:    0,
@@ -1497,11 +1471,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 	t.Run("with dropped segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
-
 		svr.meta.AddCollection(&collectionInfo{
 			ID:     0,
 			Schema: newTestSchema(),
@@ -1543,11 +1515,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 	t.Run("with fake segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
-
 		svr.meta.AddCollection(&collectionInfo{
 			ID:     0,
 			Schema: newTestSchema(),
@@ -1584,11 +1554,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 	t.Run("with continuous compaction", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
-
 		svr.meta.AddCollection(&collectionInfo{
 			ID:     0,
 			Schema: newTestSchema(),
@@ -1818,21 +1786,22 @@ func TestOptions(t *testing.T) {
 		kv.Close()
 	}()
 
-	t.Run("WithRootCoordCreator", func(t *testing.T) {
+	t.Run("WithMixCoordCreator", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		var crt rootCoordCreatorFunc = func(ctx context.Context) (types.RootCoordClient, error) {
+		var crt mixCoordCreatorFunc = func(ctx context.Context) (types.MixCoord, error) {
 			return nil, errors.New("dummy")
 		}
-		opt := WithRootCoordCreator(crt)
+		opt := WithMixCoordCreator(crt)
 		assert.NotNil(t, opt)
-		svr.rootCoordClientCreator = nil
+		svr.mixCoordCreator = nil
 		opt(svr)
 		// testify cannot compare function directly
 		// the behavior is actually undefined
 		assert.NotNil(t, crt)
-		assert.NotNil(t, svr.rootCoordClientCreator)
+		assert.NotNil(t, svr.mixCoordCreator)
 	})
+
 	t.Run("WithCluster", func(t *testing.T) {
 		defer kv.RemoveWithPrefix(context.TODO(), "")
 
@@ -1948,19 +1917,6 @@ func TestHandleSessionEvent(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
-}
-
-type rootCoordSegFlushComplete struct {
-	mockRootCoordClient
-	flag bool
-}
-
-// SegmentFlushCompleted, override default behavior
-func (rc *rootCoordSegFlushComplete) SegmentFlushCompleted(ctx context.Context, req *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
-	if rc.flag {
-		return merr.Success(), nil
-	}
-	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 }
 
 func TestDataCoordServer_SetSegmentState(t *testing.T) {
@@ -2176,8 +2132,8 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return mocks.NewMockDataNodeClient(t), nil
 	}
-	svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-		return newMockRootCoordClient(), nil
+	svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+		return newMockMixCoord(), nil
 	}
 	for _, opt := range opts {
 		opt(svr)
@@ -2399,25 +2355,6 @@ func Test_initGarbageCollection(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid port")
 	})
-}
-
-func TestDataCoord_DisableActiveStandby(t *testing.T) {
-	paramtable.Get().Save(Params.DataCoordCfg.EnableActiveStandby.Key, "false")
-	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableActiveStandby.Key)
-	svr := newTestServer(t)
-	closeTestServer(t, svr)
-}
-
-// make sure the main functions work well when EnableActiveStandby=true
-func TestDataCoord_EnableActiveStandby(t *testing.T) {
-	paramtable.Get().Save(Params.DataCoordCfg.EnableActiveStandby.Key, "true")
-	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableActiveStandby.Key)
-	svr := newTestServer(t)
-	defer closeTestServer(t, svr)
-	assert.Eventually(t, func() bool {
-		// return svr.
-		return svr.GetStateCode() == commonpb.StateCode_Healthy
-	}, time.Second*5, time.Millisecond*100)
 }
 
 func TestLoadCollectionFromRootCoord(t *testing.T) {

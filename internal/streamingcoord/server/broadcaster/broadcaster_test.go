@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -68,7 +69,9 @@ func TestBroadcaster(t *testing.T) {
 		return nil
 	})
 	rc := idalloc.NewMockRootCoordClient(t)
-	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(rc))
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	f.Set(rc)
+	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 	fbc := syncutil.NewFuture[Broadcaster]()
 	operator, appended := createOpeartor(t, fbc)

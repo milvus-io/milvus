@@ -224,27 +224,22 @@ func (s *Server) Init() error {
 		zap.String("address", s.address))
 
 	s.registerMetricsRequest()
-
-	if s.enableActiveStandBy {
-		s.activateFunc = func() error {
-			log.Info("QueryCoord switch from standby to active, activating")
-			if err := s.initQueryCoord(); err != nil {
-				log.Error("QueryCoord init failed", zap.Error(err))
-				return err
-			}
-			if err := s.startQueryCoord(); err != nil {
-				log.Error("QueryCoord init failed", zap.Error(err))
-				return err
-			}
-			log.Info("QueryCoord startup success")
-			return nil
-		}
-		s.UpdateStateCode(commonpb.StateCode_StandBy)
-		log.Info("QueryCoord enter standby mode successfully")
-		return nil
+	if err := s.initSession(); err != nil {
+		return err
 	}
 
 	return s.initQueryCoord()
+}
+
+func (s *Server) initSession() error {
+	// Init QueryCoord session
+	if s.session == nil {
+		s.session = sessionutil.NewSession(s.ctx)
+		s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
+		s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
+		s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
+	}
+	return nil
 }
 
 func (s *Server) initQueryCoord() error {

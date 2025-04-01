@@ -13,9 +13,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestNewOldVersionImmutableMessage(t *testing.T) {
@@ -26,8 +28,9 @@ func TestNewOldVersionImmutableMessage(t *testing.T) {
 		PhysicalChannelNames: []string{"test1", "test2"},
 		VirtualChannelNames:  []string{"test1-v0", "test2-v0"},
 	}, nil)
-
-	resource.InitForTest(t, resource.OptMixCoordClient(rc))
+	rcf := syncutil.NewFuture[types.MixCoordClient]()
+	rcf.Set(rc)
+	resource.InitForTest(t, resource.OptMixCoordClient(rcf))
 
 	ctx := context.Background()
 	pchannel := "test1"

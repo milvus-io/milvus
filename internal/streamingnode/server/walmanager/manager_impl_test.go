@@ -11,10 +11,12 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestMain(m *testing.M) {
@@ -23,11 +25,12 @@ func TestMain(m *testing.M) {
 }
 
 func TestManager(t *testing.T) {
-	rootcoord := mocks.NewMockMixCoordClient(t)
-
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
 	resource.InitForTest(
 		t,
-		resource.OptMixCoordClient(rootcoord),
+		resource.OptMixCoordClient(fMixcoord),
 	)
 
 	opener := mock_wal.NewMockOpener(t)

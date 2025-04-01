@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -218,13 +219,14 @@ func (s *Server) init() (err error) {
 
 	s.initMixCoord()
 	s.initGRPCServer()
-
+	fMixcoord := syncutil.NewFuture[types.MixCoordClient]()
+	fMixcoord.Set(s.mixCoord)
 	// Create StreamingNode service.
 	s.streamingnode = streamingnodeserver.NewServerBuilder().
 		WithETCD(s.etcdCli).
 		WithChunkManager(s.chunkManager).
 		WithGRPCServer(s.grpcServer).
-		WithMixCoordClient(s.mixCoord).
+		WithMixCoordClient(fMixcoord).
 		WithSession(s.session).
 		WithMetaKV(s.metaKV).
 		Build()

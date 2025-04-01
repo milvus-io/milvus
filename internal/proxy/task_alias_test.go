@@ -25,14 +25,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
 )
 
 func TestCreateAlias_all(t *testing.T) {
-	rc := mocks.NewMockMixCoordClient(t)
+	rc := NewMixCoordMock()
 
 	defer rc.Close()
 	ctx := context.Background()
@@ -78,7 +77,7 @@ func TestCreateAlias_all(t *testing.T) {
 }
 
 func TestDropAlias_all(t *testing.T) {
-	rc := mocks.NewMockMixCoordClient(t)
+	rc := NewMixCoordMock()
 
 	defer rc.Close()
 	ctx := context.Background()
@@ -113,8 +112,7 @@ func TestDropAlias_all(t *testing.T) {
 }
 
 func TestAlterAlias_all(t *testing.T) {
-	rc := mocks.NewMockMixCoordClient(t)
-
+	rc := NewMixCoordMock()
 	defer rc.Close()
 	ctx := context.Background()
 	prefix := "TestAlterAlias_all"
@@ -159,7 +157,7 @@ func TestAlterAlias_all(t *testing.T) {
 }
 
 func TestDescribeAlias_all(t *testing.T) {
-	rc := mocks.NewMockMixCoordClient(t)
+	rc := NewMixCoordMock()
 	ctx := context.Background()
 	task := &DescribeAliasTask{
 		Condition: NewTaskCondition(ctx),
@@ -197,7 +195,7 @@ func TestDescribeAlias_all(t *testing.T) {
 }
 
 func TestListAliases_all(t *testing.T) {
-	rc := mocks.NewMockMixCoordClient(t)
+	rc := NewMixCoordMock()
 	defer rc.Close()
 	ctx := context.Background()
 	task := &ListAliasesTask{

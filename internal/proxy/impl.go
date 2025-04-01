@@ -1045,7 +1045,7 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
 		AddCollectionFieldRequest: request,
-		rootCoord:                 node.rootCoord,
+		mixCoord:                  node.mixCoord,
 		oldSchema:                 dresp.GetSchema(),
 	}
 
@@ -2143,8 +2143,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		ctx:                ctx,
 		Condition:          NewTaskCondition(ctx),
 		req:                request,
-		rootCoord:          node.mixCoord,
-		datacoord:          node.mixCoord,
+		mixCoord:           node.mixCoord,
 		replicateMsgStream: node.replicateMsgStream,
 	}
 

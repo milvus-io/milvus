@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -27,7 +28,7 @@ func OptETCD(etcd *clientv3.Client) optResourceInit {
 }
 
 // OptRootCoordClient provides the root coordinator client to the resource.
-func OptMixCoordClient(mixCoordClient types.MixCoordClient) optResourceInit {
+func OptMixCoordClient(mixCoordClient *syncutil.Future[types.MixCoordClient]) optResourceInit {
 	return func(r *resourceImpl) {
 		r.mixCoordClient = mixCoordClient
 		r.idAllocator = idalloc.NewIDAllocator(r.mixCoordClient)
@@ -70,7 +71,7 @@ func Resource() *resourceImpl {
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
 	idAllocator                idalloc.Allocator
-	mixCoordClient             types.MixCoordClient
+	mixCoordClient             *syncutil.Future[types.MixCoordClient]
 	etcdClient                 *clientv3.Client
 	streamingCatalog           metastore.StreamingCoordCataLog
 	streamingNodeManagerClient manager.ManagerClient
@@ -78,7 +79,7 @@ type resourceImpl struct {
 }
 
 // RootCoordClient returns the root coordinator client.
-func (r *resourceImpl) MixCoordClient() types.MixCoordClient {
+func (r *resourceImpl) MixCoordClient() *syncutil.Future[types.MixCoordClient] {
 	return r.mixCoordClient
 }
 

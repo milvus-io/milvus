@@ -10,8 +10,10 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestTimestampAllocator(t *testing.T) {
@@ -19,8 +21,9 @@ func TestTimestampAllocator(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	client := NewMockRootCoordClient(t)
-
-	allocator := NewTSOAllocator(client)
+	f := syncutil.NewFuture[types.MixCoordClient]()
+	f.Set(client)
+	allocator := NewTSOAllocator(f)
 
 	for i := 0; i < 5000; i++ {
 		ts, err := allocator.Allocate(context.Background())
@@ -48,7 +51,7 @@ func TestTimestampAllocator(t *testing.T) {
 		},
 	)
 
-	allocator = NewTSOAllocator(client)
+	allocator = NewTSOAllocator(f)
 	_, err := allocator.Allocate(context.Background())
 	assert.Error(t, err)
 }
@@ -58,8 +61,9 @@ func TestIDAllocator(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	client := NewMockRootCoordClient(t)
-
-	allocator := NewIDAllocator(client)
+	f := syncutil.NewFuture[types.MixCoordClient]()
+	f.Set(client)
+	allocator := NewTSOAllocator(f)
 
 	// Make local dirty
 	allocator.Allocate(context.Background())

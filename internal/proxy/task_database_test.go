@@ -23,7 +23,7 @@ import (
 
 func TestCreateDatabaseTask(t *testing.T) {
 	paramtable.Init()
-	rc := mocks.NewMockMixCoordClient(t)
+	rc := NewMixCoordMock()
 	defer rc.Close()
 
 	ctx := context.Background()
@@ -70,7 +70,7 @@ func TestCreateDatabaseTask(t *testing.T) {
 
 func TestDropDatabaseTask(t *testing.T) {
 	paramtable.Init()
-	rc := mocks.NewMockMixCoordClient(t)
+	rc := NewMixCoordMock()
 	defer rc.Close()
 
 	ctx := context.Background()
@@ -124,7 +124,7 @@ func TestDropDatabaseTask(t *testing.T) {
 
 func TestListDatabaseTask(t *testing.T) {
 	paramtable.Init()
-	rc := mocks.NewMockMixCoordClient(t)
+	rc := NewMixCoordMock()
 	defer rc.Close()
 
 	ctx := GetContext(context.Background(), "root:123456")

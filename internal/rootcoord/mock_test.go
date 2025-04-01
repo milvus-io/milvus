@@ -618,6 +618,7 @@ func withUnhealthyMixCoord() Opt {
 			Status: merr.Status(err),
 		}, retry.Unrecoverable(errors.New("error mock GetComponentStates")),
 	)
+
 	return withMixCoord(mixc)
 }
 
@@ -629,6 +630,21 @@ func withInvalidMixCoord() Opt {
 			Status: merr.Success(),
 		}, nil,
 	)
+	mixc.EXPECT().WatchChannels(mock.Anything, mock.Anything).Return(
+		nil, errors.New("error mock WatchChannels"),
+	)
+
+	mixc.EXPECT().Flush(mock.Anything, mock.Anything).Return(
+		nil, errors.New("error mock Flush"),
+	)
+
+	mixc.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(
+		nil, errors.New("error mock broadCastAlteredCollection"),
+	)
+	mixc.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(
+		nil, errors.New("error mock DropIndex"),
+	)
+
 	mixc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(
 		nil, errors.New("error mock ReleaseCollection"),
 	)
@@ -659,6 +675,25 @@ func withFailedMixCoord() Opt {
 		}, nil,
 	)
 
+	mixc.EXPECT().WatchChannels(mock.Anything, mock.Anything).Return(
+		&datapb.WatchChannelsResponse{
+			Status: merr.Status(err),
+		}, nil,
+	)
+
+	mixc.EXPECT().Flush(mock.Anything, mock.Anything).Return(
+		&datapb.FlushResponse{
+			Status: merr.Status(err),
+		}, nil,
+	)
+
+	mixc.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(
+		merr.Status(err), nil,
+	)
+	mixc.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(
+		merr.Status(err), nil,
+	)
+
 	return withMixCoord(mixc)
 }
 
@@ -685,6 +720,25 @@ func withValidMixCoord() Opt {
 	)
 
 	mixc.EXPECT().SyncNewCreatedPartition(mock.Anything, mock.Anything).Return(
+		merr.Success(), nil,
+	)
+
+	mixc.EXPECT().WatchChannels(mock.Anything, mock.Anything).Return(
+		&datapb.WatchChannelsResponse{
+			Status: merr.Success(),
+		}, nil,
+	)
+
+	mixc.EXPECT().Flush(mock.Anything, mock.Anything).Return(
+		&datapb.FlushResponse{
+			Status: merr.Success(),
+		}, nil,
+	)
+
+	mixc.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(
+		merr.Success(), nil,
+	)
+	mixc.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(
 		merr.Success(), nil,
 	)
 

@@ -778,11 +778,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
-
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
 		}
@@ -821,8 +819,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -928,11 +926,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("test get recovery of unflushed segments ", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
-
 		svr.meta.AddCollection(&collectionInfo{
 			ID:     0,
 			Schema: newTestSchema(),
@@ -1005,14 +1001,12 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("test get binlogs", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
+		}
 		svr.meta.AddCollection(&collectionInfo{
 			Schema: newTestSchema(),
 		})
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
-		}
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
 			SegmentID:    0,
@@ -1105,8 +1099,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -1149,9 +1143,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("with fake segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -1194,8 +1187,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{

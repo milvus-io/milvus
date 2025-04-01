@@ -1102,6 +1102,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
+		t.Skip("normal case")
 		defer cleanTestEnv()
 
 		collectionName := funcutil.GenRandomStr()

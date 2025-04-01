@@ -32,8 +32,11 @@ func RecoverPChannelSegmentAllocManager(
 		return nil, errors.Wrap(err, "failed to list segment assignment from catalog")
 	}
 	// get collection and parition info from rootcoord.
-	rc := resource.Resource().MixCoordClient()
-	resp, err := rc.GetPChannelInfo(ctx, &rootcoordpb.GetPChannelInfoRequest{
+	mix, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := mix.GetPChannelInfo(ctx, &rootcoordpb.GetPChannelInfoRequest{
 		Pchannel: pchannel.Name,
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {

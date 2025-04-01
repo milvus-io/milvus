@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -242,11 +243,14 @@ func (s *mixCoordImpl) Stop() error {
 }
 
 func (s *mixCoordImpl) initStreamingCoord() {
+	fMixcoord := syncutil.NewFuture[types.MixCoordClient]()
+	fMixcoord.Set(s.mixCoordClient)
+
 	s.streamingCoord = streamingcoord.NewServerBuilder().
 		WithETCD(s.etcdCli).
 		WithMetaKV(s.metaKVCreator()).
 		WithSession(s.session).
-		WithMixCoordClient(s.mixCoordClient).
+		WithMixCoordClient(fMixcoord).
 		Build()
 }
 

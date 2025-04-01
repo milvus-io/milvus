@@ -325,12 +325,12 @@ func initializeTestState(t *testing.T) {
 			},
 		},
 	}, nil)
-	fRootCoordClient := syncutil.NewFuture[internaltypes.RootCoordClient]()
+	fRootCoordClient := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	fRootCoordClient.Set(rootCoordClient)
 
 	resource.InitForTest(t,
 		resource.OptStreamingNodeCatalog(streamingNodeCatalog),
-		resource.OptMixCoordClient(rootCoordClient),
+		resource.OptMixCoordClient(fRootCoordClient),
 	)
 	streamingNodeCatalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(
 		[]*streamingpb.SegmentAssignmentMeta{

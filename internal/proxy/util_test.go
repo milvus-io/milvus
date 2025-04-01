@@ -1025,7 +1025,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("error", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord := &mocks.MockMixCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		mixCoord.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		mixCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -1050,7 +1050,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("fail", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord := &mocks.MockMixCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		mixCoord.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		mixCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{

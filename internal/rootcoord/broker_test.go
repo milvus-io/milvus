@@ -31,7 +31,6 @@ import (
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -151,47 +150,6 @@ func TestServerBroker_DropCollectionIndex(t *testing.T) {
 		ctx := context.Background()
 		err := b.DropCollectionIndex(ctx, 1, nil)
 		assert.NoError(t, err)
-	})
-}
-
-func TestServerBroker_GetSegmentIndexState(t *testing.T) {
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withInvalidMixCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		_, err := b.GetSegmentIndexState(ctx, 1, "index_name", []UniqueID{1, 2})
-		assert.Error(t, err)
-	})
-
-	t.Run("non success error code on execute", func(t *testing.T) {
-		c := newTestCore(withFailedMixCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		_, err := b.GetSegmentIndexState(ctx, 1, "index_name", []UniqueID{1, 2})
-		assert.Error(t, err)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		c := newTestCore(withValidMixCoord())
-		mockDataCoord := mocks.NewMixCoord(t)
-		mockDataCoord.EXPECT().GetSegmentIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetSegmentIndexStateResponse{
-			Status: merr.Success(),
-			States: []*indexpb.SegmentIndexState{
-				{
-					SegmentID:  1,
-					State:      commonpb.IndexState_Finished,
-					FailReason: "",
-				},
-			},
-		}, nil)
-		c.mixCoord = mockDataCoord
-
-		b := newServerBroker(c)
-		ctx := context.Background()
-		states, err := b.GetSegmentIndexState(ctx, 1, "index_name", []UniqueID{1})
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(states))
-		assert.Equal(t, commonpb.IndexState_Finished, states[0].GetState())
 	})
 }
 

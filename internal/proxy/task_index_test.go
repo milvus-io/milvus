@@ -63,7 +63,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	fieldName := funcutil.GenRandomStr()
 	indexName := ""
 	ctx := context.Background()
-	queryCoord := getMockQueryCoord()
+	queryCoord := NewMixCoordMock()
 
 	gist := &getIndexStateTask{
 		GetIndexStateRequest: &milvuspb.GetIndexStateRequest{
@@ -96,11 +96,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	indexName := "_default_idx_101"
 
 	paramtable.Init()
-	qc := getMockQueryCoord()
-	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status:        merr.Success(),
-		CollectionIDs: []int64{},
-	}, nil)
+	qc := NewMixCoordMock()
 	ctx := context.Background()
 
 	mockCache := NewMockCache(t)
@@ -257,7 +253,7 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 	collectionID := UniqueID(1)
 	fieldName := newTestSchema().Fields[0].Name
 
-	dc := NewDataCoordMock()
+	dc := NewMixCoordMock()
 	ctx := context.Background()
 
 	mockCache := NewMockCache(t)
@@ -283,7 +279,7 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 			CollectionName: collectionName,
 			FieldName:      fieldName,
 		},
-		datacoord:    dc,
+		mixCoord:     dc,
 		result:       nil,
 		collectionID: collectionID,
 	}
@@ -319,7 +315,7 @@ func Test_sparse_parseIndexParams(t *testing.T) {
 			IndexName: "",
 		},
 		ctx:            nil,
-		rootCoord:      nil,
+		mixCoord:       nil,
 		result:         nil,
 		isAutoIndex:    false,
 		newIndexParams: nil,
@@ -393,7 +389,7 @@ func Test_parseIndexParams(t *testing.T) {
 			IndexName: "",
 		},
 		ctx:            nil,
-		rootCoord:      nil,
+		mixCoord:       nil,
 		result:         nil,
 		isAutoIndex:    false,
 		newIndexParams: nil,
@@ -478,7 +474,7 @@ func Test_parseIndexParams(t *testing.T) {
 			IndexName: "",
 		},
 		ctx:            nil,
-		rootCoord:      nil,
+		mixCoord:       nil,
 		result:         nil,
 		isAutoIndex:    false,
 		newIndexParams: nil,
@@ -575,7 +571,7 @@ func Test_parseIndexParams(t *testing.T) {
 				IndexName: "",
 			},
 			ctx:            nil,
-			rootCoord:      nil,
+			mixCoord:       nil,
 			result:         nil,
 			isAutoIndex:    false,
 			newIndexParams: nil,
@@ -766,7 +762,7 @@ func Test_parseIndexParams(t *testing.T) {
 				IndexName: "",
 			},
 			ctx:            nil,
-			rootCoord:      nil,
+			mixCoord:       nil,
 			result:         nil,
 			isAutoIndex:    false,
 			newIndexParams: nil,
@@ -814,7 +810,7 @@ func Test_parseIndexParams(t *testing.T) {
 				IndexName: "",
 			},
 			ctx:            nil,
-			rootCoord:      nil,
+			mixCoord:       nil,
 			result:         nil,
 			isAutoIndex:    false,
 			newIndexParams: nil,
@@ -859,7 +855,7 @@ func Test_parseIndexParams(t *testing.T) {
 				IndexName: "",
 			},
 			ctx:            nil,
-			rootCoord:      nil,
+			mixCoord:       nil,
 			result:         nil,
 			isAutoIndex:    false,
 			newIndexParams: nil,

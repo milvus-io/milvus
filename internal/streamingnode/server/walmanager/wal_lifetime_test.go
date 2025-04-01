@@ -11,18 +11,20 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestWALLifetime(t *testing.T) {
 	channel := "test"
-
 	mixcoord := mocks.NewMockMixCoordClient(t)
-
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
 	resource.InitForTest(
 		t,
-		resource.OptMixCoordClient(mixcoord),
+		resource.OptMixCoordClient(fMixcoord),
 	)
 
 	opener := mock_wal.NewMockOpener(t)

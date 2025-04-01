@@ -16,11 +16,13 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestAck(t *testing.T) {
@@ -44,7 +46,9 @@ func TestAck(t *testing.T) {
 			}, nil
 		},
 	)
-	resource.InitForTest(t, resource.OptMixCoordClient(rc))
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(rc)
+	resource.InitForTest(t, resource.OptMixCoordClient(fMixcoord))
 
 	ackManager := NewAckManager(0, nil, metricsutil.NewTimeTickMetrics("test"))
 
@@ -161,7 +165,9 @@ func TestAckManager(t *testing.T) {
 			}, nil
 		},
 	)
-	resource.InitForTest(t, resource.OptMixCoordClient(rc))
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(rc)
+	resource.InitForTest(t, resource.OptMixCoordClient(fMixcoord))
 
 	ackManager := NewAckManager(0, walimplstest.NewTestMessageID(0), metricsutil.NewTimeTickMetrics("test"))
 

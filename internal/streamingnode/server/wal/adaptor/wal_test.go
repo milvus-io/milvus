@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 const testVChannel = "v1"
@@ -71,10 +73,11 @@ func initResourceForTest(t *testing.T) {
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-
+	fMixCoordClient := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixCoordClient.Set(rc)
 	resource.InitForTest(
 		t,
-		resource.OptMixCoordClient(rc),
+		resource.OptMixCoordClient(fMixCoordClient),
 		resource.OptStreamingNodeCatalog(catalog),
 	)
 }

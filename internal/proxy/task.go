@@ -425,7 +425,7 @@ type addCollectionFieldTask struct {
 	Condition
 	*milvuspb.AddCollectionFieldRequest
 	ctx         context.Context
-	rootCoord   types.RootCoordClient
+	mixCoord    types.MixCoordClient
 	result      *commonpb.Status
 	fieldSchema *schemapb.FieldSchema
 	oldSchema   *schemapb.CollectionSchema
@@ -533,7 +533,7 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 
 func (t *addCollectionFieldTask) Execute(ctx context.Context) error {
 	var err error
-	t.result, err = t.rootCoord.AddCollectionField(ctx, t.AddCollectionFieldRequest)
+	t.result, err = t.mixCoord.AddCollectionField(ctx, t.AddCollectionFieldRequest)
 	return merr.CheckRPCCall(t.result, err)
 }
 

@@ -1487,6 +1487,13 @@ func (coord *MixCoordMock) GetReplicas(ctx context.Context, in *milvuspb.GetRepl
 func (coord *MixCoordMock) GetShardLeaders(ctx context.Context, in *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
 	return &querypb.GetShardLeadersResponse{
 		Status: merr.Success(),
+		Shards: []*querypb.ShardLeadersList{
+			{
+				ChannelName: "channel-1",
+				NodeIds:     []int64{1, 2, 3},
+				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+			},
+		},
 	}, nil
 }
 

@@ -83,7 +83,7 @@ type (
 	Timestamp = typeutil.Timestamp
 )
 
-type rootCoordCreatorFunc func(ctx context.Context) (types.RootCoordClient, error)
+type mixCoordCreatorFunc func(ctx context.Context) (types.MixCoord, error)
 
 // makes sure Server implements `DataCoord`
 var _ types.DataCoord = (*Server)(nil)
@@ -134,7 +134,7 @@ type Server struct {
 	factory         dependency.Factory
 
 	session   sessionutil.SessionInterface
-	icSession *sessionutil.Session
+	icSession sessionutil.SessionInterface
 	dnEventCh <-chan *sessionutil.SessionEvent
 	// qcEventCh <-chan *sessionutil.SessionEvent
 	qnEventCh <-chan *sessionutil.SessionEvent
@@ -142,8 +142,8 @@ type Server struct {
 	enableActiveStandBy bool
 	activateFunc        func() error
 
-	dataNodeCreator        session.DataNodeCreatorFunc
-	rootCoordClientCreator rootCoordCreatorFunc
+	dataNodeCreator session.DataNodeCreatorFunc
+	mixCoordCreator mixCoordCreatorFunc
 	// indexCoord             types.IndexCoord
 
 	// segReferManager  *SegmentReferenceManager
@@ -167,10 +167,9 @@ type CollectionNameInfo struct {
 // Option utility function signature to set DataCoord server attributes
 type Option func(svr *Server)
 
-// WithRootCoordCreator returns an `Option` setting RootCoord creator with provided parameter
-func WithRootCoordCreator(creator rootCoordCreatorFunc) Option {
+func WithMixCoordCreator(creator mixCoordCreatorFunc) Option {
 	return func(svr *Server) {
-		svr.rootCoordClientCreator = creator
+		svr.mixCoordCreator = creator
 	}
 }
 
@@ -236,9 +235,13 @@ func (s *Server) Init() error {
 	log := log.Ctx(s.ctx)
 	s.registerMetricsRequest()
 	s.factory.Init(Params)
+	if err := s.initSession(); err != nil {
+		return err
+	}
 	if err := s.initKV(); err != nil {
 		return err
 	}
+
 	if s.enableActiveStandBy {
 		s.activateFunc = func() error {
 			log.Info("DataCoord switch from standby to active, activating")
@@ -260,6 +263,11 @@ func (s *Server) Init() error {
 
 func (s *Server) initDataCoord() error {
 	log := log.Ctx(s.ctx)
+
+	log.Info("DataCoord try to wait for MixCoord ready")
+	if err := s.initMixCoord(); err != nil {
+		return err
+	}
 
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 
@@ -410,6 +418,7 @@ func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (type
 
 func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	s.session = session
+	s.icSession = session
 	if s.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
@@ -512,6 +521,21 @@ func (s *Server) initSegmentManager() error {
 			return err
 		}
 		s.segmentManager = manager
+	}
+	return nil
+}
+
+func (s *Server) initSession() error {
+	if s.icSession == nil {
+		s.icSession = sessionutil.NewSession(s.ctx)
+		s.icSession.Init(typeutil.IndexCoordRole, s.address, true, true)
+		s.icSession.SetEnableActiveStandBy(s.enableActiveStandBy)
+	}
+	if s.session == nil {
+		s.session = sessionutil.NewSession(s.ctx)
+
+		s.session.Init(typeutil.DataCoordRole, s.address, true, true)
+		s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	}
 	return nil
 }
@@ -915,6 +939,16 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 		case s.flushCh <- segment.ID:
 		}
 	}
+}
+
+func (s *Server) initMixCoord() error {
+	var err error
+	if s.mixCoord == nil {
+		if s.mixCoord, err = s.mixCoordCreator(s.ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Stop do the Server finalize processes
