@@ -1249,6 +1249,30 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                                "err_msg": f"metric type {metric} not found or not supported, "
                                                           "supported: [HAMMING JACCARD]"})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_ef_less_than_limit(self):
+        """
+        target: test the scenario which search with ef less than limit
+        method: 1. create collection
+                2. search with ef less than limit
+        expected: raise exception and report the error
+        """
+        collection_w = self.init_collection_general(prefix, True, 2000, 0, is_index=False)[0]
+        index_hnsw = {
+            "index_type": "HNSW",
+            "metric_type": "L2",
+            "params": {"M": 8, "efConstruction" : 256},
+        }
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=index_hnsw)
+        collection_w.flush()
+        collection_w.load()
+        search_params = {"metric_type": "L2", "params": {"ef": 10}}
+        res = collection_w.search(vectors, ct.default_float_vec_field_name,
+                            search_params, limit=100,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 65535,
+                                         "err_msg": "query failed: N6milvus21ExecOperatorExceptionE :Operator::GetOutput failed"})
+        
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_dynamic_compare_two_fields(self):
         """
