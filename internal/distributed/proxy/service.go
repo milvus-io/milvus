@@ -139,6 +139,7 @@ func authenticate(c *gin.Context) {
 		user, err := proxy.VerifyAPIKey(rawToken)
 		if err == nil {
 			c.Set(httpserver.ContextUsername, user)
+			c.Set(httpserver.ContextToken, rawToken)
 			return
 		}
 		log.Ctx(context.TODO()).Warn("fail to verify apikey", zap.Error(err))
@@ -1158,6 +1159,10 @@ func (s *Server) DescribeDatabase(ctx context.Context, req *milvuspb.DescribeDat
 	return s.proxy.DescribeDatabase(ctx, req)
 }
 
-func (s *Server) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequset) (*milvuspb.RunAnalyzerResponse, error) {
+func (s *Server) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	return s.proxy.RunAnalyzer(ctx, req)
+}
+
+func (s *Server) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error) {
+	return s.proxy.GetSegmentsInfo(ctx, req)
 }

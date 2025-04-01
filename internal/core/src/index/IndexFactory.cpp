@@ -19,6 +19,7 @@
 #include <memory>
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
+#include "common/JsonCastType.h"
 #include "common/Types.h"
 #include "index/VectorMemIndex.h"
 #include "index/Utils.h"
@@ -384,29 +385,23 @@ IndexFactory::CreateComplexScalarIndex(
 IndexBasePtr
 IndexFactory::CreateJsonIndex(
     IndexType index_type,
-    DataType cast_dtype,
+    JsonCastType cast_dtype,
     const std::string& nested_path,
     const storage::FileManagerContext& file_manager_context) {
     AssertInfo(index_type == INVERTED_INDEX_TYPE,
                "Invalid index type for json index");
     switch (cast_dtype) {
-        case DataType::BOOL:
+        case JsonCastType::BOOL:
             return std::make_unique<index::JsonInvertedIndex<bool>>(
                 proto::schema::DataType::Bool,
                 nested_path,
                 file_manager_context);
-        case DataType::INT8:
-        case DataType::INT16:
-        case DataType::INT32:
-        case DataType::INT64:
-        case DataType::FLOAT:
-        case DataType::DOUBLE:
+        case JsonCastType::DOUBLE:
             return std::make_unique<index::JsonInvertedIndex<double>>(
                 proto::schema::DataType::Double,
                 nested_path,
                 file_manager_context);
-        case DataType::STRING:
-        case DataType::VARCHAR:
+        case JsonCastType::VARCHAR:
             return std::make_unique<index::JsonInvertedIndex<std::string>>(
                 proto::schema::DataType::String,
                 nested_path,

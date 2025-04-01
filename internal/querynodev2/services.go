@@ -357,10 +357,11 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	defer node.unsubscribingChannels.Remove(req.GetChannelName())
 	delegator, ok := node.delegators.GetAndRemove(req.GetChannelName())
 	if ok {
+		node.pipelineManager.Remove(req.GetChannelName())
+
 		// close the delegator first to block all coming query/search requests
 		delegator.Close()
 
-		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
 		node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
@@ -1303,7 +1304,11 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				})
 			})
 		case querypb.SyncType_UpdateVersion:
-			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()), zap.Int64s("partitions", req.GetLoadMeta().GetPartitionIDs()))
+			log.Info("sync action",
+				zap.Int64("TargetVersion", action.GetTargetVersion()),
+				zap.Time("checkPoint", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())),
+				zap.Time("deleteCP", tsoutil.PhysicalTime(action.GetDeleteCP().GetTimestamp())),
+				zap.Int64s("partitions", req.GetLoadMeta().GetPartitionIDs()))
 			droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
 				if action.GetCheckpoint() == nil {
 					return id, typeutil.MaxTimestamp
@@ -1392,8 +1397,17 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	}
 
 	pks := storage.ParseIDs2PrimaryKeysBatch(req.GetPrimaryKeys())
+	var err error
 	for _, segment := range segments {
-		err := segment.Delete(ctx, pks, req.GetTimestamps())
+		if req.GetUseLoad() {
+			var dd *storage.DeltaData
+			dd, err = storage.NewDeltaDataWithData(pks, req.GetTimestamps())
+			if err == nil {
+				err = segment.LoadDeltaData(ctx, dd)
+			}
+		} else {
+			err = segment.Delete(ctx, pks, req.GetTimestamps())
+		}
 		if err != nil {
 			log.Warn("segment delete failed", zap.Error(err))
 			return merr.Status(err), nil

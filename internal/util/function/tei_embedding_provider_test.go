@@ -76,7 +76,7 @@ func createTEIProvider(url string, schema *schemapb.FieldSchema, providerName st
 	}
 	switch providerName {
 	case teiProvider:
-		return NewTEIEmbeddingProvider(schema, functionSchema)
+		return NewTEIEmbeddingProvider(schema, functionSchema, map[string]string{})
 	default:
 		return nil, fmt.Errorf("Unknow provider")
 	}
@@ -172,7 +172,7 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 			{Key: endpointParamKey, Value: "http://mymock.com"},
 		},
 	}
-	provider, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	provider, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
 	s.True(provider.MaxBatch() == 32*5)
@@ -180,35 +180,35 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 	// Invalid truncate
 	{
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: truncateParamKey, Value: "Invalid"})
-		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 		s.Error(err)
 	}
 	// Invalid truncationDirection
 	{
 		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: truncateParamKey, Value: "true"}
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: truncationDirectionParamKey, Value: "Invalid"})
-		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 		s.Error(err)
 	}
 
 	// truncationDirection
 	{
 		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: truncationDirectionParamKey, Value: "Left"}
-		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 		s.NoError(err)
 	}
 
 	// Invalid max batch
 	{
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: maxClientBatchSizeParamKey, Value: "Invalid"})
-		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 		s.Error(err)
 	}
 
 	// Valid max batch
 	{
 		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: maxClientBatchSizeParamKey, Value: "128"}
-		pv, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		pv, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 		s.NoError(err)
 		s.True(pv.MaxBatch() == 128*5)
 	}

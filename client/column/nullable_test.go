@@ -57,7 +57,7 @@ func (s *NullableScalarSuite) TestBasic() {
 			s.Equal(entity.FieldTypeBool, column.Type())
 		}
 
-		_, err = NewNullableColumnBool(name, data, nil)
+		_, err = NewNullableColumnBool(name, data, []bool{false, false})
 		s.Error(err)
 	})
 
@@ -87,7 +87,7 @@ func (s *NullableScalarSuite) TestBasic() {
 			s.Equal(entity.FieldTypeInt8, column.Type())
 		}
 
-		_, err = NewNullableColumnInt8(name, data, nil)
+		_, err = NewNullableColumnInt8(name, data, []bool{false, false})
 		s.Error(err)
 	})
 
@@ -117,7 +117,7 @@ func (s *NullableScalarSuite) TestBasic() {
 			s.Equal(entity.FieldTypeInt16, column.Type())
 		}
 
-		_, err = NewNullableColumnInt16(name, data, nil)
+		_, err = NewNullableColumnInt16(name, data, []bool{false, false})
 		s.Error(err)
 	})
 
@@ -147,7 +147,7 @@ func (s *NullableScalarSuite) TestBasic() {
 			s.Equal(entity.FieldTypeInt32, column.Type())
 		}
 
-		_, err = NewNullableColumnInt32(name, data, nil)
+		_, err = NewNullableColumnInt32(name, data, []bool{false, false})
 		s.Error(err)
 	})
 
@@ -177,7 +177,7 @@ func (s *NullableScalarSuite) TestBasic() {
 			s.Equal(entity.FieldTypeInt64, column.Type())
 		}
 
-		_, err = NewNullableColumnInt64(name, data, nil)
+		_, err = NewNullableColumnInt64(name, data, []bool{false, false})
 		s.Error(err)
 	})
 
@@ -207,7 +207,7 @@ func (s *NullableScalarSuite) TestBasic() {
 			s.Equal(entity.FieldTypeFloat, column.Type())
 		}
 
-		_, err = NewNullableColumnFloat(name, data, nil)
+		_, err = NewNullableColumnFloat(name, data, []bool{false, false})
 		s.Error(err)
 	})
 
@@ -237,7 +237,7 @@ func (s *NullableScalarSuite) TestBasic() {
 			s.Equal(entity.FieldTypeDouble, column.Type())
 		}
 
-		_, err = NewNullableColumnDouble(name, data, nil)
+		_, err = NewNullableColumnDouble(name, data, []bool{false, false})
 		s.Error(err)
 	})
 }

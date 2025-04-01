@@ -27,6 +27,7 @@
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/ConjunctExpr.h"
 #include "exec/expression/function/FunctionFactory.h"
 
 using namespace milvus;
@@ -82,10 +83,12 @@ class TaskTest : public testing::TestWithParam<DataType> {
         field_map_.insert({"string2", str2_fid});
         auto str3_fid = schema->AddDebugField("string3", DataType::VARCHAR);
         field_map_.insert({"string3", str3_fid});
+        auto json_fid = schema->AddDebugField("json", DataType::JSON);
+        field_map_.insert({"json", json_fid});
         schema->set_primary_field_id(str1_fid);
 
         auto segment = CreateSealedSegment(schema);
-        size_t N = 1000000;
+        size_t N = 100000;
         num_rows_ = N;
         auto raw_data = DataGen(schema, N);
         auto fields = schema->get_fields();
@@ -152,7 +155,7 @@ TEST_P(TaskTest, CallExprEmpty) {
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         "test1",
         segment_.get(),
-        1000000,
+        100000,
         MAX_TIMESTAMP,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
@@ -189,7 +192,7 @@ TEST_P(TaskTest, UnaryExpr) {
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         "test1",
         segment_.get(),
-        1000000,
+        100000,
         MAX_TIMESTAMP,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
@@ -235,7 +238,7 @@ TEST_P(TaskTest, LogicalExpr) {
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         "test1",
         segment_.get(),
-        1000000,
+        100000,
         MAX_TIMESTAMP,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
@@ -296,12 +299,12 @@ TEST_P(TaskTest, CompileInputs_and) {
     auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
         expr::LogicalBinaryExpr::OpType::And, expr3, expr6);
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
-        DEAFULT_QUERY_ID, segment_.get(), 1000000, MAX_TIMESTAMP);
+        DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
     auto exprs = milvus::exec::CompileInputs(expr7, query_context.get(), {});
     EXPECT_EQ(exprs.size(), 4);
     for (int i = 0; i < exprs.size(); ++i) {
-        std::cout << exprs[i]->get_name() << std::endl;
-        EXPECT_STREQ(exprs[i]->get_name().c_str(), "PhyUnaryRangeFilterExpr");
+        std::cout << exprs[i]->name() << std::endl;
+        EXPECT_STREQ(exprs[i]->name().c_str(), "PhyUnaryRangeFilterExpr");
     }
 }
 
@@ -316,7 +319,7 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
     proto::plan::GenericValue val;
     val.set_int64_val(10);
     {
-        // expr: (int64_fid < 10 and int64_fid < 10) or (int64_fid < 10 and int64_fid < 10)
+        // expr: (int64_fid > 10 and int64_fid > 10) or (int64_fid > 10 and int64_fid > 10)
         auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
@@ -342,19 +345,19 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
         auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
-            DEAFULT_QUERY_ID, segment_.get(), 1000000, MAX_TIMESTAMP);
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
         auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::Or, expr3, expr6);
         auto exprs =
             milvus::exec::CompileInputs(expr7, query_context.get(), {});
         EXPECT_EQ(exprs.size(), 2);
         for (int i = 0; i < exprs.size(); ++i) {
-            std::cout << exprs[i]->get_name() << std::endl;
-            EXPECT_STREQ(exprs[i]->get_name().c_str(), "and");
+            std::cout << exprs[i]->name() << std::endl;
+            EXPECT_STREQ(exprs[i]->name().c_str(), "PhyConjunctFilterExpr");
         }
     }
     {
-        // expr: (int64_fid < 10 or int64_fid < 10) or (int64_fid < 10 and int64_fid < 10)
+        // expr: (int64_fid < 10 or int64_fid < 10) or (int64_fid > 10 and int64_fid > 10)
         auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
@@ -380,7 +383,7 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
         auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
-            DEAFULT_QUERY_ID, segment_.get(), 1000000, MAX_TIMESTAMP);
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
         auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::Or, expr3, expr6);
         auto exprs =
@@ -388,14 +391,13 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
         std::cout << exprs.size() << std::endl;
         EXPECT_EQ(exprs.size(), 3);
         for (int i = 0; i < exprs.size() - 1; ++i) {
-            std::cout << exprs[i]->get_name() << std::endl;
-            EXPECT_STREQ(exprs[i]->get_name().c_str(),
-                         "PhyUnaryRangeFilterExpr");
+            std::cout << exprs[i]->name() << std::endl;
+            EXPECT_STREQ(exprs[i]->name().c_str(), "PhyUnaryRangeFilterExpr");
         }
-        EXPECT_STREQ(exprs[2]->get_name().c_str(), "and");
+        EXPECT_STREQ(exprs[2]->name().c_str(), "PhyConjunctFilterExpr");
     }
     {
-        // expr: (int64_fid < 10 or int64_fid < 10) and (int64_fid < 10 and int64_fid < 10)
+        // expr: (int64_fid > 10 or int64_fid > 10) and (int64_fid > 10 and int64_fid > 10)
         auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(int64_fid, DataType::INT64),
             proto::plan::OpType::GreaterThan,
@@ -421,18 +423,580 @@ TEST_P(TaskTest, CompileInputs_or_with_and) {
         auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
-            DEAFULT_QUERY_ID, segment_.get(), 1000000, MAX_TIMESTAMP);
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
         auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
             expr::LogicalBinaryExpr::OpType::And, expr3, expr6);
         auto exprs =
             milvus::exec::CompileInputs(expr7, query_context.get(), {});
         std::cout << exprs.size() << std::endl;
         EXPECT_EQ(exprs.size(), 3);
-        EXPECT_STREQ(exprs[0]->get_name().c_str(), "or");
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
         for (int i = 1; i < exprs.size(); ++i) {
-            std::cout << exprs[i]->get_name() << std::endl;
-            EXPECT_STREQ(exprs[i]->get_name().c_str(),
-                         "PhyUnaryRangeFilterExpr");
+            std::cout << exprs[i]->name() << std::endl;
+            EXPECT_STREQ(exprs[i]->name().c_str(), "PhyUnaryRangeFilterExpr");
         }
+    }
+}
+
+TEST_P(TaskTest, Test_reorder) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    using namespace milvus::exec;
+
+    {
+        // expr:  string2 like '%xx' and string2 == 'xxx'
+        // reorder: string2 == "xxx" and string2 like '%xxx'
+        proto::plan::GenericValue val1;
+        val1.set_string_val("%xxx");
+        auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["string2"], DataType::VARCHAR),
+            proto::plan::OpType::Match,
+            val1,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue val2;
+        val2.set_string_val("xxx");
+        auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["string2"], DataType::VARCHAR),
+            proto::plan::OpType::Equal,
+            val2,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        auto exprs =
+            milvus::exec::CompileExpressions({expr3}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        std::cout << phy_expr->ToString() << std::endl;
+        auto reorder = phy_expr->GetReorder();
+        EXPECT_EQ(reorder.size(), 2);
+        EXPECT_EQ(reorder[0], 1);
+        EXPECT_EQ(reorder[1], 0);
+    }
+
+    {
+        // expr:  string2 == 'xxx' and int1 < 100
+        // reorder: int1 < 100 and string2 == 'xxx'
+        proto::plan::GenericValue val1;
+        val1.set_string_val("xxx");
+        auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["string2"], DataType::VARCHAR),
+            proto::plan::OpType::Equal,
+            val1,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue val2;
+        val2.set_int64_val(100);
+        auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["int64"], DataType::INT64),
+            proto::plan::OpType::LessThan,
+            val2,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        auto exprs =
+            milvus::exec::CompileExpressions({expr3}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        std::cout << phy_expr->ToString() << std::endl;
+        auto reorder = phy_expr->GetReorder();
+        EXPECT_EQ(reorder.size(), 2);
+        EXPECT_EQ(reorder[0], 1);
+        EXPECT_EQ(reorder[1], 0);
+    }
+
+    {
+        // expr: json['b'] like '%xx' and json['a'] == 'xxx'
+        // reorder: json['a'] == 'xxx' and json['b'] like '%xx'
+        proto::plan::GenericValue val1;
+        val1.set_string_val("%xxx");
+        auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"], DataType::JSON),
+            proto::plan::OpType::Match,
+            val1,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue val2;
+        val2.set_string_val("xxx");
+        auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"], DataType::JSON),
+            proto::plan::OpType::Equal,
+            val2,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        auto exprs =
+            milvus::exec::CompileExpressions({expr3}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        std::cout << phy_expr->ToString() << std::endl;
+        auto reorder = phy_expr->GetReorder();
+        EXPECT_EQ(reorder.size(), 2);
+        EXPECT_EQ(reorder[0], 1);
+        EXPECT_EQ(reorder[1], 0);
+    }
+
+    {
+        // expr: json['a'] == 'xxx' and int1 ==  100
+        // reorder: int1 == 100 and json['a'] == 'xxx'
+        proto::plan::GenericValue val1;
+        val1.set_string_val("xxx");
+        auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"], DataType::JSON),
+            proto::plan::OpType::Equal,
+            val1,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue val2;
+        val2.set_int64_val(100);
+        auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["int64"], DataType::INT64),
+            proto::plan::OpType::Equal,
+            val2,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        auto exprs =
+            milvus::exec::CompileExpressions({expr3}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        std::cout << phy_expr->ToString() << std::endl;
+        auto reorder = phy_expr->GetReorder();
+        EXPECT_EQ(reorder.size(), 2);
+        EXPECT_EQ(reorder[0], 1);
+        EXPECT_EQ(reorder[1], 0);
+    }
+
+    {
+        // expr: json['a'] == 'xxx' and 0 < int1 < 100
+        // reorder:  0 < int1 < 100 and json['a'] == 'xxx'
+        proto::plan::GenericValue val1;
+        val1.set_string_val("xxx");
+        auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"], DataType::JSON),
+            proto::plan::OpType::Equal,
+            val1,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue low;
+        low.set_int64_val(0);
+        proto::plan::GenericValue upper;
+        upper.set_int64_val(100);
+        auto expr2 = std::make_shared<expr::BinaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["int64"], DataType::INT64),
+            low,
+            upper,
+            false,
+            false);
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        auto exprs =
+            milvus::exec::CompileExpressions({expr3}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        std::cout << phy_expr->ToString() << std::endl;
+        auto reorder = phy_expr->GetReorder();
+        EXPECT_EQ(reorder.size(), 2);
+        EXPECT_EQ(reorder[0], 1);
+        EXPECT_EQ(reorder[1], 0);
+    }
+
+    {
+        // expr: string1 != string2 and 0 < int1 < 100
+        // reorder:  0 < int1 < 100 and string1 != string2
+        proto::plan::GenericValue val1;
+        val1.set_string_val("xxx");
+        auto expr1 = std::make_shared<expr::CompareExpr>(field_map_["string1"],
+                                                         field_map_["string2"],
+                                                         DataType::VARCHAR,
+                                                         DataType::VARCHAR,
+                                                         OpType::LessThan);
+        proto::plan::GenericValue low;
+        low.set_int64_val(0);
+        proto::plan::GenericValue upper;
+        upper.set_int64_val(100);
+        auto expr2 = std::make_shared<expr::BinaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["int64"], DataType::INT64),
+            low,
+            upper,
+            false,
+            false);
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        auto exprs =
+            milvus::exec::CompileExpressions({expr3}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        std::cout << phy_expr->ToString() << std::endl;
+        auto reorder = phy_expr->GetReorder();
+        EXPECT_EQ(reorder.size(), 2);
+        EXPECT_EQ(reorder[0], 1);
+        EXPECT_EQ(reorder[1], 0);
+    }
+
+    {
+        // expr:  string2 like '%xx' and string2 == 'xxx'
+        // disable optimize expr, still remain sequence
+        proto::plan::GenericValue val1;
+        val1.set_string_val("%xxx");
+        auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["string2"], DataType::VARCHAR),
+            proto::plan::OpType::Match,
+            val1,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue val2;
+        val2.set_string_val("xxx");
+        auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["string2"], DataType::VARCHAR),
+            proto::plan::OpType::Equal,
+            val2,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, expr1, expr2);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        OPTIMIZE_EXPR_ENABLED = false;
+        auto exprs =
+            milvus::exec::CompileExpressions({expr3}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        std::cout << phy_expr->ToString() << std::endl;
+        auto reorder = phy_expr->GetReorder();
+        EXPECT_EQ(reorder.size(), 0);
+        OPTIMIZE_EXPR_ENABLED = true;
+    }
+}
+
+TEST_P(TaskTest, Test_MultiInConvert) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    using namespace milvus::exec;
+
+    {
+        // expr:  string2 == '111' or string2 == '222' or string2 == "333"
+        proto::plan::GenericValue val1;
+        val1.set_string_val("111");
+        auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["string2"], DataType::VARCHAR),
+            proto::plan::OpType::Equal,
+            val1,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue val2;
+        val2.set_string_val("222");
+        auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["string2"], DataType::VARCHAR),
+            proto::plan::OpType::Equal,
+            val2,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr1, expr2);
+        proto::plan::GenericValue val3;
+        val3.set_string_val("333");
+        auto expr4 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["string2"], DataType::VARCHAR),
+            proto::plan::OpType::Equal,
+            val3,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr5 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr3, expr4);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        auto exprs =
+            milvus::exec::CompileExpressions({expr5}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        auto inputs = phy_expr->GetInputsRef();
+        EXPECT_EQ(inputs.size(), 1);
+        EXPECT_STREQ(inputs[0]->name().c_str(), "PhyTermFilterExpr");
+    }
+
+    {
+        // expr:  string2 == '111' or string2 == '222' or (int64 > 10 && int64 < 100) or string2 == "333"
+        proto::plan::GenericValue val1;
+        val1.set_string_val("111");
+        auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["string2"], DataType::VARCHAR),
+            proto::plan::OpType::Equal,
+            val1,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue val2;
+        val2.set_string_val("222");
+        auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["string2"], DataType::VARCHAR),
+            proto::plan::OpType::Equal,
+            val2,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr1, expr2);
+
+        proto::plan::GenericValue val3;
+        val3.set_int64_val(10);
+        auto expr4 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["int64"], DataType::INT64),
+            proto::plan::OpType::GreaterThan,
+            val3,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue val4;
+        val4.set_int64_val(100);
+        auto expr5 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["int64"], DataType::INT64),
+            proto::plan::OpType::LessThan,
+            val4,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr6 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, expr4, expr5);
+
+        auto expr7 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr6, expr3);
+
+        proto::plan::GenericValue val5;
+        val5.set_string_val("333");
+        auto expr8 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["string2"], DataType::VARCHAR),
+            proto::plan::OpType::Equal,
+            val5,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr9 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr7, expr8);
+
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        auto exprs =
+            milvus::exec::CompileExpressions({expr9}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        auto inputs = phy_expr->GetInputsRef();
+        EXPECT_EQ(inputs.size(), 2);
+        EXPECT_STREQ(inputs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        EXPECT_STREQ(inputs[1]->name().c_str(), "PhyTermFilterExpr");
+    }
+    {
+        // expr: json['a'] == "111" or json['a'] == "222" or json['3'] = "333"
+        proto::plan::GenericValue val1;
+        val1.set_string_val("111");
+        auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"],
+                             DataType::JSON,
+                             std::vector<std::string>{'a'}),
+            proto::plan::OpType::Equal,
+            val1,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue val2;
+        val2.set_string_val("222");
+        auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"],
+                             DataType::JSON,
+                             std::vector<std::string>{'a'}),
+            proto::plan::OpType::Equal,
+            val2,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr1, expr2);
+        proto::plan::GenericValue val3;
+        val3.set_string_val("333");
+        auto expr4 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"],
+                             DataType::JSON,
+                             std::vector<std::string>{'a'}),
+            proto::plan::OpType::Equal,
+            val3,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr5 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr3, expr4);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        auto exprs =
+            milvus::exec::CompileExpressions({expr5}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        auto inputs = phy_expr->GetInputsRef();
+        EXPECT_EQ(inputs.size(), 1);
+        EXPECT_STREQ(inputs[0]->name().c_str(), "PhyTermFilterExpr");
+    }
+
+    {
+        // expr: json['a'] == "111" or json['b'] == "222" or json['a'] == "333"
+        proto::plan::GenericValue val1;
+        val1.set_string_val("111");
+        auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"],
+                             DataType::JSON,
+                             std::vector<std::string>{'a'}),
+            proto::plan::OpType::Equal,
+            val1,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue val2;
+        val2.set_string_val("222");
+        auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"],
+                             DataType::JSON,
+                             std::vector<std::string>{'b'}),
+            proto::plan::OpType::Equal,
+            val2,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr1, expr2);
+        proto::plan::GenericValue val3;
+        val3.set_string_val("333");
+        auto expr4 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"],
+                             DataType::JSON,
+                             std::vector<std::string>{'a'}),
+            proto::plan::OpType::Equal,
+            val3,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr5 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr3, expr4);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        auto exprs =
+            milvus::exec::CompileExpressions({expr5}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        auto inputs = phy_expr->GetInputsRef();
+        EXPECT_EQ(inputs.size(), 2);
+        EXPECT_STREQ(inputs[0]->name().c_str(), "PhyTermFilterExpr");
+        EXPECT_STREQ(inputs[1]->name().c_str(), "PhyUnaryRangeFilterExpr");
+    }
+
+    {
+        // expr: json['a'] == "111" or json['b'] == "222" or json['a'] == 1
+        proto::plan::GenericValue val1;
+        val1.set_string_val("111");
+        auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"],
+                             DataType::JSON,
+                             std::vector<std::string>{'a'}),
+            proto::plan::OpType::Equal,
+            val1,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue val2;
+        val2.set_string_val("222");
+        auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"],
+                             DataType::JSON,
+                             std::vector<std::string>{'b'}),
+            proto::plan::OpType::Equal,
+            val2,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr1, expr2);
+        proto::plan::GenericValue val3;
+        val3.set_int64_val(1);
+        auto expr4 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["json"],
+                             DataType::JSON,
+                             std::vector<std::string>{'a'}),
+            proto::plan::OpType::Equal,
+            val3,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr5 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr3, expr4);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        auto exprs =
+            milvus::exec::CompileExpressions({expr5}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        auto inputs = phy_expr->GetInputsRef();
+        EXPECT_EQ(inputs.size(), 3);
+    }
+
+    {
+        // expr: int1 == 11 or int1 == 22 or int3 == 33
+        proto::plan::GenericValue val1;
+        val1.set_int64_val(11);
+        auto expr1 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["int64"], DataType::INT64),
+            proto::plan::OpType::Equal,
+            val1,
+            std::vector<proto::plan::GenericValue>{});
+        proto::plan::GenericValue val2;
+        val2.set_int64_val(222);
+        auto expr2 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["int64"], DataType::INT64),
+            proto::plan::OpType::Equal,
+            val2,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr3 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr1, expr2);
+        proto::plan::GenericValue val3;
+        val3.set_int64_val(1);
+        auto expr4 = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_map_["int64"], DataType::INT64),
+            proto::plan::OpType::Equal,
+            val3,
+            std::vector<proto::plan::GenericValue>{});
+        auto expr5 = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, expr3, expr4);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
+        ExecContext context(query_context.get());
+        auto exprs =
+            milvus::exec::CompileExpressions({expr5}, &context, {}, false);
+        EXPECT_EQ(exprs.size(), 1);
+        EXPECT_STREQ(exprs[0]->name().c_str(), "PhyConjunctFilterExpr");
+        auto phy_expr =
+            std::static_pointer_cast<milvus::exec::PhyConjunctFilterExpr>(
+                exprs[0]);
+        auto inputs = phy_expr->GetInputsRef();
+        EXPECT_EQ(inputs.size(), 3);
     }
 }

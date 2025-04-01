@@ -51,6 +51,7 @@ type GenDataOption struct {
 	elementType      entity.FieldType
 	fieldName        string
 	textLang         string
+	texts            []string
 	textEmptyPercent int
 }
 
@@ -96,6 +97,11 @@ func (opt *GenDataOption) TWithElementType(eleType entity.FieldType) *GenDataOpt
 
 func (opt *GenDataOption) TWithTextLang(lang string) *GenDataOption {
 	opt.textLang = lang
+	return opt
+}
+
+func (opt *GenDataOption) TWithTextData(texts []string) *GenDataOption {
+	opt.texts = texts
 	return opt
 }
 
@@ -362,11 +368,9 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			case "zh", "chinese":
 				lang = "zh"
 			default:
-				// Fallback to sequential numbers for unsupported languages
-				for i := start; i < start+nb; i++ {
-					varcharValues = append(varcharValues, strconv.Itoa(i))
-				}
-				return column.NewColumnVarChar(fieldName, varcharValues)
+				// Fallback to en for unsupported languages
+				log.Warn("Unsupported language, fallback to English", zap.String("language", option.textLang))
+				lang = "en"
 			}
 
 			// Generate text data with empty values based on textEmptyPercent
@@ -381,6 +385,12 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			// Default behavior: sequential numbers
 			for i := start; i < start+nb; i++ {
 				varcharValues = append(varcharValues, strconv.Itoa(i))
+			}
+		}
+		if len(option.texts) > 0 {
+			// Replace part of varcharValues with texts from option
+			for i := 0; i < len(option.texts) && i < len(varcharValues); i++ {
+				varcharValues[i] = option.texts[i]
 			}
 		}
 		return column.NewColumnVarChar(fieldName, varcharValues)

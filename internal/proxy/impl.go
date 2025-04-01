@@ -3127,13 +3127,10 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	defer func() {
 		span := tr.ElapseSpan()
-		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+		if span >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span))
-			metrics.ProxySlowQueryCount.WithLabelValues(
-				strconv.FormatInt(paramtable.GetNodeID(), 10),
-				metrics.SearchLabel,
-			).Inc()
+			// WebUI slow query shall use slow log as well.
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3142,6 +3139,12 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			if node.slowQueries != nil {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithSearchRequest(request, user, span, traceID))
 			}
+		}
+		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+			metrics.ProxySlowQueryCount.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				metrics.SearchLabel,
+			).Inc()
 		}
 	}()
 
@@ -3360,12 +3363,9 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	defer func() {
 		span := tr.ElapseSpan()
-		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+		if span >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()), zap.Duration("duration", span))
-			metrics.ProxySlowQueryCount.WithLabelValues(
-				strconv.FormatInt(paramtable.GetNodeID(), 10),
-				metrics.HybridSearchLabel,
-			).Inc()
+			// WebUI slow query shall use slow log as well.
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3374,6 +3374,12 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			if node.slowQueries != nil {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithSearchRequest(newSearchReq, user, span, traceID))
 			}
+		}
+		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+			metrics.ProxySlowQueryCount.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				metrics.HybridSearchLabel,
+			).Inc()
 		}
 	}()
 
@@ -3645,7 +3651,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 	defer func() {
 		span := tr.ElapseSpan()
-		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+		if span >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(
 				rpcSlow(method),
 				zap.String("expr", request.Expr),
@@ -3653,10 +3659,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 				zap.Uint64("travel_timestamp", request.TravelTimestamp),
 				zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				zap.Duration("duration", span))
-			metrics.ProxySlowQueryCount.WithLabelValues(
-				strconv.FormatInt(paramtable.GetNodeID(), 10),
-				metrics.QueryLabel,
-			).Inc()
+			// WebUI slow query shall use slow log as well.
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3666,6 +3669,12 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			if node.slowQueries != nil {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithQueryRequest(request, user, span, traceID))
 			}
+		}
+		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+			metrics.ProxySlowQueryCount.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				metrics.QueryLabel,
+			).Inc()
 		}
 	}()
 
@@ -4321,6 +4330,92 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		metrics.SuccessLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	resp.Infos = persistentInfos
+	return resp, nil
+}
+
+func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetSegmentsInfo")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+	log.Debug("GetSegmentsInfo",
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", req.DbName),
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+
+	resp := &internalpb.GetSegmentsInfoResponse{
+		Status: merr.Success(),
+	}
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	method := "GetSegmentsInfo"
+	tr := timerecord.NewTimeRecorder(method)
+	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	collection := fmt.Sprint(req.GetCollectionID())
+	defer func() {
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel, req.GetDbName(), collection).Inc()
+		if resp.GetStatus().GetCode() != 0 {
+			log.Warn("import failed", zap.String("err", resp.GetStatus().GetReason()))
+			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel, req.GetDbName(), collection).Inc()
+		} else {
+			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel, req.GetDbName(), collection).Inc()
+		}
+		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	}()
+
+	infoResp, err := node.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+		SegmentIDs:       req.GetSegmentIDs(),
+		IncludeUnHealthy: true,
+	})
+	if err != nil {
+		log.Warn("GetSegmentInfo fail",
+			zap.Error(err))
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	err = merr.Error(infoResp.GetStatus())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	log.Debug("GetPersistentSegmentInfo",
+		zap.Int("len(infos)", len(infoResp.Infos)),
+		zap.Any("status", infoResp.Status))
+	getLogIDs := func(binlogs []*datapb.FieldBinlog) []*internalpb.FieldBinlog {
+		logIDs := make([]*internalpb.FieldBinlog, 0, len(binlogs))
+		for _, fb := range binlogs {
+			fieldLogIDs := make([]int64, 0, len(fb.GetBinlogs()))
+			for _, b := range fb.GetBinlogs() {
+				fieldLogIDs = append(fieldLogIDs, b.GetLogID())
+			}
+			logIDs = append(logIDs, &internalpb.FieldBinlog{
+				FieldID: fb.GetFieldID(),
+				LogIDs:  fieldLogIDs,
+			})
+		}
+		return logIDs
+	}
+	segmentInfos := make([]*internalpb.SegmentInfo, 0, len(req.GetSegmentIDs()))
+	for _, info := range infoResp.GetInfos() {
+		segmentInfos = append(segmentInfos, &internalpb.SegmentInfo{
+			SegmentID:    info.GetID(),
+			CollectionID: info.GetCollectionID(),
+			PartitionID:  info.GetPartitionID(),
+			VChannel:     info.GetInsertChannel(),
+			NumRows:      info.GetNumOfRows(),
+			State:        info.GetState(),
+			Level:        commonpb.SegmentLevel(info.GetLevel()),
+			IsSorted:     info.GetIsSorted(),
+			InsertLogs:   getLogIDs(info.GetBinlogs()),
+			DeltaLogs:    getLogIDs(info.GetDeltalogs()),
+			StatsLogs:    getLogIDs(info.GetStatslogs()),
+		})
+	}
+
+	resp.SegmentInfos = segmentInfos
 	return resp, nil
 }
 
@@ -6832,7 +6927,7 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	return result, nil
 }
 
-func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequset) (*milvuspb.RunAnalyzerResponse, error) {
+func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	// TODO: use collection analyzer when collection name and field name not none
 	tokenizer, err := ctokenizer.NewTokenizer(req.GetAnalyzerParams())
 	if err != nil {
@@ -6846,13 +6941,23 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 	for i, text := range req.GetPlaceholder() {
 		stream := tokenizer.NewTokenStream(string(text))
 		defer stream.Destroy()
-		tokens := []string{}
-		for stream.Advance() {
-			token := stream.Token()
-			tokens = append(tokens, token)
-		}
+
 		results[i] = &milvuspb.AnalyzerResult{
-			Tokens: tokens,
+			Tokens: make([]*milvuspb.AnalyzerToken, 0),
+		}
+
+		for stream.Advance() {
+			var token *milvuspb.AnalyzerToken
+			if req.GetWithDetail() {
+				token = stream.DetailedToken()
+			} else {
+				token = &milvuspb.AnalyzerToken{Token: stream.Token()}
+			}
+
+			if req.GetWithHash() {
+				token.Hash = typeutil.HashString2LessUint32(token.GetToken())
+			}
+			results[i].Tokens = append(results[i].Tokens, token)
 		}
 	}
 

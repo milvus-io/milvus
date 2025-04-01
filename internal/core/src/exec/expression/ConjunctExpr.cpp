@@ -83,16 +83,22 @@ PhyConjunctFilterExpr::CanSkipFollowingExprs(ColumnVectorPtr& vec) {
 
 void
 PhyConjunctFilterExpr::SkipFollowingExprs(int start) {
-    for (int i = start; i < inputs_.size(); ++i) {
-        inputs_[i]->MoveCursor();
+    for (int i = start; i < input_order_.size(); ++i) {
+        inputs_[input_order_[i]]->MoveCursor();
     }
 }
 
 void
 PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
-    for (int i = 0; i < inputs_.size(); ++i) {
+    if (input_order_.empty()) {
+        input_order_.resize(inputs_.size());
+        for (size_t i = 0; i < inputs_.size(); i++) {
+            input_order_[i] = i;
+        }
+    }
+    for (int i = 0; i < input_order_.size(); ++i) {
         VectorPtr input_result;
-        inputs_[i]->Eval(context, input_result);
+        inputs_[input_order_[i]]->Eval(context, input_result);
         if (i == 0) {
             result = input_result;
             auto all_flat_result = GetColumnVector(result);
@@ -100,6 +106,7 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 SkipFollowingExprs(i + 1);
                 return;
             }
+            SetNextExprBitmapInput(all_flat_result, context);
             continue;
         }
         auto input_flat_result = GetColumnVector(input_result);
@@ -110,7 +117,9 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             SkipFollowingExprs(i + 1);
             return;
         }
+        SetNextExprBitmapInput(all_flat_result, context);
     }
+    ClearBitmapInput(context);
 }
 
 }  //namespace exec

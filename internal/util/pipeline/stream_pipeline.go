@@ -67,7 +67,11 @@ func (p *streamPipeline) work() {
 		case <-p.closeCh:
 			log.Ctx(context.TODO()).Debug("stream pipeline input closed")
 			return
-		case msg := <-p.input:
+		case msg, ok := <-p.input:
+			if !ok {
+				log.Ctx(context.TODO()).Debug("stream pipeline input closed")
+				return
+			}
 			p.lastAccessTime.Store(time.Now())
 			log.Ctx(context.TODO()).RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
 			p.pipeline.inputChannel <- msg
@@ -158,12 +162,15 @@ func (p *streamPipeline) Start() error {
 
 func (p *streamPipeline) Close() {
 	p.closeOnce.Do(func() {
+		// close datasource first
+		p.dispatcher.Deregister(p.vChannel)
+		// close stream input
 		close(p.closeCh)
 		p.closeWg.Wait()
 		if p.scanner != nil {
 			p.scanner.Close()
 		}
-		p.dispatcher.Deregister(p.vChannel)
+		// close the underline pipeline
 		p.pipeline.Close()
 	})
 }

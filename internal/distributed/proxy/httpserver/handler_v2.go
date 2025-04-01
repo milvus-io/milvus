@@ -202,6 +202,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(ResourceGroupCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &ResourceGroupReq{} }, wrapperTraceLog(h.describeResourceGroup))))
 	router.POST(ResourceGroupCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &EmptyReq{} }, wrapperTraceLog(h.listResourceGroups))))
 	router.POST(ResourceGroupCategory+TransferReplicaAction, timeoutMiddleware(wrapperPost(func() any { return &TransferReplicaReq{} }, wrapperTraceLog(h.transferReplica))))
+
+	// segment group
+	router.POST(SegmentCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetSegmentsInfoReq{} }, wrapperTraceLog(h.getSegmentsInfo))))
 }
 
 type (
@@ -1557,6 +1560,13 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Value: fmt.Sprintf("%v", httpReq.Params["partitionKeyIsolation"]),
 		})
 	}
+	if _, ok := httpReq.Params[common.MmapEnabledKey]; ok {
+		req.Properties = append(req.Properties, &commonpb.KeyValuePair{
+			Key:   common.MmapEnabledKey,
+			Value: fmt.Sprintf("%v", httpReq.Params[common.MmapEnabledKey]),
+		})
+	}
+
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateCollection(reqCtx, req.(*milvuspb.CreateCollectionRequest))
 	})
@@ -2611,4 +2621,51 @@ func (h *HandlersV2) GetCollectionSchema(ctx context.Context, c *gin.Context, db
 	}
 	response, _ := descResp.(*milvuspb.DescribeCollectionResponse)
 	return response.Schema, nil
+}
+
+func (h *HandlersV2) getSegmentsInfo(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*GetSegmentsInfoReq)
+	req := &internalpb.GetSegmentsInfoRequest{
+		DbName:       httpReq.GetDbName(),
+		CollectionID: httpReq.GetCollectionID(),
+		SegmentIDs:   httpReq.GetSegmentIDs(),
+	}
+
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/GetSegmentsInfo", func(reqCtx context.Context, req any) (any, error) {
+		return h.proxy.GetSegmentsInfo(reqCtx, req.(*internalpb.GetSegmentsInfoRequest))
+	})
+
+	getLogs := func(binlogs []*internalpb.FieldBinlog) []interface{} {
+		logIDs := make([]interface{}, 0, len(binlogs))
+		for _, binlog := range binlogs {
+			details := make(map[string]interface{})
+			details["fieldID"] = binlog.GetFieldID()
+			details["logIDs"] = binlog.GetLogIDs()
+			logIDs = append(logIDs, details)
+		}
+		return logIDs
+	}
+	if err == nil {
+		response := resp.(*internalpb.GetSegmentsInfoResponse)
+		returnData := make(map[string]interface{})
+		infos := make([]map[string]interface{}, 0)
+		for _, segInfo := range response.GetSegmentInfos() {
+			info := make(map[string]interface{})
+			info["segmentID"] = segInfo.GetSegmentID()
+			info["collectionID"] = segInfo.GetCollectionID()
+			info["partitionID"] = segInfo.GetPartitionID()
+			info["vChannel"] = segInfo.GetVChannel()
+			info["numRows"] = segInfo.GetNumRows()
+			info["state"] = segInfo.GetState()
+			info["level"] = segInfo.GetLevel()
+			info["isSorted"] = segInfo.GetIsSorted()
+			info["insertLogs"] = getLogs(segInfo.GetInsertLogs())
+			info["deltaLogs"] = getLogs(segInfo.GetDeltaLogs())
+			info["statsLogs"] = getLogs(segInfo.GetStatsLogs())
+			infos = append(infos, info)
+		}
+		returnData["segmentInfos"] = infos
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
+	}
+	return resp, err
 }

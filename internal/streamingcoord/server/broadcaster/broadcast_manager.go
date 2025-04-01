@@ -48,7 +48,6 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) (*broadcastTas
 		cond:         syncutil.NewContextCond(&sync.Mutex{}),
 		tasks:        tasks,
 		resourceKeys: rks,
-		version:      1,
 		metrics:      metrics,
 	}
 	m.SetLogger(logger)
@@ -61,7 +60,6 @@ type broadcastTaskManager struct {
 	cond         *syncutil.ContextCond
 	tasks        map[uint64]*broadcastTask      // map the broadcastID to the broadcastTaskState
 	resourceKeys map[message.ResourceKey]uint64 // map the resource key to the broadcastID
-	version      int                            // version is used to make sure that there's no update lost for watcher.
 	metrics      *broadcasterMetrics
 }
 

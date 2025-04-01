@@ -21,9 +21,12 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 func NewListDeleteBuffer[T timed](startTs uint64, sizePerBlock int64, labels []string) DeleteBuffer[T] {
@@ -65,6 +68,10 @@ func (b *listDeleteBuffer[T]) RegisterL0(segmentList ...segments.Segment) {
 	for _, seg := range segmentList {
 		if seg != nil {
 			b.l0Segments = append(b.l0Segments, seg)
+			log.Info("register l0 from delete buffer",
+				zap.Int64("segmentID", seg.ID()),
+				zap.Time("startPosition", tsoutil.PhysicalTime(seg.StartPosition().GetTimestamp())),
+			)
 		}
 	}
 
@@ -83,10 +90,15 @@ func (b *listDeleteBuffer[T]) UnRegister(ts uint64) {
 	var newSegments []segments.Segment
 
 	for _, s := range b.l0Segments {
-		if s.StartPosition().GetTimestamp() > ts {
+		if s.StartPosition().GetTimestamp() >= ts {
 			newSegments = append(newSegments, s)
 		} else {
 			s.Release(context.TODO())
+			log.Info("unregister l0 from delete buffer",
+				zap.Int64("segmentID", s.ID()),
+				zap.Time("startPosition", tsoutil.PhysicalTime(s.StartPosition().GetTimestamp())),
+				zap.Time("cleanTs", tsoutil.PhysicalTime(ts)),
+			)
 		}
 	}
 	b.l0Segments = newSegments
@@ -121,7 +133,7 @@ func (b *listDeleteBuffer[T]) Put(entry T) {
 	tail := b.list[len(b.list)-1]
 	err := tail.Put(entry)
 	if errors.Is(err, errBufferFull) {
-		b.list = append(b.list, newCacheBlock[T](entry.Timestamp(), b.sizePerBlock, entry))
+		b.list = append(b.list, newCacheBlock(entry.Timestamp(), b.sizePerBlock, entry))
 	}
 
 	// update metrics

@@ -77,9 +77,9 @@ func createOpenAIProvider(url string, schema *schemapb.FieldSchema, providerName
 	}
 	switch providerName {
 	case openAIProvider:
-		return NewOpenAIEmbeddingProvider(schema, functionSchema)
+		return NewOpenAIEmbeddingProvider(schema, functionSchema, map[string]string{})
 	case azureOpenAIProvider:
-		return NewAzureOpenAIEmbeddingProvider(schema, functionSchema)
+		return NewAzureOpenAIEmbeddingProvider(schema, functionSchema, map[string]string{})
 	default:
 		return nil, fmt.Errorf("Unknow provider")
 	}
@@ -181,27 +181,15 @@ func (s *OpenAITextEmbeddingProviderSuite) TestEmbeddingNubmerNotMatch() {
 func (s *OpenAITextEmbeddingProviderSuite) TestCreateOpenAIEmbeddingClient() {
 	_, err := createOpenAIEmbeddingClient("", "")
 	s.Error(err)
-
-	os.Setenv(openaiAKEnvStr, "mockKey")
-	defer os.Unsetenv(openaiAKEnvStr)
-
-	_, err = createOpenAIEmbeddingClient("", "")
-	s.NoError(err)
 }
 
 func (s *OpenAITextEmbeddingProviderSuite) TestCreateAzureOpenAIEmbeddingClient() {
-	_, err := createAzureOpenAIEmbeddingClient("", "")
-	s.Error(err)
-
-	os.Setenv(azureOpenaiAKEnvStr, "mockKey")
-	defer os.Unsetenv(azureOpenaiAKEnvStr)
-
-	_, err = createAzureOpenAIEmbeddingClient("", "")
+	_, err := createAzureOpenAIEmbeddingClient("", "", "")
 	s.Error(err)
 
 	os.Setenv(azureOpenaiResourceName, "mockResource")
 	defer os.Unsetenv(azureOpenaiResourceName)
 
-	_, err = createAzureOpenAIEmbeddingClient("", "")
+	_, err = createAzureOpenAIEmbeddingClient("mock", "", "")
 	s.NoError(err)
 }

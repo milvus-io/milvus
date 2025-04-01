@@ -400,3 +400,33 @@ message ListImportsResponse {
   repeated int64 progresses = 5;
   repeated string collection_names = 6;
 }
+
+message GetSegmentsInfoRequest {
+  string dbName = 1;
+  int64 collectionID = 2;
+  repeated int64 segmentIDs = 3;
+}
+
+message FieldBinlog {
+  int64 fieldID = 1;
+  repeated int64 logIDs = 2;
+}
+
+message SegmentInfo {
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  string vChannel = 4;
+  int64 num_rows = 5;
+  common.SegmentState state = 6;
+  common.SegmentLevel level = 7;
+  bool is_sorted = 8;
+  repeated FieldBinlog insert_logs = 9;
+  repeated FieldBinlog delta_logs = 10;
+  repeated FieldBinlog stats_logs = 11;
+}
+
+message GetSegmentsInfoResponse {
+  common.Status status = 1;
+  repeated SegmentInfo segmentInfos = 2;
+}

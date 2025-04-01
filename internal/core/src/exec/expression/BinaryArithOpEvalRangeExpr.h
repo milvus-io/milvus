@@ -464,6 +464,21 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    std::string
+    ToString() const override {
+        return fmt::format("{}", expr_->ToString());
+    }
+
+    bool
+    IsSource() const override {
+        return true;
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return expr_->column_;
+    }
+
  private:
     template <typename T>
     VectorPtr
@@ -484,6 +499,17 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     template <typename ValueType>
     VectorPtr
     ExecRangeVisitorImplForArray(OffsetVector* input = nullptr);
+
+    template <typename T>
+    bool
+    CanUseIndex() {
+        if (is_index_mode_ && IndexHasRawData<T>()) {
+            use_index_ = true;
+            return true;
+        }
+        use_index_ = false;
+        return false;
+    }
 
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;

@@ -948,6 +948,8 @@ func Test_JSONExpr(t *testing.T) {
 		`100 == $meta["A"] + 6`,
 		`exists $meta["A"]`,
 		`exists $meta["A"]["B"]["C"] `,
+		`exists $meta["A"] || exists JSONField["A"]`,
+		`exists $meta["A"] && exists JSONField["A"]`,
 		`A["B"][0] > 100`,
 		`$meta[0] > 100`,
 		`A["\"\"B\"\""] > 10`,

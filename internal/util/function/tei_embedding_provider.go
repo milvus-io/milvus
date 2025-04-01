@@ -52,7 +52,7 @@ func createTEIEmbeddingClient(apiKey string, endpoint string) (*tei.TEIEmbedding
 	return tei.NewTEIEmbeddingClient(apiKey, endpoint)
 }
 
-func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema) (*TeiEmbeddingProvider, error) {
+func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*TeiEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err

@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -76,7 +75,7 @@ func createCohereProvider(url string, schema *schemapb.FieldSchema, providerName
 	}
 	switch providerName {
 	case cohereProvider:
-		return NewCohereEmbeddingProvider(schema, functionSchema)
+		return NewCohereEmbeddingProvider(schema, functionSchema, map[string]string{})
 	default:
 		return nil, fmt.Errorf("Unknow provider")
 	}
@@ -264,18 +263,18 @@ func (s *CohereTextEmbeddingProviderSuite) TestNewCohereProvider() {
 		},
 	}
 
-	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 	s.NoError(err)
 	s.Equal(provider.truncate, "END")
 
 	functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: truncateParamKey, Value: "START"})
-	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 	s.NoError(err)
 	s.Equal(provider.truncate, "START")
 
 	// Invalid truncateParam
 	functionSchema.Params[2].Value = "Unknow"
-	_, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	_, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 	s.Error(err)
 }
 
@@ -293,13 +292,13 @@ func (s *CohereTextEmbeddingProviderSuite) TestGetInputType() {
 		},
 	}
 
-	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 	s.NoError(err)
 	s.Equal(provider.getInputType(InsertMode), "")
 	s.Equal(provider.getInputType(SearchMode), "")
 
 	functionSchema.Params[0].Value = "model-v3.0"
-	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 	s.NoError(err)
 	s.Equal(provider.getInputType(InsertMode), "search_document")
 	s.Equal(provider.getInputType(SearchMode), "search_query")
@@ -308,12 +307,6 @@ func (s *CohereTextEmbeddingProviderSuite) TestGetInputType() {
 func (s *CohereTextEmbeddingProviderSuite) TestCreateCohereEmbeddingClient() {
 	_, err := createCohereEmbeddingClient("", "")
 	s.Error(err)
-
-	os.Setenv(cohereAIAKEnvStr, "mockKey")
-	defer os.Unsetenv(openaiAKEnvStr)
-
-	_, err = createCohereEmbeddingClient("", "")
-	s.NoError(err)
 }
 
 func (s *CohereTextEmbeddingProviderSuite) TestRuntimeDimNotMatch() {
