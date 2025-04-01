@@ -279,69 +279,6 @@ class OffsetOrderedArray : public OffsetMap {
     std::vector<std::pair<T, int32_t>> array_;
 };
 
-class ThreadSafeValidData {
- public:
-    explicit ThreadSafeValidData() = default;
-    explicit ThreadSafeValidData(FixedVector<bool> data)
-        : data_(std::move(data)) {
-    }
-
-    void
-    set_data_raw(const std::vector<FieldDataPtr>& datas) {
-        std::unique_lock<std::shared_mutex> lck(mutex_);
-        auto total = 0;
-        for (auto& field_data : datas) {
-            total += field_data->get_num_rows();
-        }
-        if (length_ + total > data_.size()) {
-            data_.resize(length_ + total);
-        }
-
-        for (auto& field_data : datas) {
-            auto num_row = field_data->get_num_rows();
-            for (size_t i = 0; i < num_row; i++) {
-                data_[length_ + i] = field_data->is_valid(i);
-            }
-            length_ += num_row;
-        }
-    }
-
-    void
-    set_data_raw(size_t num_rows,
-                 const DataArray* data,
-                 const FieldMeta& field_meta) {
-        std::unique_lock<std::shared_mutex> lck(mutex_);
-        if (field_meta.is_nullable()) {
-            if (length_ + num_rows > data_.size()) {
-                data_.resize(length_ + num_rows);
-            }
-            auto src = data->valid_data().data();
-            std::copy_n(src, num_rows, data_.data() + length_);
-            length_ += num_rows;
-        }
-    }
-
-    bool
-    is_valid(size_t offset) {
-        std::shared_lock<std::shared_mutex> lck(mutex_);
-        Assert(offset < length_);
-        return data_[offset];
-    }
-
-    bool*
-    get_chunk_data(size_t offset) {
-        std::shared_lock<std::shared_mutex> lck(mutex_);
-        Assert(offset < length_);
-        return &data_[offset];
-    }
-
- private:
-    mutable std::shared_mutex mutex_{};
-    FixedVector<bool> data_;
-    // number of actual elements
-    size_t length_{0};
-};
-
 template <bool is_sealed = false>
 struct InsertRecord {
     InsertRecord(
@@ -660,14 +597,14 @@ struct InsertRecord {
         return ptr;
     }
 
-    ThreadSafeValidData*
+    ThreadSafeValidDataPtr
     get_valid_data(FieldId field_id) const {
         AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
                    "Cannot find valid_data with field_id: " +
                        std::to_string(field_id.get()));
         AssertInfo(valid_data_.at(field_id) != nullptr,
                    "valid_data_ at i is null" + std::to_string(field_id.get()));
-        return valid_data_.at(field_id).get();
+        return valid_data_.at(field_id);
     }
 
     bool
@@ -700,18 +637,23 @@ struct InsertRecord {
     void
     append_data(FieldId field_id, int64_t size_per_chunk) {
         static_assert(IsScalar<Type> || IsSparse<Type>);
-        data_.emplace(field_id,
-                      std::make_unique<ConcurrentVector<Type>>(
-                          size_per_chunk, mmap_descriptor_));
+        data_.emplace(
+            field_id,
+            std::make_unique<ConcurrentVector<Type>>(
+                size_per_chunk,
+                mmap_descriptor_,
+                is_valid_data_exist(field_id) ? get_valid_data(field_id)
+                                              : nullptr));
     }
 
     // append a column of scalar type
     void
     append_valid_data(FieldId field_id) {
-        valid_data_.emplace(field_id, std::make_unique<ThreadSafeValidData>());
+        valid_data_.emplace(field_id, std::make_shared<ThreadSafeValidData>());
     }
 
     // append a column of vector type
+    // vector not support nullable, not pass valid data ptr
     template <typename VectorType>
     void
     append_data(FieldId field_id, int64_t dim, int64_t size_per_chunk) {
@@ -767,8 +709,7 @@ struct InsertRecord {
 
  private:
     std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
-    std::unordered_map<FieldId, std::unique_ptr<ThreadSafeValidData>>
-        valid_data_{};
+    std::unordered_map<FieldId, ThreadSafeValidDataPtr> valid_data_{};
     mutable std::shared_mutex shared_mutex_{};
     storage::MmapChunkDescriptorPtr mmap_descriptor_;
 };
