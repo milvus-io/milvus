@@ -31,7 +31,7 @@ const (
 	// StandaloneRole is a constant represent Standalone
 	StandaloneRole = "standalone"
 	// RootCoordRole is a constant represent RootCoord
-	RootCoordRole = "mixcoord"
+	RootCoordRole = "rootcoord"
 	// ProxyRole is a constant represent Proxy
 	ProxyRole = "proxy"
 	// QueryCoordRole is a constant represent QueryCoord

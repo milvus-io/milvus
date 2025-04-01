@@ -147,6 +147,9 @@ type MilvusRoles struct {
 	EnableQueryNode     bool `env:"ENABLE_QUERY_NODE"`
 	EnableDataNode      bool `env:"ENABLE_DATA_NODE"`
 	EnableStreamingNode bool `env:"ENABLE_STREAMING_NODE"`
+	EnableRootCoord     bool `env:"ENABLE_ROOT_COORD"`
+	EnableQueryCoord    bool `env:"ENABLE_QUERY_COORD"`
+	EnableDataCoord     bool `env:"ENABLE_DATA_COORD"`
 	Local               bool
 	Alias               string
 	Embedded            bool
@@ -368,6 +371,9 @@ func (mr *MilvusRoles) Run() {
 		mr.EnableDataNode,
 		mr.EnableStreamingNode,
 		mr.EnableMixCoord,
+		mr.EnableRootCoord,
+		mr.EnableQueryCoord,
+		mr.EnableDataCoord,
 	}
 	enableComponents = lo.Filter(enableComponents, func(v bool, _ int) bool {
 		return v
@@ -398,6 +404,12 @@ func (mr *MilvusRoles) Run() {
 	componentMap := make(map[string]component)
 	var mixCoord component
 	var proxy, dataNode, queryNode, streamingNode component
+
+	if mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord {
+		mixCoord = mr.runMixCoord(ctx, local, &wg)
+		componentMap[typeutil.MixCoordRole] = mixCoord
+		paramtable.SetLocalComponentEnabled(typeutil.MixCoordRole)
+	}
 
 	if mr.EnableMixCoord {
 		mixCoord = mr.runMixCoord(ctx, local, &wg)
