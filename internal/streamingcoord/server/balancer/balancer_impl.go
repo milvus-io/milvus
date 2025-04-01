@@ -181,7 +181,7 @@ func (b *balancerImpl) blockUntilAllNodeIsGreaterThan260(ctx context.Context) er
 		logger := b.logger.With(zap.String("role", role))
 		logger.Info("start to wait that the nodes is greater than 2.6.0")
 		// Check if there's any proxy or data node with version < 2.6.0.
-		proxyResolver := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), "<2.6.0")
+		proxyResolver := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), "<2.6.0-dev")
 		r := proxyResolver.Resolver()
 		err := r.Watch(ctx, func(vs resolver.VersionedState) error {
 			if len(vs.Sessions()) == 0 {
