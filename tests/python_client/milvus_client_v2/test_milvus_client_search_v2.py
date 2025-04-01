@@ -2822,7 +2822,7 @@ class TestCollectionSearch(TestcaseBase):
             for hits in search_res:
                 ids = hits.ids
                 assert set(ids).issubset(filter_ids_set)
-                 # 6. search again with expression template and hint
+            # 6. search again with expression template and hint
             search_params = default_search_params.copy()
             search_params.update({"hints": "iterative_filter"})
             search_res, _ = collection_w.search(search_vectors[:default_nq], default_search_field,
@@ -2840,10 +2840,10 @@ class TestCollectionSearch(TestcaseBase):
                 log.info(filter_ids_set)
                 assert set(ids).issubset(filter_ids_set)
             # 7. create json index
-            default_json_path_index = {"index_type": "INVERTED", "params": {"json_cast_type": DataType.DOUBLE,
+            default_json_path_index = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
                                                                             "json_path": f"{ct.default_json_field_name}['number']"}}
             collection_w.create_index(ct.default_json_field_name, default_json_path_index, index_name = f"{ct.default_json_field_name}_0")
-            default_json_path_index = {"index_type": "INVERTED", "params": {"json_cast_type": DataType.DOUBLE,
+            default_json_path_index = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
                                                                             "json_path": f"{ct.default_json_field_name}['float']"}}
             collection_w.create_index(ct.default_json_field_name, default_json_path_index, index_name = f"{ct.default_json_field_name}_1")
             # 8. release and load to make sure the new index is loaded
