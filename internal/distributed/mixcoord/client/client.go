@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	grpcCodes "google.golang.org/grpc/codes"

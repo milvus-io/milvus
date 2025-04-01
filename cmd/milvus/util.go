@@ -186,11 +186,11 @@ func formatFlags(args []string, flags *flag.FlagSet) (alias string, enableRootCo
 	enableDataCoord, enableQueryNode, enableDataNode, enableProxy bool, enableStreamingNode bool,
 ) {
 	flags.StringVar(&alias, "alias", "", "set alias")
-
+	var enableIndexCoord bool
 	flags.BoolVar(&enableRootCoord, typeutil.RootCoordRole, false, "enable root coordinator")
 	flags.BoolVar(&enableQueryCoord, typeutil.QueryCoordRole, false, "enable query coordinator")
 	flags.BoolVar(&enableDataCoord, typeutil.DataCoordRole, false, "enable data coordinator")
-
+	flags.BoolVar(&enableIndexCoord, typeutil.IndexCoordRole, false, "enable index coordinator")
 	flags.BoolVar(&enableQueryNode, typeutil.QueryNodeRole, false, "enable query node")
 	flags.BoolVar(&enableDataNode, typeutil.DataNodeRole, false, "enable data node")
 	flags.BoolVar(&enableProxy, typeutil.ProxyRole, false, "enable proxy node")

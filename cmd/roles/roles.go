@@ -405,13 +405,7 @@ func (mr *MilvusRoles) Run() {
 	var mixCoord component
 	var proxy, dataNode, queryNode, streamingNode component
 
-	if mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord {
-		mixCoord = mr.runMixCoord(ctx, local, &wg)
-		componentMap[typeutil.MixCoordRole] = mixCoord
-		paramtable.SetLocalComponentEnabled(typeutil.MixCoordRole)
-	}
-
-	if mr.EnableMixCoord {
+	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
 		mixCoord = mr.runMixCoord(ctx, local, &wg)
 		componentMap[typeutil.MixCoordRole] = mixCoord
 		paramtable.SetLocalComponentEnabled(typeutil.MixCoordRole)
