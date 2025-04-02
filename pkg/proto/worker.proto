@@ -57,6 +57,7 @@ message CreateJobRequest {
   schema.FieldSchema field = 25;
   bool partition_key_isolation = 26;
   int32 current_scalar_index_version = 27;
+  int64 lack_binlog_rows = 28;
 }
 
 message QueryJobsRequest {

@@ -27,12 +27,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/eventlog"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -54,6 +54,7 @@ type LoadCollectionJob struct {
 	targetObserver     *observers.TargetObserver
 	collectionObserver *observers.CollectionObserver
 	nodeMgr            *session.NodeManager
+	collInfo           *milvuspb.DescribeCollectionResponse
 }
 
 func NewLoadCollectionJob(
@@ -95,6 +96,13 @@ func (job *LoadCollectionJob) PreExecute() error {
 		req.ResourceGroups = []string{meta.DefaultResourceGroupName}
 	}
 
+	var err error
+	job.collInfo, err = job.broker.DescribeCollection(job.ctx, req.GetCollectionID())
+	if err != nil {
+		log.Warn("failed to describe collection from RootCoord", zap.Error(err))
+		return err
+	}
+
 	collection := job.meta.GetCollection(job.ctx, req.GetCollectionID())
 	if collection == nil {
 		return nil
@@ -108,14 +116,16 @@ func (job *LoadCollectionJob) PreExecute() error {
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded collection")
 	}
 
-	// handle legacy proxy load request
-	if len(req.GetLoadFields()) == 0 {
-		req.LoadFields = lo.FilterMap(req.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
-			return field.GetFieldID(), field.GetFieldID() >= common.StartOfUserFieldID
+	reqFieldIDs := req.GetLoadFields()
+	if !funcutil.SliceSetEqual(collection.GetLoadFields(), reqFieldIDs) && len(req.GetLoadFields()) == 0 {
+		// here is a compatible logic: meta is still old, but req was sent in new version
+		// in older versions, a full load will be saved all field id, in newer version, use empty loaded list as all loaded
+		reqFieldIDs = lo.Map(job.collInfo.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+			return field.GetFieldID()
 		})
 	}
 
-	if !funcutil.SliceSetEqual(collection.GetLoadFields(), req.GetLoadFields()) {
+	if !funcutil.SliceSetEqual(collection.GetLoadFields(), reqFieldIDs) {
 		log.Warn("collection with different load field list exists, release this collection first before chaning its load fields",
 			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
 			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
@@ -171,18 +181,12 @@ func (job *LoadCollectionJob) Execute() error {
 		}
 	}
 
-	collectionInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionID())
-	if err != nil {
-		log.Warn("failed to describe collection from RootCoord", zap.Error(err))
-		return err
-	}
-
 	// 2. create replica if not exist
 	replicas := job.meta.ReplicaManager.GetByCollection(job.ctx, req.GetCollectionID())
 	if len(replicas) == 0 {
 		// API of LoadCollection is wired, we should use map[resourceGroupNames]replicaNumber as input, to keep consistency with `TransferReplica` API.
 		// Then we can implement dynamic replica changed in different resource group independently.
-		_, err = utils.SpawnReplicasWithRG(job.ctx, job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), collectionInfo.GetVirtualChannelNames())
+		_, err = utils.SpawnReplicasWithRG(job.ctx, job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), job.collInfo.GetVirtualChannelNames())
 		if err != nil {
 			msg := "failed to spawn replica for collection"
 			log.Warn(msg, zap.Error(err))
@@ -214,7 +218,7 @@ func (job *LoadCollectionJob) Execute() error {
 			FieldIndexID:  req.GetFieldIndexID(),
 			LoadType:      querypb.LoadType_LoadCollection,
 			LoadFields:    req.GetLoadFields(),
-			DbID:          collectionInfo.GetDbId(),
+			DbID:          job.collInfo.GetDbId(),
 		},
 		CreatedAt: time.Now(),
 		LoadSpan:  sp,
@@ -261,6 +265,7 @@ type LoadPartitionJob struct {
 	targetObserver     *observers.TargetObserver
 	collectionObserver *observers.CollectionObserver
 	nodeMgr            *session.NodeManager
+	collInfo           *milvuspb.DescribeCollectionResponse
 }
 
 func NewLoadPartitionJob(
@@ -302,6 +307,13 @@ func (job *LoadPartitionJob) PreExecute() error {
 		req.ResourceGroups = []string{meta.DefaultResourceGroupName}
 	}
 
+	var err error
+	job.collInfo, err = job.broker.DescribeCollection(job.ctx, req.GetCollectionID())
+	if err != nil {
+		log.Warn("failed to describe collection from RootCoord", zap.Error(err))
+		return err
+	}
+
 	collection := job.meta.GetCollection(job.ctx, req.GetCollectionID())
 	if collection == nil {
 		return nil
@@ -313,14 +325,14 @@ func (job *LoadPartitionJob) PreExecute() error {
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded partitions")
 	}
 
-	// handle legacy proxy load request
-	if len(req.GetLoadFields()) == 0 {
-		req.LoadFields = lo.FilterMap(req.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
-			return field.GetFieldID(), field.GetFieldID() >= common.StartOfUserFieldID
-		})
+	reqFieldIDs := req.GetLoadFields()
+	if !funcutil.SliceSetEqual(collection.GetLoadFields(), reqFieldIDs) && len(req.GetLoadFields()) == 0 {
+		// here is a compatible logic: meta is still old, but req was sent in new version
+		// in older versions, a full load will be saved all field id, in newer version, use empty loaded list as all loaded
+		reqFieldIDs = lo.Map(job.collInfo.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
 	}
 
-	if !funcutil.SliceSetEqual(collection.GetLoadFields(), req.GetLoadFields()) {
+	if !funcutil.SliceSetEqual(collection.GetLoadFields(), reqFieldIDs) {
 		log.Warn("collection with different load field list exists, release this collection first before chaning its load fields",
 			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
 			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
@@ -373,16 +385,10 @@ func (job *LoadPartitionJob) Execute() error {
 		}
 	}
 
-	collectionInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionID())
-	if err != nil {
-		log.Warn("failed to describe collection from RootCoord", zap.Error(err))
-		return err
-	}
-
 	// 2. create replica if not exist
 	replicas := job.meta.ReplicaManager.GetByCollection(context.TODO(), req.GetCollectionID())
 	if len(replicas) == 0 {
-		_, err = utils.SpawnReplicasWithRG(job.ctx, job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), collectionInfo.GetVirtualChannelNames())
+		_, err = utils.SpawnReplicasWithRG(job.ctx, job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), job.collInfo.GetVirtualChannelNames())
 		if err != nil {
 			msg := "failed to spawn replica for collection"
 			log.Warn(msg, zap.Error(err))
@@ -416,7 +422,7 @@ func (job *LoadPartitionJob) Execute() error {
 				FieldIndexID:  req.GetFieldIndexID(),
 				LoadType:      querypb.LoadType_LoadPartition,
 				LoadFields:    req.GetLoadFields(),
-				DbID:          collectionInfo.GetDbId(),
+				DbID:          job.collInfo.GetDbId(),
 			},
 			CreatedAt: time.Now(),
 			LoadSpan:  sp,

@@ -815,7 +815,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, SearcTestWhenNullable) {
+TEST(CApiTest, SearchTestWhenNullable) {
     auto c_collection = NewCollection(get_default_schema_config_nullable());
     CSegmentInterface segment;
     auto status = NewSegment(c_collection, Growing, -1, &segment, false);
@@ -4121,9 +4121,13 @@ TEST(CApiTest, SealedSegment_Update_Field_Size) {
 
 TEST(CApiTest, GrowingSegment_Load_Field_Data) {
     auto schema = std::make_shared<Schema>();
-    schema->AddField(FieldName("RowID"), FieldId(0), DataType::INT64, false);
     schema->AddField(
-        FieldName("Timestamp"), FieldId(1), DataType::INT64, false);
+        FieldName("RowID"), FieldId(0), DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     FieldId(1),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
     auto vec_fid = schema->AddDebugField(
         "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
@@ -4143,6 +4147,158 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data) {
                             storage_config.root_path + "/" + "test_load_sealed",
                             raw_data,
                             cm);
+
+    auto status = LoadFieldData(segment, &load_info);
+    ASSERT_EQ(status.error_code, Success);
+    ASSERT_EQ(segment->get_real_count(), ROW_COUNT);
+    ASSERT_NE(segment->get_field_avg_size(str_fid), 0);
+
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
+    double double_default_value = 20;
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("RowID"), FieldId(0), DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     FieldId(1),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
+    auto vec_fid = schema->AddDebugField(
+        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
+    schema->set_primary_field_id(str_fid);
+
+    int N = ROW_COUNT;
+    auto raw_data = DataGen(schema, N);
+
+    auto lack_null_binlog_id =
+        schema->AddDebugField("lack_null_binlog", DataType::INT8, true);
+    DefaultValueType default_value;
+    default_value.set_double_data(double_default_value);
+
+    auto lack_default_value_binlog_id = schema->AddDebugFieldWithDefaultValue(
+        "lack_default_value_binlog", DataType::DOUBLE, default_value);
+
+    raw_data.schema_ = schema;
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta).release();
+
+    std::vector<int8_t> data1(N / 2);
+    FixedVector<bool> valid_data1(N / 2);
+    for (int i = 0; i < N / 2; i++) {
+        data1[i] = random() % N;
+        valid_data1[i] = rand() % 2 == 0 ? true : false;
+    }
+
+    auto field_meta = schema->operator[](lack_null_binlog_id);
+    auto array = milvus::segcore::CreateDataArrayFrom(
+        data1.data(), valid_data1.data(), N / 2, field_meta);
+
+    auto storage_config = get_default_local_storage_config();
+    auto cm = storage::CreateChunkManager(storage_config);
+    auto load_info =
+        PrepareInsertBinlog(1,
+                            2,
+                            3,
+                            storage_config.root_path + "/" + "test_load_sealed",
+                            raw_data,
+                            cm);
+    raw_data.raw_->mutable_fields_data()->AddAllocated(array.release());
+
+    load_info.field_infos.emplace(
+        lack_null_binlog_id.get(),
+        FieldBinlogInfo{lack_null_binlog_id.get(),
+                        static_cast<int64_t>(ROW_COUNT),
+                        std::vector<int64_t>{int64_t(0)},
+                        false,
+                        std::vector<std::string>{}});
+
+    load_info.field_infos.emplace(
+        lack_default_value_binlog_id.get(),
+        FieldBinlogInfo{lack_default_value_binlog_id.get(),
+                        static_cast<int64_t>(ROW_COUNT),
+                        std::vector<int64_t>{int64_t(0)},
+                        false,
+                        std::vector<std::string>{}});
+
+    auto status = LoadFieldData(segment, &load_info);
+    ASSERT_EQ(status.error_code, Success);
+    ASSERT_EQ(segment->get_real_count(), ROW_COUNT);
+    ASSERT_NE(segment->get_field_avg_size(str_fid), 0);
+
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
+    double double_default_value = 20;
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("RowID"), FieldId(0), DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     FieldId(1),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
+    auto vec_fid = schema->AddDebugField(
+        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
+    schema->set_primary_field_id(str_fid);
+
+    int N = ROW_COUNT;
+    auto raw_data = DataGen(schema, N);
+
+    auto lack_null_binlog_id =
+        schema->AddDebugField("lack_null_binlog", DataType::INT8, true);
+    DefaultValueType default_value;
+    default_value.set_double_data(double_default_value);
+
+    auto lack_default_value_binlog_id = schema->AddDebugFieldWithDefaultValue(
+        "lack_default_value_binlog", DataType::DOUBLE, default_value);
+
+    raw_data.schema_ = schema;
+
+    auto segment = CreateSealedSegment(schema, empty_index_meta).release();
+
+    std::vector<int8_t> data1(N / 2);
+    FixedVector<bool> valid_data1(N / 2);
+    for (int i = 0; i < N / 2; i++) {
+        data1[i] = random() % N;
+        valid_data1[i] = rand() % 2 == 0 ? true : false;
+    }
+
+    auto field_meta = schema->operator[](lack_null_binlog_id);
+    auto array = milvus::segcore::CreateDataArrayFrom(
+        data1.data(), valid_data1.data(), N / 2, field_meta);
+
+    auto storage_config = get_default_local_storage_config();
+    auto cm = storage::CreateChunkManager(storage_config);
+    auto load_info =
+        PrepareInsertBinlog(1,
+                            2,
+                            3,
+                            storage_config.root_path + "/" + "test_load_sealed",
+                            raw_data,
+                            cm);
+    raw_data.raw_->mutable_fields_data()->AddAllocated(array.release());
+
+    load_info.field_infos.emplace(
+        lack_null_binlog_id.get(),
+        FieldBinlogInfo{lack_null_binlog_id.get(),
+                        static_cast<int64_t>(ROW_COUNT),
+                        std::vector<int64_t>{int64_t(0)},
+                        false,
+                        std::vector<std::string>{}});
+
+    load_info.field_infos.emplace(
+        lack_default_value_binlog_id.get(),
+        FieldBinlogInfo{lack_default_value_binlog_id.get(),
+                        static_cast<int64_t>(ROW_COUNT),
+                        std::vector<int64_t>{int64_t(0)},
+                        false,
+                        std::vector<std::string>{}});
 
     auto status = LoadFieldData(segment, &load_info);
     ASSERT_EQ(status.error_code, Success);

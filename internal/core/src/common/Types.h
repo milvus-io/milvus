@@ -103,6 +103,7 @@ using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertRecordProto = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
+using DefaultValueType = proto::schema::ValueField;
 
 inline size_t
 GetDataTypeSize(DataType data_type, int dim = 1) {

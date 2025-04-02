@@ -1622,6 +1622,8 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	}
 
 	clonedColl.Properties = properties
+	// add field will change the schema
+	clonedColl.Schema = req.GetSchema()
 	s.meta.AddCollection(clonedColl)
 	return merr.Success(), nil
 }

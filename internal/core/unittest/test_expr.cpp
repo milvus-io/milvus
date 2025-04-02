@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <regex>
 #include <string>
 #include <string_view>
@@ -3173,8 +3174,11 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable2) {
 
 TEST_P(ExprTest, test_term_pk_with_sorted) {
     auto schema = std::make_shared<Schema>();
-    schema->AddField(
-        FieldName("Timestamp"), FieldId(1), DataType::INT64, false);
+    schema->AddField(FieldName("Timestamp"),
+                     FieldId(1),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
     auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
@@ -4689,8 +4693,11 @@ TEST(Expr, TestExprNOT) {
 
 TEST_P(ExprTest, test_term_pk) {
     auto schema = std::make_shared<Schema>();
-    schema->AddField(
-        FieldName("Timestamp"), FieldId(1), DataType::INT64, false);
+    schema->AddField(FieldName("Timestamp"),
+                     FieldId(1),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
     auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);

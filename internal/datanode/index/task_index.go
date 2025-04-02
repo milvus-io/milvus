@@ -311,10 +311,12 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		IndexStorePath:            it.req.GetIndexStorePath(),
 		OptFields:                 optFields,
 		PartitionKeyIsolation:     it.req.GetPartitionKeyIsolation(),
+		LackBinlogRows:            it.req.GetLackBinlogRows(),
 	}
 
 	log.Info("debug create index", zap.Any("buildIndexParams", buildIndexParams))
 	var err error
+
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
 	if err != nil {
 		if it.index != nil && it.index.CleanLocalData() != nil {
