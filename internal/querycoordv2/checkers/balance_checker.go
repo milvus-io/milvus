@@ -209,7 +209,7 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		// check for stopping balance first
 		segmentPlans, channelPlans = b.balanceReplicas(ctx, stoppingReplicas)
 		// iterate all collection to find a collection to balance
-		for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.normalBalanceCollectionsCurrentRound.Len() > 0 {
+		for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.stoppingBalanceCollectionsCurrentRound.Len() > 0 {
 			replicasToBalance := b.getReplicaForStoppingBalance(ctx)
 			segmentPlans, channelPlans = b.balanceReplicas(ctx, replicasToBalance)
 		}
