@@ -84,6 +84,7 @@ class SegmentChunkReader {
                 if (++processed_rows >= batch_size) {
                     current_chunk_id = chunk_id;
                     current_chunk_pos = i + 1;
+                    break;
                 }
             }
         }
@@ -108,6 +109,7 @@ class SegmentChunkReader {
                 if (++processed_rows >= batch_size) {
                     current_chunk_id = chunk_id;
                     current_chunk_pos = i + 1;
+                    break;
                 }
             }
         }
