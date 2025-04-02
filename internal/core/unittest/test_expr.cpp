@@ -16532,8 +16532,8 @@ TEST(JsonIndexTest, TestExistsExpr) {
     load_index_info.index_params = {{JSON_PATH, "/a"}};
     seg->LoadIndex(load_index_info);
 
-    auto json_field_data_info = FieldDataInfo(
-        json_fid.get(), json_strs_match.size(), {json_field});
+    auto json_field_data_info =
+        FieldDataInfo(json_fid.get(), json_strs_match.size(), {json_field});
     seg->LoadFieldData(json_fid, json_field_data_info);
 
     for (auto& [path, matched_res] : path_to_matched_res) {
@@ -16541,10 +16541,9 @@ TEST(JsonIndexTest, TestExistsExpr) {
         expect.resize(json_strs_match.size());
         expect.reset();
 
-        for (int i = 0; i < json_strs_match.size(); ++i) {
-            if (matched_res & (1 << i)) {
-                expect.set(i);
-            }
+        for (int i = json_strs_match.size() - 1; i >= 0; --i) {
+            expect.set(i, (matched_res & 1) != 0);
+            matched_res >>= 1;
         }
 
         auto exists_expr = std::make_shared<expr::ExistsExpr>(

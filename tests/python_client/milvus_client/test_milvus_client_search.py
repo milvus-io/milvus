@@ -525,9 +525,8 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         # 3. search
         null_expr = nullable_field_name + "[0]" + " " + null_expr_op
         log.info(null_expr)
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create query plan: cannot parse expression: {null_expr}, "
-                             f"error: invalid expression: {null_expr}: invalid parameter"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"unsupported data type: ARRAY"}
         self.search(client, collection_name, [vectors[0]],
                     filter=null_expr,
                     check_task=CheckTasks.err_res, check_items=error)
