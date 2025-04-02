@@ -17,6 +17,7 @@
 
 #include "mmap/ChunkData.h"
 #include "storage/MmapManager.h"
+#include "segcore/SegcoreConfig.h"
 
 namespace milvus {
 template <typename Type>
