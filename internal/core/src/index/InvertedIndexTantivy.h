@@ -69,7 +69,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     InvertedIndexTantivy() : ScalarIndex<T>(INVERTED_INDEX_TYPE) {
     }
 
-    explicit InvertedIndexTantivy(const storage::FileManagerContext& ctx,
+    // Default, we build tantivy index with version 7 (newest version now).
+    explicit InvertedIndexTantivy(uint32_t tantivy_index_version,
+                                  const storage::FileManagerContext& ctx,
                                   bool inverted_index_single_segment = false);
 
     ~InvertedIndexTantivy();
@@ -254,5 +256,12 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // new version while the query node is a older version. So we have this `inverted_index_single_segment_` to control the index
     // building node to build specific type of tantivy index.
     bool inverted_index_single_segment_{false};
+
+    // `tantivy_index_version_` is used to control which kind of tantivy index should be used.
+    // There could be the case where milvus version of read node is lower than the version of index builder node(and read node
+    // may not be upgraded to a higher version in a predictable time), so we are using a lower version of tantivy to read index
+    // built from a higher version of tantivy which is not supported.
+    // Therefore, we should provide a way to allow higher version of milvus to build tantivy index with low version.
+    uint32_t tantivy_index_version_{0};
 };
 }  // namespace milvus::index
