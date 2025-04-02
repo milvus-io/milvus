@@ -644,7 +644,7 @@ func (opt *runAnalyzerOption) WithHash() *runAnalyzerOption {
 	return opt
 }
 
-func NewRunAnaluzerOption(text []string) *runAnalyzerOption {
+func NewRunAnalyzerOption(text []string) *runAnalyzerOption {
 	return &runAnalyzerOption{
 		text: text,
 	}

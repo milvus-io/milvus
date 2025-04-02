@@ -455,7 +455,7 @@ func (mc *MilvusClient) OperatePrivilegeGroup(ctx context.Context, option client
 }
 
 // RunAnalyzer run analyzer with params
-func (mc *MilvusClient) RunAnalyzer(ctx context.Context, option client.RunAnalyzerOption, callOptions ...grpc.CallOption) ([][]*client.Token, error) {
+func (mc *MilvusClient) RunAnalyzer(ctx context.Context, option client.RunAnalyzerOption, callOptions ...grpc.CallOption) ([]*entity.AnalyzerResult, error) {
 	tokenSets, err := mc.mClient.RunAnalyzer(ctx, option, callOptions...)
 	return tokenSets, err
 }
