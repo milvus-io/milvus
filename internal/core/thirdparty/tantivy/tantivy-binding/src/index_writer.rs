@@ -8,13 +8,15 @@ use log::info;
 use tantivy::schema::{
     Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, FAST, INDEXED,
 };
-use tantivy::{doc, Document, Index, IndexWriter, SingleSegmentIndexWriter};
+use tantivy::{doc, Document, Index, IndexWriter, SingleSegmentIndexWriter, UserOperation};
 
 use crate::data_type::TantivyDataType;
 
-use crate::error::Result;
+use crate::error::{Result, TantivyBindingError};
 use crate::index_reader::IndexReaderWrapper;
 use crate::log::init_log;
+
+const BATCH_SIZE: usize = 4096;
 
 pub(crate) struct IndexWriterWrapper {
     pub(crate) field: Field,
@@ -56,7 +58,10 @@ impl IndexWriterWrapper {
         in_ram: bool,
     ) -> Result<IndexWriterWrapper> {
         init_log();
-        info!("create index writer, field_name: {}, data_type: {:?}", field_name, data_type);
+        info!(
+            "create index writer, field_name: {}, data_type: {:?}, num threads {}",
+            field_name, data_type, num_threads
+        );
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, &field_name, data_type);
         // We cannot build direct connection from rows in multi-segments to milvus row data. So we have this doc_id field.
@@ -83,7 +88,10 @@ impl IndexWriterWrapper {
         path: String,
     ) -> Result<IndexWriterWrapper> {
         init_log();
-        info!("create single segment index writer, field_name: {}, data_type: {:?}", field_name, data_type);
+        info!(
+            "create single segment index writer, field_name: {}, data_type: {:?}",
+            field_name, data_type
+        );
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, &field_name, data_type);
         let schema = schema_builder.build();
@@ -167,6 +175,50 @@ impl IndexWriterWrapper {
             self.field => data,
             self.id_field.unwrap() => offset,
         ))
+    }
+
+    // add in batch within BATCH_SIZE
+    pub fn add_json_key_stats(
+        &mut self,
+        keys: &[*const i8],
+        json_offsets: &[*const i64],
+        json_offsets_len: &[usize],
+    ) -> Result<()> {
+        let writer = self.index_writer.as_ref().left().unwrap();
+        let id_field = self.id_field.unwrap();
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+        keys.iter()
+            .zip(json_offsets.iter())
+            .zip(json_offsets_len.iter())
+            .try_for_each(|((key, json_offsets), json_offsets_len)| -> Result<()> {
+                let key = unsafe { CStr::from_ptr(*key) }
+                    .to_str()
+                    .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+                let json_offsets =
+                    unsafe { std::slice::from_raw_parts(*json_offsets, *json_offsets_len) };
+
+                for offset in json_offsets {
+                    batch.push(UserOperation::Add(doc!(
+                        id_field => *offset,
+                        self.field => key,
+                    )));
+
+                    if batch.len() >= BATCH_SIZE {
+                        writer.run(std::mem::replace(
+                            &mut batch,
+                            Vec::with_capacity(BATCH_SIZE),
+                        ))?;
+                    }
+                }
+
+                Ok(())
+            })?;
+
+        if !batch.is_empty() {
+            writer.run(batch)?;
+        }
+
+        Ok(())
     }
 
     pub fn add_multi_i8s(&mut self, datas: &[i8], offset: i64) -> Result<()> {
@@ -381,5 +433,65 @@ impl IndexWriterWrapper {
     pub(crate) fn commit(&mut self) -> Result<()> {
         self.index_writer.as_mut().left().unwrap().commit()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::CString;
+
+    use rand::Rng;
+    use tempfile::tempdir;
+
+    #[test]
+    pub fn test_add_json_key_stats() {
+        use crate::data_type::TantivyDataType;
+        use crate::index_writer::IndexWriterWrapper;
+
+        let temp_dir = tempdir().unwrap();
+        let mut index_writer = IndexWriterWrapper::new(
+            "test".to_string(),
+            TantivyDataType::Keyword,
+            temp_dir.path().to_str().unwrap().to_string(),
+            1,
+            15 * 1024 * 1024,
+            false,
+        )
+        .unwrap();
+
+        let keys = (0..100).map(|i| format!("key{:05}", i)).collect::<Vec<_>>();
+        let mut total_count = 0;
+        let mut rng = rand::thread_rng();
+        let json_offsets = (0..100)
+            .map(|_| {
+                let count = rng.gen_range(0, 1000);
+                total_count += count;
+                (0..count)
+                    .map(|_| rng.gen_range(0, i64::MAX))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let json_offsets_len = json_offsets
+            .iter()
+            .map(|offsets| offsets.len())
+            .collect::<Vec<_>>();
+        let json_offsets = json_offsets.iter().map(|x| x.as_ptr()).collect::<Vec<_>>();
+        let c_keys: Vec<CString> = keys.into_iter().map(|k| CString::new(k).unwrap()).collect();
+        let key_ptrs: Vec<*const libc::c_char> = c_keys.iter().map(|cs| cs.as_ptr()).collect();
+
+        index_writer
+            .add_json_key_stats(&key_ptrs, &json_offsets, &json_offsets_len)
+            .unwrap();
+
+        index_writer.commit().unwrap();
+        let count: u32 = index_writer
+            .index
+            .load_metas()
+            .unwrap()
+            .segments
+            .iter()
+            .map(|s| s.max_doc())
+            .sum();
+        assert_eq!(count, total_count);
     }
 }
