@@ -416,7 +416,7 @@ class TestMilvusClientAliasValid(TestMilvusClientV2Base):
         self.drop_alias(client, alias)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1891, 1892")
+    @pytest.mark.skip(reason="pymilvus issue 1891, 1892")
     def test_milvus_client_alias_default(self):
         """
         target: test alias (high level api) normal case

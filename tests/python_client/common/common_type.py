@@ -1,3 +1,5 @@
+import numpy as np
+
 """ Initialized parameters """
 port = 19530
 epsilon = 0.000001
@@ -213,6 +215,14 @@ get_wrong_format_dict = [
     {"host": 0, "port": 19520}
 ]
 
+get_all_kind_data_distribution = [
+    1, np.float64(1.0), np.double(1.0), 9707199254740993.0, 9707199254740992,
+    '1', '123', '321', '213', True, False, [1, 2], [1.0, 2], None, {}, {"a": 1},
+    {'a': 1.0}, {'a': 9707199254740993.0}, {'a': 9707199254740992}, {'a': '1'}, {'a': '123'},
+    {'a': '321'}, {'a': '213'}, {'a': True}, {'a': [1, 2, 3]}, {'a': [1.0, 2, '1']}, {'a': [1.0, 2]},
+    {'a': None}, {'a': {'b': 1}}, {'a': {'b': 1.0}}, {'a': [{'b': 1}, 2.0, np.double(3.0), '4', True, [1, 3.0], None]}
+]
+
 """ Specially defined list """
 L0_index_types = ["IVF_SQ8", "HNSW", "DISKANN"]
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
@@ -287,6 +297,7 @@ class CheckTasks:
     check_insert_result = "check_insert_result"
     check_collection_fields_properties = "check_collection_fields_properties"
     check_describe_index_property = "check_describe_index_property"
+    check_describe_database_property = "check_describe_database_property"
 
 
 class BulkLoadStates:
