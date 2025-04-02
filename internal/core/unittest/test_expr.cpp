@@ -16483,10 +16483,11 @@ TEST(JsonIndexTest, TestExistsExpr) {
         R"([1, 2, 3])",
         R"({"a": 1, "b": 2})"};
 
-    std::vector<std::pair<std::vector<std::string>, uint32_t>> path_to_matched_res =
-    { {{"a"}, 0b11111110000001},
-      {{"a", "0"}, 0b00000010000000},
-    };
+    std::vector<std::pair<std::vector<std::string>, uint32_t>>
+        path_to_matched_res = {
+            {{"a"}, 0b11111110000001},
+            {{"a", "0"}, 0b00000010000000},
+        };
 
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
@@ -16530,6 +16531,10 @@ TEST(JsonIndexTest, TestExistsExpr) {
     load_index_info.index = std::move(json_index);
     load_index_info.index_params = {{JSON_PATH, "/a"}};
     seg->LoadIndex(load_index_info);
+
+    auto json_field_data_info = FieldDataInfo(
+        json_fid.get(), json_strs_match.size(), {json_field});
+    seg->LoadFieldData(json_fid, json_field_data_info);
 
     for (auto& [path, matched_res] : path_to_matched_res) {
         BitsetType expect;

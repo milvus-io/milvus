@@ -197,7 +197,7 @@ class BitsetBase {
 
     // Set all bits to false.
     inline void
-    reset() {;
+    reset() {
         policy_type::op_reset(this->data(), this->offset(), this->size());
     }
 
