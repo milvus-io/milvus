@@ -1476,6 +1476,8 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
         index = std::make_unique<index::TextMatchIndex>(
             cfg.GetMmapPath(),
             unique_id.c_str(),
+            // todo: make it configurable
+            index::TANTIVY_INDEX_LATEST_VERSION,
             "milvus_tokenizer",
             field_meta.get_analyzer_params().c_str());
     }

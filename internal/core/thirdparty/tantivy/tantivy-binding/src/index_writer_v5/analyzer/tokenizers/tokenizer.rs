@@ -1,10 +1,12 @@
 use log::warn;
 use serde_json as json;
-use tantivy::tokenizer::*;
-use tantivy::tokenizer::{TextAnalyzer, TextAnalyzerBuilder};
+use tantivy_5::tokenizer::*;
+use tantivy_5::tokenizer::{TextAnalyzer, TextAnalyzerBuilder};
 
-use crate::analyzer::tokenizers::{JiebaTokenizer, LinderaTokenizer};
 use crate::error::{Result, TantivyBindingError};
+
+use super::jieba_tokenizer::JiebaTokenizer;
+use super::lindera_tokenizer::LinderaTokenizer;
 
 pub fn standard_builder() -> TextAnalyzerBuilder {
     TextAnalyzer::builder(SimpleTokenizer::default()).dynamic()

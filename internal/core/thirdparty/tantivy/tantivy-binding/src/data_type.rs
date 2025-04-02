@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 #[repr(u8)]
 #[derive(Debug)]
 pub enum TantivyDataType {
