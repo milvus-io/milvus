@@ -19,6 +19,7 @@
 #include <regex>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 #include <chrono>
@@ -16473,8 +16474,14 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     EXPECT_EQ(final.count(), 2 * json_strs.size() - 4);
 }
 
-TEST(JsonIndexTest, TestExistsExpr) {
-    std::vector<std::string> json_strs_match = {
+class JsonIndexExistsTest : public ::testing::TestWithParam<std::string> {};
+
+INSTANTIATE_TEST_SUITE_P(JsonIndexExistsTestParams,
+                         JsonIndexExistsTest,
+                         ::testing::Values("/a", ""));
+
+TEST_P(JsonIndexExistsTest, TestExistsExpr) {
+    std::vector<std::string> json_strs = {
         R"({"a": 1.0})",
         R"({"a": "abc"})",
         R"({"a": 3.0})",
@@ -16488,13 +16495,19 @@ TEST(JsonIndexTest, TestExistsExpr) {
         R"(1.0)",
         R"(true)",
         R"([1, 2, 3])",
-        R"({"a": 1, "b": 2})"};
+        R"({"a": 1, "b": 2})",
+        R"({})",
+        R"(null)",
+    };
 
-    std::vector<std::pair<std::vector<std::string>, uint32_t>>
-        path_to_matched_res = {
-            {{"a"}, 0b11111110000001},
-            {{"a", "0"}, 0b00000010000000},
+    // bool: exists or not
+    std::vector<std::tuple<std::vector<std::string>, bool, uint32_t>>
+        test_cases = {
+            {{"a"}, true, 0b1111111000000100},
+            {{"a", "b"}, true, 0b0000100000000000},
         };
+
+    auto json_index_path = GetParam();
 
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
@@ -16514,7 +16527,7 @@ TEST(JsonIndexTest, TestExistsExpr) {
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
         index::INVERTED_INDEX_TYPE,
         JsonCastType::DOUBLE,
-        "/a",
+        json_index_path,
         file_manager_ctx);
 
     using json_index_type = index::JsonInvertedIndex<double>;
@@ -16524,7 +16537,7 @@ TEST(JsonIndexTest, TestExistsExpr) {
     auto json_field =
         std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
     std::vector<milvus::Json> jsons;
-    for (auto& json_str : json_strs_match) {
+    for (auto& json_str : json_strs) {
         jsons.push_back(milvus::Json(simdjson::padded_string(json_str)));
     }
     json_field->add_json_data(jsons);
@@ -16536,29 +16549,36 @@ TEST(JsonIndexTest, TestExistsExpr) {
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
     load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, "/a"}};
+    load_index_info.index_params = {{JSON_PATH, json_index_path}};
     seg->LoadIndex(load_index_info);
 
     auto json_field_data_info =
-        FieldDataInfo(json_fid.get(), json_strs_match.size(), {json_field});
+        FieldDataInfo(json_fid.get(), json_strs.size(), {json_field});
     seg->LoadFieldData(json_fid, json_field_data_info);
 
-    for (auto& [path, matched_res] : path_to_matched_res) {
-        BitsetType expect;
-        expect.resize(json_strs_match.size());
-        expect.reset();
-
-        for (int i = json_strs_match.size() - 1; i >= 0; --i) {
-            expect.set(i, (matched_res & 1) != 0);
-            matched_res >>= 1;
+    for (auto& [nested_path, exists, expect] : test_cases) {
+        BitsetType expect_res;
+        expect_res.resize(json_strs.size());
+        for (int i = json_strs.size() - 1; expect > 0; i--) {
+            expect_res.set(i, (expect & 1) != 0);
+            expect >>= 1;
         }
 
-        auto exists_expr = std::make_shared<expr::ExistsExpr>(
-            expr::ColumnInfo(json_fid, DataType::JSON, path, true));
+        std::shared_ptr<expr::ITypeFilterExpr> exists_expr;
+        if (exists) {
+            exists_expr = std::make_shared<expr::ExistsExpr>(
+                expr::ColumnInfo(json_fid, DataType::JSON, nested_path, true));
+        } else {
+            auto child_expr = std::make_shared<expr::ExistsExpr>(
+                expr::ColumnInfo(json_fid, DataType::JSON, nested_path, true));
+            exists_expr = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, child_expr);
+        }
         auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
                                                            exists_expr);
-        auto result = ExecuteQueryExpr(
-            plan, seg.get(), json_strs_match.size(), MAX_TIMESTAMP);
-        EXPECT_TRUE(result == expect);
+        auto result =
+            ExecuteQueryExpr(plan, seg.get(), json_strs.size(), MAX_TIMESTAMP);
+
+        EXPECT_TRUE(result == expect_res);
     }
 }
