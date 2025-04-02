@@ -38,11 +38,10 @@ type (
 
 // CreateCSegmentRequest is a request to create a segment.
 type CreateCSegmentRequest struct {
-	Collection    *CCollection
-	SegmentID     int64
-	SegmentType   SegmentType
-	IsSorted      bool
-	EnableChunked bool
+	Collection  *CCollection
+	SegmentID   int64
+	SegmentType SegmentType
+	IsSorted    bool
 }
 
 func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
@@ -51,10 +50,6 @@ func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
 	case SegmentTypeGrowing:
 		segmentType = C.Growing
 	case SegmentTypeSealed:
-		if req.EnableChunked {
-			segmentType = C.ChunkedSealed
-			break
-		}
 		segmentType = C.Sealed
 	default:
 		panic(fmt.Sprintf("invalid segment type: %d", req.SegmentType))

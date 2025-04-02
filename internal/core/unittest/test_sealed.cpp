@@ -13,11 +13,13 @@
 #include <optional>
 #include <gtest/gtest.h>
 
+#include "common/Consts.h"
+#include "common/FieldMeta.h"
 #include "common/Types.h"
 #include "common/Tracer.h"
 #include "index/IndexFactory.h"
 #include "knowhere/version.h"
-#include "segcore/SegmentSealedImpl.h"
+
 #include "storage/MmapManager.h"
 #include "storage/MinioChunkManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -509,7 +511,7 @@ TEST(Sealed, LoadFieldData) {
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
-    ASSERT_EQ(segment->num_chunk(FieldId(0)), 1);
+    ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
     ASSERT_EQ(segment->num_chunk_index(double_id), 0);
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
@@ -544,15 +546,40 @@ TEST(Sealed, LoadFieldData) {
     ASSERT_EQ(chunk_span2.valid_data(), nullptr);
     ASSERT_EQ(chunk_span3.second.size(), 0);
     for (int i = 0; i < N; ++i) {
-        ASSERT_EQ(chunk_span1.data()[i], ref1[i]);
-        ASSERT_EQ(chunk_span2.data()[i], ref2[i]);
-        ASSERT_EQ(chunk_span3.first[i], ref3[i]);
-        ASSERT_EQ(chunk_span4.data()[i], ref4[i]);
-        ASSERT_EQ(chunk_span5.data()[i], ref5[i]);
-        ASSERT_EQ(chunk_span6.data()[i], ref6[i]);
-        ASSERT_EQ(chunk_span7.data()[i], ref7[i]);
-        ASSERT_EQ(chunk_span8.data()[i], ref8[i]);
-        ASSERT_EQ(chunk_span9.first[i], ref9[i]);
+        if (chunk_span1.valid_data() == nullptr ||
+            chunk_span1.valid_data()[i]) {
+            ASSERT_EQ(chunk_span1.data()[i], ref1[i]);
+        }
+        if (chunk_span2.valid_data() == nullptr ||
+            chunk_span2.valid_data()[i]) {
+            ASSERT_EQ(chunk_span2.data()[i], ref2[i]);
+        }
+        if (chunk_span3.second.size() == 0 || chunk_span3.second[i]) {
+            ASSERT_EQ(chunk_span3.first[i], ref3[i]);
+        }
+        if (chunk_span4.valid_data() == nullptr ||
+            chunk_span4.valid_data()[i]) {
+            ASSERT_EQ(chunk_span4.data()[i], ref4[i]);
+        }
+        if (chunk_span5.valid_data() == nullptr ||
+            chunk_span5.valid_data()[i]) {
+            ASSERT_EQ(chunk_span5.data()[i], ref5[i]);
+        }
+        if (chunk_span6.valid_data() == nullptr ||
+            chunk_span6.valid_data()[i]) {
+            ASSERT_EQ(chunk_span6.data()[i], ref6[i]);
+        }
+        if (chunk_span7.valid_data() == nullptr ||
+            chunk_span7.valid_data()[i]) {
+            ASSERT_EQ(chunk_span7.data()[i], ref7[i]);
+        }
+        if (chunk_span8.valid_data() == nullptr ||
+            chunk_span8.valid_data()[i]) {
+            ASSERT_EQ(chunk_span8.data()[i], ref8[i]);
+        }
+        if (chunk_span9.second.size() == 0 || chunk_span9.second[i]) {
+            ASSERT_EQ(chunk_span9.first[i], ref9[i]);
+        }
         ASSERT_EQ(chunk_span4.valid_data()[i], valid4[i]);
         ASSERT_EQ(chunk_span5.valid_data()[i], valid5[i]);
         ASSERT_EQ(chunk_span6.valid_data()[i], valid6[i]);
@@ -672,7 +699,7 @@ TEST(Sealed, ClearData) {
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
-    ASSERT_EQ(segment->num_chunk(FieldId(0)), 1);
+    ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
     ASSERT_EQ(segment->num_chunk_index(double_id), 0);
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
@@ -693,7 +720,7 @@ TEST(Sealed, ClearData) {
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 
-    auto sealed_segment = (SegmentSealedImpl*)segment.get();
+    auto sealed_segment = (ChunkedSegmentSealedImpl*)segment.get();
     sealed_segment->ClearData();
     ASSERT_EQ(sealed_segment->get_row_count(), 0);
     ASSERT_EQ(sealed_segment->get_real_count(), 0);
@@ -776,7 +803,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
-    ASSERT_EQ(segment->num_chunk(FieldId(0)), 1);
+    ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
     ASSERT_EQ(segment->num_chunk_index(double_id), 0);
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
@@ -816,9 +843,10 @@ TEST(Sealed, LoadPkScalarIndex) {
 
         auto info = FieldDataInfo(field_data.field_id(), N);
         auto field_meta = fields.at(FieldId(field_id));
-        info.channel->push(
+        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
             CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.channel->close();
+        info.arrow_reader_channel->push(arrow_data_wrapper);
+        info.arrow_reader_channel->close();
 
         segment->LoadFieldData(FieldId(field_id), info);
     }
@@ -920,8 +948,12 @@ TEST(Sealed, LoadScalarIndex) {
     auto field_data =
         std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(dataset.row_ids_.data(), N);
+    auto arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(field_data);
     auto field_data_info = FieldDataInfo{
-        RowFieldID.get(), N, std::vector<FieldDataPtr>{field_data}};
+        RowFieldID.get(),
+        N,
+        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
     segment->LoadFieldData(RowFieldID, field_data_info);
 
     LoadFieldDataInfo ts_info;
@@ -933,9 +965,13 @@ TEST(Sealed, LoadScalarIndex) {
     field_data =
         std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(dataset.timestamps_.data(), N);
-    field_data_info = FieldDataInfo{
-        TimestampFieldID.get(), N, std::vector<FieldDataPtr>{field_data}};
-    segment->LoadFieldData(TimestampFieldID, field_data_info);
+    auto ts_arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(field_data);
+    auto ts_field_data_info = FieldDataInfo{
+        TimestampFieldID.get(),
+        N,
+        std::vector<std::shared_ptr<ArrowDataWrapper>>{ts_arrow_data_wrapper}};
+    segment->LoadFieldData(TimestampFieldID, ts_field_data_info);
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
@@ -1203,8 +1239,13 @@ TEST(Sealed, BF) {
     auto field_data =
         storage::CreateFieldData(DataType::VECTOR_FLOAT, false, dim);
     field_data->FillFieldData(vec_data.data(), N);
+    auto fake_vec_arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(field_data);
     auto field_data_info =
-        FieldDataInfo{fake_id.get(), N, std::vector<FieldDataPtr>{field_data}};
+        FieldDataInfo{fake_id.get(),
+                      N,
+                      std::vector<std::shared_ptr<ArrowDataWrapper>>{
+                          fake_vec_arrow_data_wrapper}};
     segment->LoadFieldData(fake_id, field_data_info);
 
     auto topK = 1;
@@ -1258,8 +1299,12 @@ TEST(Sealed, BF_Overflow) {
     auto field_data =
         storage::CreateFieldData(DataType::VECTOR_FLOAT, false, dim);
     field_data->FillFieldData(vec_data.data(), N);
-    auto field_data_info =
-        FieldDataInfo{fake_id.get(), N, std::vector<FieldDataPtr>{field_data}};
+    auto arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(field_data);
+    auto field_data_info = FieldDataInfo{
+        fake_id.get(),
+        N,
+        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
     segment->LoadFieldData(fake_id, field_data_info);
 
     auto topK = 1;
@@ -1414,7 +1459,8 @@ TEST(Sealed, GetVector) {
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment_sealed->LoadIndex(vec_info);
 
-    auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
+    auto segment =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
 
     auto has = segment->HasRawData(vec_info.field_id);
     EXPECT_TRUE(has);
@@ -1506,7 +1552,8 @@ TEST(Sealed, GetVectorFromChunkCache) {
         LoadFieldDataInfo{std::map<int64_t, FieldBinlogInfo>{
             {fakevec_id.get(), field_binlog_info}}});
 
-    auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
+    auto segment =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
     auto has = segment->HasRawData(vec_info.field_id);
     EXPECT_FALSE(has);
 
@@ -1612,7 +1659,8 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
         LoadFieldDataInfo{std::map<int64_t, FieldBinlogInfo>{
             {fakevec_id.get(), field_binlog_info}}});
 
-    auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
+    auto segment =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
 
     auto ids_ds = GenRandomIds(N);
     auto result =
@@ -1716,7 +1764,8 @@ TEST(Sealed, WarmupChunkCache) {
         LoadFieldDataInfo{std::map<int64_t, FieldBinlogInfo>{
             {fakevec_id.get(), field_binlog_info}}});
 
-    auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
+    auto segment =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
     auto has = segment->HasRawData(vec_info.field_id);
     EXPECT_FALSE(has);
 
@@ -1797,7 +1846,7 @@ TEST(Sealed, LoadArrayFieldData) {
     segment->Search(plan.get(), ph_group.get(), 1L << 63);
 
     auto ids_ds = GenRandomIds(N);
-    auto s = dynamic_cast<SegmentSealedImpl*>(segment.get());
+    auto s = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     auto int64_result = s->bulk_subscript(array_id, ids_ds->GetIds(), N);
     auto result_count = int64_result->scalars().array_data().data().size();
     ASSERT_EQ(result_count, N);
@@ -2135,8 +2184,12 @@ TEST(Sealed, SkipIndexSkipStringRange) {
     auto string_field_data =
         storage::CreateFieldData(DataType::VARCHAR, false, 1, N);
     string_field_data->FillFieldData(strings.data(), N);
+    auto arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(string_field_data);
     auto string_field_data_info = FieldDataInfo{
-        string_fid.get(), N, std::vector<FieldDataPtr>{string_field_data}};
+        string_fid.get(),
+        N,
+        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
     segment->LoadFieldData(string_fid, string_field_data_info);
     auto& skip_index = segment->GetSkipIndex();
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
@@ -2219,7 +2272,8 @@ TEST(Sealed, QueryAllFields) {
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
     auto segment_sealed = CreateSealedSegment(schema, metaPtr);
-    auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
+    auto segment =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
 
     int64_t dataset_size = 1000;
     int64_t dim = 128;
@@ -2374,7 +2428,8 @@ TEST(Sealed, QueryAllNullableFields) {
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
     auto segment_sealed = CreateSealedSegment(schema, metaPtr);
-    auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
+    auto segment =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
 
     int64_t dataset_size = 1000;
     int64_t dim = 128;
@@ -2494,7 +2549,8 @@ TEST(Sealed, SearchSortedPk) {
     schema->set_primary_field_id(varchar_pk_field);
     auto segment_sealed = CreateSealedSegment(
         schema, nullptr, 999, SegcoreConfig::default_config(), false, true);
-    auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
+    auto segment =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
 
     int64_t dataset_size = 1000;
     auto dataset = DataGen(schema, dataset_size, 42, 0, 10);

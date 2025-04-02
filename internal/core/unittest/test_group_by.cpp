@@ -10,9 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include "common/FieldMeta.h"
 #include "common/Schema.h"
 #include "query/Plan.h"
-#include "segcore/SegmentSealedImpl.h"
+
 #include "segcore/reduce_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
@@ -34,19 +35,25 @@ prepareSegmentSystemFieldData(const std::unique_ptr<SegmentSealed>& segment,
     auto field_data =
         std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(data_set.row_ids_.data(), row_count);
-    auto field_data_info =
-        FieldDataInfo{RowFieldID.get(),
-                      row_count,
-                      std::vector<milvus::FieldDataPtr>{field_data}};
+    auto arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(field_data);
+    auto field_data_info = FieldDataInfo{
+        RowFieldID.get(),
+        row_count,
+        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
     segment->LoadFieldData(RowFieldID, field_data_info);
 
     field_data =
         std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(data_set.timestamps_.data(), row_count);
+
+    auto timestamp_arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(field_data);
     field_data_info =
         FieldDataInfo{TimestampFieldID.get(),
                       row_count,
-                      std::vector<milvus::FieldDataPtr>{field_data}};
+                      std::vector<std::shared_ptr<ArrowDataWrapper>>{
+                          timestamp_arrow_data_wrapper}};
     segment->LoadFieldData(TimestampFieldID, field_data_info);
 }
 
@@ -102,9 +109,11 @@ TEST(GroupBY, SealedIndex) {
 
         auto info = FieldDataInfo(field_data.field_id(), N);
         auto field_meta = fields.at(FieldId(field_id));
-        info.channel->push(
+        // Assuming 'channel' is not a member of FieldDataInfo, we need to handle it differently
+        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
             CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.channel->close();
+        info.arrow_reader_channel->push(arrow_data_wrapper);
+        info.arrow_reader_channel->close();
 
         segment->LoadFieldData(FieldId(field_id), info);
     }
@@ -453,10 +462,11 @@ TEST(GroupBY, SealedData) {
         int64_t field_id = field_data.field_id();
 
         auto info = FieldDataInfo(field_data.field_id(), N);
-        auto field_meta = fields.at(FieldId(field_id));
-        info.channel->push(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.channel->close();
+        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
+            CreateFieldDataFromDataArray(
+                N, &field_data, fields.at(FieldId(field_id))));
+        info.arrow_reader_channel->push(arrow_data_wrapper);
+        info.arrow_reader_channel->close();
 
         segment->LoadFieldData(FieldId(field_id), info);
     }
@@ -553,9 +563,10 @@ TEST(GroupBY, Reduce) {
         int64_t field_id = field_data.field_id();
         auto info = FieldDataInfo(field_data.field_id(), N);
         auto field_meta = fields.at(FieldId(field_id));
-        info.channel->push(
+        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
             CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.channel->close();
+        info.arrow_reader_channel->push(arrow_data_wrapper);
+        info.arrow_reader_channel->close();
         segment1->LoadFieldData(FieldId(field_id), info);
     }
     prepareSegmentSystemFieldData(segment1, N, raw_data1);
@@ -565,9 +576,10 @@ TEST(GroupBY, Reduce) {
         int64_t field_id = field_data.field_id();
         auto info = FieldDataInfo(field_data.field_id(), N);
         auto field_meta = fields.at(FieldId(field_id));
-        info.channel->push(
+        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
             CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.channel->close();
+        info.arrow_reader_channel->push(arrow_data_wrapper);
+        info.arrow_reader_channel->close();
         segment2->LoadFieldData(FieldId(field_id), info);
     }
     prepareSegmentSystemFieldData(segment2, N, raw_data2);
