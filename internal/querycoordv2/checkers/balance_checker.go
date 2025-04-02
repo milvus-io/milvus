@@ -95,6 +95,13 @@ func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context) []int
 
 	if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
 		hasUnbalancedCollection := false
+		defer func() {
+			if !hasUnbalancedCollection {
+				b.stoppingBalanceCollectionsCurrentRound.Clear()
+				log.RatedDebug(10, "BalanceChecker has triggered stopping balance for all "+
+					"collections in one round, clear collectionIDs for this round")
+			}
+		}()
 		for _, cid := range ids {
 			// if target and meta isn't ready, skip balance this collection
 			if !b.readyToCheck(ctx, cid) {
@@ -117,11 +124,6 @@ func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context) []int
 				b.stoppingBalanceCollectionsCurrentRound.Insert(cid)
 				return stoppingReplicas
 			}
-		}
-		if !hasUnbalancedCollection {
-			b.stoppingBalanceCollectionsCurrentRound.Clear()
-			log.RatedDebug(10, "BalanceChecker has triggered stopping balance for all "+
-				"collections in one round, clear collectionIDs for this round")
 		}
 	}
 
