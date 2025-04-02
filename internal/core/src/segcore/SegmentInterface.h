@@ -424,6 +424,10 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual bool
     is_mmap_field(FieldId field_id) const = 0;
 
+    virtual std::unique_ptr<DataArray>
+    bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   int64_t count) const;
+
  protected:
     // todo: use an Unified struct for all type in growing/seal segment to store data and valid_data.
     // internal API: return chunk_data in span
@@ -472,6 +476,8 @@ class SegmentInternalInterface : public SegmentInterface {
         PanicInfo(ErrorCode::NotImplemented, "not implemented");
     };
 
+    virtual bool
+    is_field_exist(FieldId field_id) const = 0;
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
     virtual void
     bulk_subscript(SystemFieldType system_type,
