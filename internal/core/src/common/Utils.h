@@ -228,6 +228,22 @@ GetCommonPrefix(const std::string& str1, const std::string& str2) {
     return str1.substr(0, i);
 }
 
+// Escape braces in the input string,
+// used for fmt::format json string
+inline std::string
+EscapeBraces(const std::string& input) {
+    std::string result;
+    for (char ch : input) {
+        if (ch == '{')
+            result += "{{";
+        else if (ch == '}')
+            result += "}}";
+        else
+            result += ch;
+    }
+    return result;
+}
+
 inline knowhere::sparse::SparseRow<float>
 CopyAndWrapSparseRow(const void* data,
                      size_t size,

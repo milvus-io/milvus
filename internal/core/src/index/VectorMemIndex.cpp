@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "common/Common.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/type_c.h"
@@ -439,8 +440,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
                 PanicInfo(
                     ErrorCode::UnexpectedError,
                     // escape json brace in case of using message as format
-                    "failed to search: config={{{}}} {}: {}",
-                    search_conf.dump(),
+                    "failed to search: config={} {}: {}",
+                    milvus::EscapeBraces(search_conf.dump()),
                     KnowhereStatusString(res.error()),
                     res.what());
             }

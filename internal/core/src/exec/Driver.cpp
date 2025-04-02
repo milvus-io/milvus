@@ -180,7 +180,7 @@ Driver::Next(std::shared_ptr<BlockingState>& blocking_state) {
             "Operator::{} failed for [Operator:{}, plan node id: "             \
             "{}] : {}",                                                        \
             method_name,                                                       \
-            operator->get_operator_type(),                                     \
+            operator->ToString(),                                              \
             operator->get_plannode_id(),                                       \
             e.what());                                                         \
         LOG_ERROR(err_msg);                                                    \
