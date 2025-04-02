@@ -266,6 +266,17 @@ func (m *CollectionManager) GetCollectionSchema(ctx context.Context, collectionI
 	return collection.Schema
 }
 
+func (m *CollectionManager) PutCollectionSchema(ctx context.Context, collectionID typeutil.UniqueID, schema *schemapb.CollectionSchema) {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		return
+	}
+	collection.Schema = schema
+}
+
 func (m *CollectionManager) GetPartition(ctx context.Context, partitionID typeutil.UniqueID) *Partition {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
