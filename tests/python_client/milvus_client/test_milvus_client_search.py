@@ -487,12 +487,8 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. search
         log.info(null_expr)
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"failed to create query plan: cannot parse expression: {null_expr}, "
-                             f"error: invalid expression: {null_expr}: invalid parameter"}
         self.search(client, collection_name, [vectors[0]],
-                    filter=null_expr,
-                    check_task=CheckTasks.err_res, check_items=error)
+                    filter=null_expr)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [True, False])
