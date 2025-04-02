@@ -96,6 +96,13 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 			log.Warn("collection released during check index", zap.Int64("collection", collectionID))
 			continue
 		}
+		if schema == nil && paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
+			collectionSchema, err1 := c.broker.DescribeCollection(ctx, collectionID)
+			if err1 == nil {
+				schema = collectionSchema.GetSchema()
+				c.meta.PutCollectionSchema(ctx, collectionID, collectionSchema.GetSchema())
+			}
+		}
 		replicas := c.meta.ReplicaManager.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			tasks = append(tasks, c.checkReplica(ctx, collection, replica, indexInfos, schema)...)
