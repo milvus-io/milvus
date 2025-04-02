@@ -6,6 +6,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -37,7 +38,7 @@ func ConvertToArrowField(field *schemapb.FieldSchema, dataType arrow.DataType) a
 	return arrow.Field{
 		Name:     field.GetName(),
 		Type:     dataType,
-		Metadata: arrow.NewMetadata([]string{"FieldID"}, []string{strconv.Itoa(int(field.GetFieldID()))}),
+		Metadata: arrow.NewMetadata([]string{packed.ArrowFieldIdMetadataKey}, []string{strconv.Itoa(int(field.GetFieldID()))}),
 		Nullable: field.GetNullable(),
 	}
 }
