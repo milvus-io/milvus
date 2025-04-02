@@ -201,7 +201,9 @@ class Json {
 
     bool
     exist(std::string_view pointer) const {
-        return doc().at_pointer(pointer).error() == simdjson::SUCCESS;
+        auto doc = this->doc();
+        auto res = doc.at_pointer(pointer);
+        return res.error() == simdjson::SUCCESS && !res.is_null();
     }
 
     // construct JSON pointer with provided path
