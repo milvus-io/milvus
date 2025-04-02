@@ -321,6 +321,7 @@ IsLikeExpr(std::shared_ptr<Expr> input) {
         switch (optype) {
             case proto::plan::PrefixMatch:
             case proto::plan::PostfixMatch:
+            case proto::plan::InnerMatch:
             case proto::plan::Match:
                 return true;
             default:
