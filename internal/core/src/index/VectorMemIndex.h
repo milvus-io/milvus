@@ -39,6 +39,12 @@ class VectorMemIndex : public VectorIndex {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
+    // knowhere data view index special constucter for intermin index, no need to hold file_manager_ to upload or download files
+    VectorMemIndex(const IndexType& index_type,
+                   const MetricType& metric_type,
+                   const IndexVersion& version,
+                   const knowhere::ViewDataOp view_data);
+
     BinarySet
     Serialize(const Config& config) override;
 
