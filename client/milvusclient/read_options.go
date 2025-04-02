@@ -616,35 +616,35 @@ type RunAnalyzerOption interface {
 }
 
 type runAnalyzerOption struct {
-	text            []string
-	analyzer_params string
-	with_detail     bool
-	with_hash       bool
+	text           []string
+	analyzerParams string
+	withDetail     bool
+	withHash       bool
 }
 
 func (opt *runAnalyzerOption) Request() (*milvuspb.RunAnalyzerRequest, error) {
 	return &milvuspb.RunAnalyzerRequest{
 		Placeholder:    lo.Map(opt.text, func(str string, _ int) []byte { return []byte(str) }),
-		AnalyzerParams: opt.analyzer_params,
+		AnalyzerParams: opt.analyzerParams,
 	}, nil
 }
 
 func (opt *runAnalyzerOption) WithAnalyzerParams(params string) *runAnalyzerOption {
-	opt.analyzer_params = params
+	opt.analyzerParams = params
 	return opt
 }
 
 func (opt *runAnalyzerOption) WithDetail() *runAnalyzerOption {
-	opt.with_detail = true
+	opt.withDetail = true
 	return opt
 }
 
 func (opt *runAnalyzerOption) WithHash() *runAnalyzerOption {
-	opt.with_hash = true
+	opt.withHash = true
 	return opt
 }
 
-func NewRunAnaluzerOption(text []string) *runAnalyzerOption {
+func NewRunAnalyzerOption(text []string) *runAnalyzerOption {
 	return &runAnalyzerOption{
 		text: text,
 	}

@@ -1214,22 +1214,22 @@ func TestRunAnalyzer(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// run analyzer with default analyzer
-	tokens, err := mc.RunAnalyzer(ctx, client.NewRunAnaluzerOption([]string{"test doc"}))
+	tokens, err := mc.RunAnalyzer(ctx, client.NewRunAnalyzerOption([]string{"test doc"}))
 	require.NoError(t, err)
 	for i, text := range []string{"test", "doc"} {
-		require.Equal(t, text, tokens[0][i].Text)
+		require.Equal(t, text, tokens[0].Tokens[i].Text)
 	}
 
 	// run analyzer with invalid params
-	_, err = mc.RunAnalyzer(ctx, client.NewRunAnaluzerOption([]string{"text doc"}).WithAnalyzerParams("invalid params}"))
+	_, err = mc.RunAnalyzer(ctx, client.NewRunAnalyzerOption([]string{"text doc"}).WithAnalyzerParams("invalid params}"))
 	common.CheckErr(t, err, false, "JsonError")
 
 	// run analyzer with custom analyzer
-	tokens, err = mc.RunAnalyzer(ctx, client.NewRunAnaluzerOption([]string{"test doc"}).
+	tokens, err = mc.RunAnalyzer(ctx, client.NewRunAnalyzerOption([]string{"test doc"}).
 		WithAnalyzerParams(`{"type": "standard", "stop_words": ["test"]}`))
 
 	require.NoError(t, err)
 	for i, text := range []string{"doc"} {
-		require.Equal(t, text, tokens[0][i].Text)
+		require.Equal(t, text, tokens[0].Tokens[i].Text)
 	}
 }
