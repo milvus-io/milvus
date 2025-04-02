@@ -1236,8 +1236,9 @@ func TestCreateCollectionTask(t *testing.T) {
 		assert.Error(t, err)
 
 		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		lastFieldID := schema.Fields[len(schema.Fields)-1].FieldID
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      lastFieldID + 1,
 			Name:         "second_vector",
 			IsPrimaryKey: false,
 			Description:  "",
