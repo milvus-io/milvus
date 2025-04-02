@@ -109,6 +109,12 @@ struct UnaryElementFunc {
                 } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
                     res[i] = milvus::query::Match(
                         src[offset], val, proto::plan::OpType::PrefixMatch);
+                } else if constexpr (op == proto::plan::OpType::PostfixMatch) {
+                    res[i] = milvus::query::Match(
+                        src[offset], val, proto::plan::OpType::PostfixMatch);
+                } else if constexpr (op == proto::plan::OpType::InnerMatch) {
+                    res[i] = milvus::query::Match(
+                        src[offset], val, proto::plan::OpType::InnerMatch);
                 } else {
                     PanicInfo(
                         OpTypeInvalid,
@@ -119,12 +125,7 @@ struct UnaryElementFunc {
             return;
         }
 
-        if constexpr (op == proto::plan::OpType::PrefixMatch) {
-            for (int i = 0; i < size; ++i) {
-                res[i] = milvus::query::Match(
-                    src[i], val, proto::plan::OpType::PrefixMatch);
-            }
-        } else if constexpr (op == proto::plan::OpType::Equal) {
+        if constexpr (op == proto::plan::OpType::Equal) {
             res.inplace_compare_val<T, milvus::bitset::CompareOpType::EQ>(
                 src, size, val);
         } else if constexpr (op == proto::plan::OpType::NotEqual) {
@@ -225,7 +226,9 @@ struct UnaryElementFuncForArray {
                 UnaryArrayCompare(array_data >= val);
             } else if constexpr (op == proto::plan::OpType::LessEqual) {
                 UnaryArrayCompare(array_data <= val);
-            } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
+            } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
+                                 op == proto::plan::OpType::PostfixMatch ||
+                                 op == proto::plan::OpType::InnerMatch) {
                 UnaryArrayCompare(milvus::query::Match(array_data, val, op));
             } else if constexpr (op == proto::plan::OpType::Match) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
@@ -316,7 +319,9 @@ struct UnaryIndexFunc {
                          proto::plan::OpType::PrefixMatch);
             dataset->Set(milvus::index::PREFIX_VALUE, val);
             return index->Query(std::move(dataset));
-        } else if constexpr (op == proto::plan::OpType::Match) {
+        } else if constexpr (op == proto::plan::OpType::Match ||
+                             op == proto::plan::OpType::PostfixMatch ||
+                             op == proto::plan::OpType::InnerMatch) {
             UnaryIndexFuncForMatch<T> func;
             return func(index, val);
         } else {
