@@ -752,6 +752,7 @@ func (suite *BalanceCheckerTestSuite) TestBalanceTriggerOrder() {
 	replicas = suite.checker.getReplicaForNormalBalance(ctx)
 	suite.Contains(replicas, replicaID1, "Should balance collection with lowest ID first")
 
+	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
 	// Stopping balance should also pick the collection with lowest ID first
 	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
 	suite.Contains(replicas, replicaID1, "Stopping balance should prioritize collection with lowest ID")
