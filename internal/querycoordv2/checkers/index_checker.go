@@ -99,7 +99,7 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 		}
 		if schema == nil && paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
 			collectionSchema, err1 := c.broker.DescribeCollection(ctx, collectionID)
-			if err1 != nil {
+			if err1 == nil {
 				schema = collectionSchema.GetSchema()
 				c.meta.PutCollectionSchema(ctx, collectionID, collectionSchema.GetSchema())
 			}
