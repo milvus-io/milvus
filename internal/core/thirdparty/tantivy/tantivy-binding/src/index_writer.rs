@@ -102,265 +102,118 @@ impl IndexWriterWrapper {
         IndexReaderWrapper::from_index(self.index.clone())
     }
 
-    fn index_writer_add_document(&self, document: TantivyDocument) -> Result<()> {
-        match self.index_writer {
-            Either::Left(ref writer) => {
-                let _ = writer.add_document(document)?;
+    fn index_writer_add_document(&mut self, document: TantivyDocument) -> Result<()> {
+        match &mut self.index_writer {
+            Either::Left(writer) => {
+                writer.add_document(document)?;
             }
-            Either::Right(_) => {
-                panic!("unexpected writer");
-            }
-        }
-        Ok(())
-    }
-
-    fn single_segment_index_writer_add_document(
-        &mut self,
-        document: TantivyDocument,
-    ) -> Result<()> {
-        match self.index_writer {
-            Either::Left(_) => {
-                panic!("unexpected writer");
-            }
-            Either::Right(ref mut single_segmnet_writer) => {
-                let _ = single_segmnet_writer.add_document(document)?;
+            Either::Right(single_segment_writer) => {
+                single_segment_writer.add_document(document)?;
             }
         }
         Ok(())
     }
 
-    pub fn add_i8(&mut self, data: i8, offset: i64) -> Result<()> {
-        self.add_i64(data.into(), offset)
+    // Add document ID to the document (if needed)
+    fn add_doc_id(&self, document: &mut TantivyDocument, offset: Option<i64>) {
+        if let Some(offset) = offset {
+            if let Some(id_field) = self.id_field {
+                document.add_i64(id_field, offset);
+            }
+        }
     }
 
-    pub fn add_i16(&mut self, data: i16, offset: i64) -> Result<()> {
-        self.add_i64(data.into(), offset)
+    pub fn add_integer<T>(&mut self, data: T, offset: Option<i64>) -> Result<()>
+    where
+        T: Into<i64>,
+    {
+        let mut doc = TantivyDocument::default();
+        doc.add_i64(self.field, data.into());
+        self.add_doc_id(&mut doc, offset);
+        self.index_writer_add_document(doc)
     }
 
-    pub fn add_i32(&mut self, data: i32, offset: i64) -> Result<()> {
-        self.add_i64(data.into(), offset)
+    pub fn add_float<T>(&mut self, data: T, offset: Option<i64>) -> Result<()>
+    where
+        T: Into<f64>,
+    {
+        let mut doc = TantivyDocument::default();
+        doc.add_f64(self.field, data.into());
+        self.add_doc_id(&mut doc, offset);
+        self.index_writer_add_document(doc)
     }
 
-    pub fn add_i64(&mut self, data: i64, offset: i64) -> Result<()> {
-        self.index_writer_add_document(doc!(
-            self.field => data,
-            self.id_field.unwrap() => offset,
-        ))
+    pub fn add_bool(&mut self, data: bool, offset: Option<i64>) -> Result<()> {
+        let mut doc = TantivyDocument::default();
+        doc.add_bool(self.field, data);
+        self.add_doc_id(&mut doc, offset);
+        self.index_writer_add_document(doc)
     }
 
-    pub fn add_f32(&mut self, data: f32, offset: i64) -> Result<()> {
-        self.add_f64(data.into(), offset)
+    pub fn add_string(&mut self, data: &str, offset: Option<i64>) -> Result<()> {
+        let mut doc = TantivyDocument::default();
+        doc.add_text(self.field, data);
+        self.add_doc_id(&mut doc, offset);
+        self.index_writer_add_document(doc)
     }
 
-    pub fn add_f64(&mut self, data: f64, offset: i64) -> Result<()> {
-        self.index_writer_add_document(doc!(
-            self.field => data,
-            self.id_field.unwrap() => offset,
-        ))
-    }
-
-    pub fn add_bool(&mut self, data: bool, offset: i64) -> Result<()> {
-        self.index_writer_add_document(doc!(
-            self.field => data,
-            self.id_field.unwrap() => offset,
-        ))
-    }
-
-    pub fn add_string(&mut self, data: &str, offset: i64) -> Result<()> {
-        self.index_writer_add_document(doc!(
-            self.field => data,
-            self.id_field.unwrap() => offset,
-        ))
-    }
-
-    pub fn add_array_i8s(&mut self, datas: &[i8], offset: i64) -> Result<()> {
+    pub fn add_array_integer<T>(&mut self, datas: &[T], offset: Option<i64>) -> Result<()>
+    where
+        T: Into<i64> + Copy,
+    {
         let mut document = TantivyDocument::default();
         for data in datas {
-            document.add_field_value(self.field, &(*data as i64));
+            let value: i64 = (*data).into();
+            document.add_i64(self.field, value);
         }
-        document.add_i64(self.id_field.unwrap(), offset);
+        self.add_doc_id(&mut document, offset);
         self.index_writer_add_document(document)
     }
 
-    pub fn add_array_i16s(&mut self, datas: &[i16], offset: i64) -> Result<()> {
+    pub fn add_array_float<T>(&mut self, datas: &[T], offset: Option<i64>) -> Result<()>
+    where
+        T: Into<f64> + Copy,
+    {
         let mut document = TantivyDocument::default();
         for data in datas {
-            document.add_field_value(self.field, &(*data as i64));
+            let value: f64 = (*data).into();
+            document.add_f64(self.field, value);
         }
-        document.add_i64(self.id_field.unwrap(), offset);
+        self.add_doc_id(&mut document, offset);
         self.index_writer_add_document(document)
     }
 
-    pub fn add_array_i32s(&mut self, datas: &[i32], offset: i64) -> Result<()> {
+    pub fn add_array_bool(&mut self, datas: &[bool], offset: Option<i64>) -> Result<()> {
         let mut document = TantivyDocument::default();
         for data in datas {
-            document.add_field_value(self.field, &(*data as i64));
+            document.add_bool(self.field, *data);
         }
-        document.add_i64(self.id_field.unwrap(), offset);
+        self.add_doc_id(&mut document, offset);
         self.index_writer_add_document(document)
     }
 
-    pub fn add_array_i64s(&mut self, datas: &[i64], offset: i64) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for data in datas {
-            document.add_field_value(self.field, data);
-        }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
-    }
-
-    pub fn add_array_f32s(&mut self, datas: &[f32], offset: i64) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for data in datas {
-            document.add_field_value(self.field, &(*data as f64));
-        }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
-    }
-
-    pub fn add_array_f64s(&mut self, datas: &[f64], offset: i64) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for data in datas {
-            document.add_field_value(self.field, data);
-        }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
-    }
-
-    pub fn add_array_bools(&mut self, datas: &[bool], offset: i64) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for data in datas {
-            document.add_field_value(self.field, data);
-        }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
-    }
-
-    pub fn add_array_keywords(&mut self, datas: &[*const c_char], offset: i64) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for element in datas {
-            let data = unsafe { CStr::from_ptr(*element) };
-            document.add_field_value(self.field, data.to_str()?);
-        }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
-    }
-
-    pub fn add_i8_by_single_segment_writer(&mut self, data: i8) -> Result<()> {
-        self.add_i64_by_single_segment_writer(data.into())
-    }
-
-    pub fn add_i16_by_single_segment_writer(&mut self, data: i16) -> Result<()> {
-        self.add_i64_by_single_segment_writer(data.into())
-    }
-
-    pub fn add_i32_by_single_segment_writer(&mut self, data: i32) -> Result<()> {
-        self.add_i64_by_single_segment_writer(data.into())
-    }
-
-    pub fn add_i64_by_single_segment_writer(&mut self, data: i64) -> Result<()> {
-        self.single_segment_index_writer_add_document(doc!(
-            self.field => data
-        ))
-    }
-
-    pub fn add_f32_by_single_segment_writer(&mut self, data: f32) -> Result<()> {
-        self.add_f64_by_single_segment_writer(data.into())
-    }
-
-    pub fn add_f64_by_single_segment_writer(&mut self, data: f64) -> Result<()> {
-        self.single_segment_index_writer_add_document(doc!(
-            self.field => data
-        ))
-    }
-
-    pub fn add_bool_by_single_segment_writer(&mut self, data: bool) -> Result<()> {
-        self.single_segment_index_writer_add_document(doc!(
-            self.field => data
-        ))
-    }
-
-    pub fn add_string_by_single_segment_writer(&mut self, data: &str) -> Result<()> {
-        self.single_segment_index_writer_add_document(doc!(
-            self.field => data
-        ))
-    }
-
-    pub fn add_array_i8s_by_single_segment_writer(&mut self, datas: &[i8]) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for data in datas {
-            document.add_field_value(self.field, &(*data as i64));
-        }
-        self.single_segment_index_writer_add_document(document)
-    }
-
-    pub fn add_array_i16s_by_single_segment_writer(&mut self, datas: &[i16]) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for data in datas {
-            document.add_field_value(self.field, &(*data as i64));
-        }
-        self.single_segment_index_writer_add_document(document)
-    }
-
-    pub fn add_array_i32s_by_single_segment_writer(&mut self, datas: &[i32]) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for data in datas {
-            document.add_field_value(self.field, &(*data as i64));
-        }
-        self.single_segment_index_writer_add_document(document)
-    }
-
-    pub fn add_array_i64s_by_single_segment_writer(&mut self, datas: &[i64]) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for data in datas {
-            document.add_field_value(self.field, data);
-        }
-        self.single_segment_index_writer_add_document(document)
-    }
-
-    pub fn add_array_f32s_by_single_segment_writer(&mut self, datas: &[f32]) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for data in datas {
-            document.add_field_value(self.field, &(*data as f64));
-        }
-        self.single_segment_index_writer_add_document(document)
-    }
-
-    pub fn add_array_f64s_by_single_segment_writer(&mut self, datas: &[f64]) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for data in datas {
-            document.add_field_value(self.field, data);
-        }
-        self.single_segment_index_writer_add_document(document)
-    }
-
-    pub fn add_array_bools_by_single_segment_writer(&mut self, datas: &[bool]) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        for data in datas {
-            document.add_field_value(self.field, data);
-        }
-        self.single_segment_index_writer_add_document(document)
-    }
-
-    pub fn add_array_keywords_by_single_segment_writer(
+    pub fn add_array_keyword(
         &mut self,
         datas: &[*const c_char],
+        offset: Option<i64>,
     ) -> Result<()> {
         let mut document = TantivyDocument::default();
         for element in datas {
             let data = unsafe { CStr::from_ptr(*element) };
-            document.add_field_value(self.field, data.to_str()?);
+            document.add_text(self.field, data.to_str()?);
         }
-        self.single_segment_index_writer_add_document(document)
+        self.add_doc_id(&mut document, offset);
+        self.index_writer_add_document(document)
     }
 
     fn manual_merge(&mut self) -> Result<()> {
-        let index_writer = self.index_writer.as_mut().left().unwrap();
-        let metas = index_writer.index().searchable_segment_metas()?;
-        let policy = index_writer.get_merge_policy();
-        let candidates = policy.compute_merge_candidates(metas.as_slice());
-        for candidate in candidates {
-            index_writer.merge(candidate.0.as_slice()).wait()?;
+        if let Either::Left(index_writer) = &mut self.index_writer {
+            let metas = index_writer.index().searchable_segment_metas()?;
+            let policy = index_writer.get_merge_policy();
+            let candidates = policy.compute_merge_candidates(metas.as_slice());
+            for candidate in candidates {
+                index_writer.merge(candidate.0.as_slice()).wait()?;
+            }
         }
         Ok(())
     }
@@ -383,7 +236,9 @@ impl IndexWriterWrapper {
     }
 
     pub(crate) fn commit(&mut self) -> Result<()> {
-        self.index_writer.as_mut().left().unwrap().commit()?;
+        if let Either::Left(index_writer) = &mut self.index_writer {
+            index_writer.commit()?;
+        }
         Ok(())
     }
 }
