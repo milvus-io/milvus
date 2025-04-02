@@ -26,8 +26,10 @@
 
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
+#include "common/JsonCastType.h"
 #include "common/LoadInfo.h"
 #include "common/Types.h"
+#include "gtest/gtest.h"
 #include "index/Meta.h"
 #include "index/JsonInvertedIndex.h"
 #include "knowhere/comp/index_param.h"
@@ -16467,7 +16469,14 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     EXPECT_EQ(final.count(), 2 * json_strs.size() - 2);
 }
 
-TEST(JsonIndexTest, TestBinaryRangeExpr) {
+class JsonIndexBinaryExprTest : public testing::TestWithParam<JsonCastType> {};
+
+INSTANTIATE_TEST_SUITE_P(JsonIndexBinaryExprTestParams,
+                         JsonIndexBinaryExprTest,
+                         testing::Values(JsonCastType::DOUBLE,
+                                         JsonCastType::VARCHAR));
+
+TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
     auto json_strs = std::vector<std::string>{
         R"({"a": 1})",
         R"({"a": 2})",
@@ -16537,11 +16546,11 @@ TEST(JsonIndexTest, TestBinaryRangeExpr) {
          0b1110'1110'0000'000},
 
         // String range test ["1", "3"] (matches string "1","2","3")
-        // {std::make_any<std::string>("1"),
-        //  std::make_any<std::string>("3"),
-        //  true,
-        //  true,
-        //  0b0000'0000'1110'000},
+        {std::make_any<std::string>("1"),
+         std::make_any<std::string>("3"),
+         true,
+         true,
+         0b0000'0000'1110'000},
 
         // Range that should match nothing
         {std::make_any<int64_t>(10),
@@ -16581,10 +16590,7 @@ TEST(JsonIndexTest, TestBinaryRangeExpr) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
 
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::INVERTED_INDEX_TYPE,
-        JsonCastType::DOUBLE,
-        "/a",
-        file_manager_ctx);
+        index::INVERTED_INDEX_TYPE, GetParam(), "/a", file_manager_ctx);
 
     using json_index_type = index::JsonInvertedIndex<double>;
     auto json_index = std::unique_ptr<json_index_type>(
