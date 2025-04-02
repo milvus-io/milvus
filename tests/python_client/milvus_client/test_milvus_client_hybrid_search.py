@@ -313,13 +313,21 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
     def metric_type(self, request):
         yield request.param
 
+    @pytest.fixture(scope="function", params=["INVERTED"])
+    def supported_varchar_scalar_index(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "BOOL", "double", "varchar", "bool"])
+    def supported_json_cast_type(self, request):
+        yield request.param
+
     """
     ******************************************************************
     #  The following are valid base cases
     ******************************************************************
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_hybrid_search_default(self):
         """
         target: test hybrid search with default normal case (2 vector fields)
@@ -384,6 +392,94 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
         sub_search1 = AnnSearchRequest(vectors_to_search, "vector", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(1)
         self.hybrid_search(client, collection_name, [sub_search1], ranker, limit=default_limit,
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"enable_milvus_client_api": True,
+                                        "nq": len(vectors_to_search),
+                                        "ids": insert_ids,
+                                        "limit": default_limit})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("is_flush", [True, False])
+    @pytest.mark.parametrize("is_release", [True, False])
+    def test_milvus_client_hybrid_search_after_json_path_index(self, supported_varchar_scalar_index,
+                                                               supported_json_cast_type, is_flush, is_release):
+        """
+        target: test hybrid search after json path index created
+        method: create connection, collection, insert and hybrid search
+        Step: 1. create schema
+              2. prepare index_params with the required vector index params and json path index
+              3. create collection with the above schema and index params
+              4. insert
+              5. hybrid search
+        expected: Search successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 128
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_vector_field_name+"new", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
+        schema.add_field(json_field_name, DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        index_params.add_index(default_vector_field_name+"new", metric_type="L2")
+        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(field_name=json_field_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']"})
+        index_params.add_index(field_name=json_field_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}"})
+        index_params.add_index(field_name=json_field_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a'][0]['b']"})
+        index_params.add_index(field_name=json_field_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a'][0]"})
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [
+            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+             default_vector_field_name+"new": list(rng.random((1, default_dim))[0]),
+             default_string_field_name: str(i),
+             json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        if is_flush:
+            self.flush(client, collection_name)
+        if is_release:
+            self.release_collection(client, collection_name)
+            self.load_collection(client, collection_name)
+        # 3. hybrid search
+        vectors_to_search = rng.random((1, default_dim))
+        insert_ids = [i for i in range(default_nb)]
+        sub_search1 = AnnSearchRequest(vectors_to_search, default_vector_field_name, {"level": 1}, 20, expr="id>=0")
+        sub_search2 = AnnSearchRequest(vectors_to_search, default_vector_field_name+"new", {"level": 1}, 20, expr="id>=0")
+        ranker = WeightedRanker(0.2, 0.8)
+        self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker, limit=default_limit,
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"enable_milvus_client_api": True,
+                                        "nq": len(vectors_to_search),
+                                        "ids": insert_ids,
+                                        "limit": default_limit})
+        sub_search1 = AnnSearchRequest(vectors_to_search, default_vector_field_name, {"level": 1}, 20,
+                                       expr=f"{json_field_name}['a']['b']>=10")
+        sub_search2 = AnnSearchRequest(vectors_to_search, default_vector_field_name + "new", {"level": 1}, 20,
+                                       expr=f"{json_field_name}['a']['b']>=10")
+        ranker = WeightedRanker(0.2, 0.8)
+        insert_ids = [i for i in range(10, default_nb)]
+        self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker, limit=default_limit,
                            check_task=CheckTasks.check_search_results,
                            check_items={"enable_milvus_client_api": True,
                                         "nq": len(vectors_to_search),

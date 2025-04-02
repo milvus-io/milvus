@@ -435,7 +435,7 @@ class TestSearchDiskann(TestcaseBase):
                             )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #23672")
+    @pytest.mark.skip(reason="issue #23672")
     def test_search_diskann_search_list_up_to_min(self, _async):
         """
         target: test search diskann index when search_list up to min

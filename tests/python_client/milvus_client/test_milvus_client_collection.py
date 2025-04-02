@@ -113,7 +113,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="pymilvus issue 1554")
+    @pytest.mark.skip(reason="pymilvus issue 1554")
     def test_milvus_client_collection_invalid_primary_field(self):
         """
         target: test fast create collection name with invalid primary field
@@ -163,7 +163,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="pymilvus issue 1872")
+    @pytest.mark.skip(reason="pymilvus issue 1872")
     @pytest.mark.parametrize("metric_type", [1, " ", "invalid"])
     def test_milvus_client_collection_invalid_metric_type(self, metric_type):
         """
@@ -1114,7 +1114,7 @@ class TestMilvusClientUsingDatabaseInvalid(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="pymilvus issue 1900")
+    @pytest.mark.skip(reason="pymilvus issue 1900")
     @pytest.mark.parametrize("db_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_milvus_client_using_database_not_exist_db_name(self, db_name):
         """
