@@ -145,6 +145,7 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     if (info->opt_fields().size()) {
         config["opt_fields"] = get_opt_field(info->opt_fields());
     }
+    config["lack_binlog_rows"] = info->lack_binlog_rows();
     if (info->partition_key_isolation()) {
         config["partition_key_isolation"] = info->partition_key_isolation();
     }

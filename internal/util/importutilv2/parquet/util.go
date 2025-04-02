@@ -40,13 +40,6 @@ func WrapTypeErr(expect string, actual string, field *schemapb.FieldSchema) erro
 			expect, field.GetName(), actual))
 }
 
-func calcBufferSize(blockSize int, schema *schemapb.CollectionSchema) int {
-	if len(schema.GetFields()) <= 0 {
-		return blockSize
-	}
-	return blockSize / len(schema.GetFields())
-}
-
 func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*FieldReader, error) {
 	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
 		return field.GetName()

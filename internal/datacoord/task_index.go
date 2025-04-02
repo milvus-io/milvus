@@ -160,7 +160,9 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	typeParams := dependency.meta.indexMeta.GetTypeParams(segIndex.CollectionID, segIndex.IndexID)
 
 	fieldID := dependency.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID)
+
 	binlogIDs := getBinLogIDs(segment, fieldID)
+	totalRows := getTotalBinlogRows(segment, fieldID)
 
 	// When new index parameters are added, these parameters need to be updated to ensure they are included during the index-building process.
 	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && Params.KnowhereConfig.Enable.GetAsBool() {
@@ -258,6 +260,8 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		Field:                     field,
 		PartitionKeyIsolation:     partitionKeyIsolation,
 	}
+
+	it.req.LackBinlogRows = it.req.NumRows - totalRows
 
 	log.Ctx(ctx).Info("index task pre check successfully", zap.Int64("taskID", it.GetTaskID()),
 		zap.Int64("segID", segment.GetID()),

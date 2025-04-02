@@ -98,7 +98,13 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 	batchSize := 100000
 	builders := make([]array.Builder, len(schema.Fields))
 	for i, f := range schema.Fields {
-		b := array.NewBuilder(memory.DefaultAllocator, records[0].Column(f.FieldID).DataType())
+		// will change later, to do
+		var b array.Builder
+		if records[0].Column(f.FieldID) == nil {
+			b = array.NewBuilder(memory.DefaultAllocator, MilvusDataTypeToArrowType(f.GetDataType(), 1))
+		} else {
+			b = array.NewBuilder(memory.DefaultAllocator, records[0].Column(f.FieldID).DataType())
+		}
 		b.Reserve(batchSize)
 		builders[i] = b
 	}
