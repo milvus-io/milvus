@@ -16,7 +16,7 @@ pytest-xdist==2.5.0
 pymilvus==2.4.16rc1
 pymilvus[bulk_writer]==2.4.16rc1
 pytest-rerunfailures==9.1.1
-git+https://github.com/Projectplace/pytest-tags
+pytest_tagging==1.6.0
 ndg-httpsclient
 pyopenssl
 pyasn1
