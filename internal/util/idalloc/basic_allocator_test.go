@@ -110,7 +110,7 @@ func TestRemoteIDAllocator(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 
-	client := mocks.NewMockMixCoordClient(t)
+	client := NewMockRootCoordClient(t)
 	f := syncutil.NewFuture[types.MixCoordClient]()
 	f.Set(client)
 

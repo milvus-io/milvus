@@ -63,7 +63,8 @@ func TestIDAllocator(t *testing.T) {
 	client := NewMockRootCoordClient(t)
 	f := syncutil.NewFuture[types.MixCoordClient]()
 	f.Set(client)
-	allocator := NewTSOAllocator(f)
+
+	allocator := NewIDAllocator(f)
 
 	// Make local dirty
 	allocator.Allocate(context.Background())
