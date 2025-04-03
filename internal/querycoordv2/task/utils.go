@@ -207,6 +207,7 @@ func packSubChannelRequest(
 	loadMeta *querypb.LoadMetaInfo,
 	channel *meta.DmChannel,
 	indexInfo []*indexpb.IndexInfo,
+	partitions []int64,
 ) *querypb.WatchDmChannelsRequest {
 	return &querypb.WatchDmChannelsRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -215,6 +216,7 @@ func packSubChannelRequest(
 		),
 		NodeID:        action.Node(),
 		CollectionID:  task.CollectionID(),
+		PartitionIDs:  partitions,
 		Infos:         []*datapb.VchannelInfo{channel.VchannelInfo},
 		Schema:        schema,   // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
 		LoadMeta:      loadMeta, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3

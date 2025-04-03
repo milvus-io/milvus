@@ -156,8 +156,13 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 2
 	}, 5*time.Second, 1*time.Second)
 
-	suite.distMgr.LeaderViewManager.Update(2,
-		&meta.LeaderView{
+	suite.distMgr.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collectionID,
+			ChannelName:  "channel-1",
+		},
+		Node: 2,
+		View: &meta.LeaderView{
 			ID:           2,
 			CollectionID: suite.collectionID,
 			Channel:      "channel-1",
@@ -165,7 +170,13 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 				11: {NodeID: 2},
 			},
 		},
-		&meta.LeaderView{
+	}, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collectionID,
+			ChannelName:  "channel-2",
+		},
+		Node: 2,
+		View: &meta.LeaderView{
 			ID:           2,
 			CollectionID: suite.collectionID,
 			Channel:      "channel-2",
@@ -173,7 +184,7 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 				12: {NodeID: 2},
 			},
 		},
-	)
+	})
 
 	// Never update current target if it's empty, even the next target is ready
 	suite.Eventually(func() bool {
@@ -203,27 +214,36 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 	// Manually update next target
 	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
 	suite.NoError(err)
-
-	ch1View := &meta.LeaderView{
-		ID:           2,
-		CollectionID: suite.collectionID,
-		Channel:      "channel-1",
-		Segments: map[int64]*querypb.SegmentDist{
-			11: {NodeID: 2},
-			13: {NodeID: 2},
+	suite.distMgr.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collectionID,
+			ChannelName:  "channel-1",
 		},
-	}
-
-	ch2View := &meta.LeaderView{
-		ID:           2,
-		CollectionID: suite.collectionID,
-		Channel:      "channel-2",
-		Segments: map[int64]*querypb.SegmentDist{
-			12: {NodeID: 2},
+		Node: 2,
+		View: &meta.LeaderView{
+			ID:           2,
+			CollectionID: suite.collectionID,
+			Channel:      "channel-1",
+			Segments: map[int64]*querypb.SegmentDist{
+				11: {NodeID: 2},
+				13: {NodeID: 2},
+			},
 		},
-	}
-
-	suite.distMgr.LeaderViewManager.Update(2, ch1View, ch2View)
+	}, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collectionID,
+			ChannelName:  "channel-2",
+		},
+		Node: 2,
+		View: &meta.LeaderView{
+			ID:           2,
+			CollectionID: suite.collectionID,
+			Channel:      "channel-2",
+			Segments: map[int64]*querypb.SegmentDist{
+				12: {NodeID: 2},
+			},
+		},
+	})
 
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -242,6 +262,7 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.CurrentTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
 
+	ch1View := suite.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel("channel-1"))[0].View
 	action := suite.observer.checkNeedUpdateTargetVersion(ctx, ch1View, 100)
 	suite.Equal(action.GetDeleteCP().Timestamp, uint64(200))
 }

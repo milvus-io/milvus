@@ -81,8 +81,8 @@ func (suite *DistControllerTestSuite) SetupTest() {
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
 	suite.mockScheduler.EXPECT().GetExecutedFlag(mock.Anything).Return(nil).Maybe()
-	syncTargetVersionFn := func(collectionID int64) {}
-	suite.controller = NewDistController(suite.mockCluster, suite.nodeMgr, distManager, targetManager, suite.mockScheduler, syncTargetVersionFn)
+
+	suite.controller = NewDistController(suite.mockCluster, suite.nodeMgr, distManager, targetManager, suite.mockScheduler, func(collectionID ...int64) {})
 }
 
 func (suite *DistControllerTestSuite) TearDownSuite() {

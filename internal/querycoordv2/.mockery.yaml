@@ -22,6 +22,18 @@ packages:
         config:
           filename: "mock_target_manager.go"
           mockname: "MockTargetManager"
+      ReplicaManagerInterface:
+        config:
+          filename: "mock_replica_manager.go"
+          mockname: "MockReplicaManager"
+      ChannelDistManagerInterface:
+        config:
+          filename: "mock_channel_dist_manager.go" 
+          mockname: "MockChannelDistManager"
+      SegmentDistManagerInterface:
+        config:
+          filename: "mock_segment_dist_manager.go"
+          mockname: "MockSegmentDistManager"
   github.com/milvus-io/milvus/internal/querycoordv2/session:
     interfaces:
       Cluster:
