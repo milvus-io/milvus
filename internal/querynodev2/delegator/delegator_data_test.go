@@ -194,7 +194,7 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
-	}, 10000, nil, s.chunkManager)
+	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.NoError(err)
 	s.delegator = delegator.(*shardDelegator)
 }
@@ -216,7 +216,7 @@ func (s *DelegatorDataSuite) SetupTest() {
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
-	}, 10000, nil, s.chunkManager)
+	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 	sd, ok := delegator.(*shardDelegator)
 	s.Require().True(ok)
@@ -414,9 +414,21 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
+		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
 
+	// sync target version, make delegator serviceable
+	s.delegator.SyncReadableTarget(&querypb.SyncAction{
+		TargetVersion:   2001,
+		GrowingInTarget: []int64{1001},
+		SealedSegmentRowCount: map[int64]int64{
+			1000: 100,
+		},
+		DroppedInTarget: []int64{},
+		Checkpoint:      &msgpb.MsgPosition{},
+		DeleteCP:        &msgpb.MsgPosition{},
+	}, []int64{500, 501})
 	s.delegator.ProcessDelete([]*DeleteData{
 		{
 			PartitionID: 500,
@@ -471,7 +483,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
-		Version: 1,
+		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
 	s.True(s.delegator.distribution.Serviceable())
@@ -506,7 +518,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
-		Version: 2,
+		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
 	s.True(s.delegator.distribution.Serviceable())
@@ -796,7 +808,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 					return s.mq, nil
 				},
-			}, 10000, nil, nil)
+			}, 10000, nil, nil, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.NoError(err)
 
 		growing0 := segments.NewMockSegment(s.T())
@@ -1408,8 +1420,15 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		s.manager.Segment.Put(context.Background(), segments.SegmentTypeGrowing, ms)
 	}
 
-	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
-	s.Equal(int64(5), s.delegator.GetTargetVersion())
+	s.delegator.SyncReadableTarget(&querypb.SyncAction{
+		TargetVersion:   5,
+		GrowingInTarget: []int64{1},
+		SealedInTarget:  []int64{2},
+		DroppedInTarget: []int64{3, 4},
+		Checkpoint:      &msgpb.MsgPosition{},
+		DeleteCP:        &msgpb.MsgPosition{},
+	}, []int64{500, 501})
+	s.Equal(int64(5), s.delegator.GetQueryView().GetVersion())
 }
 
 func (s *DelegatorDataSuite) TestLevel0Deletions() {

@@ -20,12 +20,13 @@ import (
 type queryNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)
 
 type nodeInfo struct {
-	nodeID  UniqueID
-	address string
+	nodeID      UniqueID
+	address     string
+	serviceable bool
 }
 
 func (n nodeInfo) String() string {
-	return fmt.Sprintf("<NodeID: %d>", n.nodeID)
+	return fmt.Sprintf("<NodeID: %d, Address: %s, Serviceable: %t>", n.nodeID, n.address, n.serviceable)
 }
 
 var errClosed = errors.New("client is closed")

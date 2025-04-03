@@ -128,13 +128,11 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 	// compare with targets to find the lack and redundancy of segments
 	lacks, redundancies := c.getSealedSegmentDiff(ctx, replica.GetCollectionID(), replica.GetID())
-	// loadCtx := trace.ContextWithSpan(context.Background(), c.meta.GetCollection(replica.CollectionID).LoadSpan)
 	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, replica)
 	task.SetReason("lacks of segment", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 
-	redundancies = c.filterSegmentInUse(ctx, replica, redundancies)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("segment not exists in target", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
@@ -142,7 +140,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 	// compare inner dists to find repeated loaded segments
 	redundancies = c.findRepeatedSealedSegments(ctx, replica.GetID())
-	redundancies = c.filterExistedOnLeader(replica, redundancies)
+	redundancies = c.filterInUsedByDelegator(replica, redundancies)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("redundancies of segment", tasks...)
 	// set deduplicate task priority to low, to avoid deduplicate task cancel balance task
@@ -173,19 +171,15 @@ func (c *SegmentChecker) getGrowingSegmentDiff(ctx context.Context, collectionID
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replica.GetID()))
 
-	leaders := c.dist.ChannelDistManager.GetShardLeadersByReplica(replica)
-	for channelName, node := range leaders {
-		view := c.dist.LeaderViewManager.GetLeaderShardView(node, channelName)
-		if view == nil {
-			log.Info("leaderView is not ready, skip", zap.String("channelName", channelName), zap.Int64("node", node))
-			continue
-		}
+	delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
+	for _, d := range delegatorList {
+		view := d.View
 		targetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
 		if view.TargetVersion != targetVersion {
 			// before shard delegator update it's readable version, skip release segment
 			log.RatedInfo(20, "before shard delegator update it's readable version, skip release segment",
-				zap.String("channelName", channelName),
-				zap.Int64("nodeID", node),
+				zap.String("channelName", view.Channel),
+				zap.Int64("nodeID", view.ID),
 				zap.Int64("leaderVersion", view.TargetVersion),
 				zap.Int64("currentVersion", targetVersion),
 			)
@@ -300,51 +294,32 @@ func (c *SegmentChecker) findRepeatedSealedSegments(ctx context.Context, replica
 	return segments
 }
 
-func (c *SegmentChecker) filterExistedOnLeader(replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
+func (c *SegmentChecker) filterInUsedByDelegator(replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
 	filtered := make([]*meta.Segment, 0, len(segments))
+	delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
+	ch2DelegatorList := lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
+		return d.View.Channel
+	})
+
 	for _, s := range segments {
-		leaderID, ok := c.dist.ChannelDistManager.GetShardLeader(replica, s.GetInsertChannel())
-		if !ok {
+		delegatorList := ch2DelegatorList[s.GetInsertChannel()]
+		if len(delegatorList) == 0 {
+			// skip deduplication if delegator is not found
 			continue
 		}
 
-		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
-		if view == nil {
-			continue
+		usedByDelegator := false
+		for _, delegator := range delegatorList {
+			seg, ok := delegator.View.Segments[s.GetID()]
+			if ok && seg.NodeID == s.Node {
+				// if this segment is serving on leader, do not remove it for search available
+				usedByDelegator = true
+				break
+			}
 		}
-		seg, ok := view.Segments[s.GetID()]
-		if ok && seg.NodeID == s.Node {
-			// if this segment is serving on leader, do not remove it for search available
-			continue
+		if !usedByDelegator {
+			filtered = append(filtered, s)
 		}
-		filtered = append(filtered, s)
-	}
-	return filtered
-}
-
-func (c *SegmentChecker) filterSegmentInUse(ctx context.Context, replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
-	filtered := make([]*meta.Segment, 0, len(segments))
-	for _, s := range segments {
-		leaderID, ok := c.dist.ChannelDistManager.GetShardLeader(replica, s.GetInsertChannel())
-		if !ok {
-			continue
-		}
-
-		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
-		if view == nil {
-			continue
-		}
-		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, s.CollectionID, meta.CurrentTarget)
-		partition := c.meta.CollectionManager.GetPartition(ctx, s.PartitionID)
-
-		// if delegator has valid target version, and before it update to latest readable version, skip release it's sealed segment
-		// Notice: if syncTargetVersion stuck, segment on delegator won't be released
-		readableVersionNotUpdate := view.TargetVersion != initialTargetVersion && view.TargetVersion < currentTargetVersion
-		if partition != nil && readableVersionNotUpdate {
-			// leader view version hasn't been updated, segment maybe still in use
-			continue
-		}
-		filtered = append(filtered, s)
 	}
 	return filtered
 }
@@ -361,7 +336,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	plans := make([]balance.SegmentAssignPlan, 0)
 	for shard, segments := range shardSegments {
 		// if channel is not subscribed yet, skip load segments
-		leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(shard))
+		leader := c.dist.ChannelDistManager.GetShardLeader(shard, replica)
 		if leader == nil {
 			continue
 		}

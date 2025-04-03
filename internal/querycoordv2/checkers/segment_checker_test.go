@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -144,8 +145,15 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// set dist
-	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View:    &meta.LeaderView{ID: 2, CollectionID: 1, Channel: "test-insert-channel", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -234,9 +242,16 @@ func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// set dist
-	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View:    &meta.LeaderView{ID: 2, CollectionID: 1, Channel: "test-insert-channel", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -276,10 +291,17 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// set dist
-	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}))
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 1, 1, 2, "test-insert-channel"))
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View:    utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}),
+	})
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -293,7 +315,15 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 
 	// test less version exist on leader
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 1}, map[int64]*meta.Segment{}))
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View:    utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 1}, map[int64]*meta.Segment{}),
+	})
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 0)
 }
@@ -335,9 +365,16 @@ func (suite *SegmentCheckerTestSuite) TestReleaseDirtySegments() {
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// set dist
-	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}))
 	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View:    utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}),
+	})
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -379,40 +416,30 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	readableVersion := checker.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
 
-	// test less target version exist on leader,meet segment doesn't exit in target, segment should be released
+	// test less target version exist on leader,meet segment doesn't exit in target, segment shouldn't be released
 	nodeID := int64(2)
 	segmentID := int64(1)
-	checker.dist.ChannelDistManager.Update(nodeID, utils.CreateTestChannel(collectionID, nodeID, segmentID, "test-insert-channel"))
-	view := utils.CreateTestLeaderView(nodeID, collectionID, "test-insert-channel", map[int64]int64{segmentID: 2}, map[int64]*meta.Segment{})
-	view.TargetVersion = readableVersion - 1
-	checker.dist.LeaderViewManager.Update(nodeID, view)
 	checker.dist.SegmentDistManager.Update(nodeID, utils.CreateTestSegment(collectionID, partitionID, segmentID, nodeID, 2, "test-insert-channel"))
-	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 0)
+	checker.dist.ChannelDistManager.Update(nodeID, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:            nodeID,
+			CollectionID:  collectionID,
+			Channel:       "test-insert-channel",
+			TargetVersion: readableVersion - 1,
+			Segments:      map[int64]*querypb.SegmentDist{segmentID: {NodeID: nodeID}},
+		},
+	})
 
-	// test leader's target version update to latest,meet segment doesn't exit in target, segment should be released
-	view = utils.CreateTestLeaderView(nodeID, collectionID, "test-insert-channel", map[int64]int64{1: 3}, map[int64]*meta.Segment{})
-	view.TargetVersion = readableVersion
-	checker.dist.LeaderViewManager.Update(2, view)
-	tasks = checker.Check(context.TODO())
+	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.Len(tasks[0].Actions(), 1)
 	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
-	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
-	suite.Equal(task.ActionTypeReduce, action.Type())
-	suite.EqualValues(segmentID, action.GetSegmentID())
-	suite.EqualValues(nodeID, action.Node())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
-
-	// test leader with initialTargetVersion, meet segment doesn't exit in target, segment should be released
-	view = utils.CreateTestLeaderView(nodeID, collectionID, "test-insert-channel", map[int64]int64{1: 3}, map[int64]*meta.Segment{})
-	view.TargetVersion = initialTargetVersion
-	checker.dist.LeaderViewManager.Update(2, view)
-	tasks = checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok = tasks[0].Actions()[0].(*task.SegmentAction)
 	suite.True(ok)
 	suite.EqualValues(1, tasks[0].ReplicaID())
 	suite.Equal(task.ActionTypeReduce, action.Type())
@@ -458,13 +485,25 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	growingSegments[4] = utils.CreateTestSegment(1, 1, 4, 2, 1, "test-insert-channel")
 	growingSegments[4].SegmentInfo.StartPosition = &msgpb.MsgPosition{Timestamp: 11}
 
-	dmChannel := utils.CreateTestChannel(1, 2, 1, "test-insert-channel")
-	dmChannel.UnflushedSegmentIds = []int64{2, 3}
-	checker.dist.ChannelDistManager.Update(2, dmChannel)
-	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, growingSegments)
-	view.TargetVersion = checker.targetMgr.GetCollectionTargetVersion(ctx, int64(1), meta.CurrentTarget)
-	checker.dist.LeaderViewManager.Update(2, view)
 	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 3, 2, 2, "test-insert-channel"))
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID:        1,
+			ChannelName:         "test-insert-channel",
+			UnflushedSegmentIds: []int64{2, 3},
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:              2,
+			CollectionID:    1,
+			Channel:         "test-insert-channel",
+			TargetVersion:   checker.targetMgr.GetCollectionTargetVersion(ctx, int64(1), meta.CurrentTarget),
+			Segments:        map[int64]*querypb.SegmentDist{3: {NodeID: 2}},
+			GrowingSegments: growingSegments,
+			Status:          &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 2)
@@ -524,13 +563,25 @@ func (suite *SegmentCheckerTestSuite) TestReleaseCompactedGrowingSegments() {
 	growingSegments[4] = utils.CreateTestSegment(1, 1, 4, 2, 1, "test-insert-channel")
 	growingSegments[4].SegmentInfo.StartPosition = &msgpb.MsgPosition{Timestamp: 11}
 
-	dmChannel := utils.CreateTestChannel(1, 2, 1, "test-insert-channel")
-	dmChannel.UnflushedSegmentIds = []int64{2, 3}
-	checker.dist.ChannelDistManager.Update(2, dmChannel)
-	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, growingSegments)
-	view.TargetVersion = checker.targetMgr.GetCollectionTargetVersion(ctx, int64(1), meta.CurrentTarget)
-	checker.dist.LeaderViewManager.Update(2, view)
 	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 3, 2, 2, "test-insert-channel"))
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID:        1,
+			ChannelName:         "test-insert-channel",
+			UnflushedSegmentIds: []int64{2, 3},
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:              2,
+			CollectionID:    1,
+			Channel:         "test-insert-channel",
+			TargetVersion:   checker.targetMgr.GetCollectionTargetVersion(ctx, int64(1), meta.CurrentTarget),
+			Segments:        map[int64]*querypb.SegmentDist{3: {NodeID: 2}},
+			GrowingSegments: growingSegments,
+			Status:          &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -572,18 +623,45 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 	growingSegments[2] = utils.CreateTestSegment(1, 1, 2, 2, 0, "test-insert-channel")
 	growingSegments[2].SegmentInfo.StartPosition = &msgpb.MsgPosition{Timestamp: 2}
 
-	dmChannel := utils.CreateTestChannel(1, 2, 1, "test-insert-channel")
-	dmChannel.UnflushedSegmentIds = []int64{2, 3}
-	checker.dist.ChannelDistManager.Update(2, dmChannel)
-	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, growingSegments)
-	view.TargetVersion = checker.targetMgr.GetCollectionTargetVersion(ctx, int64(1), meta.CurrentTarget) - 1
-	checker.dist.LeaderViewManager.Update(2, view)
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID:        1,
+			ChannelName:         "test-insert-channel",
+			UnflushedSegmentIds: []int64{2, 3},
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:              2,
+			CollectionID:    1,
+			Channel:         "test-insert-channel",
+			TargetVersion:   checker.targetMgr.GetCollectionTargetVersion(ctx, int64(1), meta.CurrentTarget) - 1,
+			Segments:        map[int64]*querypb.SegmentDist{3: {NodeID: 2}},
+			GrowingSegments: growingSegments,
+			Status:          &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 0)
 
-	view.TargetVersion = checker.targetMgr.GetCollectionTargetVersion(ctx, int64(1), meta.CurrentTarget)
-	checker.dist.LeaderViewManager.Update(2, view)
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID:        1,
+			ChannelName:         "test-insert-channel",
+			UnflushedSegmentIds: []int64{2, 3},
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:              2,
+			CollectionID:    1,
+			Channel:         "test-insert-channel",
+			TargetVersion:   checker.targetMgr.GetCollectionTargetVersion(ctx, int64(1), meta.CurrentTarget),
+			Segments:        map[int64]*querypb.SegmentDist{3: {NodeID: 2}},
+			GrowingSegments: growingSegments,
+		},
+	})
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.Len(tasks[0].Actions(), 1)

@@ -3149,6 +3149,16 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		request.PlaceholderGroup = placeholderGroupBytes
 	}
 
+	// if request.EnablePartialResult is true, use the partial result required data ratio from request
+	// otherwise, use the default partial result required data ratio from config
+	var partialResultRequiredDataRatio float32
+	if request.EnablePartialResult {
+		partialResultRequiredDataRatio = request.GetPartialResultRequiredDataRatio()
+	} else {
+		partialResultRequiredDataRatio = float32(Params.ProxyCfg.PartialResultRequiredDataRatio.GetAsFloat())
+	}
+	enablePartialResult := partialResultRequiredDataRatio < 1.0
+
 	qt := &searchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -3157,9 +3167,11 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 				commonpbutil.WithMsgType(commonpb.MsgType_Search),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			ReqID:              paramtable.GetNodeID(),
-			IsTopkReduce:       optimizedSearch,
-			IsRecallEvaluation: isRecallEvaluation,
+			ReqID:                          paramtable.GetNodeID(),
+			IsTopkReduce:                   optimizedSearch,
+			IsRecallEvaluation:             isRecallEvaluation,
+			PartialResultRequiredDataRatio: partialResultRequiredDataRatio,
+			EnablePartialResult:            enablePartialResult,
 		},
 		request:                request,
 		tr:                     timerecord.NewTimeRecorder("search"),
@@ -3387,6 +3399,16 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		request.GetCollectionName(),
 	).Inc()
 
+	// if request.EnablePartialResult is true, use the partial result required data ratio from request
+	// otherwise, use the default partial result required data ratio from config
+	var partialResultRequiredDataRatio float32
+	if request.EnablePartialResult {
+		partialResultRequiredDataRatio = request.GetPartialResultRequiredDataRatio()
+	} else {
+		partialResultRequiredDataRatio = float32(Params.ProxyCfg.PartialResultRequiredDataRatio.GetAsFloat())
+	}
+	enablePartialResult := partialResultRequiredDataRatio < 1.0
+
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HybridSearch")
 	defer sp.End()
 	newSearchReq := convertHybridSearchToSearch(request)
@@ -3398,8 +3420,10 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 				commonpbutil.WithMsgType(commonpb.MsgType_Search),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			ReqID:        paramtable.GetNodeID(),
-			IsTopkReduce: optimizedSearch,
+			ReqID:                          paramtable.GetNodeID(),
+			IsTopkReduce:                   optimizedSearch,
+			PartialResultRequiredDataRatio: partialResultRequiredDataRatio,
+			EnablePartialResult:            enablePartialResult,
 		},
 		request:             newSearchReq,
 		tr:                  timerecord.NewTimeRecorder(method),
@@ -3803,6 +3827,16 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	// if request.EnablePartialResult is true, use the partial result required data ratio from request
+	// otherwise, use the default partial result required data ratio from config
+	var partialResultRequiredDataRatio float32
+	if request.EnablePartialResult {
+		partialResultRequiredDataRatio = request.GetPartialResultRequiredDataRatio()
+	} else {
+		partialResultRequiredDataRatio = float32(Params.ProxyCfg.PartialResultRequiredDataRatio.GetAsFloat())
+	}
+	enablePartialResult := partialResultRequiredDataRatio < 1.0
+
 	qt := &queryTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -3811,8 +3845,10 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			ReqID:            paramtable.GetNodeID(),
-			ConsistencyLevel: request.ConsistencyLevel,
+			ReqID:                          paramtable.GetNodeID(),
+			ConsistencyLevel:               request.ConsistencyLevel,
+			PartialResultRequiredDataRatio: partialResultRequiredDataRatio,
+			EnablePartialResult:            enablePartialResult,
 		},
 		request:             request,
 		mixCoord:            node.mixCoord,

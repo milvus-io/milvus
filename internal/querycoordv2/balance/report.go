@@ -55,7 +55,7 @@ func (br *balanceReport) SetMemoryFactor(node int64, memoryFactor float64) {
 	}
 }
 
-func (br *balanceReport) SetDeletagorScore(node int64, delegatorScore float64) {
+func (br *balanceReport) SetDelegatorScore(node int64, delegatorScore float64) {
 	nodeItem, ok := br.nodeItems[node]
 	if ok {
 		nodeItem.delegatorScore = delegatorScore

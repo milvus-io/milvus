@@ -163,7 +163,7 @@ func (s *DelegatorSuite) SetupTest() {
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
-	}, 10000, nil, s.chunkManager)
+	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 }
 
@@ -202,7 +202,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 				return s.mq, nil
 			},
-		}, 10000, nil, s.chunkManager)
+		}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.Error(err)
 	})
 
@@ -245,7 +245,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 				return s.mq, nil
 			},
-		}, 10000, nil, s.chunkManager)
+		}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.NoError(err)
 	})
 }
@@ -325,7 +325,19 @@ func (s *DelegatorSuite) initSegments() {
 			Version:     2001,
 		},
 	)
-	s.delegator.SyncTargetVersion(2001, []int64{500, 501}, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{}, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
+	s.delegator.SyncReadableTarget(&querypb.SyncAction{
+		TargetVersion:   2001,
+		GrowingInTarget: []int64{1004},
+		SealedSegmentRowCount: map[int64]int64{
+			1000: 100,
+			1001: 100,
+			1002: 100,
+			1003: 100,
+		},
+		DroppedInTarget: []int64{},
+		Checkpoint:      &msgpb.MsgPosition{},
+		DeleteCP:        &msgpb.MsgPosition{},
+	}, []int64{500, 501})
 }
 
 func (s *DelegatorSuite) TestSearch() {
@@ -371,7 +383,7 @@ func (s *DelegatorSuite) TestSearch() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		results, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+		results, _, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req:         &internalpb.SearchRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
@@ -387,7 +399,7 @@ func (s *DelegatorSuite) TestSearch() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+		_, _, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
 				Base: commonpbutil.NewMsgBase(),
 				// not load partation -1,will return error
@@ -426,7 +438,7 @@ func (s *DelegatorSuite) TestSearch() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+		_, _, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req:         &internalpb.SearchRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
@@ -466,7 +478,7 @@ func (s *DelegatorSuite) TestSearch() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+		_, _, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req:         &internalpb.SearchRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
@@ -478,7 +490,7 @@ func (s *DelegatorSuite) TestSearch() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+		_, _, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req:         &internalpb.SearchRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{"non_exist_channel"},
 		})
@@ -490,7 +502,7 @@ func (s *DelegatorSuite) TestSearch() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
 		defer cancel()
 
-		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+		_, _, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
 				Base:               commonpbutil.NewMsgBase(),
 				GuaranteeTimestamp: 10100,
@@ -505,7 +517,7 @@ func (s *DelegatorSuite) TestSearch() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+		_, _, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
 				Base:               commonpbutil.NewMsgBase(),
 				GuaranteeTimestamp: uint64(paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)) + 10001,
@@ -522,9 +534,9 @@ func (s *DelegatorSuite) TestSearch() {
 
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
-		sd.distribution.AddOfflines(1001)
+		sd.distribution.MarkOfflineSegments(1001)
 
-		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+		_, _, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
 				Base: commonpbutil.NewMsgBase(),
 			},
@@ -540,7 +552,7 @@ func (s *DelegatorSuite) TestSearch() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
+		_, _, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req:         &internalpb.SearchRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
@@ -592,7 +604,7 @@ func (s *DelegatorSuite) TestQuery() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		results, err := s.delegator.Query(ctx, &querypb.QueryRequest{
+		results, _, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
@@ -608,7 +620,7 @@ func (s *DelegatorSuite) TestQuery() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
+		_, _, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
 				Base: commonpbutil.NewMsgBase(),
 				// not load partation -1,will return error
@@ -646,7 +658,7 @@ func (s *DelegatorSuite) TestQuery() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
+		_, _, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
@@ -683,7 +695,7 @@ func (s *DelegatorSuite) TestQuery() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
+		_, _, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
@@ -695,7 +707,7 @@ func (s *DelegatorSuite) TestQuery() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
+		_, _, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{"non_exist_channel"},
 		})
@@ -709,9 +721,9 @@ func (s *DelegatorSuite) TestQuery() {
 
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
-		sd.distribution.AddOfflines(1001)
+		sd.distribution.MarkOfflineSegments(1001)
 
-		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
+		_, _, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
@@ -725,7 +737,7 @@ func (s *DelegatorSuite) TestQuery() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
+		_, _, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
@@ -888,7 +900,8 @@ func (s *DelegatorSuite) TestQueryStream() {
 			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		}, server)
-		s.True(errors.Is(err, mockErr))
+		s.Error(err)
+		s.ErrorContains(err, "segments not loaded in any worker")
 	})
 
 	s.Run("worker_return_error", func() {
@@ -987,7 +1000,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
-		sd.distribution.AddOfflines(1001)
+		sd.distribution.MarkOfflineSegments(1001)
 
 		client := streamrpc.NewLocalQueryClient(ctx)
 		server := client.CreateServer()
@@ -1164,7 +1177,7 @@ func (s *DelegatorSuite) TestGetStats() {
 
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
-		sd.distribution.AddOfflines(1001)
+		sd.distribution.MarkOfflineSegments(1001)
 
 		_, err := s.delegator.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			Req:         &internalpb.GetStatisticsRequest{Base: commonpbutil.NewMsgBase()},
@@ -1251,7 +1264,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 	s.Run("worker_manager_error", func() {
 		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).RunAndReturn(func(ctx context.Context, i int64) (cluster.Worker, error) {
 			return nil, merr.WrapErrServiceInternal("mocked")
-		}).Once()
+		})
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -1265,7 +1278,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
-		sd.distribution.AddOfflines(1001)
+		sd.distribution.MarkOfflineSegments(1001)
 
 		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{}, 100)
 		s.Error(err)
@@ -1301,7 +1314,7 @@ func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 		isBM25Field: map[int64]bool{101: true},
 	}
 
-	_, err := sd.search(context.Background(), searchReq, []SnapshotItem{}, []SegmentEntry{})
+	_, _, err := sd.search(context.Background(), searchReq, []SnapshotItem{}, []SegmentEntry{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must use BM25 metric type when searching against BM25 Function output field")
 }

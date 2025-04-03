@@ -330,7 +330,7 @@ func (sd *shardDelegator) applyDelete(ctx context.Context,
 
 // markSegmentOffline makes segment go offline and waits for QueryCoord to fix.
 func (sd *shardDelegator) markSegmentOffline(segmentIDs ...int64) {
-	sd.distribution.AddOfflines(segmentIDs...)
+	sd.distribution.MarkOfflineSegments(segmentIDs...)
 }
 
 // addGrowing add growing segment record for delegator.
@@ -965,70 +965,45 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	return nil
 }
 
-func (sd *shardDelegator) SyncTargetVersion(
-	newVersion int64,
-	partitions []int64,
-	growingInTarget []int64,
-	sealedInTarget []int64,
-	droppedInTarget []int64,
-	checkpoint *msgpb.MsgPosition,
-	deleteSeekPos *msgpb.MsgPosition,
-) {
-	growings := sd.segmentManager.GetBy(
-		segments.WithType(segments.SegmentTypeGrowing),
-		segments.WithChannel(sd.vchannelName),
-	)
-
-	sealedSet := typeutil.NewUniqueSet(sealedInTarget...)
-	growingSet := typeutil.NewUniqueSet(growingInTarget...)
-	droppedSet := typeutil.NewUniqueSet(droppedInTarget...)
-	redundantGrowing := typeutil.NewUniqueSet()
-	for _, s := range growings {
-		if growingSet.Contain(s.ID()) {
-			continue
+func (sd *shardDelegator) SyncReadableTarget(action *querypb.SyncAction, partitions []int64) {
+	sd.distribution.SyncReadableChannelView(action, partitions)
+	// clean delete buffer after distribution becomes serviceable
+	if sd.distribution.queryView.Serviceable() {
+		checkpoint := action.GetCheckpoint()
+		deleteSeekPos := action.GetDeleteCP()
+		if deleteSeekPos == nil {
+			// for compatible with 2.4, we use checkpoint as deleteCP when deleteCP is nil
+			deleteSeekPos = checkpoint
+			log.Info("use checkpoint as deleteCP",
+				zap.String("channelName", sd.vchannelName),
+				zap.Time("deleteSeekPos", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())))
 		}
 
-		// sealed segment already exists, make growing segment redundant
-		if sealedSet.Contain(s.ID()) {
-			redundantGrowing.Insert(s.ID())
+		start := time.Now()
+		sizeBeforeClean, _ := sd.deleteBuffer.Size()
+		l0NumBeforeClean := len(sd.deleteBuffer.ListL0())
+		sd.deleteBuffer.UnRegister(deleteSeekPos.GetTimestamp())
+		sizeAfterClean, _ := sd.deleteBuffer.Size()
+		l0NumAfterClean := len(sd.deleteBuffer.ListL0())
+
+		if sizeAfterClean < sizeBeforeClean || l0NumAfterClean < l0NumBeforeClean {
+			log.Info("clean delete buffer",
+				zap.String("channel", sd.vchannelName),
+				zap.Time("deleteSeekPos", tsoutil.PhysicalTime(deleteSeekPos.GetTimestamp())),
+				zap.Time("channelCP", tsoutil.PhysicalTime(checkpoint.GetTimestamp())),
+				zap.Int64("sizeBeforeClean", sizeBeforeClean),
+				zap.Int64("sizeAfterClean", sizeAfterClean),
+				zap.Int("l0NumBeforeClean", l0NumBeforeClean),
+				zap.Int("l0NumAfterClean", l0NumAfterClean),
+				zap.Duration("cost", time.Since(start)),
+			)
 		}
-
-		// sealed segment already dropped, make growing segment redundant
-		if droppedSet.Contain(s.ID()) {
-			redundantGrowing.Insert(s.ID())
-		}
+		sd.RefreshLevel0DeletionStats()
 	}
-	redundantGrowingIDs := redundantGrowing.Collect()
-	if len(redundantGrowing) > 0 {
-		log.Warn("found redundant growing segments",
-			zap.Int64s("growingSegments", redundantGrowingIDs))
-	}
-	sd.distribution.SyncTargetVersion(newVersion, partitions, growingInTarget, sealedInTarget, redundantGrowingIDs)
-	start := time.Now()
-	sizeBeforeClean, _ := sd.deleteBuffer.Size()
-	l0NumBeforeClean := len(sd.deleteBuffer.ListL0())
-	sd.deleteBuffer.UnRegister(deleteSeekPos.GetTimestamp())
-	sizeAfterClean, _ := sd.deleteBuffer.Size()
-	l0NumAfterClean := len(sd.deleteBuffer.ListL0())
-
-	if sizeAfterClean < sizeBeforeClean || l0NumAfterClean < l0NumBeforeClean {
-		log.Info("clean delete buffer",
-			zap.String("channel", sd.vchannelName),
-			zap.Time("deleteSeekPos", tsoutil.PhysicalTime(deleteSeekPos.GetTimestamp())),
-			zap.Time("channelCP", tsoutil.PhysicalTime(checkpoint.GetTimestamp())),
-			zap.Int64("sizeBeforeClean", sizeBeforeClean),
-			zap.Int64("sizeAfterClean", sizeAfterClean),
-			zap.Int("l0NumBeforeClean", l0NumBeforeClean),
-			zap.Int("l0NumAfterClean", l0NumAfterClean),
-			zap.Duration("cost", time.Since(start)),
-		)
-	}
-
-	sd.RefreshLevel0DeletionStats()
 }
 
-func (sd *shardDelegator) GetTargetVersion() int64 {
-	return sd.distribution.getTargetVersion()
+func (sd *shardDelegator) GetQueryView() *channelQueryView {
+	return sd.distribution.queryView
 }
 
 func (sd *shardDelegator) AddExcludedSegments(excludeInfo map[int64]uint64) {
