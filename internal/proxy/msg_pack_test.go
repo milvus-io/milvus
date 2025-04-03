@@ -29,9 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
@@ -47,8 +45,8 @@ func TestRepackInsertData(t *testing.T) {
 
 	ctx := context.Background()
 
-	rc := NewRootCoordMock()
-	defer rc.Close()
+	mix := NewMixCoordMock()
+	defer mix.Close()
 
 	cache := NewMockCache(t)
 	cache.On("GetPartitionID",
@@ -59,13 +57,13 @@ func TestRepackInsertData(t *testing.T) {
 	).Return(int64(1), nil)
 	globalMetaCache = cache
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
+	idAllocator, err := allocator.NewIDAllocator(ctx, mix, paramtable.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
 
 	t.Run("create collection", func(t *testing.T) {
-		resp, err := rc.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		resp, err := mix.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
@@ -73,7 +71,7 @@ func TestRepackInsertData(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 		assert.NoError(t, err)
 
-		resp, err = rc.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+		resp, err = mix.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreatePartition,
 				MsgID:     0,
@@ -153,15 +151,12 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 	ctx := context.Background()
 	dbName := GetCurDBNameFromContextOrDefault(ctx)
 
-	rc := NewRootCoordMock()
-	defer rc.Close()
-	qc := &mocks.MockQueryCoordClient{}
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	mix := NewMixCoordMock()
 
-	err := InitMetaCache(ctx, rc, qc, nil)
+	err := InitMetaCache(ctx, mix, nil)
 	assert.NoError(t, err)
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
+	idAllocator, err := allocator.NewIDAllocator(ctx, mix, paramtable.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
@@ -182,7 +177,7 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 
-		resp, err := rc.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		resp, err := mix.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,

@@ -29,7 +29,7 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
 fi
 
 echo "Starting mixcoord..."
-nohup ./bin/milvus run mixture -rootcoord -querycoord -datacoord --run-with-subprocess >/tmp/mixcoord.log 2>&1 &
+nohup ./bin/milvus run mixcoord --run-with-subprocess >/tmp/mixcoord.log 2>&1 &
 
 echo "Starting datanode..."
 nohup ./bin/milvus run datanode --run-with-subprocess >/tmp/datanode.log 2>&1 &

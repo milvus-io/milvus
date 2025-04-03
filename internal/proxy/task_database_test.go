@@ -23,7 +23,7 @@ import (
 
 func TestCreateDatabaseTask(t *testing.T) {
 	paramtable.Init()
-	rc := NewRootCoordMock()
+	rc := NewMixCoordMock()
 	defer rc.Close()
 
 	ctx := context.Background()
@@ -37,9 +37,9 @@ func TestCreateDatabaseTask(t *testing.T) {
 			},
 			DbName: "db",
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
+		ctx:      ctx,
+		mixCoord: rc,
+		result:   nil,
 	}
 
 	t.Run("ok", func(t *testing.T) {
@@ -70,7 +70,7 @@ func TestCreateDatabaseTask(t *testing.T) {
 
 func TestDropDatabaseTask(t *testing.T) {
 	paramtable.Init()
-	rc := NewRootCoordMock()
+	rc := NewMixCoordMock()
 	defer rc.Close()
 
 	ctx := context.Background()
@@ -84,9 +84,9 @@ func TestDropDatabaseTask(t *testing.T) {
 			},
 			DbName: "db",
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
+		ctx:      ctx,
+		mixCoord: rc,
+		result:   nil,
 	}
 
 	cache := NewMockCache(t)
@@ -124,7 +124,7 @@ func TestDropDatabaseTask(t *testing.T) {
 
 func TestListDatabaseTask(t *testing.T) {
 	paramtable.Init()
-	rc := NewRootCoordMock()
+	rc := NewMixCoordMock()
 	defer rc.Close()
 
 	ctx := GetContext(context.Background(), "root:123456")
@@ -137,9 +137,9 @@ func TestListDatabaseTask(t *testing.T) {
 				Timestamp: 100,
 			},
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
+		ctx:      ctx,
+		mixCoord: rc,
+		result:   nil,
 	}
 
 	t.Run("ok", func(t *testing.T) {
@@ -170,7 +170,7 @@ func TestListDatabaseTask(t *testing.T) {
 }
 
 func TestAlterDatabase(t *testing.T) {
-	rc := mocks.NewMockRootCoordClient(t)
+	rc := mocks.NewMockMixCoordClient(t)
 
 	rc.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	task := &alterDatabaseTask{
@@ -179,7 +179,7 @@ func TestAlterDatabase(t *testing.T) {
 			DbName:     "test_alter_database",
 			Properties: []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
 		},
-		rootCoord: rc,
+		mixCoord: rc,
 	}
 	err := task.PreExecute(context.Background())
 	assert.Nil(t, err)
@@ -193,7 +193,7 @@ func TestAlterDatabase(t *testing.T) {
 			DbName:     "test_alter_database",
 			DeleteKeys: []string{common.MmapEnabledKey},
 		},
-		rootCoord: rc,
+		mixCoord: rc,
 	}
 	err1 := task1.PreExecute(context.Background())
 	assert.Nil(t, err1)
@@ -203,7 +203,7 @@ func TestAlterDatabase(t *testing.T) {
 }
 
 func TestAlterDatabaseTaskForReplicateProperty(t *testing.T) {
-	rc := mocks.NewMockRootCoordClient(t)
+	rc := mocks.NewMockMixCoordClient(t)
 	cache := globalMetaCache
 	defer func() { globalMetaCache = cache }()
 	mockCache := NewMockCache(t)
@@ -225,7 +225,7 @@ func TestAlterDatabaseTaskForReplicateProperty(t *testing.T) {
 					},
 				},
 			},
-			rootCoord: rc,
+			mixCoord: rc,
 		}
 		err := task.PreExecute(context.Background())
 		assert.Error(t, err)
@@ -244,7 +244,7 @@ func TestAlterDatabaseTaskForReplicateProperty(t *testing.T) {
 					},
 				},
 			},
-			rootCoord: rc,
+			mixCoord: rc,
 		}
 		err := task.PreExecute(context.Background())
 		assert.Error(t, err)
@@ -265,7 +265,7 @@ func TestAlterDatabaseTaskForReplicateProperty(t *testing.T) {
 					},
 				},
 			},
-			rootCoord: rc,
+			mixCoord: rc,
 		}
 		err := task.PreExecute(context.Background())
 		assert.Error(t, err)
@@ -292,7 +292,7 @@ func TestAlterDatabaseTaskForReplicateProperty(t *testing.T) {
 					},
 				},
 			},
-			rootCoord: rc,
+			mixCoord: rc,
 		}
 		err := task.PreExecute(context.Background())
 		assert.Error(t, err)
@@ -322,7 +322,7 @@ func TestAlterDatabaseTaskForReplicateProperty(t *testing.T) {
 					},
 				},
 			},
-			rootCoord: rc,
+			mixCoord: rc,
 		}
 		err := task.PreExecute(context.Background())
 		assert.Error(t, err)
@@ -352,7 +352,7 @@ func TestAlterDatabaseTaskForReplicateProperty(t *testing.T) {
 					},
 				},
 			},
-			rootCoord: rc,
+			mixCoord: rc,
 		}
 		err := task.PreExecute(context.Background())
 		assert.NoError(t, err)
@@ -360,7 +360,7 @@ func TestAlterDatabaseTaskForReplicateProperty(t *testing.T) {
 }
 
 func TestDescribeDatabaseTask(t *testing.T) {
-	rc := mocks.NewMockRootCoordClient(t)
+	rc := mocks.NewMockMixCoordClient(t)
 
 	rc.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{}, nil)
 	task := &describeDatabaseTask{
@@ -368,7 +368,7 @@ func TestDescribeDatabaseTask(t *testing.T) {
 			Base:   &commonpb.MsgBase{},
 			DbName: "test_describe_database",
 		},
-		rootCoord: rc,
+		mixCoord: rc,
 	}
 
 	err := task.PreExecute(context.Background())

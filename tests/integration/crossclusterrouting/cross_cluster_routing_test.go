@@ -76,7 +76,7 @@ func (s *CrossClusterRoutingSuite) TestCrossClusterRouting() {
 
 	// test rootCoord
 	s.Eventually(func() bool {
-		resp, err := s.Cluster.RootCoordClient.ShowCollections(s.Cluster.GetContext(), &milvuspb.ShowCollectionsRequest{
+		resp, err := s.Cluster.MixCoordClient.ShowCollections(s.Cluster.GetContext(), &milvuspb.ShowCollectionsRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
 			),
@@ -91,7 +91,7 @@ func (s *CrossClusterRoutingSuite) TestCrossClusterRouting() {
 
 	// test dataCoord
 	s.Eventually(func() bool {
-		resp, err := s.Cluster.DataCoordClient.GetRecoveryInfoV2(s.Cluster.GetContext(), &datapb.GetRecoveryInfoRequestV2{})
+		resp, err := s.Cluster.MixCoordClient.GetRecoveryInfoV2(s.Cluster.GetContext(), &datapb.GetRecoveryInfoRequestV2{})
 		s.Suite.T().Logf("resp: %s, err: %s", resp, err)
 		if err != nil {
 			return strings.Contains(err.Error(), merr.ErrServiceUnavailable.Error())
@@ -101,7 +101,7 @@ func (s *CrossClusterRoutingSuite) TestCrossClusterRouting() {
 
 	// test queryCoord
 	s.Eventually(func() bool {
-		resp, err := s.Cluster.QueryCoordClient.LoadCollection(s.Cluster.GetContext(), &querypb.LoadCollectionRequest{})
+		resp, err := s.Cluster.MixCoordClient.LoadCollection(s.Cluster.GetContext(), &querypb.LoadCollectionRequest{})
 		s.Suite.T().Logf("resp: %s, err: %s", resp, err)
 		if err != nil {
 			return strings.Contains(err.Error(), merr.ErrServiceUnavailable.Error())

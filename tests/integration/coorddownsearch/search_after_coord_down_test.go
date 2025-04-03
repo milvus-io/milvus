@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -282,20 +281,9 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 	paramtable.Init()
 
 	start := time.Now()
-	log.Info("=========================Data Coordinators stopped=========================")
-	c.StopDataCoord()
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
-
-	log.Info("=========================Query Coordinators stopped=========================")
-	c.StopQueryCoord()
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
 
 	log.Info("=========================Root Coordinators stopped=========================")
-	c.StopRootCoord()
+	c.StopMixCoord()
 	params.Save(params.CommonCfg.GracefulTime.Key, "60000")
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
@@ -305,22 +293,9 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 	log.Info(fmt.Sprintf("=========================Failed search cost: %fs=========================", time.Since(failedStart).Seconds()))
 
 	registry.ResetRegistration()
-	coordclient.ResetRegistration()
 
 	log.Info("=========================restart Root Coordinators=========================")
-	c.StartRootCoord()
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
-
-	log.Info("=========================restart Data Coordinators=========================")
-	c.StartDataCoord()
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
-
-	log.Info("=========================restart Query Coordinators=========================")
-	c.StartQueryCoord()
+	c.StartMixCoord()
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)

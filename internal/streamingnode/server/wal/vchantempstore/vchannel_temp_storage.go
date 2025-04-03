@@ -21,9 +21,9 @@ import (
 var ErrNotFound = errors.New("not found")
 
 // NewVChannelTempStorage creates a new VChannelTempStorage.
-func NewVChannelTempStorage(rc *syncutil.Future[types.RootCoordClient]) *VChannelTempStorage {
+func NewVChannelTempStorage(mix *syncutil.Future[types.MixCoordClient]) *VChannelTempStorage {
 	return &VChannelTempStorage{
-		rc:        rc,
+		mix:       mix,
 		vchannels: make(map[int64]map[string]string),
 	}
 }
@@ -32,7 +32,7 @@ func NewVChannelTempStorage(rc *syncutil.Future[types.RootCoordClient]) *VChanne
 // It's used to make compatibility between old version and new version message.
 // TODO: removed in 3.0.
 type VChannelTempStorage struct {
-	rc *syncutil.Future[types.RootCoordClient]
+	mix *syncutil.Future[types.MixCoordClient]
 
 	mu        sync.Mutex
 	vchannels map[int64]map[string]string
@@ -63,14 +63,13 @@ func (ts *VChannelTempStorage) updateVChannelByPChannelOfCollectionIfNotExist(ct
 		return nil
 	}
 	ts.mu.Unlock()
-
-	rc, err := ts.rc.GetWithContext(ctx)
+	mix, err := ts.mix.GetWithContext(ctx)
 	if err != nil {
 		return err
 	}
 
 	return retry.Do(ctx, func() error {
-		resp, err := rc.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+		resp, err := mix.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),

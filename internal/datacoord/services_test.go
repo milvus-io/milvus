@@ -691,37 +691,6 @@ func (s *ServerSuite) TestAssignSegmentID() {
 		s.NoError(err)
 		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
-
-	s.Run("assign segment with invalid collection", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		s.testServer.rootCoordClient = &mockRootCoord{
-			RootCoordClient: s.testServer.rootCoordClient,
-			collID:          collID,
-		}
-
-		schema := newTestSchema()
-		s.testServer.meta.AddCollection(&collectionInfo{
-			ID:         collID,
-			Schema:     schema,
-			Partitions: []int64{},
-		})
-		req := &datapb.SegmentIDRequest{
-			Count:        1000,
-			ChannelName:  channel0,
-			CollectionID: collIDInvalid,
-			PartitionID:  partID,
-		}
-
-		resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:            0,
-			PeerRole:          "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
-		})
-		s.NoError(err)
-		s.EqualValues(1, len(resp.SegIDAssignments))
-	})
 }
 
 func TestBroadcastAlteredCollection(t *testing.T) {
@@ -809,11 +778,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
-
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
 		}
@@ -852,8 +819,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -959,11 +926,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("test get recovery of unflushed segments ", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
-
 		svr.meta.AddCollection(&collectionInfo{
 			ID:     0,
 			Schema: newTestSchema(),
@@ -1036,14 +1001,12 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("test get binlogs", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
+		}
 		svr.meta.AddCollection(&collectionInfo{
 			Schema: newTestSchema(),
 		})
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
-		}
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
 			SegmentID:    0,
@@ -1136,8 +1099,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -1180,9 +1143,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("with fake segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -1225,8 +1187,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{

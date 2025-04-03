@@ -151,8 +151,8 @@ func (s *CompactionSuite) compactAndReboot(collection string) {
 
 	// Reboot
 	if planResp.GetMergeInfos()[0].GetTarget() == int64(-1) {
-		s.Cluster.StopDataCoord()
-		s.Cluster.StartDataCoord()
+		s.Cluster.StopMixCoord()
+		s.Cluster.StartMixCoord()
 
 		stateResp, err = s.Cluster.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
 			CompactionID: compactID,

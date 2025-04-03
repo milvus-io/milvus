@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -69,23 +68,16 @@ func initResourceForTest(t *testing.T) {
 	rc := idalloc.NewMockRootCoordClient(t)
 	rc.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{}, nil)
 
-	fRootCoordClient := syncutil.NewFuture[internaltypes.RootCoordClient]()
-	fRootCoordClient.Set(rc)
-
-	dc := mocks.NewMockDataCoordClient(t)
-	dc.EXPECT().AllocSegment(mock.Anything, mock.Anything).Return(&datapb.AllocSegmentResponse{}, nil)
-
-	fDataCoordClient := syncutil.NewFuture[internaltypes.DataCoordClient]()
-	fDataCoordClient.Set(dc)
+	rc.EXPECT().AllocSegment(mock.Anything, mock.Anything).Return(&datapb.AllocSegmentResponse{}, nil)
 
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-
+	fMixCoordClient := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixCoordClient.Set(rc)
 	resource.InitForTest(
 		t,
-		resource.OptRootCoordClient(fRootCoordClient),
-		resource.OptDataCoordClient(fDataCoordClient),
+		resource.OptMixCoordClient(fMixCoordClient),
 		resource.OptStreamingNodeCatalog(catalog),
 	)
 }

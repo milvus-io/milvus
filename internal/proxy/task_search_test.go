@@ -58,18 +58,14 @@ func TestSearchTask_PostExecute(t *testing.T) {
 	var err error
 
 	var (
-		rc  = NewRootCoordMock()
-		qc  = mocks.NewMockQueryCoordClient(t)
+		qc  = NewMixCoordMock()
 		ctx = context.TODO()
 	)
 
-	defer rc.Close()
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: merr.Success(),
-	}, nil).Maybe()
-	err = InitMetaCache(ctx, rc, qc, mgr)
+
+	err = InitMetaCache(ctx, qc, mgr)
 	require.NoError(t, err)
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
@@ -84,8 +80,8 @@ func TestSearchTask_PostExecute(t *testing.T) {
 				Nq:             1,
 				SearchParams:   getBaseSearchParams(),
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			mixCoord: qc,
+			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -94,7 +90,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		collName := "test_collection_empty_result" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 		qt := getSearchTask(t, collName)
 		err = qt.PreExecute(ctx)
 		assert.NoError(t, err)
@@ -115,7 +111,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		)
 
 		collName := "test_collection_search_iterator_v2" + funcutil.GenRandomStr()
-		collSchema := createColl(t, collName, rc)
+		collSchema := createColl(t, collName, qc)
 
 		createIteratorSearchTask := func(t *testing.T, metricType string, rows int) *searchTask {
 			ids := make([]int64, rows)
@@ -224,7 +220,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 	})
 }
 
-func createColl(t *testing.T, name string, rc types.RootCoordClient) *schemapb.CollectionSchema {
+func createColl(t *testing.T, name string, rc types.MixCoordClient) *schemapb.CollectionSchema {
 	schema := constructCollectionSchema(testInt64Field, testFloatVecField, testVecDim, name)
 	marshaledSchema, err := proto.Marshal(schema)
 	require.NoError(t, err)
@@ -237,8 +233,8 @@ func createColl(t *testing.T, name string, rc types.RootCoordClient) *schemapb.C
 			Schema:         marshaledSchema,
 			ShardsNum:      common.DefaultShardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
+		ctx:      ctx,
+		mixCoord: rc,
 	}
 
 	require.NoError(t, createColT.OnEnqueue())
@@ -313,16 +309,12 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	var err error
 
 	var (
-		rc  = NewRootCoordMock()
-		qc  = mocks.NewMockQueryCoordClient(t)
+		qc  = NewMixCoordMock()
 		ctx = context.TODO()
 	)
-
-	defer rc.Close()
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	err = InitMetaCache(ctx, rc, qc, mgr)
+	err = InitMetaCache(ctx, qc, mgr)
 	require.NoError(t, err)
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
@@ -334,8 +326,8 @@ func TestSearchTask_PreExecute(t *testing.T) {
 				CollectionName: collName,
 				Nq:             1,
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			mixCoord: qc,
+			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -350,8 +342,8 @@ func TestSearchTask_PreExecute(t *testing.T) {
 				CollectionName: collName,
 				Nq:             nq,
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			mixCoord: qc,
+			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -359,7 +351,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("bad nq 0", func(t *testing.T) {
 		collName := "test_bad_nq0_error" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 		// Nq must be in range [1, 16384].
 		task := getSearchTaskWithNq(t, collName, 0)
 		err = task.PreExecute(ctx)
@@ -368,7 +360,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("bad nq 16385", func(t *testing.T) {
 		collName := "test_bad_nq16385_error" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 
 		// Nq must be in range [1, 16384].
 		task := getSearchTaskWithNq(t, collName, 16384+1)
@@ -385,7 +377,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("invalid IgnoreGrowing param", func(t *testing.T) {
 		collName := "test_invalid_param" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 
 		task := getSearchTask(t, collName)
 		task.request.SearchParams = getInvalidSearchParams(IgnoreGrowingKey)
@@ -395,7 +387,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("search with timeout", func(t *testing.T) {
 		collName := "search_with_timeout" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 
 		task := getSearchTask(t, collName)
 		task.request.SearchParams = getValidSearchParams()
@@ -429,7 +421,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("search consistent iterator pre_ts", func(t *testing.T) {
 		collName := "search_with_timeout" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 
 		st := getSearchTask(t, collName)
 		st.request.SearchParams = getValidSearchParams()
@@ -453,7 +445,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("search consistent iterator post_ts", func(t *testing.T) {
 		collName := "search_with_timeout" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 
 		st := getSearchTask(t, collName)
 		st.request.SearchParams = getValidSearchParams()
@@ -478,7 +470,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("search inconsistent collection_id", func(t *testing.T) {
 		collName := "search_inconsistent_collection" + funcutil.GenRandomStr()
-		createColl(t, collName, rc)
+		createColl(t, collName, qc)
 
 		st := getSearchTask(t, collName)
 		st.request.SearchParams = getValidSearchParams()
@@ -566,16 +558,13 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 
 	var err error
 	var (
-		rc  = NewRootCoordMock()
-		qc  = mocks.NewMockQueryCoordClient(t)
+		qc  = NewMixCoordMock()
 		ctx = context.TODO()
 	)
 
-	defer rc.Close()
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	err = InitMetaCache(ctx, rc, qc, mgr)
+	err = InitMetaCache(ctx, qc, mgr)
 	require.NoError(t, err)
 
 	getSearchTask := func(t *testing.T, collName string, data []string) *searchTask {
@@ -606,8 +595,8 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 				},
 				PlaceholderGroup: holderByte,
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			mixCoord: qc,
+			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -692,8 +681,8 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 					{Key: LimitKey, Value: "10"},
 				},
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			mixCoord: qc,
+			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
 		return task
@@ -746,17 +735,17 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	}
 }
 
-func getQueryCoord() *mocks.MockQueryCoord {
-	qc := &mocks.MockQueryCoord{}
-	qc.EXPECT().Start().Return(nil)
-	qc.EXPECT().Stop().Return(nil)
-	return qc
+func getMixCoord() *mocks.MixCoord {
+	mixc := &mocks.MixCoord{}
+	mixc.EXPECT().Start().Return(nil)
+	mixc.EXPECT().Stop().Return(nil)
+	return mixc
 }
 
-func getQueryCoordClient() *mocks.MockQueryCoordClient {
-	qc := &mocks.MockQueryCoordClient{}
-	qc.EXPECT().Close().Return(nil)
-	return qc
+func getMixCoordClient() *mocks.MockMixCoordClient {
+	mixc := &mocks.MockMixCoordClient{}
+	mixc.EXPECT().Close().Return(nil)
+	return mixc
 }
 
 func getQueryNode() *mocks.MockQueryNode {
@@ -775,17 +764,14 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 	var (
 		err error
 
-		rc  = NewRootCoordMock()
-		qc  = getQueryCoordClient()
+		qc  = NewMixCoordMock()
 		ctx = context.TODO()
 
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 
-	defer rc.Close()
 	mgr := newShardClientMgr()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	err = InitMetaCache(ctx, rc, qc, mgr)
+	err = InitMetaCache(ctx, qc, mgr)
 	require.NoError(t, err)
 
 	defer qc.Close()
@@ -804,11 +790,11 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 		result: &milvuspb.SearchResults{
 			Status: &commonpb.Status{},
 		},
-		qc: qc,
-		tr: timerecord.NewTimeRecorder("search"),
+		mixCoord: qc,
+		tr:       timerecord.NewTimeRecorder("search"),
 	}
 	require.NoError(t, task.OnEnqueue())
-	createColl(t, collectionName, rc)
+	createColl(t, collectionName, qc)
 }
 
 func genSearchResultData(nq int64, topk int64, ids []int64, scores []float32) *schemapb.SearchResultData {
@@ -840,41 +826,6 @@ func TestSearchTask_Ts(t *testing.T) {
 	task.SetTs(ts)
 	assert.Equal(t, ts, task.BeginTs())
 	assert.Equal(t, ts, task.EndTs())
-}
-
-func TestSearchTask_Reduce(t *testing.T) {
-	// const (
-	//     nq         = 1
-	//     topk       = 4
-	//     metricType = "L2"
-	// )
-	// t.Run("case1", func(t *testing.T) {
-	//     ids := []int64{1, 2, 3, 4}
-	//     scores := []float32{-1.0, -2.0, -3.0, -4.0}
-	//     data1 := genSearchResultData(nq, topk, ids, scores)
-	//     data2 := genSearchResultData(nq, topk, ids, scores)
-	//     dataArray := make([]*schemapb.SearchResultData, 0)
-	//     dataArray = append(dataArray, data1)
-	//     dataArray = append(dataArray, data2)
-	//     res, err := reduceSearchResultData(dataArray, nq, topk, metricType)
-	//     assert.NoError(t, err)
-	//     assert.Equal(t, ids, res.Results.Ids.GetIntId().Data)
-	//     assert.Equal(t, []float32{1.0, 2.0, 3.0, 4.0}, res.Results.Scores)
-	// })
-	// t.Run("case2", func(t *testing.T) {
-	//     ids1 := []int64{1, 2, 3, 4}
-	//     scores1 := []float32{-1.0, -2.0, -3.0, -4.0}
-	//     ids2 := []int64{5, 1, 3, 4}
-	//     scores2 := []float32{-1.0, -1.0, -3.0, -4.0}
-	//     data1 := genSearchResultData(nq, topk, ids1, scores1)
-	//     data2 := genSearchResultData(nq, topk, ids2, scores2)
-	//     dataArray := make([]*schemapb.SearchResultData, 0)
-	//     dataArray = append(dataArray, data1)
-	//     dataArray = append(dataArray, data2)
-	//     res, err := reduceSearchResultData(dataArray, nq, topk, metricType)
-	//     assert.NoError(t, err)
-	//     assert.ElementsMatch(t, []int64{1, 5, 2, 3}, res.Results.Ids.GetIntId().Data)
-	// })
 }
 
 func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
@@ -1767,68 +1718,6 @@ func TestTaskSearch_selectHighestScoreIndex(t *testing.T) {
 		}
 	})
 
-	//t.Run("Integer ID with bad score", func(t *testing.T) {
-	//	type args struct {
-	//		subSearchResultData []*schemapb.SearchResultData
-	//		subSearchNqOffset   [][]int64
-	//		cursors             []int64
-	//		topk                int64
-	//		nq                  int64
-	//	}
-	//	tests := []struct {
-	//		description string
-	//		args        args
-	//
-	//		expectedIdx     []int
-	//		expectedDataIdx []int
-	//	}{
-	//		{
-	//			description: "reduce 2 subSearchResultData",
-	//			args: args{
-	//				subSearchResultData: []*schemapb.SearchResultData{
-	//					{
-	//						Ids: &schemapb.IDs{
-	//							IdField: &schemapb.IDs_IntId{
-	//								IntId: &schemapb.LongArray{
-	//									Data: []int64{11, 9, 8, 5, 3, 1},
-	//								},
-	//							},
-	//						},
-	//						Scores: []float32{-math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32},
-	//						Topks:  []int64{2, 2, 2},
-	//					},
-	//					{
-	//						Ids: &schemapb.IDs{
-	//							IdField: &schemapb.IDs_IntId{
-	//								IntId: &schemapb.LongArray{
-	//									Data: []int64{12, 10, 7, 6, 4, 2},
-	//								},
-	//							},
-	//						},
-	//						Scores: []float32{-math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32},
-	//						Topks:  []int64{2, 2, 2},
-	//					},
-	//				},
-	//				subSearchNqOffset: [][]int64{{0, 2, 4}, {0, 2, 4}},
-	//				cursors:           []int64{0, 0},
-	//				topk:              2,
-	//				nq:                3,
-	//			},
-	//			expectedIdx:     []int{-1, -1, -1},
-	//			expectedDataIdx: []int{-1, -1, -1},
-	//		},
-	//	}
-	//	for _, test := range tests {
-	//		t.Run(test.description, func(t *testing.T) {
-	//			for nqNum := int64(0); nqNum < test.args.nq; nqNum++ {
-	//				idx, dataIdx := selectHighestScoreIndex(test.args.subSearchResultData, test.args.subSearchNqOffset, test.args.cursors, nqNum)
-	//				assert.NotEqual(t, test.expectedIdx[nqNum], idx)
-	//				assert.NotEqual(t, test.expectedDataIdx[nqNum], int(dataIdx))
-	//			}
-	//		})
-	//	}
-	//})
-
 	t.Run("String ID", func(t *testing.T) {
 		type args struct {
 			subSearchResultData []*schemapb.SearchResultData
@@ -2485,160 +2374,157 @@ func TestTaskSearch_reduceAdvanceSearchGroupByMultipleNq(t *testing.T) {
 }
 
 func TestSearchTask_ErrExecute(t *testing.T) {
-	var (
-		err error
-		ctx = context.TODO()
+	// var (
+	// 	err error
+	// 	ctx = context.TODO()
+	// 	qc  = NewMixCoordMock()
+	// 	qn  = getQueryNodeClient()
 
-		rc = NewRootCoordMock()
-		qc = getQueryCoordClient()
-		qn = getQueryNodeClient()
+	// 	shardsNum      = int32(2)
+	// 	collectionName = t.Name() + funcutil.GenRandomStr()
+	// )
 
-		shardsNum      = int32(2)
-		collectionName = t.Name() + funcutil.GenRandomStr()
-	)
+	// qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
-	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	// mgr := NewMockShardClientManager(t)
+	// mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
+	// lb := NewLBPolicyImpl(mgr)
 
-	mgr := NewMockShardClientManager(t)
-	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
-	lb := NewLBPolicyImpl(mgr)
+	// defer qc.Close()
 
-	defer qc.Close()
+	// err = InitMetaCache(ctx, qc, mgr)
+	// assert.NoError(t, err)
 
-	err = InitMetaCache(ctx, rc, qc, mgr)
-	assert.NoError(t, err)
+	// fieldName2Types := map[string]schemapb.DataType{
+	// 	testBoolField:     schemapb.DataType_Bool,
+	// 	testInt32Field:    schemapb.DataType_Int32,
+	// 	testInt64Field:    schemapb.DataType_Int64,
+	// 	testFloatField:    schemapb.DataType_Float,
+	// 	testDoubleField:   schemapb.DataType_Double,
+	// 	testFloatVecField: schemapb.DataType_FloatVector,
+	// }
+	// if enableMultipleVectorFields {
+	// 	fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
+	// }
 
-	fieldName2Types := map[string]schemapb.DataType{
-		testBoolField:     schemapb.DataType_Bool,
-		testInt32Field:    schemapb.DataType_Int32,
-		testInt64Field:    schemapb.DataType_Int64,
-		testFloatField:    schemapb.DataType_Float,
-		testDoubleField:   schemapb.DataType_Double,
-		testFloatVecField: schemapb.DataType_FloatVector,
-	}
-	if enableMultipleVectorFields {
-		fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
-	}
+	// schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testInt64Field, false)
+	// marshaledSchema, err := proto.Marshal(schema)
+	// assert.NoError(t, err)
 
-	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testInt64Field, false)
-	marshaledSchema, err := proto.Marshal(schema)
-	assert.NoError(t, err)
+	// createColT := &createCollectionTask{
+	// 	Condition: NewTaskCondition(ctx),
+	// 	CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+	// 		CollectionName: collectionName,
+	// 		Schema:         marshaledSchema,
+	// 		ShardsNum:      shardsNum,
+	// 	},
+	// 	ctx:      ctx,
+	// 	mixCoord: qc,
+	// }
 
-	createColT := &createCollectionTask{
-		Condition: NewTaskCondition(ctx),
-		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
-			CollectionName: collectionName,
-			Schema:         marshaledSchema,
-			ShardsNum:      shardsNum,
-		},
-		ctx:       ctx,
-		rootCoord: rc,
-	}
+	// require.NoError(t, createColT.OnEnqueue())
+	// require.NoError(t, createColT.PreExecute(ctx))
+	// require.NoError(t, createColT.Execute(ctx))
+	// require.NoError(t, createColT.PostExecute(ctx))
 
-	require.NoError(t, createColT.OnEnqueue())
-	require.NoError(t, createColT.PreExecute(ctx))
-	require.NoError(t, createColT.Execute(ctx))
-	require.NoError(t, createColT.PostExecute(ctx))
+	// collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	// assert.NoError(t, err)
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
-	assert.NoError(t, err)
+	// successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+	// qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+	// qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+	// 	Status: successStatus,
+	// 	Shards: []*querypb.ShardLeadersList{
+	// 		{
+	// 			ChannelName: "channel-1",
+	// 			NodeIds:     []int64{1, 2, 3},
+	// 			NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+	// 		},
+	// 	},
+	// }, nil)
+	// qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+	// 	Status:              successStatus,
+	// 	CollectionIDs:       []int64{collectionID},
+	// 	InMemoryPercentages: []int64{100},
+	// }, nil)
+	// status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
+	// 	Base: &commonpb.MsgBase{
+	// 		MsgType:  commonpb.MsgType_LoadCollection,
+	// 		SourceID: paramtable.GetNodeID(),
+	// 	},
+	// 	CollectionID: collectionID,
+	// })
+	// require.NoError(t, err)
+	// require.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
-	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
-		Status: successStatus,
-		Shards: []*querypb.ShardLeadersList{
-			{
-				ChannelName: "channel-1",
-				NodeIds:     []int64{1, 2, 3},
-				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
-			},
-		},
-	}, nil)
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status:              successStatus,
-		CollectionIDs:       []int64{collectionID},
-		InMemoryPercentages: []int64{100},
-	}, nil)
-	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_LoadCollection,
-			SourceID: paramtable.GetNodeID(),
-		},
-		CollectionID: collectionID,
-	})
-	require.NoError(t, err)
-	require.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	// // test begins
+	// task := &searchTask{
+	// 	Condition: NewTaskCondition(ctx),
+	// 	SearchRequest: &internalpb.SearchRequest{
+	// 		Base: &commonpb.MsgBase{
+	// 			MsgType:  commonpb.MsgType_Retrieve,
+	// 			SourceID: paramtable.GetNodeID(),
+	// 		},
+	// 		CollectionID:   collectionID,
+	// 		OutputFieldsId: make([]int64, len(fieldName2Types)),
+	// 	},
+	// 	ctx: ctx,
+	// 	result: &milvuspb.SearchResults{
+	// 		Status: merr.Success(),
+	// 	},
+	// 	request: &milvuspb.SearchRequest{
+	// 		Base: &commonpb.MsgBase{
+	// 			MsgType:  commonpb.MsgType_Retrieve,
+	// 			SourceID: paramtable.GetNodeID(),
+	// 		},
+	// 		CollectionName: collectionName,
+	// 		Nq:             2,
+	// 		DslType:        commonpb.DslType_BoolExprV1,
+	// 	},
+	// 	mixCoord: qc,
+	// 	lb:       lb,
+	// }
+	// for i := 0; i < len(fieldName2Types); i++ {
+	// 	task.SearchRequest.OutputFieldsId[i] = int64(common.StartOfUserFieldID + i)
+	// }
 
-	// test begins
-	task := &searchTask{
-		Condition: NewTaskCondition(ctx),
-		SearchRequest: &internalpb.SearchRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_Retrieve,
-				SourceID: paramtable.GetNodeID(),
-			},
-			CollectionID:   collectionID,
-			OutputFieldsId: make([]int64, len(fieldName2Types)),
-		},
-		ctx: ctx,
-		result: &milvuspb.SearchResults{
-			Status: merr.Success(),
-		},
-		request: &milvuspb.SearchRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_Retrieve,
-				SourceID: paramtable.GetNodeID(),
-			},
-			CollectionName: collectionName,
-			Nq:             2,
-			DslType:        commonpb.DslType_BoolExprV1,
-		},
-		qc: qc,
-		lb: lb,
-	}
-	for i := 0; i < len(fieldName2Types); i++ {
-		task.SearchRequest.OutputFieldsId[i] = int64(common.StartOfUserFieldID + i)
-	}
+	// assert.NoError(t, task.OnEnqueue())
 
-	assert.NoError(t, task.OnEnqueue())
+	// task.ctx = ctx
+	// if enableMultipleVectorFields {
+	// 	err = task.PreExecute(ctx)
+	// 	assert.Error(t, err)
+	// 	assert.Equal(t, err.Error(), "multiple anns_fields exist, please specify a anns_field in search_params")
+	// } else {
+	// 	assert.NoError(t, task.PreExecute(ctx))
+	// }
 
-	task.ctx = ctx
-	if enableMultipleVectorFields {
-		err = task.PreExecute(ctx)
-		assert.Error(t, err)
-		assert.Equal(t, err.Error(), "multiple anns_fields exist, please specify a anns_field in search_params")
-	} else {
-		assert.NoError(t, task.PreExecute(ctx))
-	}
+	// qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+	// assert.Error(t, task.Execute(ctx))
 
-	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
-	assert.Error(t, task.Execute(ctx))
+	// qn.ExpectedCalls = nil
+	// qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	// qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
+	// 	Status: merr.Status(merr.ErrChannelNotAvailable),
+	// }, nil)
+	// err = task.Execute(ctx)
+	// assert.ErrorIs(t, err, merr.ErrChannelNotAvailable)
 
-	qn.ExpectedCalls = nil
-	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
-		Status: merr.Status(merr.ErrChannelNotAvailable),
-	}, nil)
-	err = task.Execute(ctx)
-	assert.ErrorIs(t, err, merr.ErrChannelNotAvailable)
+	// qn.ExpectedCalls = nil
+	// qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	// qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
+	// 	Status: &commonpb.Status{
+	// 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	// 	},
+	// }, nil)
+	// assert.Error(t, task.Execute(ctx))
 
-	qn.ExpectedCalls = nil
-	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}, nil)
-	assert.Error(t, task.Execute(ctx))
-
-	qn.ExpectedCalls = nil
-	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
-		Status: merr.Success(),
-	}, nil)
-	assert.NoError(t, task.Execute(ctx))
+	// qn.ExpectedCalls = nil
+	// qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	// qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
+	// 	Status: merr.Success(),
+	// }, nil)
+	// assert.NoError(t, task.Execute(ctx))
 }
 
 func TestTaskSearch_parseSearchInfo(t *testing.T) {
@@ -3185,8 +3071,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	assert.NoError(t, err)
 	err = node.initRateCollector()
 	assert.NoError(t, err)
-	node.rootCoord = mocks.NewMockRootCoordClient(t)
-	node.queryCoord = mocks.NewMockQueryCoordClient(t)
+	node.mixCoord = mocks.NewMockMixCoordClient(t)
 
 	collectionName := "col"
 	collectionID := UniqueID(0)

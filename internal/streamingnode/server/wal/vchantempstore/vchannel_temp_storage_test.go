@@ -16,7 +16,7 @@ import (
 )
 
 func TestVChannelTempStorage(t *testing.T) {
-	rcf := syncutil.NewFuture[types.RootCoordClient]()
+	rcf := syncutil.NewFuture[types.MixCoordClient]()
 	ts := NewVChannelTempStorage(rcf)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -26,7 +26,7 @@ func TestVChannelTempStorage(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 
 	ctx = context.Background()
-	rc := mocks.NewMockRootCoordClient(t)
+	rc := mocks.NewMockMixCoordClient(t)
 	rc.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:               merr.Success(),
 		CollectionID:         1,

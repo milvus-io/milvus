@@ -28,15 +28,15 @@ func InitForTest(t *testing.T, opts ...optResourceInit) {
 		r.syncMgr = syncmgr.NewSyncManager(r.chunkManager)
 		r.wbMgr = writebuffer.NewManager(r.syncMgr)
 	}
-	if r.rootCoordClient != nil {
-		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
-		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
+	if r.mixCoordClient != nil {
+		r.timestampAllocator = idalloc.NewTSOAllocator(r.mixCoordClient)
+		r.idAllocator = idalloc.NewIDAllocator(r.mixCoordClient)
 	} else {
-		f := syncutil.NewFuture[types.RootCoordClient]()
+		f := syncutil.NewFuture[types.MixCoordClient]()
 		f.Set(idalloc.NewMockRootCoordClient(t))
-		r.rootCoordClient = f
-		r.timestampAllocator = idalloc.NewTSOAllocator(r.rootCoordClient)
-		r.idAllocator = idalloc.NewIDAllocator(r.rootCoordClient)
+		r.mixCoordClient = f
+		r.timestampAllocator = idalloc.NewTSOAllocator(r.mixCoordClient)
+		r.idAllocator = idalloc.NewIDAllocator(r.mixCoordClient)
 	}
 	r.segmentAssignStatsManager = stats.NewStatsManager()
 	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()

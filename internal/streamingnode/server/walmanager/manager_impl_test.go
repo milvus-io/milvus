@@ -25,17 +25,12 @@ func TestMain(m *testing.M) {
 }
 
 func TestManager(t *testing.T) {
-	rootcoord := mocks.NewMockRootCoordClient(t)
-	fRootcoord := syncutil.NewFuture[internaltypes.RootCoordClient]()
-	fRootcoord.Set(rootcoord)
-	datacoord := mocks.NewMockDataCoordClient(t)
-	fDatacoord := syncutil.NewFuture[internaltypes.DataCoordClient]()
-	fDatacoord.Set(datacoord)
-
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
 	resource.InitForTest(
 		t,
-		resource.OptRootCoordClient(fRootcoord),
-		resource.OptDataCoordClient(fDatacoord),
+		resource.OptMixCoordClient(fMixcoord),
 	)
 
 	opener := mock_wal.NewMockOpener(t)

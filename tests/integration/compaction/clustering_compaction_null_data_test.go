@@ -229,7 +229,7 @@ func (s *ClusteringCompactionNullDataSuite) TestClusteringCompactionNullData() {
 	s.NoError(err)
 	s.Equal(desCollResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
-	flushedSegmentsResp, err := c.DataCoord.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{
+	flushedSegmentsResp, err := c.MixCoord.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{
 		CollectionID: desCollResp.GetCollectionID(),
 		PartitionID:  -1,
 	})
@@ -241,7 +241,7 @@ func (s *ClusteringCompactionNullDataSuite) TestClusteringCompactionNullData() {
 	s.Contains([]int{15, 16}, len(flushedSegmentsResp.GetSegments()))
 	log.Info("get flushed segments done", zap.Int64s("segments", flushedSegmentsResp.GetSegments()))
 	totalRows := int64(0)
-	segsInfoResp, err := c.DataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+	segsInfoResp, err := c.MixCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		SegmentIDs: flushedSegmentsResp.GetSegments(),
 	})
 	s.NoError(err)

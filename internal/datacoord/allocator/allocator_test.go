@@ -24,7 +24,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -33,12 +32,12 @@ import (
 
 type RootCoordAllocatorSuite struct {
 	suite.Suite
-	ms        *mocks.MockRootCoordClient
+	ms        *mocks.MixCoord
 	allocator Allocator
 }
 
 func (s *RootCoordAllocatorSuite) SetupTest() {
-	s.ms = mocks.NewMockRootCoordClient(s.T())
+	s.ms = mocks.NewMixCoord(s.T())
 	s.allocator = NewRootCoordAllocator(s.ms)
 }
 
@@ -47,7 +46,7 @@ func (s *RootCoordAllocatorSuite) TestAllocTimestamp() {
 	defer cancel()
 	s.Run("normal", func() {
 		ts := rand.Uint64()
-		s.ms.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, atr *rootcoordpb.AllocTimestampRequest, co ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
+		s.ms.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, atr *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 			s.EqualValues(1, atr.GetCount())
 			return &rootcoordpb.AllocTimestampResponse{
 				Status:    merr.Success(),
@@ -71,7 +70,7 @@ func (s *RootCoordAllocatorSuite) TestAllocID() {
 	defer cancel()
 	s.Run("normal", func() {
 		id := rand.Int63n(1000000)
-		s.ms.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ai *rootcoordpb.AllocIDRequest, co ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
+		s.ms.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ai *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 			s.EqualValues(1, ai.GetCount())
 			return &rootcoordpb.AllocIDResponse{
 				Status: merr.Success(),
@@ -94,7 +93,7 @@ func (s *RootCoordAllocatorSuite) TestAllocN() {
 	s.Run("normal", func() {
 		n := rand.Int63n(100) + 1
 		id := rand.Int63n(1000000)
-		s.ms.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ai *rootcoordpb.AllocIDRequest, co ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
+		s.ms.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ai *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 			s.EqualValues(n, ai.GetCount())
 			return &rootcoordpb.AllocIDResponse{
 				Status: merr.Success(),
@@ -110,7 +109,7 @@ func (s *RootCoordAllocatorSuite) TestAllocN() {
 
 	s.Run("zero_n", func() {
 		id := rand.Int63n(1000000)
-		s.ms.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ai *rootcoordpb.AllocIDRequest, co ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
+		s.ms.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ai *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 			s.EqualValues(1, ai.GetCount())
 			return &rootcoordpb.AllocIDResponse{
 				Status: merr.Success(),

@@ -238,7 +238,7 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
-	flushedSegmentsResp, err := c.DataCoordClient.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{
+	flushedSegmentsResp, err := c.MixCoordClient.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{
 		CollectionID:     collectionID,
 		PartitionID:      partitionID,
 		IncludeUnhealthy: false,

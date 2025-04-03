@@ -107,28 +107,28 @@ func (s *SuspendNodeTestSuite) TestSuspendNode() {
 	s.Len(resp2.GetReplicas(), 1)
 	defer s.releaseCollection(dbName, collectionName)
 
-	resp3, err := s.Cluster.QueryCoord.SuspendNode(ctx, &querypb.SuspendNodeRequest{
+	resp3, err := s.Cluster.MixCoord.SuspendNode(ctx, &querypb.SuspendNodeRequest{
 		NodeID: qns[0].GetQueryNode().GetNodeID(),
 	})
 	s.NoError(err)
 	s.True(merr.Ok(resp3))
 
 	// expect suspend node to be removed from resource group
-	resp5, err := s.Cluster.QueryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
+	resp5, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
 		ResourceGroup: meta.DefaultResourceGroupName,
 	})
 	s.NoError(err)
 	s.True(merr.Ok(resp5.GetStatus()))
 	s.Equal(2, len(resp5.GetResourceGroup().GetNodes()))
 
-	resp6, err := s.Cluster.QueryCoord.ResumeNode(ctx, &querypb.ResumeNodeRequest{
+	resp6, err := s.Cluster.MixCoord.ResumeNode(ctx, &querypb.ResumeNodeRequest{
 		NodeID: qns[0].GetQueryNode().GetNodeID(),
 	})
 	s.NoError(err)
 	s.True(merr.Ok(resp6))
 
 	// expect node state to be resume
-	resp7, err := s.Cluster.QueryCoord.ListQueryNode(ctx, &querypb.ListQueryNodeRequest{})
+	resp7, err := s.Cluster.MixCoord.ListQueryNode(ctx, &querypb.ListQueryNodeRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(resp7.GetStatus()))
 	for _, node := range resp7.GetNodeInfos() {
@@ -138,7 +138,7 @@ func (s *SuspendNodeTestSuite) TestSuspendNode() {
 	}
 
 	// expect suspend node to be added to resource group
-	resp8, err := s.Cluster.QueryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
+	resp8, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
 		ResourceGroup: meta.DefaultResourceGroupName,
 	})
 	s.NoError(err)

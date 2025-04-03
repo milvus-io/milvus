@@ -43,16 +43,15 @@ type getStatisticsTask struct {
 	// partition ids that are not loaded into query node, require get statistics from DataCoord
 	unloadedPartitionIDs []UniqueID
 
-	ctx context.Context
-	dc  types.DataCoordClient
-	tr  *timerecord.TimeRecorder
+	ctx  context.Context
+	mixc types.MixCoordClient
+	tr   *timerecord.TimeRecorder
 
 	fromDataCoord bool
 	fromQueryNode bool
 
 	// if query from shard
 	*internalpb.GetStatisticsRequest
-	qc        types.QueryCoordClient
 	resultBuf *typeutil.ConcurrentSet[*internalpb.GetStatisticsResponse]
 
 	lb LBPolicy
@@ -131,7 +130,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	}
 
 	// check if collection/partitions are loaded into query node
-	loaded, unloaded, err := checkFullLoaded(ctx, g.qc, g.request.GetDbName(), g.collectionName, g.GetStatisticsRequest.CollectionID, partIDs)
+	loaded, unloaded, err := checkFullLoaded(ctx, g.mixc, g.request.GetDbName(), g.collectionName, g.GetStatisticsRequest.CollectionID, partIDs)
 	log := log.Ctx(ctx).With(
 		zap.String("collectionName", g.collectionName),
 		zap.Int64("collectionID", g.CollectionID),
@@ -237,7 +236,7 @@ func (g *getStatisticsTask) getStatisticsFromDataCoord(ctx context.Context) erro
 		PartitionIDs: partIDs,
 	}
 
-	result, err := g.dc.GetPartitionStatistics(ctx, req)
+	result, err := g.mixc.GetPartitionStatistics(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -326,7 +325,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 
 	// If request to search partitions
 	if len(searchPartitionIDs) > 0 {
-		resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+		resp, err := qc.ShowLoadPartitions(ctx, &querypb.ShowPartitionsRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -352,7 +351,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 	}
 
 	// If request to search collection
-	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+	resp, err := qc.ShowLoadPartitions(ctx, &querypb.ShowPartitionsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -592,9 +591,9 @@ type getCollectionStatisticsTask struct {
 	baseTask
 	Condition
 	*milvuspb.GetCollectionStatisticsRequest
-	ctx       context.Context
-	dataCoord types.DataCoordClient
-	result    *milvuspb.GetCollectionStatisticsResponse
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.GetCollectionStatisticsResponse
 
 	collectionID UniqueID
 }
@@ -656,7 +655,7 @@ func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
 		CollectionID: collID,
 	}
 
-	result, err := g.dataCoord.GetCollectionStatistics(ctx, req)
+	result, err := g.mixCoord.GetCollectionStatistics(ctx, req)
 	if err = merr.CheckRPCCall(result, err); err != nil {
 		return err
 	}
@@ -675,9 +674,9 @@ type getPartitionStatisticsTask struct {
 	baseTask
 	Condition
 	*milvuspb.GetPartitionStatisticsRequest
-	ctx       context.Context
-	dataCoord types.DataCoordClient
-	result    *milvuspb.GetPartitionStatisticsResponse
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.GetPartitionStatisticsResponse
 
 	collectionID UniqueID
 }
@@ -744,7 +743,7 @@ func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
 		PartitionIDs: []int64{partitionID},
 	}
 
-	result, _ := g.dataCoord.GetPartitionStatistics(ctx, req)
+	result, _ := g.mixCoord.GetPartitionStatistics(ctx, req)
 	if result == nil {
 		return errors.New("get partition statistics resp is nil")
 	}

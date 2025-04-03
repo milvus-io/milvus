@@ -23,10 +23,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -55,10 +56,9 @@ func Test_newChannels(t *testing.T) {
 func Test_getDmlChannelsFunc(t *testing.T) {
 	t.Run("failed to describe collection", func(t *testing.T) {
 		ctx := context.Background()
-		rc := newMockRootCoord()
-		rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-			return nil, errors.New("mock")
-		}
+		rc := mocks.NewMockMixCoordClient(t)
+		rc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
+
 		f := getDmlChannelsFunc(ctx, rc)
 		_, err := f(100)
 		assert.Error(t, err)
@@ -66,10 +66,8 @@ func Test_getDmlChannelsFunc(t *testing.T) {
 
 	t.Run("error code not success", func(t *testing.T) {
 		ctx := context.Background()
-		rc := newMockRootCoord()
-		rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil
-		}
+		rc := mocks.NewMockMixCoordClient(t)
+		rc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil)
 		f := getDmlChannelsFunc(ctx, rc)
 		_, err := f(100)
 		assert.Error(t, err)
@@ -77,14 +75,13 @@ func Test_getDmlChannelsFunc(t *testing.T) {
 
 	t.Run("normal case", func(t *testing.T) {
 		ctx := context.Background()
-		rc := newMockRootCoord()
-		rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{
-				VirtualChannelNames:  []string{"111", "222"},
-				PhysicalChannelNames: []string{"111", "111"},
-				Status:               &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			}, nil
-		}
+		rc := mocks.NewMockMixCoordClient(t)
+		rc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			VirtualChannelNames:  []string{"111", "222"},
+			PhysicalChannelNames: []string{"111", "111"},
+			Status:               &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
+
 		f := getDmlChannelsFunc(ctx, rc)
 		got, err := f(100)
 		assert.NoError(t, err)

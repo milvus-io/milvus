@@ -24,7 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	rc "github.com/milvus-io/milvus/internal/distributed/rootcoord"
+	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -32,45 +32,45 @@ import (
 )
 
 // RootCoord implements RoodCoord grpc server
-type RootCoord struct {
+type MixCoord struct {
 	ctx context.Context
-	svr *rc.Server
+	svr *mix.Server
 }
 
 // NewRootCoord creates a new RoorCoord
-func NewRootCoord(ctx context.Context, factory dependency.Factory) (*RootCoord, error) {
-	svr, err := rc.NewServer(ctx, factory)
+func NewMixCoord(ctx context.Context, factory dependency.Factory) (*MixCoord, error) {
+	svr, err := mix.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}
-	return &RootCoord{
+	return &MixCoord{
 		ctx: ctx,
 		svr: svr,
 	}, nil
 }
 
-func (rc *RootCoord) Prepare() error {
+func (rc *MixCoord) Prepare() error {
 	return rc.svr.Prepare()
 }
 
 // Run starts service
-func (rc *RootCoord) Run() error {
+func (rc *MixCoord) Run() error {
 	if err := rc.svr.Run(); err != nil {
-		log.Ctx(rc.ctx).Error("RootCoord starts error", zap.Error(err))
+		log.Ctx(rc.ctx).Error("MixCoord starts error", zap.Error(err))
 		return err
 	}
-	log.Ctx(rc.ctx).Info("RootCoord successfully started")
+	log.Ctx(rc.ctx).Info("MixCoord successfully started")
 	return nil
 }
 
 // Stop terminates service
-func (rc *RootCoord) Stop() error {
+func (rc *MixCoord) Stop() error {
 	timeout := paramtable.Get().RootCoordCfg.GracefulStopTimeout.GetAsDuration(time.Second)
 	return exitWhenStopTimeout(rc.svr.Stop, timeout)
 }
 
 // GetComponentStates returns RootCoord's states
-func (rc *RootCoord) Health(ctx context.Context) commonpb.StateCode {
+func (rc *MixCoord) Health(ctx context.Context) commonpb.StateCode {
 	resp, err := rc.svr.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	if err != nil {
 		return commonpb.StateCode_Abnormal
@@ -78,6 +78,6 @@ func (rc *RootCoord) Health(ctx context.Context) commonpb.StateCode {
 	return resp.State.GetStateCode()
 }
 
-func (rc *RootCoord) GetName() string {
-	return typeutil.RootCoordRole
+func (rc *MixCoord) GetName() string {
+	return typeutil.MixCoordRole
 }

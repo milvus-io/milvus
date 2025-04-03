@@ -6218,39 +6218,6 @@ func (_c *MockProxy_SetAddress_Call) RunAndReturn(run func(string)) *MockProxy_S
 	return _c
 }
 
-// SetDataCoordClient provides a mock function with given fields: dataCoord
-func (_m *MockProxy) SetDataCoordClient(dataCoord types.DataCoordClient) {
-	_m.Called(dataCoord)
-}
-
-// MockProxy_SetDataCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetDataCoordClient'
-type MockProxy_SetDataCoordClient_Call struct {
-	*mock.Call
-}
-
-// SetDataCoordClient is a helper method to define mock.On call
-//   - dataCoord types.DataCoordClient
-func (_e *MockProxy_Expecter) SetDataCoordClient(dataCoord interface{}) *MockProxy_SetDataCoordClient_Call {
-	return &MockProxy_SetDataCoordClient_Call{Call: _e.mock.On("SetDataCoordClient", dataCoord)}
-}
-
-func (_c *MockProxy_SetDataCoordClient_Call) Run(run func(dataCoord types.DataCoordClient)) *MockProxy_SetDataCoordClient_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.DataCoordClient))
-	})
-	return _c
-}
-
-func (_c *MockProxy_SetDataCoordClient_Call) Return() *MockProxy_SetDataCoordClient_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockProxy_SetDataCoordClient_Call) RunAndReturn(run func(types.DataCoordClient)) *MockProxy_SetDataCoordClient_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // SetEtcdClient provides a mock function with given fields: etcdClient
 func (_m *MockProxy) SetEtcdClient(etcdClient *clientv3.Client) {
 	_m.Called(etcdClient)
@@ -6284,35 +6251,35 @@ func (_c *MockProxy_SetEtcdClient_Call) RunAndReturn(run func(*clientv3.Client))
 	return _c
 }
 
-// SetQueryCoordClient provides a mock function with given fields: queryCoord
-func (_m *MockProxy) SetQueryCoordClient(queryCoord types.QueryCoordClient) {
-	_m.Called(queryCoord)
+// SetMixCoordClient provides a mock function with given fields: rootCoord
+func (_m *MockProxy) SetMixCoordClient(rootCoord types.MixCoordClient) {
+	_m.Called(rootCoord)
 }
 
-// MockProxy_SetQueryCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetQueryCoordClient'
-type MockProxy_SetQueryCoordClient_Call struct {
+// MockProxy_SetMixCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetMixCoordClient'
+type MockProxy_SetMixCoordClient_Call struct {
 	*mock.Call
 }
 
-// SetQueryCoordClient is a helper method to define mock.On call
-//   - queryCoord types.QueryCoordClient
-func (_e *MockProxy_Expecter) SetQueryCoordClient(queryCoord interface{}) *MockProxy_SetQueryCoordClient_Call {
-	return &MockProxy_SetQueryCoordClient_Call{Call: _e.mock.On("SetQueryCoordClient", queryCoord)}
+// SetMixCoordClient is a helper method to define mock.On call
+//   - rootCoord types.MixCoordClient
+func (_e *MockProxy_Expecter) SetMixCoordClient(rootCoord interface{}) *MockProxy_SetMixCoordClient_Call {
+	return &MockProxy_SetMixCoordClient_Call{Call: _e.mock.On("SetMixCoordClient", rootCoord)}
 }
 
-func (_c *MockProxy_SetQueryCoordClient_Call) Run(run func(queryCoord types.QueryCoordClient)) *MockProxy_SetQueryCoordClient_Call {
+func (_c *MockProxy_SetMixCoordClient_Call) Run(run func(rootCoord types.MixCoordClient)) *MockProxy_SetMixCoordClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.QueryCoordClient))
+		run(args[0].(types.MixCoordClient))
 	})
 	return _c
 }
 
-func (_c *MockProxy_SetQueryCoordClient_Call) Return() *MockProxy_SetQueryCoordClient_Call {
+func (_c *MockProxy_SetMixCoordClient_Call) Return() *MockProxy_SetMixCoordClient_Call {
 	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockProxy_SetQueryCoordClient_Call) RunAndReturn(run func(types.QueryCoordClient)) *MockProxy_SetQueryCoordClient_Call {
+func (_c *MockProxy_SetMixCoordClient_Call) RunAndReturn(run func(types.MixCoordClient)) *MockProxy_SetMixCoordClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6405,39 +6372,6 @@ func (_c *MockProxy_SetRates_Call) Return(_a0 *commonpb.Status, _a1 error) *Mock
 }
 
 func (_c *MockProxy_SetRates_Call) RunAndReturn(run func(context.Context, *proxypb.SetRatesRequest) (*commonpb.Status, error)) *MockProxy_SetRates_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// SetRootCoordClient provides a mock function with given fields: rootCoord
-func (_m *MockProxy) SetRootCoordClient(rootCoord types.RootCoordClient) {
-	_m.Called(rootCoord)
-}
-
-// MockProxy_SetRootCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetRootCoordClient'
-type MockProxy_SetRootCoordClient_Call struct {
-	*mock.Call
-}
-
-// SetRootCoordClient is a helper method to define mock.On call
-//   - rootCoord types.RootCoordClient
-func (_e *MockProxy_Expecter) SetRootCoordClient(rootCoord interface{}) *MockProxy_SetRootCoordClient_Call {
-	return &MockProxy_SetRootCoordClient_Call{Call: _e.mock.On("SetRootCoordClient", rootCoord)}
-}
-
-func (_c *MockProxy_SetRootCoordClient_Call) Run(run func(rootCoord types.RootCoordClient)) *MockProxy_SetRootCoordClient_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.RootCoordClient))
-	})
-	return _c
-}
-
-func (_c *MockProxy_SetRootCoordClient_Call) Return() *MockProxy_SetRootCoordClient_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockProxy_SetRootCoordClient_Call) RunAndReturn(run func(types.RootCoordClient)) *MockProxy_SetRootCoordClient_Call {
 	_c.Call.Return(run)
 	return _c
 }

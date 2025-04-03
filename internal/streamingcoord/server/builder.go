@@ -16,10 +16,10 @@ import (
 )
 
 type ServerBuilder struct {
-	etcdClient      *clientv3.Client
-	metaKV          kv.MetaKv
-	session         sessionutil.SessionInterface
-	rootCoordClient *syncutil.Future[types.RootCoordClient]
+	etcdClient     *clientv3.Client
+	metaKV         kv.MetaKv
+	session        sessionutil.SessionInterface
+	mixCoordClient *syncutil.Future[types.MixCoordClient]
 }
 
 func NewServerBuilder() *ServerBuilder {
@@ -36,8 +36,8 @@ func (b *ServerBuilder) WithMetaKV(metaKV kv.MetaKv) *ServerBuilder {
 	return b
 }
 
-func (b *ServerBuilder) WithRootCoordClient(rootCoordClient *syncutil.Future[types.RootCoordClient]) *ServerBuilder {
-	b.rootCoordClient = rootCoordClient
+func (b *ServerBuilder) WithMixCoordClient(mixCoordClient *syncutil.Future[types.MixCoordClient]) *ServerBuilder {
+	b.mixCoordClient = mixCoordClient
 	return b
 }
 
@@ -50,7 +50,7 @@ func (s *ServerBuilder) Build() *Server {
 	resource.Init(
 		resource.OptETCD(s.etcdClient),
 		resource.OptStreamingCatalog(streamingcoord.NewCataLog(s.metaKV)),
-		resource.OptRootCoordClient(s.rootCoordClient),
+		resource.OptMixCoordClient(s.mixCoordClient),
 	)
 	balancer := syncutil.NewFuture[balancer.Balancer]()
 	broadcaster := syncutil.NewFuture[broadcaster.Broadcaster]()

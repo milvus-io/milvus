@@ -65,7 +65,7 @@ func TestRemoteTSOAllocator(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	client := NewMockRootCoordClient(t)
-	f := syncutil.NewFuture[types.RootCoordClient]()
+	f := syncutil.NewFuture[types.MixCoordClient]()
 	f.Set(client)
 
 	allocator := newTSOAllocator(f)
@@ -75,13 +75,13 @@ func TestRemoteTSOAllocator(t *testing.T) {
 	assert.Equal(t, count, 100)
 
 	// Test error.
-	client = mocks.NewMockRootCoordClient(t)
+	client = mocks.NewMockMixCoordClient(t)
 	client.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, atr *rootcoordpb.AllocTimestampRequest, co ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
 			return nil, errors.New("test")
 		},
 	)
-	f = syncutil.NewFuture[types.RootCoordClient]()
+	f = syncutil.NewFuture[types.MixCoordClient]()
 	f.Set(client)
 
 	allocator = newTSOAllocator(f)
@@ -98,7 +98,7 @@ func TestRemoteTSOAllocator(t *testing.T) {
 			}, nil
 		},
 	)
-	f = syncutil.NewFuture[types.RootCoordClient]()
+	f = syncutil.NewFuture[types.MixCoordClient]()
 	f.Set(client)
 
 	allocator = newTSOAllocator(f)
@@ -111,7 +111,7 @@ func TestRemoteIDAllocator(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	client := NewMockRootCoordClient(t)
-	f := syncutil.NewFuture[types.RootCoordClient]()
+	f := syncutil.NewFuture[types.MixCoordClient]()
 	f.Set(client)
 
 	allocator := newIDAllocator(f)
@@ -122,13 +122,13 @@ func TestRemoteIDAllocator(t *testing.T) {
 	assert.Equal(t, count, 100)
 
 	// Test error.
-	client = mocks.NewMockRootCoordClient(t)
+	client = mocks.NewMockMixCoordClient(t)
 	client.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, atr *rootcoordpb.AllocIDRequest, co ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
 			return nil, errors.New("test")
 		},
 	)
-	f = syncutil.NewFuture[types.RootCoordClient]()
+	f = syncutil.NewFuture[types.MixCoordClient]()
 	f.Set(client)
 
 	allocator = newIDAllocator(f)
@@ -145,7 +145,7 @@ func TestRemoteIDAllocator(t *testing.T) {
 			}, nil
 		},
 	)
-	f = syncutil.NewFuture[types.RootCoordClient]()
+	f = syncutil.NewFuture[types.MixCoordClient]()
 	f.Set(client)
 
 	allocator = newIDAllocator(f)

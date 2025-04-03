@@ -21,10 +21,10 @@ type coordBroker struct {
 	*dataCoordBroker
 }
 
-func NewCoordBroker(dc types.DataCoordClient, serverID int64) Broker {
+func NewCoordBroker(mixc types.MixCoordClient, serverID int64) Broker {
 	return &coordBroker{
 		dataCoordBroker: &dataCoordBroker{
-			client:   dc,
+			client:   mixc,
 			serverID: serverID,
 		},
 	}

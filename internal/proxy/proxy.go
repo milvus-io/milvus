@@ -87,11 +87,9 @@ type Proxy struct {
 
 	stateCode atomic.Int32
 
-	etcdCli    *clientv3.Client
-	address    string
-	rootCoord  types.RootCoordClient
-	dataCoord  types.DataCoordClient
-	queryCoord types.QueryCoordClient
+	etcdCli  *clientv3.Client
+	address  string
+	mixCoord types.MixCoordClient
 
 	simpleLimiter *SimpleLimiter
 
@@ -235,7 +233,7 @@ func (node *Proxy) Init() error {
 	}
 	log.Info("Proxy init rateCollector done", zap.Int64("nodeID", paramtable.GetNodeID()))
 
-	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.rootCoord, paramtable.GetNodeID())
+	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.mixCoord, paramtable.GetNodeID())
 	if err != nil {
 		log.Warn("failed to create id allocator",
 			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()),
@@ -245,7 +243,7 @@ func (node *Proxy) Init() error {
 	node.rowIDAllocator = idAllocator
 	log.Debug("create id allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 
-	tsoAllocator, err := newTimestampAllocator(node.rootCoord, paramtable.GetNodeID())
+	tsoAllocator, err := newTimestampAllocator(node.mixCoord, paramtable.GetNodeID())
 	if err != nil {
 		log.Warn("failed to create timestamp allocator",
 			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()),
@@ -255,7 +253,7 @@ func (node *Proxy) Init() error {
 	node.tsoAllocator = tsoAllocator
 	log.Debug("create timestamp allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 
-	segAssigner, err := newSegIDAssigner(node.ctx, node.dataCoord, node.lastTick)
+	segAssigner, err := newSegIDAssigner(node.ctx, node.mixCoord, node.lastTick)
 	if err != nil {
 		log.Warn("failed to create segment id assigner",
 			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()),
@@ -266,7 +264,7 @@ func (node *Proxy) Init() error {
 	node.segAssigner.PeerID = paramtable.GetNodeID()
 	log.Debug("create segment id assigner done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 
-	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.rootCoord)
+	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.mixCoord)
 	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc, node.factory)
 	node.chMgr = chMgr
 	log.Debug("create channels manager done", zap.String("role", typeutil.ProxyRole))
@@ -297,7 +295,7 @@ func (node *Proxy) Init() error {
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	log.Debug("create metrics cache manager done", zap.String("role", typeutil.ProxyRole))
 
-	if err := InitMetaCache(node.ctx, node.rootCoord, node.queryCoord, node.shardMgr); err != nil {
+	if err := InitMetaCache(node.ctx, node.mixCoord, node.shardMgr); err != nil {
 		log.Warn("failed to init meta cache", zap.String("role", typeutil.ProxyRole), zap.Error(err))
 		return err
 	}
@@ -384,7 +382,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					metrics.ProxySyncTimeTickLag.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), minTsOfChannel).Set(float64(sub))
 				}()
 
-				status, err := node.rootCoord.UpdateChannelTimeTick(node.ctx, req)
+				status, err := node.mixCoord.UpdateChannelTimeTick(node.ctx, req)
 				if err != nil {
 					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick", zap.Error(err))
 					continue
@@ -540,19 +538,9 @@ func (node *Proxy) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
 }
 
-// SetRootCoordClient sets RootCoord client for proxy.
-func (node *Proxy) SetRootCoordClient(cli types.RootCoordClient) {
-	node.rootCoord = cli
-}
-
-// SetDataCoordClient sets DataCoord client for proxy.
-func (node *Proxy) SetDataCoordClient(cli types.DataCoordClient) {
-	node.dataCoord = cli
-}
-
-// SetQueryCoordClient sets QueryCoord client for proxy.
-func (node *Proxy) SetQueryCoordClient(cli types.QueryCoordClient) {
-	node.queryCoord = cli
+// SetMixCoordClient sets MixCoord client for proxy.
+func (node *Proxy) SetMixCoordClient(cli types.MixCoordClient) {
+	node.mixCoord = cli
 }
 
 func (node *Proxy) SetQueryNodeCreator(f func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)) {

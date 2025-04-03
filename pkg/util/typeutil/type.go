@@ -52,6 +52,8 @@ const (
 	StreamingCoordRole = "streamingcoord"
 	// StreamingNode is a constant represent StreamingNode
 	StreamingNodeRole = "streamingnode"
+	// MixCoordRole is a constant represent MixCoord
+	MixCoordRole = "mixcoord"
 )
 
 var (
@@ -65,6 +67,7 @@ var (
 		DataCoordRole,
 		DataNodeRole,
 		StreamingNodeRole,
+		MixCoordRole,
 	)
 	serverTypeList = serverTypeSet.Collect()
 )

@@ -141,9 +141,9 @@ func (s *IndexServiceSuite) SetupTest() {
 
 	s.in = NewDataNode(ctx, factory)
 
-	dc := mocks.NewMockDataCoordClient(s.T())
+	dc := mocks.NewMockMixCoordClient(s.T())
 	dc.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	s.in.dataCoord = dc
+	s.in.mixCoord = dc
 
 	err = s.in.Init()
 	s.NoError(err)
