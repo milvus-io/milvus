@@ -97,12 +97,12 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 				nodes = replica.GetRWSQNodes()
 			}
 			for _, node := range nodes {
-				leaderViews := c.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(replica.GetCollectionID()), meta.WithNodeID2LeaderView(node))
-				for _, leaderView := range leaderViews {
-					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(leaderView.Channel), meta.WithReplica(replica))
-					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica, leaderView, dist)...)
-					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica, leaderView, dist)...)
-					tasks = append(tasks, c.findNeedSyncPartitionStats(ctx, replica, leaderView, node)...)
+				delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
+				for _, d := range delegatorList {
+					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(d.View.Channel), meta.WithReplica(replica))
+					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica, d.View, dist)...)
+					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica, d.View, dist)...)
+					tasks = append(tasks, c.findNeedSyncPartitionStats(ctx, replica, d.View, node)...)
 				}
 			}
 		}

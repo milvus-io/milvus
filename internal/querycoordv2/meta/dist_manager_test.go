@@ -43,42 +43,36 @@ func TestGetDistributionJSON(t *testing.T) {
 	manager.SegmentDistManager.Update(2, segment2)
 
 	// Add some channels to the ChannelDistManager
-	channel1 := DmChannelFromVChannel(&datapb.VchannelInfo{
-		CollectionID: 100,
-		ChannelName:  "channel-1",
+	manager.ChannelDistManager.Update(1, &DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 100,
+			ChannelName:  "channel-1",
+		},
+		Node:    1,
+		Version: 1,
+		View: &LeaderView{
+			ID:           1,
+			CollectionID: 100,
+			Channel:      "channel-1",
+			Version:      1,
+			Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1}},
+		},
 	})
-	channel1.Node = 1
-	channel1.Version = 1
-
-	channel2 := DmChannelFromVChannel(&datapb.VchannelInfo{
-		CollectionID: 200,
-		ChannelName:  "channel-2",
+	manager.ChannelDistManager.Update(2, &DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 200,
+			ChannelName:  "channel-2",
+		},
+		Node:    2,
+		Version: 1,
+		View: &LeaderView{
+			ID:           2,
+			CollectionID: 200,
+			Channel:      "channel-2",
+			Version:      1,
+			Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
+		},
 	})
-	channel2.Node = 2
-	channel2.Version = 1
-
-	manager.ChannelDistManager.Update(1, channel1)
-	manager.ChannelDistManager.Update(2, channel2)
-
-	// Add some leader views to the LeaderViewManager
-	leaderView1 := &LeaderView{
-		ID:           1,
-		CollectionID: 100,
-		Channel:      "channel-1",
-		Version:      1,
-		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1}},
-	}
-
-	leaderView2 := &LeaderView{
-		ID:           2,
-		CollectionID: 200,
-		Channel:      "channel-2",
-		Version:      1,
-		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
-	}
-
-	manager.LeaderViewManager.Update(1, leaderView1)
-	manager.LeaderViewManager.Update(2, leaderView2)
 
 	// Call GetDistributionJSON
 	jsonOutput := manager.GetDistributionJSON(0)
