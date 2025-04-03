@@ -117,10 +117,15 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.check_collection_fields_properties:
             # check field properties in describe collection response
             result = self.check_collection_fields_properties(self.response, self.func_name, self.check_items)
-
+        elif self.check_task == CheckTasks.check_describe_database_property:
+            # describe database interface(high level api) response check
+            result = self.check_describe_database_property(self.response, self.func_name, self.check_items)
         elif self.check_task == CheckTasks.check_insert_result:
             # check `insert` interface response
             result = self.check_insert_response(check_items=self.check_items)
+        elif self.check_task == CheckTasks.check_describe_index_property:
+            # describe collection interface(high level api) response check
+            result = self.check_describe_index_property(self.response, self.func_name, self.check_items)
 
         # Add check_items here if something new need verify
 
@@ -298,6 +303,46 @@ class ResponseChecker:
         return True
 
     @staticmethod
+    def check_describe_database_property(res, func_name, check_items):
+        """
+        According to the check_items to check database properties of res, which return from func_name
+        :param res: actual response of init database
+        :type res: Database
+
+        :param func_name: init database API
+        :type func_name: str
+
+        :param check_items: which items expected to be checked
+        :type check_items: dict, {check_key: expected_value}
+        """
+        exp_func_name = "describe_database"
+        if func_name != exp_func_name:
+            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+        if len(check_items) == 0:
+            raise Exception("No expect values found in the check task")
+        if check_items.get("db_name", None) is not None:
+            assert res["name"] == check_items.get("db_name")
+        if check_items.get("database.force.deny.writing", None) is not None:
+            if check_items.get("database.force.deny.writing") == "Missing":
+                assert "database.force.deny.writing" not in res
+            else:
+                assert res["database.force.deny.writing"] == check_items.get("database.force.deny.writing")
+        if check_items.get("database.force.deny.reading", None) is not None:
+            if check_items.get("database.force.deny.reading") == "Missing":
+                assert "database.force.deny.reading" not in res
+            else:
+                assert res["database.force.deny.reading"] == check_items.get("database.force.deny.reading")
+        if check_items.get("database.replica.number", None) is not None:
+            if check_items.get("database.replica.number") == "Missing":
+                assert "database.replica.number" not in res
+            else:
+                assert res["database.replica.number"] == check_items.get("database.replica.number")
+        if check_items.get("properties_length", None) is not None:
+            assert len(res) == check_items.get("properties_length")
+
+        return True
+
+    @staticmethod
     def check_partition_property(partition, func_name, check_items):
         exp_func_name = "init_partition"
         if func_name != exp_func_name:
@@ -428,16 +473,20 @@ class ResponseChecker:
         if func_name != 'search_iterator':
             log.warning("The function name is {} rather than {}".format(func_name, "search_iterator"))
         search_iterator = search_res
+        expected_batch_size = check_items.get("batch_size", None)
+        expected_iterate_times = check_items.get("iterate_times", None)
         pk_list = []
+        iterate_times = 0
         while True:
             try:
                 res = search_iterator.next()
-                if res is None or len(res) == 0:
+                iterate_times += 1
+                if not res:
                     log.info("search iteration finished, close")
                     search_iterator.close()
                     break
-                if check_items.get("batch_size", None):
-                    assert len(res) <= check_items["batch_size"]
+                if expected_batch_size is not None:
+                    assert len(res) <= expected_batch_size
                 if check_items.get("radius", None):
                     for distance in res.distances():
                         if check_items["metric_type"] == "L2":
@@ -454,13 +503,14 @@ class ResponseChecker:
             except Exception as e:
                 assert check_items["err_msg"] in str(e)
                 return False
-
-        if check_items.get("limit"):
-            if "range_filter" not in check_items and "radius" not in check_items:
-                assert len(pk_list) / check_items["limit"] >= 0.9
-        log.debug(f"check: total {len(pk_list)} results, set len: {len(set(pk_list))}")
+        if expected_iterate_times is not None:
+            assert iterate_times <= expected_iterate_times
+            if expected_iterate_times == 1:
+                assert len(pk_list) == 0  # expected batch size =0 if external filter all
+                assert iterate_times == 1
+                return True
+        log.debug(f"check: total {len(pk_list)} results, set len: {len(set(pk_list))}, iterate_times: {iterate_times}")
         assert len(pk_list) == len(set(pk_list)) != 0
-
         return True
 
     @staticmethod
@@ -684,5 +734,36 @@ class ResponseChecker:
         # check insert count
         error_message = "[CheckFunc] Insert count does not meet expectations, response:{0} != expected:{1}"
         assert self.response.insert_count == real, error_message.format(self.response.insert_count, real)
+
+        return True
+
+    @staticmethod
+    def check_describe_index_property(res, func_name, check_items):
+        """
+        According to the check_items to check collection properties of res, which return from func_name
+        :param res: actual response of init collection
+        :type res: Collection
+
+        :param func_name: init collection API
+        :type func_name: str
+
+        :param check_items: which items expected to be checked, including name, schema, num_entities, primary
+        :type check_items: dict, {check_key: expected_value}
+        """
+        exp_func_name = "describe_index"
+        if func_name != exp_func_name:
+            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+        if len(check_items) == 0:
+            raise Exception("No expect values found in the check task")
+        if check_items.get("json_cast_type", None) is not None:
+            assert res["json_cast_type"] == check_items.get("json_cast_type")
+        if check_items.get("index_type", None) is not None:
+            assert res["index_type"] == check_items.get("index_type")
+        if check_items.get("json_path", None) is not None:
+            assert res["json_path"] == check_items.get("json_path")
+        if check_items.get("field_name", None) is not None:
+            assert res["field_name"] == check_items.get("field_name")
+        if check_items.get("index_name", None) is not None:
+            assert res["index_name"] == check_items.get("index_name")
 
         return True
