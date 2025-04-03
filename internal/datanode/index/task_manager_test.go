@@ -93,6 +93,20 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 			})
 	})
 
+	s.Run("storeStatsJsonIndexResult", func() {
+		s.manager.StoreJSONKeyStatsResult(s.cluster, s.taskID, 1, 2, 3, "ch1",
+			map[int64]*datapb.JsonKeyStats{
+				100: {
+					FieldID:                100,
+					Version:                1,
+					Files:                  []string{"file1"},
+					LogSize:                1024,
+					MemorySize:             1024,
+					JsonKeyStatsDataFormat: 1,
+				},
+			})
+	})
+
 	s.Run("getStatsTaskInfo", func() {
 		taskInfo := s.manager.GetStatsTaskInfo(s.cluster, s.taskID)
 

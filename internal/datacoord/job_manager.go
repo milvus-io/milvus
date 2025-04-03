@@ -73,6 +73,9 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 
 	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
+
+	lastJSONStatsLastTrigger := time.Now().Unix()
+	maxJSONStatsTaskCount := 0
 	for {
 		select {
 		case <-jm.ctx.Done():
@@ -82,6 +85,7 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 			jm.triggerSortStatsTask()
 			jm.triggerTextStatsTask()
 			jm.triggerBM25StatsTask()
+			lastJSONStatsLastTrigger, maxJSONStatsTaskCount = jm.triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger, maxJSONStatsTaskCount)
 
 		case segID := <-getStatsTaskChSingleton():
 			log.Info("receive new segment to trigger stats task", zap.Int64("segmentID", segID))
@@ -141,10 +145,21 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	}
 
 	for _, fieldID := range fieldIDs {
-		if segment.GetTextStatsLogs() == nil {
+		if segment.GetTextStatsLogs()[fieldID] == nil {
 			return true
 		}
-		if segment.GetTextStatsLogs()[fieldID] == nil {
+	}
+	return false
+}
+
+func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
+	if !(isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		segment.GetIsSorted()) {
+		return false
+	}
+
+	for _, fieldID := range fieldIDs {
+		if segment.GetJsonKeyStats()[fieldID] == nil {
 			return true
 		}
 	}
@@ -180,6 +195,38 @@ func (jm *statsJobManager) triggerTextStatsTask() {
 			}
 		}
 	}
+}
+
+func (jm *statsJobManager) triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger int64, maxJSONStatsTaskCount int) (int64, int) {
+	collections := jm.mt.GetCollections()
+	for _, collection := range collections {
+		needTriggerFieldIDs := make([]UniqueID, 0)
+		for _, field := range collection.Schema.GetFields() {
+			h := typeutil.CreateFieldSchemaHelper(field)
+			if h.EnableJSONKeyStatsIndex() && Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() {
+				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
+			}
+		}
+		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
+			return needDoJsonKeyIndex(seg, needTriggerFieldIDs)
+		}))
+		if time.Now().Unix()-lastJSONStatsLastTrigger > int64(Params.DataCoordCfg.JSONStatsTriggerInterval.GetAsDuration(time.Minute).Seconds()) {
+			lastJSONStatsLastTrigger = time.Now().Unix()
+			maxJSONStatsTaskCount = 0
+		}
+		for _, segment := range segments {
+			if maxJSONStatsTaskCount >= Params.DataCoordCfg.JSONStatsTriggerCount.GetAsInt() {
+				break
+			}
+			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_JsonKeyIndexJob, true); err != nil {
+				log.Warn("create stats task with json key index for segment failed, wait for retry:",
+					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+				continue
+			}
+			maxJSONStatsTaskCount++
+		}
+	}
+	return lastJSONStatsLastTrigger, maxJSONStatsTaskCount
 }
 
 func (jm *statsJobManager) triggerBM25StatsTask() {
