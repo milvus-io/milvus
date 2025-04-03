@@ -1267,12 +1267,13 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.flush()
         collection_w.load()
         search_params = {"metric_type": "L2", "params": {"ef": 10}}
-        res = collection_w.search(vectors, ct.default_float_vec_field_name,
+        collection_w.search(vectors, ct.default_float_vec_field_name,
                             search_params, limit=100,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 65535,
-                                         "err_msg": "query failed: N6milvus21ExecOperatorExceptionE :Operator::GetOutput failed"})
-        
+                                         "err_msg": "query failed: Operator::GetOutput failed for "
+                                                    "[Operator:PhyVectorSearchNode"})
+    
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_dynamic_compare_two_fields(self):
         """
