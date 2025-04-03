@@ -664,6 +664,19 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             self.collection_wrap.create_index(
                 field_name=f, index_params=ct.default_binary_index
             )
+        # add json path index for json field
+        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
+                                                                              "json_path": f"{df.json_field}['number']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
+        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
+                                                                               "json_path": f"{df.json_field}['address']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
+        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
+                                                                            "json_path": f"{df.json_field}['name']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
+        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
+                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
 
         t0 = time.time()
@@ -737,6 +750,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     if enable_dynamic_field:
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
+        res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] >= 0", output_fields=[df.json_field])
+        assert len(res) == entities
+        res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] == 1", output_fields=[df.json_field])
+        assert len(res) == 1
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])
@@ -821,6 +838,19 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             self.collection_wrap.create_index(
                 field_name=f, index_params=ct.default_binary_index
             )
+        # add json path index for json field
+        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
+                                                                              "json_path": f"{df.json_field}['number']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
+        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
+                                                                               "json_path": f"{df.json_field}['address']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
+        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
+                                                                            "json_path": f"{df.json_field}['name']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
+        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
+                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
         time.sleep(2)
@@ -901,6 +931,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             assert 0 < len(res) < entities
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
+        res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] >= 0", output_fields=[df.json_field])
+        if not nullable:
+            assert len(res) == entities
+        else:
+            assert len(res) == 0
+        res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] == 1", output_fields=[df.json_field])
+        if not nullable:
+            assert len(res) == 1
+        else:
+            assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -980,6 +1020,19 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             self.collection_wrap.create_index(
                 field_name=f, index_params=index_params
             )
+        # add json path index for json field
+        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
+                                                                              "json_path": f"{df.json_field}['number']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
+        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
+                                                                               "json_path": f"{df.json_field}['address']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
+        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
+                                                                            "json_path": f"{df.json_field}['name']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
+        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
+                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         for f in binary_vec_fields:
             self.collection_wrap.create_index(
                 field_name=f, index_params=ct.default_binary_index
@@ -1054,6 +1107,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             assert 0 < len(res) < entities
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
+        res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] >= 0", output_fields=[df.json_field])
+        assert len(res) == entities
+        res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] == 1", output_fields=[df.json_field])
+        assert len(res) == 1
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -1141,6 +1198,19 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             self.collection_wrap.create_index(
                 field_name=f, index_params=ct.default_binary_index
             )
+        # add json path index for json field
+        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
+                                                                              "json_path": f"{df.json_field}['number']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
+        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
+                                                                               "json_path": f"{df.json_field}['address']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
+        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
+                                                                            "json_path": f"{df.json_field}['name']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
+        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
+                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
         time.sleep(2)
@@ -1221,6 +1291,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
+        res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] >= 0", output_fields=[df.json_field])
+        if not nullable:
+            assert len(res) == entities
+        else:
+            assert len(res) == 0
+        res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] == 1", output_fields=[df.json_field])
+        if not nullable:
+            assert len(res) == 1
+        else:
+            assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -1520,6 +1600,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 # ["1", "2", "3"],
                 # [1, 2, "3"],
                 {"key": "value"},
+                {"number": 1},
+                {"name": fake.name()},
+                {"address": fake.address()}
             ]
             for i in range(entities):
                 row = {
@@ -1573,6 +1656,19 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             self.collection_wrap.create_index(
                 field_name=f, index_params=ct.default_sparse_inverted_index
             )
+        # add json path index for json field
+        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
+                                                                              "json_path": f"{df.json_field}['number']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
+        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
+                                                                               "json_path": f"{df.json_field}['address']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
+        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
+                                                                            "json_path": f"{df.json_field}['name']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
+        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
+                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
         time.sleep(2)
@@ -1596,7 +1692,11 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 if enable_dynamic_field:
                     assert "name" in fields_from_search
                     assert "address" in fields_from_search
-
+        res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] == 1", output_fields=[df.json_field])
+        if not nullable:
+            assert len(res) == int(entities/len(json_value))
+        else:
+            assert 0 < len(res) < int(entities/len(json_value))
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])
@@ -1663,7 +1763,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 # [1, 2, 3],
                 # ["1", "2", "3"],
                 # [1, 2, "3"],
-                {"key": "value"},
+                {"key": "value"}
             ]
             for i in range(entities):
                 row = {
@@ -1810,6 +1910,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 # ["1", "2", "3"],
                 # [1, 2, "3"],
                 {"key": "value"},
+                {"number": 1},
+                {"name": fake.name()},
+                {"address": fake.address()}
             ]
             for i in range(entities):
                 row = {
@@ -1858,6 +1961,19 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             self.collection_wrap.create_index(
                 field_name=f, index_params=ct.default_sparse_inverted_index
             )
+        # add json path index for json field
+        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
+                                                                              "json_path": f"{df.json_field}['number']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
+        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
+                                                                               "json_path": f"{df.json_field}['address']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
+        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
+                                                                            "json_path": f"{df.json_field}['name']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
+        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
+                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
         time.sleep(2)
@@ -1881,6 +1997,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 if enable_dynamic_field:
                     assert "name" in fields_from_search
                     assert "address" in fields_from_search
+        res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] == 1", output_fields=[df.json_field])
+        assert len(res) == int(entities / len(json_value))
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -1930,6 +2048,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 # ["1", "2", "3"],
                 # [1, 2, "3"],
                 {"key": "value"},
+                {"number": 1},
+                {"name": fake.name()},
+                {"address": fake.address()}
             ]
             for i in range(entities):
                 row = {
@@ -1983,6 +2104,19 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             self.collection_wrap.create_index(
                 field_name=f, index_params=ct.default_sparse_inverted_index
             )
+        # add json path index for json field
+        json_path_index_params_double = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
+                                                                              "json_path": f"{df.json_field}['number']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_double)
+        json_path_index_params_varchar = {"index_type": "INVERTED", "params": {"json_cast_type": "VARCHAR",
+                                                                               "json_path": f"{df.json_field}['address']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_varchar)
+        json_path_index_params_bool = {"index_type": "INVERTED", "params": {"json_cast_type": "Bool",
+                                                                            "json_path": f"{df.json_field}['name']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_bool)
+        json_path_index_params_not_exist = {"index_type": "INVERTED", "params": {"json_cast_type": "Double",
+                                                                                 "json_path": f"{df.json_field}['not_exist']"}}
+        self.collection_wrap.create_index(field_name=df.json_field, index_params=json_path_index_params_not_exist)
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
         time.sleep(2)
@@ -2006,7 +2140,11 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 if enable_dynamic_field:
                     assert "name" in fields_from_search
                     assert "address" in fields_from_search
-
+        res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] == 1", output_fields=[df.json_field])
+        if not nullable:
+            assert len(res) == int(entities/len(json_value))
+        else:
+            assert 0 < len(res) < int(entities/len(json_value))
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])

@@ -505,3 +505,151 @@ class TestMilvusClientGetValid(TestMilvusClientV2Base):
         assert first_pk_data == first_pk_data_1
         assert len(first_pk_data_1[0]) == len(output_fields_array)
         self.drop_collection(client, collection_name)
+
+
+class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
+    """ Test case of search interface """
+
+    @pytest.fixture(scope="function", params=["INVERTED"])
+    def supported_varchar_scalar_index(self, request):
+        yield request.param
+
+    # @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "BOOL", "double", "varchar", "bool"])
+    @pytest.fixture(scope="function", params=["DOUBLE"])
+    def supported_json_cast_type(self, request):
+        yield request.param
+
+    """
+    ******************************************************************
+    #  The following are valid base cases
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("is_flush", [True, False])
+    @pytest.mark.parametrize("is_release", [True, False])
+    @pytest.mark.parametrize("single_data_num", [50])
+    def test_milvus_client_search_json_path_index_all_expressions(self, enable_dynamic_field, supported_json_cast_type,
+                                                                  supported_varchar_scalar_index, is_flush, is_release,
+                                                                  single_data_num):
+        """
+        target: test query after json path index with all supported basic expressions
+        method: Query after json path index with all supported basic expressions
+        step: 1. create collection
+              2. insert with different data distribution
+              3. flush if specified
+              4. query when there is no json path index under all expressions
+              5. release if specified
+              6. prepare index params with json path index
+              7. create json path index
+              8. create same json index twice
+              9. reload collection if released before to make sure the new index load successfully
+              10. sleep for 60s to make sure the new index load successfully without release and reload operations
+              11. query after there is json path index under all expressions which should get the same result
+                  with that without json path index
+        expected: query successfully after there is json path index under all expressions which should get the same result
+                  with that without json path index
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "json_field"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        # 2. insert with different data distribution
+        vectors = cf.gen_vectors(default_nb+60, default_dim)
+        inserted_data_distribution = ct.get_all_kind_data_distribution
+        nb_single = single_data_num
+        for i in range(len(inserted_data_distribution)):
+            rows = [{default_primary_key_field_name: j, default_vector_field_name: vectors[j],
+                     default_string_field_name: f"{j}", json_field_name: inserted_data_distribution[i]} for j in
+                    range(i * nb_single, (i + 1) * nb_single)]
+            assert len(rows) == nb_single
+            self.insert(client, collection_name=collection_name, data=rows)
+            log.info(f"inserted {nb_single} {inserted_data_distribution[i]}")
+        # 3. flush if specified
+        if is_flush:
+            self.flush(client, collection_name)
+        # 4. query when there is no json path index under all expressions
+        # skip negative expression for issue 40685
+        #  "my_json['a'] != 1", "my_json['a'] != 1.0", "my_json['a'] != '1'", "my_json['a'] != 1.1", "my_json['a'] not in [1]"
+        express_list = cf.gen_json_field_expressions_all_single_operator()
+        compare_dict = {}
+        for i in range(len(express_list)):
+            json_list = []
+            id_list = []
+            log.info(f"query with filter {express_list[i]} before json path index is:")
+            res = self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"])[0]
+            count = res[0]['count(*)']
+            log.info(f"The count(*) after query with filter {express_list[i]} before json path index is: {count}")
+            res = self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=[f"{json_field_name}"])[0]
+            for single in res:
+                id_list.append(single[f"{default_primary_key_field_name}"])
+                json_list.append(single[f"{json_field_name}"])
+            assert count == len(id_list)
+            assert count == len(json_list)
+            compare_dict.setdefault(f'{i}', {})
+            compare_dict[f'{i}']["id_list"] = id_list
+            compare_dict[f'{i}']["json_list"] = json_list
+        # 5. release if specified
+        if is_release:
+            self.release_collection(client, collection_name)
+            self.drop_index(client, collection_name, default_vector_field_name)
+        # 6. prepare index params with json path index
+        index_name = "json_index"
+        index_params = self.prepare_index_params(client)[0]
+        json_path_list = [f"{json_field_name}", f"{json_field_name}[0]", f"{json_field_name}[1]",
+                          f"{json_field_name}[6]", f"{json_field_name}['a']", f"{json_field_name}['a']['b']",
+                          f"{json_field_name}['a'][0]", f"{json_field_name}['a'][6]", f"{json_field_name}['a'][0]['b']",
+                          f"{json_field_name}['a']['b']['c']", f"{json_field_name}['a']['b'][0]['d']",
+                          f"{json_field_name}[10000]", f"{json_field_name}['a']['c'][0]['d']"]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        for i in range(len(json_path_list)):
+            index_params.add_index(field_name=json_field_name, index_name=index_name + f'{i}',
+                                   index_type=supported_varchar_scalar_index,
+                                   params={"json_cast_type": supported_json_cast_type,
+                                           "json_path": json_path_list[i]})
+        # 7. create json path index
+        self.create_index(client, collection_name, index_params)
+        # 8. create same json index twice
+        self.create_index(client, collection_name, index_params)
+        # 9. reload collection if released before to make sure the new index load successfully
+        if is_release:
+            self.load_collection(client, collection_name)
+        else:
+            # 10. sleep for 60s to make sure the new index load successfully without release and reload operations
+            time.sleep(60)
+        # 11. query after there is json path index under all expressions which should get the same result
+        # with that without json path index
+        for i in range(len(express_list)):
+            json_list = []
+            id_list = []
+            log.info(f"query with filter {express_list[i]} after json path index is:")
+            count = self.query(client, collection_name=collection_name, filter=express_list[i],
+                               output_fields=["count(*)"])[0]
+            log.info(f"The count(*) after query with filter {express_list[i]} after json path index is: {count}")
+            res = self.query(client, collection_name=collection_name, filter=express_list[i],
+                             output_fields=[f"{json_field_name}"])[0]
+            for single in res:
+                id_list.append(single[f"{default_primary_key_field_name}"])
+                json_list.append(single[f"{json_field_name}"])
+            if len(json_list) != len(compare_dict[f'{i}']["json_list"]):
+                log.debug(f"json field after json path index under expression {express_list[i]} is:")
+                log.debug(json_list)
+                log.debug(f"json field before json path index to be compared under expression {express_list[i]} is:")
+                log.debug(compare_dict[f'{i}']["json_list"])
+            assert json_list == compare_dict[f'{i}']["json_list"]
+            if len(id_list) != len(compare_dict[f'{i}']["id_list"]):
+                log.debug(f"primary key field after json path index under expression {express_list[i]} is:")
+                log.debug(id_list)
+                log.debug(f"primary key field before json path index to be compared under expression {express_list[i]} is:")
+                log.debug(compare_dict[f'{i}']["id_list"])
+            assert id_list == compare_dict[f'{i}']["id_list"]
+            log.info(f"PASS with expression {express_list[i]}")
