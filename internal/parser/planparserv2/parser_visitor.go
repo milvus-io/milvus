@@ -93,7 +93,7 @@ func (v *ParserVisitor) VisitBoolean(ctx *parser.BooleanContext) interface{} {
 
 // VisitInteger translates expr to GenericValue.
 func (v *ParserVisitor) VisitInteger(ctx *parser.IntegerContext) interface{} {
-	literal := ctx.IntegerConstant().GetText()
+	literal := ctx.GetText()
 	i, err := strconv.ParseInt(literal, 0, 64)
 	if err != nil {
 		return err
@@ -113,7 +113,7 @@ func (v *ParserVisitor) VisitInteger(ctx *parser.IntegerContext) interface{} {
 
 // VisitFloating translates expr to GenericValue.
 func (v *ParserVisitor) VisitFloating(ctx *parser.FloatingContext) interface{} {
-	literal := ctx.FloatingConstant().GetText()
+	literal := ctx.GetText()
 	f, err := strconv.ParseFloat(literal, 64)
 	if err != nil {
 		return err
