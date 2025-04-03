@@ -157,6 +157,12 @@ func (segment *Segment) Clone() *Segment {
 	}
 }
 
+type SegmentDistManagerInterface interface {
+	Update(nodeID typeutil.UniqueID, segments ...*Segment)
+	GetByFilter(filters ...SegmentDistFilter) []*Segment
+	GetSegmentDist(collectionID int64) []*metricsinfo.Segment
+}
+
 type SegmentDistManager struct {
 	rwmutex sync.RWMutex
 

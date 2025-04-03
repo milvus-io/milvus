@@ -23,9 +23,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ChannelDistManagerSuite struct {
@@ -99,55 +97,6 @@ func (suite *ChannelDistManagerSuite) TestGetBy() {
 	// 3. Invalid node and valid collection
 	channels = dist.GetByCollectionAndFilter(suite.collection, WithNodeID2Channel(-1))
 	suite.Len(channels, 0)
-}
-
-func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
-	replicas := []*Replica{
-		NewReplica(
-			&querypb.Replica{
-				CollectionID: suite.collection,
-			},
-			typeutil.NewUniqueSet(suite.nodes[0], suite.nodes[2]),
-		),
-		NewReplica(
-			&querypb.Replica{
-				CollectionID: suite.collection,
-			},
-			typeutil.NewUniqueSet(suite.nodes[1]),
-		),
-	}
-
-	// Test on replica 0
-	leader0, ok := suite.dist.GetShardLeader(replicas[0], "dmc0")
-	suite.True(ok)
-	suite.Equal(suite.nodes[0], leader0)
-	leader1, ok := suite.dist.GetShardLeader(replicas[0], "dmc1")
-	suite.True(ok)
-	suite.Equal(suite.nodes[2], leader1)
-
-	// Test on replica 1
-	leader0, ok = suite.dist.GetShardLeader(replicas[1], "dmc0")
-	suite.True(ok)
-	suite.Equal(suite.nodes[1], leader0)
-	leader1, ok = suite.dist.GetShardLeader(replicas[1], "dmc1")
-	suite.True(ok)
-	suite.Equal(suite.nodes[1], leader1)
-
-	// Test no shard leader for given channel
-	_, ok = suite.dist.GetShardLeader(replicas[0], "invalid-shard")
-	suite.False(ok)
-
-	// Test on replica 0
-	leaders := suite.dist.GetShardLeadersByReplica(replicas[0])
-	suite.Len(leaders, 2)
-	suite.Equal(leaders["dmc0"], suite.nodes[0])
-	suite.Equal(leaders["dmc1"], suite.nodes[2])
-
-	// Test on replica 1
-	leaders = suite.dist.GetShardLeadersByReplica(replicas[1])
-	suite.Len(leaders, 2)
-	suite.Equal(leaders["dmc0"], suite.nodes[1])
-	suite.Equal(leaders["dmc1"], suite.nodes[1])
 }
 
 func (suite *ChannelDistManagerSuite) AssertNames(channels []*DmChannel, names ...string) bool {

@@ -36,14 +36,14 @@ type Controller interface {
 }
 
 type ControllerImpl struct {
-	mu                  sync.RWMutex
-	handlers            map[int64]*distHandler
-	client              session.Cluster
-	nodeManager         *session.NodeManager
-	dist                *meta.DistributionManager
-	targetMgr           meta.TargetManagerInterface
-	scheduler           task.Scheduler
-	syncTargetVersionFn TriggerUpdateTargetVersion
+	mu             sync.RWMutex
+	handlers       map[int64]*distHandler
+	client         session.Cluster
+	nodeManager    *session.NodeManager
+	dist           *meta.DistributionManager
+	targetMgr      meta.TargetManagerInterface
+	scheduler      task.Scheduler
+	replicaManager meta.ReplicaManagerInterface
 }
 
 func (dc *ControllerImpl) StartDistInstance(ctx context.Context, nodeID int64) {
@@ -53,7 +53,7 @@ func (dc *ControllerImpl) StartDistInstance(ctx context.Context, nodeID int64) {
 		log.Info("node has started", zap.Int64("nodeID", nodeID))
 		return
 	}
-	h := newDistHandler(ctx, nodeID, dc.client, dc.nodeManager, dc.scheduler, dc.dist, dc.targetMgr, dc.syncTargetVersionFn)
+	h := newDistHandler(ctx, nodeID, dc.client, dc.nodeManager, dc.scheduler, dc.dist, dc.targetMgr, dc.replicaManager)
 	dc.handlers[nodeID] = h
 }
 
@@ -101,15 +101,15 @@ func NewDistController(
 	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
 	scheduler task.Scheduler,
-	syncTargetVersionFn TriggerUpdateTargetVersion,
+	replicaManager meta.ReplicaManagerInterface,
 ) *ControllerImpl {
 	return &ControllerImpl{
-		handlers:            make(map[int64]*distHandler),
-		client:              client,
-		nodeManager:         nodeManager,
-		dist:                dist,
-		targetMgr:           targetMgr,
-		scheduler:           scheduler,
-		syncTargetVersionFn: syncTargetVersionFn,
+		handlers:       make(map[int64]*distHandler),
+		client:         client,
+		nodeManager:    nodeManager,
+		dist:           dist,
+		targetMgr:      targetMgr,
+		scheduler:      scheduler,
+		replicaManager: replicaManager,
 	}
 }

@@ -150,9 +150,9 @@ func (b *RowCountBasedBalancer) convertToNodeItemsBySegment(nodeIDs []int64) []*
 		}
 
 		// calculate growing segment row count on node
-		views := b.dist.LeaderViewManager.GetByFilter(meta.WithNodeID2LeaderView(node))
-		for _, view := range views {
-			rowcnt += int(view.NumOfGrowingRows)
+		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(node))
+		for _, channel := range channels {
+			rowcnt += int(channel.View.NumOfGrowingRows)
 		}
 
 		// calculate executing task cost in scheduler

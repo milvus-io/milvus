@@ -411,9 +411,6 @@ func (s *Server) initQueryCoord() error {
 	s.initObserver()
 
 	// Init heartbeat
-	syncTargetVersionFn := func(collectionID int64) {
-		s.targetObserver.TriggerUpdateCurrentTarget(collectionID)
-	}
 	log.Info("init dist controller")
 	s.distController = dist.NewDistController(
 		s.cluster,
@@ -421,7 +418,7 @@ func (s *Server) initQueryCoord() error {
 		s.dist,
 		s.targetMgr,
 		s.taskScheduler,
-		syncTargetVersionFn,
+		s.meta.ReplicaManager,
 	)
 
 	// Init load status cache
@@ -473,7 +470,7 @@ func (s *Server) initMeta() error {
 	s.dist = &meta.DistributionManager{
 		SegmentDistManager: meta.NewSegmentDistManager(),
 		ChannelDistManager: meta.NewChannelDistManager(),
-		LeaderViewManager:  meta.NewLeaderViewManager(),
+		ShardLeaderManager: meta.NewShardLeaderManager(),
 	}
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
 	err = s.targetMgr.Recover(s.ctx, s.store)
@@ -514,7 +511,7 @@ func (s *Server) initObserver() {
 	s.leaderCacheObserver = observers.NewLeaderCacheObserver(
 		s.proxyClientManager,
 	)
-	s.dist.LeaderViewManager.SetNotifyFunc(s.leaderCacheObserver.RegisterEvent)
+	s.dist.ShardLeaderManager.SetNotifyFunc(s.leaderCacheObserver.RegisterEvent)
 }
 
 func (s *Server) afterStart() {}
@@ -878,7 +875,7 @@ func (s *Server) handleNodeDown(node int64) {
 	s.distController.Remove(node)
 
 	// Clear dist
-	s.dist.LeaderViewManager.Update(node)
+	s.dist.ShardLeaderManager.Remove(node)
 	s.dist.ChannelDistManager.Update(node)
 	s.dist.SegmentDistManager.Update(node)
 
