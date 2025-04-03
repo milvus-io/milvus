@@ -5206,6 +5206,11 @@ type streamingConfig struct {
 	// write ahead buffer
 	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
 	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
+
+	// memory usage control
+	NodeMemoryUsageThreshold            ParamItem `refreshable:"true"`
+	NodeGrowingSegmentBytesHwmThreshold ParamItem `refreshable:"true"`
+	NodeGrowingSegmentBytesLwmThreshold ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -5333,6 +5338,39 @@ it also determine the depth of depth first search method that is used to find th
 		Export:       true,
 	}
 	p.WALWriteAheadBufferKeepalive.Init(base.mgr)
+
+	p.NodeMemoryUsageThreshold = ParamItem{
+		Key:     "streaming.node.memoryUsageThreshold",
+		Version: "2.6.0",
+		Doc: `The threshold of memory usage for one streaming node,
+If the memory usage is higher than this threshold, the node will try to trigger some action to decrease the memory usage,
+e.g. growing segment flush. the value should be in the range of (0, 1), 0.8 by default`,
+		DefaultValue: "0.8",
+		Export:       true,
+	}
+	p.NodeMemoryUsageThreshold.Init(base.mgr)
+
+	p.NodeGrowingSegmentBytesHwmThreshold = ParamItem{
+		Key:     "streaming.node.growingSegmentBytesHwmThreshold",
+		Version: "2.6.0",
+		Doc: `The upper watermark of total growing segment bytes for one streaming node,
+If the total bytes of growing segment is greater than this threshold,
+a growing segment flush process will be triggered to decrease total bytes of growing segment.`,
+		DefaultValue: "0.2",
+		Export:       true,
+	}
+	p.NodeGrowingSegmentBytesHwmThreshold.Init(base.mgr)
+
+	p.NodeGrowingSegmentBytesLwmThreshold = ParamItem{
+		Key:     "streaming.node.growingSegmentBytesLwmThreshold",
+		Version: "2.6.0",
+		Doc: `The lower watermark of total growing segment bytes for one streaming node,
+growing segment flush process will try to flush some growing segment into sealed 
+until the total bytes of growing segment is less than this threshold.`,
+		DefaultValue: "0.1",
+		Export:       true,
+	}
+	p.NodeGrowingSegmentBytesLwmThreshold.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

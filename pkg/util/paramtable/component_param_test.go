@@ -627,6 +627,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
 		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse())
 		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
+		assert.Equal(t, float64(0.8), params.StreamingCfg.NodeMemoryUsageThreshold.GetAsFloat())
+		assert.Equal(t, float64(0.2), params.StreamingCfg.NodeGrowingSegmentBytesHwmThreshold.GetAsFloat())
+		assert.Equal(t, float64(0.1), params.StreamingCfg.NodeGrowingSegmentBytesLwmThreshold.GetAsFloat())
+
 		params.Save(params.StreamingCfg.WALBalancerTriggerInterval.Key, "50s")
 		params.Save(params.StreamingCfg.WALBalancerBackoffInitialInterval.Key, "50s")
 		params.Save(params.StreamingCfg.WALBalancerBackoffMultiplier.Key, "3.5")
@@ -640,6 +644,9 @@ func TestComponentParam(t *testing.T) {
 		params.Save(params.StreamingCfg.WALBalancerPolicyVChannelFairAntiAffinityWeight.Key, "0.02")
 		params.Save(params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceTolerance.Key, "0.02")
 		params.Save(params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceMaxStep.Key, "4")
+		params.Save(params.StreamingCfg.NodeMemoryUsageThreshold.Key, "0.7")
+		params.Save(params.StreamingCfg.NodeGrowingSegmentBytesHwmThreshold.Key, "0.25")
+		params.Save(params.StreamingCfg.NodeGrowingSegmentBytesLwmThreshold.Key, "0.15")
 		assert.Equal(t, 50*time.Second, params.StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse())
 		assert.Equal(t, 50*time.Second, params.StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse())
 		assert.Equal(t, 3.5, params.StreamingCfg.WALBalancerBackoffMultiplier.GetAsFloat())
@@ -653,6 +660,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 3500*time.Millisecond, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse())
 		assert.Equal(t, int64(128*1024), params.StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
+		assert.Equal(t, float64(0.7), params.StreamingCfg.NodeMemoryUsageThreshold.GetAsFloat())
+		assert.Equal(t, float64(0.25), params.StreamingCfg.NodeGrowingSegmentBytesHwmThreshold.GetAsFloat())
+		assert.Equal(t, float64(0.15), params.StreamingCfg.NodeGrowingSegmentBytesLwmThreshold.GetAsFloat())
 	})
 
 	t.Run("channel config priority", func(t *testing.T) {

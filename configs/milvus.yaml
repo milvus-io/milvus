@@ -1173,6 +1173,19 @@ streaming:
   walWriteAheadBuffer:
     capacity: 64m # The capacity of write ahead buffer of each wal, 64M by default
     keepalive: 30s # The keepalive duration for entries in write ahead buffer of each wal, 30s by default
+  node:
+    # The threshold of memory usage for one streaming node,
+    # If the memory usage is higher than this threshold, the node will try to trigger some action to decrease the memory usage,
+    # e.g. growing segment flush. the value should be in the range of (0, 1), 0.8 by default
+    memoryUsageThreshold: 0.8
+    # The upper watermark of total growing segment bytes for one streaming node,
+    # If the total bytes of growing segment is greater than this threshold,
+    # a growing segment flush process will be triggered to decrease total bytes of growing segment.
+    growingSegmentBytesHwmThreshold: 0.2
+    # The lower watermark of total growing segment bytes for one streaming node,
+    # growing segment flush process will try to flush some growing segment into sealed 
+    # until the total bytes of growing segment is less than this threshold.
+    growingSegmentBytesLwmThreshold: 0.1
 
 # Any configuration related to the knowhere vector search engine
 knowhere:
