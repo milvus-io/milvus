@@ -432,7 +432,7 @@ def gen_dynamic_field_in_numpy_file(dir, rows, start=0, force=False):
         # non vector columns
         data = []
         if rows > 0:
-            data = [json.dumps({str(i): i, "name": fake.name(), "address": fake.address()}) for i in range(start, rows+start)]
+            data = [json.dumps({str(i): i, "name": fake.name(), "address": fake.address(), "number": i}) for i in range(start, rows+start)]
         arr = np.array(data)
         log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
         np.save(file, arr)
@@ -460,7 +460,7 @@ def gen_json_in_numpy_file(dir, data_field, rows, start=0, force=False):
     if not os.path.exists(file) or force:
         data = []
         if rows > 0:
-            data = [json.dumps({"name": fake.name(), "address": fake.address()}) for i in range(start, rows+start)]
+            data = [json.dumps({"name": fake.name(), "address": fake.address(), "number": i}) for i in range(start, rows+start)]
         arr = np.array(data)
         log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
         np.save(file, arr)
@@ -596,7 +596,10 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
         elif data_field == DataField.json_field:
             if not nullable:
                 data = pd.Series([json.dumps({
-                    gen_unique_str(): random.randint(-999999, 9999999)
+                    gen_unique_str(): random.randint(-999999, 9999999),
+                    "name": fake.name(),
+                    "address": fake.address(),
+                    "number": i
                 }) for i in range(start, rows + start)], dtype=np.dtype("str"))
             else:
                 data = pd.Series([json.dumps({
@@ -764,7 +767,8 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
                     d[data_field] = random.choice([True, False])
             elif data_field == DataField.json_field:
                 if not nullable:
-                    d[data_field] = {str(r+start): r+start}
+                    d[data_field] = {str(r+start): r+start, "name": fake.name(),
+                                     "address": fake.address(), "number": r+start}
                 else:
                     d[data_field] = {str(r + start): None}
             elif data_field == DataField.array_bool_field:
@@ -951,7 +955,7 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
 def gen_dynamic_field_data_in_parquet_file(rows, start=0):
     data = []
     if rows > 0:
-        data = pd.Series([json.dumps({str(i): i, "name": fake.name(), "address": fake.address()}) for i in range(start, rows+start)], dtype=np.dtype("str"))
+        data = pd.Series([json.dumps({str(i): i, "name": fake.name(), "address": fake.address(), "number": i}) for i in range(start, rows+start)], dtype=np.dtype("str"))
     return data
 
 

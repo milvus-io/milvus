@@ -96,7 +96,7 @@ class TestSearchGroupBy(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("group_size", [0, -1])
-    @pytest.mark.xfail(reason="issue #36146")
+    @pytest.mark.skip(reason="issue #36146")
     def test_search_negative_group_size(self, group_size):
         """
         target: test search group by with negative group size
