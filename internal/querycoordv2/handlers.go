@@ -127,7 +127,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 			actions = append(actions, releaseAction)
 		}
 
-		t, err := task.NewSegmentTask(ctx,
+		t, err := task.NewSegmentTask(s.ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			utils.ManualBalance,
 			collectionID,

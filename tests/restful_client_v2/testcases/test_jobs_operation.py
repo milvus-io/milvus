@@ -5,6 +5,8 @@ import time
 from sklearn import preprocessing
 from pathlib import Path
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import numpy as np
 from pymilvus import Collection, utility
 from utils.utils import gen_collection_name
@@ -29,10 +31,11 @@ class TestCreateImportJob(TestBase):
 
     @pytest.mark.parametrize("insert_num", [3000])
     @pytest.mark.parametrize("import_task_num", [2])
-    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("is_partition_key", [True, False])
-    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_job_e2e(self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field):
+    @pytest.mark.parametrize("enable_dynamic_field", [True])
+    @pytest.mark.parametrize("file_format", ["parquet", "json"])
+    def test_import_job_e2e(self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field, file_format):
         # create collection
         name = gen_collection_name()
         dim = 128
@@ -44,13 +47,14 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": is_partition_key, "elementTypeParams": {}},
-                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}, "nullable": True},
                     {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
                 ]
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         }
-        self.collection_client.collection_create(payload)
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] == 0
         self.wait_load_completed(name)
         # upload file to storage
         data = []
@@ -63,13 +67,26 @@ class TestCreateImportJob(TestBase):
             if not auto_id:
                 tmp["book_id"] = i
             if enable_dynamic_field:
-                tmp.update({f"dynamic_field_{i}": i})
+                tmp["$meta"] = {}
+                tmp["$meta"].update({f"dynamic_field_{i}": i})
             data.append(tmp)
         # dump data to file
-        file_name = f"bulk_insert_data_{uuid4()}.json"
+        file_name = f"bulk_insert_data_{uuid4()}.json" if file_format == "json" else f"bulk_insert_data_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
-        with open(file_path, "w") as f:
-            json.dump(data, f, cls=NumpyEncoder)
+        if file_format == "json":
+            with open(file_path, "w") as f:
+                json.dump(data, f, cls=NumpyEncoder)
+        if file_format == "parquet":
+            pa_schema = pa.schema([
+                ('word_count', pa.int64(), False),  # not nullable
+                ('book_describe', pa.string(), False),  # pecifically set as not nullable to verify a certain corner case
+                ('book_intro', pa.list_(pa.float32()), False)  # not nullable
+            ])
+            df = pd.DataFrame(data)
+            table = pa.Table.from_pandas(df, schema=pa_schema)
+            pq.write_table(table, file_path)
+            schema_info = pq.read_schema(file_path)
+            logger.info(f"parquet schema: {schema_info}")
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
 

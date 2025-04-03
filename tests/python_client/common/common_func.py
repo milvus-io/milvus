@@ -2406,6 +2406,42 @@ def gen_json_field_expressions_and_templates():
          {"expr": "json_field['float'] <= {value_0} && json_field['float'] > {value_1} && json_field['float'] != {value_2}",
           "expr_params": {"value_0": -4**5/2, "value_1": 500-1, "value_2": 500/2+260}}],
     ]
+
+    return expressions
+
+
+def gen_json_field_expressions_all_single_operator():
+    """
+    Gen a list of filter in expression-format(as a string)
+    """
+    expressions = ["json_field['a'] <= 1", "json_field['a'] <= 1.0", "json_field['a'] >= 1", "json_field['a'] >= 1.0",
+                   "json_field['a'] < 2", "json_field['a'] < 2.0", "json_field['a'] > 0", "json_field['a'] > 0.0",
+                   "json_field['a'] <= '1'", "json_field['a'] >= '1'", "json_field['a'] < '2'", "json_field['a'] > '0'",
+                   "json_field['a'] == 1", "json_field['a'] == 1.0", "json_field['a'] == True",
+                   "json_field['a'] == 9707199254740993.0", "json_field['a'] == 9707199254740992", "json_field['a'] == '1'",
+                   "json_field['a'] != '1'", "json_field['a'] like '1%'", "json_field['a'] like '%1'",
+                   "json_field['a'] like '%1%'", "json_field['a'] LIKE '1%'", "json_field['a'] LIKE '%1'",
+                   "json_field['a'] LIKE '%1%'", "EXISTS json_field['a']", "exists json_field['a']",
+                   "EXISTS json_field['a']['b']", "exists json_field['a']['b']", "json_field['a'] + 1 >= 2",
+                   "json_field['a'] - 1 <= 0", "json_field['a'] + 1.0 >= 2", "json_field['a'] - 1.0 <= 0",
+                   "json_field['a'] * 2 == 2", "json_field['a'] * 1.0 == 1.0", "json_field / 1 == 1",
+                   "json_field['a'] / 1.0 == 1", "json_field['a'] % 10 == 1", "json_field['a'] == 1**2",
+                   "json_field['a'][0] == 1 && json_field['a'][1] == 2", "json_field['a'][0] == 1 and json_field['a'][1] == 2",
+                   "json_field['a'][0]['b'] >=1 && json_field['a'][2] == 3",
+                   "json_field['a'][0]['b'] >=1 and json_field['a'][2] == 3",
+                   "json_field['a'] == 1 || json_field['a'] == '1'", "json_field['a'] == 1 or json_field['a'] == '1'",
+                   "json_field['a'][0]['b'] >=1  || json_field['a']['b'] >=1",
+                   "json_field['a'][0]['b'] >=1 or json_field['a']['b'] >=1",
+                   "json_field['a'] in [1]", "json_contains(json_field['a'], 1)", "JSON_CONTAINS(json_field['a'], 1)",
+                   "json_contains_all(json_field['a'], [2.0, '4'])", "JSON_CONTAINS_ALL(json_field['a'], [2.0, '4'])",
+                   "json_contains_any(json_field['a'], [2.0, '4'])", "JSON_CONTAINS_ANY(json_field['a'], [2.0, '4'])",
+                   "array_contains(json_field['a'], 2)", "ARRAY_CONTAINS(json_field['a'], 2)",
+                   "array_contains_all(json_field['a'], [1.0, 2])", "ARRAY_CONTAINS_ALL(json_field['a'], [1.0, 2])",
+                   "array_contains_any(json_field['a'], [1.0, 2])", "ARRAY_CONTAINS_ANY(json_field['a'], [1.0, 2])",
+                   "array_length(json_field['a']) < 10", "ARRAY_LENGTH(json_field['a']) < 10",
+                   "json_field is null", "json_field IS NULL", "json_field is not null", "json_field IS NOT NULL"
+                   ]
+    
     return expressions
 
 

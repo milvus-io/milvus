@@ -134,6 +134,11 @@ class SegmentInterface {
 
     virtual index::TextMatchIndex*
     GetTextIndex(FieldId field_id) const = 0;
+
+    virtual index::IndexBase*
+    GetJsonIndex(FieldId field_id, std::string path) const {
+        return nullptr;
+    }
 };
 
 // internal API for DSL calculation
@@ -271,9 +276,9 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual bool
     HasIndex(FieldId field_id,
              const std::string& nested_path,
-             DataType data_type) const {
-        PanicInfo(ErrorCode::NotImplemented, "not implemented");
-    };
+             DataType data_type,
+             bool any_type = false) const = 0;
+
     virtual bool
     HasFieldData(FieldId field_id) const = 0;
 

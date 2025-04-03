@@ -41,12 +41,14 @@ import (
 // BalanceChecker checks the cluster distribution and generates balance tasks.
 type BalanceChecker struct {
 	*checkerActivation
-	meta                                 *meta.Meta
-	nodeManager                          *session.NodeManager
-	normalBalanceCollectionsCurrentRound typeutil.UniqueSet
-	scheduler                            task.Scheduler
-	targetMgr                            meta.TargetManagerInterface
-	getBalancerFunc                      GetBalancerFunc
+	meta            *meta.Meta
+	nodeManager     *session.NodeManager
+	scheduler       task.Scheduler
+	targetMgr       meta.TargetManagerInterface
+	getBalancerFunc GetBalancerFunc
+
+	normalBalanceCollectionsCurrentRound   typeutil.UniqueSet
+	stoppingBalanceCollectionsCurrentRound typeutil.UniqueSet
 
 	// record auto balance ts
 	autoBalanceTs time.Time
@@ -59,13 +61,14 @@ func NewBalanceChecker(meta *meta.Meta,
 	getBalancerFunc GetBalancerFunc,
 ) *BalanceChecker {
 	return &BalanceChecker{
-		checkerActivation:                    newCheckerActivation(),
-		meta:                                 meta,
-		targetMgr:                            targetMgr,
-		nodeManager:                          nodeMgr,
-		normalBalanceCollectionsCurrentRound: typeutil.NewUniqueSet(),
-		scheduler:                            scheduler,
-		getBalancerFunc:                      getBalancerFunc,
+		checkerActivation:                      newCheckerActivation(),
+		meta:                                   meta,
+		targetMgr:                              targetMgr,
+		nodeManager:                            nodeMgr,
+		normalBalanceCollectionsCurrentRound:   typeutil.NewUniqueSet(),
+		stoppingBalanceCollectionsCurrentRound: typeutil.NewUniqueSet(),
+		scheduler:                              scheduler,
+		getBalancerFunc:                        getBalancerFunc,
 	}
 }
 
@@ -91,9 +94,22 @@ func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context) []int
 	ids = b.sortCollections(ctx, ids)
 
 	if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
+		hasUnbalancedCollection := false
+		defer func() {
+			if !hasUnbalancedCollection {
+				b.stoppingBalanceCollectionsCurrentRound.Clear()
+				log.RatedDebug(10, "BalanceChecker has triggered stopping balance for all "+
+					"collections in one round, clear collectionIDs for this round")
+			}
+		}()
 		for _, cid := range ids {
 			// if target and meta isn't ready, skip balance this collection
 			if !b.readyToCheck(ctx, cid) {
+				continue
+			}
+			if b.stoppingBalanceCollectionsCurrentRound.Contain(cid) {
+				log.RatedDebug(10, "BalanceChecker is balancing this collection, skip balancing in this round",
+					zap.Int64("collectionID", cid))
 				continue
 			}
 			replicas := b.meta.ReplicaManager.GetByCollection(ctx, cid)
@@ -104,6 +120,8 @@ func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context) []int
 				}
 			}
 			if len(stoppingReplicas) > 0 {
+				hasUnbalancedCollection = true
+				b.stoppingBalanceCollectionsCurrentRound.Insert(cid)
 				return stoppingReplicas
 			}
 		}
@@ -146,7 +164,7 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context) []int64
 	hasUnbalancedCollection := false
 	for _, cid := range loadedCollections {
 		if b.normalBalanceCollectionsCurrentRound.Contain(cid) {
-			log.RatedDebug(10, "ScoreBasedBalancer is balancing this collection, skip balancing in this round",
+			log.RatedDebug(10, "BalanceChecker is balancing this collection, skip balancing in this round",
 				zap.Int64("collectionID", cid))
 			continue
 		}
@@ -160,7 +178,7 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context) []int64
 
 	if !hasUnbalancedCollection {
 		b.normalBalanceCollectionsCurrentRound.Clear()
-		log.RatedDebug(10, "ScoreBasedBalancer has balanced all "+
+		log.RatedDebug(10, "BalanceChecker has triggered normal balance for all "+
 			"collections in one round, clear collectionIDs for this round")
 	}
 	return normalReplicasToBalance
@@ -191,7 +209,7 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 		// check for stopping balance first
 		segmentPlans, channelPlans = b.balanceReplicas(ctx, stoppingReplicas)
 		// iterate all collection to find a collection to balance
-		for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.normalBalanceCollectionsCurrentRound.Len() > 0 {
+		for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.stoppingBalanceCollectionsCurrentRound.Len() > 0 {
 			replicasToBalance := b.getReplicaForStoppingBalance(ctx)
 			segmentPlans, channelPlans = b.balanceReplicas(ctx, replicasToBalance)
 		}

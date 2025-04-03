@@ -3808,7 +3808,7 @@ class TestLoadPartition(TestcaseBase):
 class TestCollectionString(TestcaseBase):
     """
     ******************************************************************
-      The following cases are used to test about string 
+      The following cases are used to test about string
     ******************************************************************
     """
 
@@ -3898,7 +3898,7 @@ class TestCollectionString(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_string_field_is_primary_and_auto_id(self):
         """
-        target: test create collection with string field 
+        target: test create collection with string field
         method: create collection with string field, the string field primary and auto id are true
         expected: Create collection successfully
         """
@@ -3974,7 +3974,7 @@ class TestCollectionJSON(TestcaseBase):
         self.collection_wrap.init_collection(name=c_name, schema=schema,
                                              check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
-        
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
     def test_collection_multiple_json_fields_supported_primary_key(self, primary_field):
@@ -4759,4 +4759,35 @@ class TestCollectionDefaultValueValid(TestcaseBase):
         schema = cf.gen_collection_schema(fields=int_fields)
         self.collection_wrap.init_collection(c_name, schema=schema)
         self.collection_wrap.init_collection(c_name, schema=schema)
-        
+
+
+class TestCollectionInvalidFieldName(TestcaseBase):
+    """Test cases for collection creation with invalid field names"""
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("keyword", [
+        "$meta", "like", "exists", "EXISTS", "and", "or", "not", "in",
+        "json_contains", "JSON_CONTAINS", "json_contains_all", "JSON_CONTAINS_ALL",
+        "json_contains_any", "JSON_CONTAINS_ANY", "array_contains", "ARRAY_CONTAINS",
+        "array_contains_all", "ARRAY_CONTAINS_ALL", "array_contains_any", "ARRAY_CONTAINS_ANY",
+        "array_length", "ARRAY_LENGTH", "true", "True", "TRUE", "false", "False", "FALSE",
+        "text_match", "TEXT_MATCH", "phrase_match", "PHRASE_MATCH", "random_sample", "RANDOM_SAMPLE"
+    ])
+    def test_collection_field_name_with_keywords(self, keyword):
+        """
+        target: test collection creation with field name using Milvus keywords
+        method: create collection with field name using reserved keywords
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        fields = [
+            cf.gen_int64_field(is_primary=True),
+            cf.gen_float_vec_field(name=keyword)
+        ]
+        schema = cf.gen_collection_schema(fields=fields)
+        error = {ct.err_code: 1701, ct.err_msg: f"Invalid field name: {keyword}"}
+        self.collection_wrap.init_collection(c_name, schema=schema,
+                                           check_task=CheckTasks.err_res,
+                                           check_items=error)
+    

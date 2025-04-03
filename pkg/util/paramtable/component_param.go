@@ -2308,7 +2308,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.BalanceCheckInterval = ParamItem{
 		Key:          "queryCoord.checkBalanceInterval",
 		Version:      "2.3.0",
-		DefaultValue: "3000",
+		DefaultValue: "300",
 		PanicIfEmpty: true,
 		Export:       true,
 	}

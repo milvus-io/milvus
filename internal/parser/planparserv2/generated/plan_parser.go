@@ -98,8 +98,8 @@ func planParserInit() {
 		0, 88, 86, 1, 0, 0, 0, 88, 89, 1, 0, 0, 0, 89, 92, 1, 0, 0, 0, 90, 88,
 		1, 0, 0, 0, 91, 93, 5, 4, 0, 0, 92, 91, 1, 0, 0, 0, 92, 93, 1, 0, 0, 0,
 		93, 95, 1, 0, 0, 0, 94, 83, 1, 0, 0, 0, 94, 95, 1, 0, 0, 0, 95, 96, 1,
-		0, 0, 0, 96, 102, 5, 2, 0, 0, 97, 98, 5, 48, 0, 0, 98, 102, 5, 32, 0, 0,
-		99, 100, 5, 48, 0, 0, 100, 102, 5, 33, 0, 0, 101, 2, 1, 0, 0, 0, 101, 4,
+		0, 0, 0, 96, 102, 5, 2, 0, 0, 97, 98, 7, 5, 0, 0, 98, 102, 5, 32, 0, 0,
+		99, 100, 7, 5, 0, 0, 100, 102, 5, 33, 0, 0, 101, 2, 1, 0, 0, 0, 101, 4,
 		1, 0, 0, 0, 101, 5, 1, 0, 0, 0, 101, 6, 1, 0, 0, 0, 101, 7, 1, 0, 0, 0,
 		101, 8, 1, 0, 0, 0, 101, 9, 1, 0, 0, 0, 101, 12, 1, 0, 0, 0, 101, 16, 1,
 		0, 0, 0, 101, 30, 1, 0, 0, 0, 101, 31, 1, 0, 0, 0, 101, 33, 1, 0, 0, 0,
@@ -636,12 +636,16 @@ func (s *IsNotNullContext) GetRuleContext() antlr.RuleContext {
 	return s
 }
 
+func (s *IsNotNullContext) ISNOTNULL() antlr.TerminalNode {
+	return s.GetToken(PlanParserISNOTNULL, 0)
+}
+
 func (s *IsNotNullContext) Identifier() antlr.TerminalNode {
 	return s.GetToken(PlanParserIdentifier, 0)
 }
 
-func (s *IsNotNullContext) ISNOTNULL() antlr.TerminalNode {
-	return s.GetToken(PlanParserISNOTNULL, 0)
+func (s *IsNotNullContext) JSONIdentifier() antlr.TerminalNode {
+	return s.GetToken(PlanParserJSONIdentifier, 0)
 }
 
 func (s *IsNotNullContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
@@ -2443,12 +2447,16 @@ func (s *IsNullContext) GetRuleContext() antlr.RuleContext {
 	return s
 }
 
+func (s *IsNullContext) ISNULL() antlr.TerminalNode {
+	return s.GetToken(PlanParserISNULL, 0)
+}
+
 func (s *IsNullContext) Identifier() antlr.TerminalNode {
 	return s.GetToken(PlanParserIdentifier, 0)
 }
 
-func (s *IsNullContext) ISNULL() antlr.TerminalNode {
-	return s.GetToken(PlanParserISNULL, 0)
+func (s *IsNullContext) JSONIdentifier() antlr.TerminalNode {
+	return s.GetToken(PlanParserJSONIdentifier, 0)
 }
 
 func (s *IsNullContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
@@ -3277,10 +3285,13 @@ func (p *PlanParser) expr(_p int) (localctx IExprContext) {
 		_prevctx = localctx
 		{
 			p.SetState(97)
-			p.Match(PlanParserIdentifier)
-			if p.HasError() {
-				// Recognition error - abort rule
-				goto errorExit
+			_la = p.GetTokenStream().LA(1)
+
+			if !(_la == PlanParserIdentifier || _la == PlanParserJSONIdentifier) {
+				p.GetErrorHandler().RecoverInline(p)
+			} else {
+				p.GetErrorHandler().ReportMatch(p)
+				p.Consume()
 			}
 		}
 		{
@@ -3298,10 +3309,13 @@ func (p *PlanParser) expr(_p int) (localctx IExprContext) {
 		_prevctx = localctx
 		{
 			p.SetState(99)
-			p.Match(PlanParserIdentifier)
-			if p.HasError() {
-				// Recognition error - abort rule
-				goto errorExit
+			_la = p.GetTokenStream().LA(1)
+
+			if !(_la == PlanParserIdentifier || _la == PlanParserJSONIdentifier) {
+				p.GetErrorHandler().RecoverInline(p)
+			} else {
+				p.GetErrorHandler().ReportMatch(p)
+				p.Consume()
 			}
 		}
 		{
