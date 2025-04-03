@@ -6,6 +6,7 @@ import (
 )
 
 // NewInterceptorBuilder creates a new flusher interceptor builder.
+// TODO: flusher should not be a interceptor, it should be just be component that embedded in wal directly.
 func NewInterceptorBuilder() interceptors.InterceptorBuilder {
 	return &interceptorBuilder{}
 }
