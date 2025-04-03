@@ -1,8 +1,8 @@
 grammar Plan;
 
 expr:
-	IntegerConstant											                     # Integer
-	| FloatingConstant										                     # Floating
+	(ADD | SUB)? IntegerConstant											     # Integer
+	| (ADD | SUB)? FloatingConstant										         # Floating
 	| BooleanConstant										                     # Boolean
 	| StringLiteral											                     # String
 	| (Identifier|Meta)           			      							     # Identifier
@@ -101,11 +101,10 @@ ArrayLength: 'array_length' | 'ARRAY_LENGTH';
 BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
 
 IntegerConstant:
-	(DecimalConstant
+	DecimalConstant
 	| OctalConstant
 	| HexadecimalConstant
-	| BinaryConstant) | MIN_INT64;
-MIN_INT64 : '-9223372036854775808';
+	| BinaryConstant;
 
 FloatingConstant:
 	DecimalFloatingConstant
