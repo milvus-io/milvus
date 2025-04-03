@@ -3,7 +3,6 @@ package message
 const (
 	// preserved properties
 	messageVersion                          = "_v"   // message version for compatibility, see `Version` for more information.
-	messageWALTerm                          = "_wt"  // wal term of a message, always increase by MessageID order, should never rollback.
 	messageTypeKey                          = "_t"   // message type key.
 	messageTimeTick                         = "_tt"  // message time tick.
 	messageBarrierTimeTick                  = "_btt" // message barrier time tick.

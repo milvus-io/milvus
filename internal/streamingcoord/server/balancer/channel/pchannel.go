@@ -15,6 +15,7 @@ func newPChannelMeta(name string) *PChannelMeta {
 				Name:       name,
 				Term:       1,
 				AccessMode: streamingpb.PChannelAccessMode(types.AccessModeRW),
+				ReplicaId:  0, // TODO: we only support RW mode now, so replica id is always 0.
 			},
 			Node:      nil,
 			State:     streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
@@ -36,9 +37,22 @@ type PChannelMeta struct {
 	inner *streamingpb.PChannelMeta
 }
 
+// IsRWChannel check if the pchannel is a rw channel.
+func (c *PChannelMeta) IsRWChannel() bool {
+	return c.inner.Channel.GetAccessMode() == streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE
+}
+
 // Name returns the name of the channel.
 func (c *PChannelMeta) Name() string {
 	return c.inner.GetChannel().GetName()
+}
+
+// ChannelID returns the channel id.
+func (c *PChannelMeta) ChannelID() types.ChannelID {
+	return types.ChannelID{
+		Name:      c.inner.Channel.Name,
+		ReplicaID: c.inner.Channel.ReplicaId,
+	}
 }
 
 // ChannelInfo returns the channel info.

@@ -17,6 +17,8 @@ import "google/protobuf/any.proto";
 enum PChannelAccessMode {
     PCHANNEL_ACCESS_READWRITE = 0;  // read and write by default.
     PCHANNEL_ACCESS_READONLY = 1;  // read only.
+    // PCHANNEL_ACCESS_PREPARE_READWRITE = 2; // in future, we will introduce more access mode for one pchannel.
+    // e.g. the pchannel with some access mode may prepare for readwrite, load index, growing segment before switch to readwrite.
 }
 
 // PChannelInfo is the information of a pchannel info, should only keep the
@@ -27,6 +29,9 @@ message PChannelInfo {
                       // recovered or moved to another streamingnode, the term
                       // will increase by meta server.
     PChannelAccessMode access_mode = 3;  // access mode of the channel.
+    int64 replica_id = 4; // replica id of the channel, used to identify the replica of the channel.
+    // When the channel is a rw channel, the replica id is zero, there will be only one rw replica for a channel.
+    // The access mode is always readwrite for the rw replica.
 }
 
 // PChannelAssignmentLog is the log of meta information of a pchannel, should
