@@ -475,6 +475,10 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
         GetValueFromConfig<int32_t>(config,
                                     milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1) == 0;
+    tantivy_index_version_ =
+        GetValueFromConfig<int32_t>(config,
+                                    milvus::index::TANTIVY_INDEX_VERSION)
+            .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         field.c_str(),
         d_type_,
