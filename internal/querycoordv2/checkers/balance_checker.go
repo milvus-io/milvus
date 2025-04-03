@@ -239,10 +239,8 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 				// if balance on multiple collections is disabled, and there are already some tasks, break
 				break
 			}
-			if len(channelTasks) < channelBatchSize {
-				replicasToBalance := b.getReplicaForStoppingBalance(ctx)
-				generateBalanceTaskForReplicas(replicasToBalance)
-			}
+			replicasToBalance := b.getReplicaForStoppingBalance(ctx)
+			generateBalanceTaskForReplicas(replicasToBalance)
 		}
 	} else {
 		// then check for auto balance

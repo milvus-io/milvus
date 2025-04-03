@@ -498,11 +498,9 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		taskType := GetTaskType(task)
 
 		if taskType == TaskTypeMove {
-			views := scheduler.distMgr.LeaderViewManager.GetByFilter(
-				meta.WithChannelName2LeaderView(task.Shard()),
-				meta.WithSegment2LeaderView(task.SegmentID(), false))
-			if len(views) == 0 {
-				return merr.WrapErrServiceInternal("segment's delegator not found, stop balancing")
+			leader := scheduler.distMgr.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+			if leader == nil {
+				return merr.WrapErrServiceInternal("segment's delegator leader not found, stop balancing")
 			}
 			segmentInTargetNode := scheduler.distMgr.SegmentDistManager.GetByFilter(meta.WithNodeID(task.Actions()[1].Node()), meta.WithSegmentID(task.SegmentID()))
 			if len(segmentInTargetNode) == 0 {
@@ -530,15 +528,15 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 		taskType := GetTaskType(task)
 		if taskType == TaskTypeGrow {
-			views := scheduler.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(task.Channel()))
-			nodesWithChannel := lo.Map(views, func(v *meta.LeaderView, _ int) UniqueID { return v.ID })
+			delegatorList := scheduler.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(task.Channel()))
+			nodesWithChannel := lo.Map(delegatorList, func(v *meta.DmChannel, _ int) UniqueID { return v.Node })
 			replicaNodeMap := utils.GroupNodesByReplica(task.ctx, scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
 			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
 				return merr.WrapErrServiceInternal("channel subscribed, it can be only balanced")
 			}
 		} else if taskType == TaskTypeMove {
-			views := scheduler.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(task.Channel()))
-			_, ok := lo.Find(views, func(v *meta.LeaderView) bool { return v.ID == task.Actions()[1].Node() })
+			delegatorList := scheduler.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(task.Channel()))
+			_, ok := lo.Find(delegatorList, func(v *meta.DmChannel) bool { return v.Node == task.Actions()[1].Node() })
 			if !ok {
 				return merr.WrapErrServiceInternal("source channel unsubscribed, stop balancing")
 			}
@@ -827,15 +825,14 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 			if segment == nil {
 				continue
 			}
-			replica := scheduler.meta.ReplicaManager.GetByCollectionAndNode(task.ctx, task.CollectionID(), action.Node())
-			if replica == nil {
+			if task.replica == nil {
 				continue
 			}
-			leader, ok := scheduler.distMgr.GetShardLeader(replica, segment.GetInsertChannel())
-			if !ok {
+			leader := scheduler.distMgr.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+			if leader == nil {
 				continue
 			}
-			if leader == node {
+			if leader.Node == node {
 				return true
 			}
 		}
@@ -855,24 +852,23 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 	actions, step := task.Actions(), task.Step()
 	for step < len(actions) && actions[step].IsFinished(scheduler.distMgr) {
 		if GetTaskType(task) == TaskTypeMove && actions[step].Type() == ActionTypeGrow {
-			var ready bool
-			switch actions[step].(type) {
+			var newDelegatorReady bool
+			switch action := actions[step].(type) {
 			case *ChannelAction:
-				// if balance channel task has finished grow action, block reduce action until
-				// segment distribution has been sync to new delegator, cause new delegator may
-				// causes a few time to load delta log, if reduce the old delegator in advance,
-				// new delegator can't service search and query, will got no available channel error
-				channelAction := actions[step].(*ChannelAction)
-				leader := scheduler.distMgr.LeaderViewManager.GetLeaderShardView(channelAction.Node(), channelAction.Shard)
-				ready = leader.UnServiceableError == nil
+				// wait for new delegator becomes leader, then try to remove old leader
+				task := task.(*ChannelTask)
+				delegator := scheduler.distMgr.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+				newDelegatorReady = delegator != nil && delegator.Node == action.Node()
 			default:
-				ready = true
+				newDelegatorReady = true
 			}
-
-			if !ready {
-				log.Ctx(scheduler.ctx).WithRateGroup("qcv2.taskScheduler", 1, 60).RatedInfo(30, "Blocking reduce action in balance channel task",
-					zap.Int64("collectionID", task.CollectionID()),
-					zap.Int64("taskID", task.ID()))
+			if !newDelegatorReady {
+				log.Ctx(scheduler.ctx).
+					WithRateGroup("qcv2.preProcess", 1, 60).
+					RatedInfo(30, "Blocking reduce action in balance channel task",
+						zap.Int64("collectionID", task.CollectionID()),
+						zap.String("channelName", task.Shard()),
+						zap.Int64("taskID", task.ID()))
 				break
 			}
 		}
@@ -1112,13 +1108,8 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 				return merr.WrapErrSegmentReduplicate(task.SegmentID(), "target doesn't contain this segment")
 			}
 
-			replica := scheduler.meta.ReplicaManager.GetByCollectionAndNode(task.ctx, task.CollectionID(), action.Node())
-			if replica == nil {
-				log.Ctx(task.Context()).Warn("task stale due to replica not found", WrapTaskLog(task)...)
-				return merr.WrapErrReplicaNotFound(task.CollectionID(), "by collectionID")
-			}
-			_, ok := scheduler.distMgr.GetShardLeader(replica, segment.GetInsertChannel())
-			if !ok {
+			leader := scheduler.distMgr.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+			if leader == nil {
 				log.Ctx(task.Context()).Warn("task stale due to leader not found", WrapTaskLog(task)...)
 				return merr.WrapErrChannelNotFound(segment.GetInsertChannel(), "failed to get shard delegator")
 			}
@@ -1171,21 +1162,15 @@ func (scheduler *taskScheduler) checkLeaderTaskStale(task *LeaderTask) error {
 				return merr.WrapErrSegmentReduplicate(task.SegmentID(), "target doesn't contain this segment")
 			}
 
-			replica := scheduler.meta.ReplicaManager.GetByCollectionAndNode(task.ctx, task.CollectionID(), action.Node())
-			if replica == nil {
-				log.Ctx(task.Context()).Warn("task stale due to replica not found", WrapTaskLog(task, zap.Int64("leaderID", task.leaderID))...)
-				return merr.WrapErrReplicaNotFound(task.CollectionID(), "by collectionID")
-			}
-
-			view := scheduler.distMgr.GetLeaderShardView(task.leaderID, task.Shard())
-			if view == nil {
+			leader := scheduler.distMgr.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+			if leader == nil {
 				log.Ctx(task.Context()).Warn("task stale due to leader not found", WrapTaskLog(task, zap.Int64("leaderID", task.leaderID))...)
 				return merr.WrapErrChannelNotFound(task.Shard(), "failed to get shard delegator")
 			}
 
 		case ActionTypeReduce:
-			view := scheduler.distMgr.GetLeaderShardView(task.leaderID, task.Shard())
-			if view == nil {
+			leader := scheduler.distMgr.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+			if leader == nil {
 				log.Ctx(task.Context()).Warn("task stale due to leader not found", WrapTaskLog(task, zap.Int64("leaderID", task.leaderID))...)
 				return merr.WrapErrChannelNotFound(task.Shard(), "failed to get shard delegator")
 			}
