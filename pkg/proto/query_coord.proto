@@ -618,9 +618,14 @@ message LeaderView {
     map<int64, SegmentDist> segment_dist = 3;
     repeated int64 growing_segmentIDs = 4;
     map<int64, msg.MsgPosition> growing_segments = 5;
-    int64 TargetVersion = 6;
+    int64 TargetVersion = 6; // deprecated
     int64 num_of_growing_rows = 7;
     map<int64, int64> partition_stats_versions = 8;
+    LeaderViewStatus status = 9;
+}
+
+message LeaderViewStatus {
+    bool serviceable = 10;
 }
 
 message SegmentDist {

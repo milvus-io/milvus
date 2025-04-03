@@ -330,7 +330,7 @@ func (sd *shardDelegator) applyDelete(ctx context.Context,
 
 // markSegmentOffline makes segment go offline and waits for QueryCoord to fix.
 func (sd *shardDelegator) markSegmentOffline(segmentIDs ...int64) {
-	sd.distribution.AddOfflines(segmentIDs...)
+	sd.distribution.MarkOfflineSegments(segmentIDs...)
 }
 
 // addGrowing add growing segment record for delegator.
@@ -1027,8 +1027,8 @@ func (sd *shardDelegator) SyncTargetVersion(
 	sd.RefreshLevel0DeletionStats()
 }
 
-func (sd *shardDelegator) GetTargetVersion() int64 {
-	return sd.distribution.getTargetVersion()
+func (sd *shardDelegator) GetQueryView() *QueryView {
+	return sd.distribution.queryView
 }
 
 func (sd *shardDelegator) AddExcludedSegments(excludeInfo map[int64]uint64) {

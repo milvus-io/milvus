@@ -30,6 +30,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -87,7 +89,7 @@ type ShardDelegator interface {
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
 	SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition, deleteSeekPos *msgpb.MsgPosition)
-	GetTargetVersion() int64
+	GetQueryView() *QueryView
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
 
 	// manage exclude segments
@@ -327,7 +329,12 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
-		return worker.SearchSegments(ctx, req)
+		resp, err := worker.SearchSegments(ctx, req)
+		status, ok := status.FromError(err)
+		if ok && status.Code() == codes.Unavailable {
+			sd.markSegmentOffline(req.GetSegmentIDs()...)
+		}
+		return resp, err
 	}, "Search", log)
 	if err != nil {
 		log.Warn("Delegator search failed", zap.Error(err))
@@ -515,7 +522,12 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	}
 
 	_, err = executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		return nil, worker.QueryStreamSegments(ctx, req, srv)
+		err := worker.QueryStreamSegments(ctx, req, srv)
+		status, ok := status.FromError(err)
+		if ok && status.Code() == codes.Unavailable {
+			sd.markSegmentOffline(req.GetSegmentIDs()...)
+		}
+		return nil, err
 	}, "Query", log)
 	if err != nil {
 		log.Warn("Delegator query failed", zap.Error(err))
@@ -595,7 +607,12 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		return worker.QuerySegments(ctx, req)
+		resp, err := worker.QuerySegments(ctx, req)
+		status, ok := status.FromError(err)
+		if ok && status.Code() == codes.Unavailable {
+			sd.markSegmentOffline(req.GetSegmentIDs()...)
+		}
+		return resp, err
 	}, "Query", log)
 	if err != nil {
 		log.Warn("Delegator query failed", zap.Error(err))
@@ -1002,7 +1019,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		segmentManager: manager.Segment,
 		workerManager:  workerManager,
 		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
-		distribution:   NewDistribution(),
+		distribution:   NewDistribution(channel),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
 		pkOracle:         pkoracle.NewPkOracle(),

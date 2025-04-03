@@ -325,8 +325,8 @@ func (ob *CollectionObserver) observeChannelStatus(ctx context.Context, collecti
 
 	subChannelCount := 0
 	for _, channel := range channelTargets {
-		views := ob.dist.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel.GetChannelName()))
-		nodes := lo.Map(views, func(v *meta.LeaderView, _ int) int64 { return v.ID })
+		delegatorList := ob.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channel.GetChannelName()))
+		nodes := lo.Map(delegatorList, func(v *meta.DmChannel, _ int) int64 { return v.Node })
 		group := utils.GroupNodesByReplica(ctx, ob.meta.ReplicaManager, collectionID, nodes)
 		subChannelCount += len(group)
 	}
@@ -354,11 +354,14 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 	loadPercentage := int32(0)
 
 	for _, segment := range segmentTargets {
-		views := ob.dist.LeaderViewManager.GetByFilter(
-			meta.WithChannelName2LeaderView(segment.GetInsertChannel()),
-			meta.WithSegment2LeaderView(segment.GetID(), false))
-		nodes := lo.Map(views, func(view *meta.LeaderView, _ int) int64 { return view.ID })
-		group := utils.GroupNodesByReplica(ctx, ob.meta.ReplicaManager, partition.GetCollectionID(), nodes)
+		delegatorList := ob.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(segment.GetInsertChannel()))
+		loadedSegmentNodes := make([]int64, 0)
+		for _, delegator := range delegatorList {
+			if delegator.View.Segments[segment.GetID()] != nil {
+				loadedSegmentNodes = append(loadedSegmentNodes, delegator.Node)
+			}
+		}
+		group := utils.GroupNodesByReplica(ctx, ob.meta.ReplicaManager, partition.GetCollectionID(), loadedSegmentNodes)
 		loadedCount += len(group)
 	}
 	loadPercentage = int32(loadedCount * 100 / (targetNum * int(replicaNum)))
