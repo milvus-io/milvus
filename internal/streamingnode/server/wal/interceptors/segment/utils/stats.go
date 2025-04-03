@@ -1,10 +1,19 @@
-package stats
+package utils
 
 import (
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
+
+// SegmentBelongs is the info of segment belongs to a channel.
+type SegmentBelongs struct {
+	PChannel     string
+	VChannel     string
+	CollectionID int64
+	PartitionID  int64
+	SegmentID    int64
+}
 
 // SegmentStats is the usage stats of a segment.
 // The SegmentStats is imprecise, so it is not promised to be recoverable for performance.
@@ -50,12 +59,6 @@ func NewProtoFromSegmentStat(stat *SegmentStats) *streamingpb.SegmentAssignmentS
 	}
 }
 
-// SyncOperationMetrics is the metrics of sync operation.
-type SyncOperationMetrics struct {
-	BinLogCounterIncr     uint64 // the counter increment of bin log
-	BinLogFileCounterIncr uint64 // the counter increment of bin log file
-}
-
 // AllocRows alloc space of rows on current segment.
 // Return true if the segment is assigned.
 func (s *SegmentStats) AllocRows(m InsertMetrics) bool {
@@ -97,4 +100,34 @@ func (s *SegmentStats) UpdateOnSync(f SyncOperationMetrics) {
 func (s *SegmentStats) Copy() *SegmentStats {
 	s2 := *s
 	return &s2
+}
+
+// InsertMetrics is the metrics of insert operation.
+type InsertMetrics struct {
+	Rows       uint64
+	BinarySize uint64
+}
+
+// Collect collects other metrics.
+func (m *InsertMetrics) Collect(other InsertMetrics) {
+	m.Rows += other.Rows
+	m.BinarySize += other.BinarySize
+}
+
+// Subtract subtract by other metrics.
+func (m *InsertMetrics) Subtract(other InsertMetrics) {
+	if m.Rows < other.Rows {
+		panic("rows cannot be less than zero")
+	}
+	if m.BinarySize < other.BinarySize {
+		panic("binary size cannot be less than zero")
+	}
+	m.Rows -= other.Rows
+	m.BinarySize -= other.BinarySize
+}
+
+// SyncOperationMetrics is the metrics of sync operation.
+type SyncOperationMetrics struct {
+	BinLogCounterIncr     uint64 // the counter increment of bin log
+	BinLogFileCounterIncr uint64 // the counter increment of bin log file
 }
