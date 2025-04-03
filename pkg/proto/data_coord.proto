@@ -755,6 +755,17 @@ message AlterCollectionRequest {
   repeated string vChannels = 7;
 }
 
+message AddCollectionFieldRequest {
+  int64  collectionID = 1;
+  int64  dbID = 2;
+  schema.FieldSchema field_schema = 3;
+  schema.CollectionSchema schema = 4;
+  repeated int64 partitionIDs = 5;
+  repeated common.KeyDataPair start_positions = 6;
+  repeated common.KeyValuePair properties = 7;
+  repeated string vChannels = 8;
+}
+
 message GcConfirmRequest {
   int64 collection_id = 1;
   int64 partition_id = 2; // -1 means whole collection.

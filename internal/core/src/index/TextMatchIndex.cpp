@@ -35,6 +35,8 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
         milvus::tantivy::DEFAULT_NUM_THREADS_FOR_QUERY_NODE,
         milvus::tantivy::DEFAULT_NUM_THREADS_FOR_QUERY_NODE *
             milvus::tantivy::DEFAULT_MEMORY_BUDGET_PER_THREAD,
+        TANTIVY_INDEX_LATEST_VERSION /* Growing segment has no reason to use old version index*/
+        ,
         tokenizer_name,
         analyzer_params);
 }
@@ -42,6 +44,7 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
 // for sealed segment.
 TextMatchIndex::TextMatchIndex(const std::string& path,
                                const char* unique_id,
+                               uint32_t tantivy_index_version,
                                const char* tokenizer_name,
                                const char* analyzer_params)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
@@ -58,12 +61,14 @@ TextMatchIndex::TextMatchIndex(const std::string& path,
         milvus::tantivy::DEFAULT_NUM_THREADS_FOR_QUERY_NODE,
         milvus::tantivy::DEFAULT_NUM_THREADS_FOR_QUERY_NODE *
             milvus::tantivy::DEFAULT_MEMORY_BUDGET_PER_THREAD,
+        tantivy_index_version,
         tokenizer_name,
         analyzer_params);
 }
 
 // for building index.
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
+                               uint32_t tantivy_index_version,
                                const char* tokenizer_name,
                                const char* analyzer_params)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
@@ -86,6 +91,7 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
         milvus::tantivy::DEFAULT_NUM_THREADS_FOR_INDEX_NODE,
         milvus::tantivy::DEFAULT_NUM_THREADS_FOR_INDEX_NODE *
             milvus::tantivy::DEFAULT_MEMORY_BUDGET_PER_THREAD,
+        tantivy_index_version,
         tokenizer_name,
         analyzer_params);
 }

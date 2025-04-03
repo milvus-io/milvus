@@ -10,12 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <cstddef>
 #include <functional>
 #include <boost/filesystem.hpp>
+#include <optional>
 #include <unordered_set>
 #include <memory>
 
 #include "common/Tracer.h"
+#include "common/Types.h"
 #include "index/BitmapIndex.h"
 #include "storage/Util.h"
 #include "storage/InsertData.h"
@@ -71,6 +74,22 @@ class BitmapIndexTest : public testing::Test {
          int64_t index_version) {
         proto::schema::FieldSchema field_schema;
         field_schema.set_nullable(nullable_);
+        if (has_default_value_) {
+            auto default_value = field_schema.mutable_default_value();
+            if constexpr (std::is_same_v<int8_t, T> ||
+                          std::is_same_v<int16_t, T> ||
+                          std::is_same_v<int32_t, T>) {
+                default_value->set_int_data(10);
+            } else if constexpr (std::is_same_v<int64_t, T>) {
+                default_value->set_long_data(10);
+            } else if constexpr (std::is_same_v<float, T>) {
+                default_value->set_float_data(10);
+            } else if constexpr (std::is_same_v<double, T>) {
+                default_value->set_double_data(10);
+            } else if constexpr (std::is_same_v<std::string, T>) {
+                default_value->set_string_data("10");
+            }
+        }
         if constexpr (std::is_same_v<int8_t, T>) {
             field_schema.set_data_type(proto::schema::DataType::Int8);
         } else if constexpr (std::is_same_v<int16_t, T>) {
@@ -138,6 +157,9 @@ class BitmapIndexTest : public testing::Test {
         Config config;
         config["index_type"] = milvus::index::BITMAP_INDEX_TYPE;
         config["insert_files"] = std::vector<std::string>{log_path};
+        if (has_lack_binlog_row_) {
+            config["lack_binlog_rows"] = lack_binlog_row_;
+        }
 
         auto build_index =
             indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -230,11 +252,26 @@ class BitmapIndexTest : public testing::Test {
         }
         auto index_ptr = dynamic_cast<index::BitmapIndex<T>*>(index_.get());
         auto bitset = index_ptr->In(test_data.size(), test_data.data());
-        for (size_t i = 0; i < bitset.size(); i++) {
-            if (nullable_ && !valid_data_[i]) {
+        size_t start = 0;
+        if (has_lack_binlog_row_) {
+            for (int i = 0; i < lack_binlog_row_; i++) {
+                if (!has_default_value_) {
+                    ASSERT_EQ(bitset[i], false);
+                } else {
+                    if constexpr (std::is_same_v<std::string, T>) {
+                        ASSERT_EQ(bitset[i], s.find("10") != s.end());
+                    } else {
+                        ASSERT_EQ(bitset[i], s.find(10) != s.end());
+                    }
+                }
+            }
+            start += lack_binlog_row_;
+        }
+        for (size_t i = start; i < bitset.size(); i++) {
+            if (nullable_ && !valid_data_[i - start]) {
                 ASSERT_EQ(bitset[i], false);
             } else {
-                ASSERT_EQ(bitset[i], s.find(data_[i]) != s.end());
+                ASSERT_EQ(bitset[i], s.find(data_[i - start]) != s.end());
             }
         }
     }
@@ -250,11 +287,26 @@ class BitmapIndexTest : public testing::Test {
         }
         auto index_ptr = dynamic_cast<index::BitmapIndex<T>*>(index_.get());
         auto bitset = index_ptr->NotIn(test_data.size(), test_data.data());
-        for (size_t i = 0; i < bitset.size(); i++) {
-            if (nullable_ && !valid_data_[i]) {
+        size_t start = 0;
+        if (has_lack_binlog_row_) {
+            for (int i = 0; i < lack_binlog_row_; i++) {
+                if (!has_default_value_) {
+                    ASSERT_EQ(bitset[i], false);
+                } else {
+                    if constexpr (std::is_same_v<std::string, T>) {
+                        ASSERT_EQ(bitset[i], s.find("10") == s.end());
+                    } else {
+                        ASSERT_EQ(bitset[i], s.find(10) == s.end());
+                    }
+                }
+            }
+            start += lack_binlog_row_;
+        }
+        for (size_t i = start; i < bitset.size(); i++) {
+            if (nullable_ && !valid_data_[i - start]) {
                 ASSERT_EQ(bitset[i], false);
             } else {
-                ASSERT_EQ(bitset[i], s.find(data_[i]) == s.end());
+                ASSERT_EQ(bitset[i], s.find(data_[i - start]) == s.end());
             }
         }
     }
@@ -263,8 +315,20 @@ class BitmapIndexTest : public testing::Test {
     TestIsNullFunc() {
         auto index_ptr = dynamic_cast<index::BitmapIndex<T>*>(index_.get());
         auto bitset = index_ptr->IsNull();
-        for (size_t i = 0; i < bitset.size(); i++) {
-            if (nullable_ && !valid_data_[i]) {
+        size_t start = 0;
+        if (has_lack_binlog_row_) {
+            for (int i = 0; i < lack_binlog_row_; i++) {
+                if (has_default_value_) {
+                    ASSERT_EQ(bitset[i], false);
+                } else {
+                    ASSERT_EQ(bitset[i], true);
+                }
+            }
+            start += lack_binlog_row_;
+        }
+
+        for (size_t i = start; i < bitset.size(); i++) {
+            if (nullable_ && !valid_data_[i - start]) {
                 ASSERT_EQ(bitset[i], true);
             } else {
                 ASSERT_EQ(bitset[i], false);
@@ -276,8 +340,20 @@ class BitmapIndexTest : public testing::Test {
     TestIsNotNullFunc() {
         auto index_ptr = dynamic_cast<index::BitmapIndex<T>*>(index_.get());
         auto bitset = index_ptr->IsNotNull();
-        for (size_t i = 0; i < bitset.size(); i++) {
-            if (nullable_ && !valid_data_[i]) {
+        size_t start = 0;
+        if (has_lack_binlog_row_) {
+            for (int i = 0; i < lack_binlog_row_; i++) {
+                if (has_default_value_) {
+                    ASSERT_EQ(bitset[i], true);
+                } else {
+                    ASSERT_EQ(bitset[i], false);
+                }
+            }
+            start += lack_binlog_row_;
+        }
+
+        for (size_t i = start; i < bitset.size(); i++) {
+            if (nullable_ && !valid_data_[i - start]) {
                 ASSERT_EQ(bitset[i], false);
             } else {
                 ASSERT_EQ(bitset[i], true);
@@ -289,35 +365,52 @@ class BitmapIndexTest : public testing::Test {
     TestCompareValueFunc() {
         if constexpr (!std::is_same_v<T, std::string>) {
             using RefFunc = std::function<bool(int64_t)>;
-            std::vector<std::tuple<T, OpType, RefFunc>> test_cases{
+            std::vector<std::tuple<T, OpType, RefFunc, bool>> test_cases{
                 {10,
                  OpType::GreaterThan,
-                 [&](int64_t i) -> bool { return data_[i] > 10; }},
+                 [&](int64_t i) -> bool { return data_[i] > 10; },
+                 false},
                 {10,
                  OpType::GreaterEqual,
-                 [&](int64_t i) -> bool { return data_[i] >= 10; }},
+                 [&](int64_t i) -> bool { return data_[i] >= 10; },
+                 true},
                 {10,
                  OpType::LessThan,
-                 [&](int64_t i) -> bool { return data_[i] < 10; }},
+                 [&](int64_t i) -> bool { return data_[i] < 10; },
+                 false},
                 {10,
                  OpType::LessEqual,
-                 [&](int64_t i) -> bool { return data_[i] <= 10; }},
+                 [&](int64_t i) -> bool { return data_[i] <= 10; },
+                 true},
             };
-            for (const auto& [test_value, op, ref] : test_cases) {
+            for (const auto& [test_value, op, ref, default_value_res] :
+                 test_cases) {
                 auto index_ptr =
                     dynamic_cast<index::BitmapIndex<T>*>(index_.get());
                 auto bitset = index_ptr->Range(test_value, op);
-                for (size_t i = 0; i < bitset.size(); i++) {
+                size_t start = 0;
+                if (has_lack_binlog_row_) {
+                    for (int i = 0; i < lack_binlog_row_; i++) {
+                        if (has_default_value_) {
+                            ASSERT_EQ(bitset[i], default_value_res);
+                        } else {
+                            ASSERT_EQ(bitset[i], false);
+                        }
+                    }
+                    start += lack_binlog_row_;
+                }
+
+                for (size_t i = start; i < bitset.size(); i++) {
                     auto ans = bitset[i];
-                    auto should = ref(i);
-                    if (nullable_ && !valid_data_[i]) {
+                    auto should = ref(i - start);
+                    if (nullable_ && !valid_data_[i - start]) {
                         ASSERT_EQ(ans, false)
                             << "op: " << op << ", @" << i << ", ans: " << ans
                             << ", ref: " << should;
                     } else {
                         ASSERT_EQ(ans, should)
                             << "op: " << op << ", @" << i << ", ans: " << ans
-                            << ", ref: " << should << "|" << data_[i];
+                            << ", ref: " << should << "|" << data_[i - start];
                     }
                 }
             }
@@ -334,6 +427,7 @@ class BitmapIndexTest : public testing::Test {
                 bool lower_inclusive;
                 bool upper_inclusive;
                 RefFunc ref;
+                bool default_value_res;
             };
             std::vector<TestParam> test_cases = {
                 {
@@ -342,6 +436,7 @@ class BitmapIndexTest : public testing::Test {
                     false,
                     false,
                     [&](int64_t i) { return 10 < data_[i] && data_[i] < 30; },
+                    false,
                 },
                 {
                     10,
@@ -349,6 +444,7 @@ class BitmapIndexTest : public testing::Test {
                     true,
                     false,
                     [&](int64_t i) { return 10 <= data_[i] && data_[i] < 30; },
+                    true,
                 },
                 {
                     10,
@@ -356,6 +452,7 @@ class BitmapIndexTest : public testing::Test {
                     true,
                     true,
                     [&](int64_t i) { return 10 <= data_[i] && data_[i] <= 30; },
+                    true,
                 },
                 {
                     10,
@@ -363,6 +460,7 @@ class BitmapIndexTest : public testing::Test {
                     false,
                     true,
                     [&](int64_t i) { return 10 < data_[i] && data_[i] <= 30; },
+                    false,
                 }};
 
             for (const auto& test_case : test_cases) {
@@ -372,10 +470,22 @@ class BitmapIndexTest : public testing::Test {
                                                test_case.lower_inclusive,
                                                test_case.upper_val,
                                                test_case.upper_inclusive);
-                for (size_t i = 0; i < bitset.size(); i++) {
+                size_t start = 0;
+                if (has_lack_binlog_row_) {
+                    for (int i = 0; i < lack_binlog_row_; i++) {
+                        if (has_default_value_) {
+                            ASSERT_EQ(bitset[i], test_case.default_value_res);
+                        } else {
+                            ASSERT_EQ(bitset[i], false);
+                        }
+                    }
+                    start += lack_binlog_row_;
+                }
+
+                for (size_t i = start; i < bitset.size(); i++) {
                     auto ans = bitset[i];
-                    auto should = test_case.ref(i);
-                    if (nullable_ && !valid_data_[i]) {
+                    auto should = test_case.ref(i - start);
+                    if (nullable_ && !valid_data_[i - start]) {
                         ASSERT_EQ(ans, false)
                             << "lower:" << test_case.lower_val
                             << "upper:" << test_case.upper_val << ", @" << i
@@ -403,6 +513,9 @@ class BitmapIndexTest : public testing::Test {
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
     int index_version_;
     int index_build_id_;
+    bool has_default_value_{false};
+    bool has_lack_binlog_row_{false};
+    size_t lack_binlog_row_{100};
 };
 
 TYPED_TEST_SUITE_P(BitmapIndexTest);
@@ -634,4 +747,146 @@ REGISTER_TYPED_TEST_SUITE_P(BitmapIndexTestV4,
 
 INSTANTIATE_TYPED_TEST_SUITE_P(BitmapIndexE2ECheck_Mmap,
                                BitmapIndexTestV4,
+                               BitmapType);
+
+template <typename T>
+class BitmapIndexTestV5 : public BitmapIndexTest<T> {
+ public:
+    virtual void
+    SetParam() override {
+        this->nb_ = 10000;
+        this->cardinality_ = 2000;
+        this->is_mmap_ = true;
+        this->nullable_ = true;
+        this->index_version_ = 3003;
+        this->index_build_id_ = 3003;
+        this->has_default_value_ = false;
+        this->has_lack_binlog_row_ = true;
+        this->lack_binlog_row_ = 100;
+    }
+
+    virtual ~BitmapIndexTestV5() {
+    }
+};
+
+TYPED_TEST_SUITE_P(BitmapIndexTestV5);
+
+TYPED_TEST_P(BitmapIndexTestV5, CountFuncTest) {
+    auto count = this->index_->Count();
+    if (this->has_lack_binlog_row_) {
+        EXPECT_EQ(count, this->nb_ + this->lack_binlog_row_);
+    } else {
+        EXPECT_EQ(count, this->nb_);
+    }
+}
+
+TYPED_TEST_P(BitmapIndexTestV5, INFuncTest) {
+    this->TestInFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV5, NotINFuncTest) {
+    this->TestNotInFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV5, CompareValFuncTest) {
+    this->TestCompareValueFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV5, TestRangeCompareFuncTest) {
+    this->TestRangeCompareFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV5, IsNullFuncTest) {
+    this->TestIsNullFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV5, IsNotNullFuncTest) {
+    this->TestIsNotNullFunc();
+}
+
+using BitmapType =
+    testing::Types<int8_t, int16_t, int32_t, int64_t, std::string>;
+
+REGISTER_TYPED_TEST_SUITE_P(BitmapIndexTestV5,
+                            CountFuncTest,
+                            INFuncTest,
+                            NotINFuncTest,
+                            CompareValFuncTest,
+                            TestRangeCompareFuncTest,
+                            IsNullFuncTest,
+                            IsNotNullFuncTest);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(BitmapIndexE2ECheck_Mmap,
+                               BitmapIndexTestV5,
+                               BitmapType);
+
+template <typename T>
+class BitmapIndexTestV6 : public BitmapIndexTest<T> {
+ public:
+    virtual void
+    SetParam() override {
+        this->nb_ = 10000;
+        this->cardinality_ = 2000;
+        this->is_mmap_ = true;
+        this->nullable_ = true;
+        this->index_version_ = 3003;
+        this->index_build_id_ = 3003;
+        this->has_default_value_ = true;
+        this->has_lack_binlog_row_ = true;
+        this->lack_binlog_row_ = 100;
+    }
+
+    virtual ~BitmapIndexTestV6() {
+    }
+};
+
+TYPED_TEST_SUITE_P(BitmapIndexTestV6);
+
+TYPED_TEST_P(BitmapIndexTestV6, CountFuncTest) {
+    auto count = this->index_->Count();
+    if (this->has_lack_binlog_row_) {
+        EXPECT_EQ(count, this->nb_ + this->lack_binlog_row_);
+    } else {
+        EXPECT_EQ(count, this->nb_);
+    }
+}
+
+TYPED_TEST_P(BitmapIndexTestV6, INFuncTest) {
+    this->TestInFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV6, NotINFuncTest) {
+    this->TestNotInFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV6, CompareValFuncTest) {
+    this->TestCompareValueFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV6, TestRangeCompareFuncTest) {
+    this->TestRangeCompareFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV6, IsNullFuncTest) {
+    this->TestIsNullFunc();
+}
+
+TYPED_TEST_P(BitmapIndexTestV6, IsNotNullFuncTest) {
+    this->TestIsNotNullFunc();
+}
+
+using BitmapType =
+    testing::Types<int8_t, int16_t, int32_t, int64_t, std::string>;
+
+REGISTER_TYPED_TEST_SUITE_P(BitmapIndexTestV6,
+                            CountFuncTest,
+                            INFuncTest,
+                            NotINFuncTest,
+                            CompareValFuncTest,
+                            TestRangeCompareFuncTest,
+                            IsNullFuncTest,
+                            IsNotNullFuncTest);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(BitmapIndexE2ECheck_Mmap,
+                               BitmapIndexTestV6,
                                BitmapType);

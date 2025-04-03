@@ -291,9 +291,6 @@ struct InsertRecord {
         for (auto& field : schema) {
             auto field_id = field.first;
             auto& field_meta = field.second;
-            if (field_meta.is_nullable()) {
-                this->append_valid_data(field_id);
-            }
             if (pk2offset_ == nullptr && pk_field_id.has_value() &&
                 pk_field_id.value() == field_id) {
                 switch (field_meta.get_data_type()) {
@@ -324,90 +321,7 @@ struct InsertRecord {
                     }
                 }
             }
-            if (field_meta.is_vector()) {
-                if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-                    this->append_data<FloatVector>(
-                        field_id, field_meta.get_dim(), size_per_chunk);
-                    continue;
-                } else if (field_meta.get_data_type() ==
-                           DataType::VECTOR_BINARY) {
-                    this->append_data<BinaryVector>(
-                        field_id, field_meta.get_dim(), size_per_chunk);
-                    continue;
-                } else if (field_meta.get_data_type() ==
-                           DataType::VECTOR_FLOAT16) {
-                    this->append_data<Float16Vector>(
-                        field_id, field_meta.get_dim(), size_per_chunk);
-                    continue;
-                } else if (field_meta.get_data_type() ==
-                           DataType::VECTOR_BFLOAT16) {
-                    this->append_data<BFloat16Vector>(
-                        field_id, field_meta.get_dim(), size_per_chunk);
-                    continue;
-                } else if (field_meta.get_data_type() ==
-                           DataType::VECTOR_SPARSE_FLOAT) {
-                    this->append_data<SparseFloatVector>(field_id,
-                                                         size_per_chunk);
-                    continue;
-                } else if (field_meta.get_data_type() ==
-                           DataType::VECTOR_INT8) {
-                    this->append_data<Int8Vector>(
-                        field_id, field_meta.get_dim(), size_per_chunk);
-                    continue;
-                } else {
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unsupported vector type",
-                                          field_meta.get_data_type()));
-                }
-            }
-            switch (field_meta.get_data_type()) {
-                case DataType::BOOL: {
-                    this->append_data<bool>(field_id, size_per_chunk);
-                    break;
-                }
-                case DataType::INT8: {
-                    this->append_data<int8_t>(field_id, size_per_chunk);
-                    break;
-                }
-                case DataType::INT16: {
-                    this->append_data<int16_t>(field_id, size_per_chunk);
-                    break;
-                }
-                case DataType::INT32: {
-                    this->append_data<int32_t>(field_id, size_per_chunk);
-                    break;
-                }
-                case DataType::INT64: {
-                    this->append_data<int64_t>(field_id, size_per_chunk);
-                    break;
-                }
-                case DataType::FLOAT: {
-                    this->append_data<float>(field_id, size_per_chunk);
-                    break;
-                }
-                case DataType::DOUBLE: {
-                    this->append_data<double>(field_id, size_per_chunk);
-                    break;
-                }
-                case DataType::VARCHAR:
-                case DataType::TEXT: {
-                    this->append_data<std::string>(field_id, size_per_chunk);
-                    break;
-                }
-                case DataType::JSON: {
-                    this->append_data<Json>(field_id, size_per_chunk);
-                    break;
-                }
-                case DataType::ARRAY: {
-                    this->append_data<Array>(field_id, size_per_chunk);
-                    break;
-                }
-                default: {
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unsupported scalar type",
-                                          field_meta.get_data_type()));
-                }
-            }
+            append_field_meta(field_id, field_meta, size_per_chunk);
         }
     }
 
@@ -630,6 +544,95 @@ struct InsertRecord {
                 data->get_element_size());
         }
         return data->get_span_base(chunk_id);
+    }
+
+    void
+    append_field_meta(FieldId field_id,
+                      const FieldMeta& field_meta,
+                      int64_t size_per_chunk) {
+        if (field_meta.is_nullable()) {
+            this->append_valid_data(field_id);
+        }
+        if (field_meta.is_vector()) {
+            if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
+                this->append_data<FloatVector>(
+                    field_id, field_meta.get_dim(), size_per_chunk);
+                return;
+            } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
+                this->append_data<BinaryVector>(
+                    field_id, field_meta.get_dim(), size_per_chunk);
+                return;
+            } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
+                this->append_data<Float16Vector>(
+                    field_id, field_meta.get_dim(), size_per_chunk);
+                return;
+            } else if (field_meta.get_data_type() ==
+                       DataType::VECTOR_BFLOAT16) {
+                this->append_data<BFloat16Vector>(
+                    field_id, field_meta.get_dim(), size_per_chunk);
+                return;
+            } else if (field_meta.get_data_type() ==
+                       DataType::VECTOR_SPARSE_FLOAT) {
+                this->append_data<SparseFloatVector>(field_id, size_per_chunk);
+                return;
+            } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
+                this->append_data<Int8Vector>(
+                    field_id, field_meta.get_dim(), size_per_chunk);
+                return;
+            } else {
+                PanicInfo(DataTypeInvalid,
+                          fmt::format("unsupported vector type",
+                                      field_meta.get_data_type()));
+            }
+        }
+        switch (field_meta.get_data_type()) {
+            case DataType::BOOL: {
+                this->append_data<bool>(field_id, size_per_chunk);
+                return;
+            }
+            case DataType::INT8: {
+                this->append_data<int8_t>(field_id, size_per_chunk);
+                return;
+            }
+            case DataType::INT16: {
+                this->append_data<int16_t>(field_id, size_per_chunk);
+                return;
+            }
+            case DataType::INT32: {
+                this->append_data<int32_t>(field_id, size_per_chunk);
+                return;
+            }
+            case DataType::INT64: {
+                this->append_data<int64_t>(field_id, size_per_chunk);
+                return;
+            }
+            case DataType::FLOAT: {
+                this->append_data<float>(field_id, size_per_chunk);
+                return;
+            }
+            case DataType::DOUBLE: {
+                this->append_data<double>(field_id, size_per_chunk);
+                return;
+            }
+            case DataType::VARCHAR:
+            case DataType::TEXT: {
+                this->append_data<std::string>(field_id, size_per_chunk);
+                return;
+            }
+            case DataType::JSON: {
+                this->append_data<Json>(field_id, size_per_chunk);
+                return;
+            }
+            case DataType::ARRAY: {
+                this->append_data<Array>(field_id, size_per_chunk);
+                return;
+            }
+            default: {
+                PanicInfo(DataTypeInvalid,
+                          fmt::format("unsupported scalar type",
+                                      field_meta.get_data_type()));
+            }
+        }
     }
 
     // append a column of scalar or sparse float vector type

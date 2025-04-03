@@ -98,6 +98,7 @@ pub extern "C" fn free_rust_array_i64(array: RustArrayI64) {
     }
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 pub enum Value {
     None(()),
@@ -192,11 +193,9 @@ pub extern "C" fn free_rust_error(error: *const c_char) {
 #[macro_export]
 macro_rules! cstr_to_str {
     ($cstr:expr) => {
-        unsafe {
-            match CStr::from_ptr($cstr).to_str() {
-                Ok(f) => f,
-                Err(e) => return RustResult::from_error(e.to_string()),
-            }
+        match unsafe { CStr::from_ptr($cstr).to_str() } {
+            Ok(f) => f,
+            Err(e) => return RustResult::from_error(e.to_string()),
         }
     };
 }

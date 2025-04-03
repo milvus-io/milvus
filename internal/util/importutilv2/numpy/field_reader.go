@@ -318,7 +318,11 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 			if n > 0 {
 				buf = buf[:n]
 			}
-			data = append(data, string(buf))
+			str := string(buf)
+			if err = common.CheckValidUTF8(str, c.field); err != nil {
+				return nil, err
+			}
+			data = append(data, str)
 		}
 	}
 	return data, nil

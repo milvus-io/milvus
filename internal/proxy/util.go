@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -52,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -475,6 +477,48 @@ func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 				return fmt.Errorf("only primary field can speficy AutoID with true, field name = %s", field.Name)
 			}
 		}
+	}
+	return nil
+}
+
+func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchema) error {
+	// validate field name
+	var err error
+	if err := validateFieldName(field.Name); err != nil {
+		return err
+	}
+	// validate dense vector field type parameters
+	isVectorType := typeutil.IsVectorType(field.DataType)
+	if isVectorType {
+		err = validateDimension(field)
+		if err != nil {
+			return err
+		}
+	}
+	// valid max length per row parameters
+	// if max_length not specified, return error
+	if field.DataType == schemapb.DataType_VarChar ||
+		(field.GetDataType() == schemapb.DataType_Array && field.GetElementType() == schemapb.DataType_VarChar) {
+		err = validateMaxLengthPerRow(schema.Name, field)
+		if err != nil {
+			return err
+		}
+	}
+	// valid max capacity for array per row parameters
+	// if max_capacity not specified, return error
+	if field.DataType == schemapb.DataType_Array {
+		if err = validateMaxCapacityPerRow(schema.Name, field); err != nil {
+			return err
+		}
+	}
+	// TODO should remove the index params in the field schema
+	indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
+	if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
+		return err
+	}
+
+	if err := ctokenizer.ValidateTextSchema(field, wasBm25FunctionInputField(schema, field)); err != nil {
+		return err
 	}
 	return nil
 }
