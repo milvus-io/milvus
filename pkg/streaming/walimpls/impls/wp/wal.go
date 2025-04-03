@@ -62,7 +62,7 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (walimpls.S
 		from.EntryId = id.logMsgId.EntryId + 1
 	}
 
-	reader, err := w.l.OpenLogReader(ctx, &from)
+	reader, err := w.l.OpenLogReader(ctx, &from, opt.Name)
 	if err != nil {
 		return nil, err
 	}

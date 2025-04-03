@@ -68,6 +68,11 @@ type MutableMessage interface {
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithBarrierTimeTick(tt uint64) MutableMessage
 
+	// WithNotPersisted sets the message as not persisted.
+	// If the message is setted as not persisted, it will not be written to underlying wal.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithNotPersisted() MutableMessage
+
 	// WithWALTerm sets the wal term of current message.
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithWALTerm(term int64) MutableMessage

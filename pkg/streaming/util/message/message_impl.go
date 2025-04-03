@@ -66,6 +66,15 @@ func (m *messageImpl) EstimateSize() int {
 	return len(m.payload) + m.properties.EstimateSize()
 }
 
+// WithNotPersisted sets the message as not persisted.
+func (m *messageImpl) WithNotPersisted() MutableMessage {
+	if m.properties.Exist(messageNotPersisteted) {
+		panic("not persisted already set in properties of message")
+	}
+	m.properties.Set(messageNotPersisteted, "")
+	return m
+}
+
 // WithBarrierTimeTick sets the barrier time tick of current message.
 func (m *messageImpl) WithBarrierTimeTick(tt uint64) MutableMessage {
 	if m.properties.Exist(messageBarrierTimeTick) {

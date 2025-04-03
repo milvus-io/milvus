@@ -5200,6 +5200,16 @@ type streamingConfig struct {
 	// write ahead buffer
 	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
 	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
+
+	// memory usage control
+	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
+	FlushGrowingSegmentBytesHwmThreshold ParamItem `refreshable:"true"`
+	FlushGrowingSegmentBytesLwmThreshold ParamItem `refreshable:"true"`
+
+	// recovery configuration.
+	WALRecoveryPersistInterval      ParamItem `refreshable:"true"`
+	WALRecoveryMaxDirtyMessage      ParamItem `refreshable:"true"`
+	WALRecoveryGracefulCloseTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -5327,6 +5337,72 @@ it also determine the depth of depth first search method that is used to find th
 		Export:       true,
 	}
 	p.WALWriteAheadBufferKeepalive.Init(base.mgr)
+
+	p.FlushMemoryThreshold = ParamItem{
+		Key:     "streaming.flush.memoryThreshold",
+		Version: "2.6.0",
+		Doc: `The threshold of memory usage for one streaming node,
+If the memory usage is higher than this threshold, the node will try to trigger flush action to decrease the total of growing segment until growingSegmentBytesLwmThreshold,
+the value should be in the range of (0, 1), 0.6 by default.`,
+		DefaultValue: "0.6",
+		Export:       true,
+	}
+	p.FlushMemoryThreshold.Init(base.mgr)
+
+	p.FlushGrowingSegmentBytesHwmThreshold = ParamItem{
+		Key:     "streaming.flush.growingSegmentBytesHwmThreshold",
+		Version: "2.6.0",
+		Doc: `The high watermark of total growing segment bytes for one streaming node,
+If the total bytes of growing segment is greater than this threshold,
+a flush process will be triggered to decrease total bytes of growing segment until growingSegmentBytesLwmThreshold, 0.4 by default`,
+		DefaultValue: "0.4",
+		Export:       true,
+	}
+	p.FlushGrowingSegmentBytesHwmThreshold.Init(base.mgr)
+
+	p.FlushGrowingSegmentBytesLwmThreshold = ParamItem{
+		Key:     "streaming.flush.growingSegmentBytesLwmThreshold",
+		Version: "2.6.0",
+		Doc: `The lower watermark of total growing segment bytes for one streaming node,
+growing segment flush process will try to flush some growing segment into sealed 
+until the total bytes of growing segment is less than this threshold, 0.2 by default.`,
+		DefaultValue: "0.2",
+		Export:       true,
+	}
+	p.FlushGrowingSegmentBytesLwmThreshold.Init(base.mgr)
+
+	p.WALRecoveryPersistInterval = ParamItem{
+		Key:     "streaming.walRecovery.persistInterval",
+		Version: "2.6.0",
+		Doc: `The interval of persist recovery info, 10s by default. 
+Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.
+Currently it only affect the recovery of wal, but not affect the recovery of data flush into object storage`,
+		DefaultValue: "10s",
+		Export:       true,
+	}
+	p.WALRecoveryPersistInterval.Init(base.mgr)
+
+	p.WALRecoveryMaxDirtyMessage = ParamItem{
+		Key:     "streaming.walRecovery.maxDirtyMessage",
+		Version: "2.6.0",
+		Doc: `The max dirty message count of wal recovery, 100 by default.
+If there are more than this count of dirty message in wal recovery info, it will be persisted immediately, 
+but not wait for the persist interval.`,
+		DefaultValue: "100",
+		Export:       true,
+	}
+	p.WALRecoveryMaxDirtyMessage.Init(base.mgr)
+
+	p.WALRecoveryGracefulCloseTimeout = ParamItem{
+		Key:     "streaming.walRecovery.gracefulCloseTimeout",
+		Version: "2.6.0",
+		Doc: `The graceful close timeout for wal recovery, 3s by default.
+When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
+If that persist operation exceeds this timeout, the wal recovery module will close right now.`,
+		DefaultValue: "3s",
+		Export:       true,
+	}
+	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

@@ -51,7 +51,7 @@ packages:
       InterceptorWithReady:
       InterceptorWithMetrics:
       InterceptorBuilder:
-  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/utils:
     interfaces:
       SealOperator:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector:
@@ -90,9 +90,6 @@ packages:
   github.com/milvus-io/milvus/internal/util/searchutil/optimizers:
     interfaces:
       QueryHook:
-#  github.com/milvus-io/milvus/internal/flushcommon/util:
-#    interfaces:
-#      MsgHandler:
   google.golang.org/grpc/resolver:
     interfaces:
       ClientConn:

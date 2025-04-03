@@ -2,60 +2,52 @@ package manager
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+const gracefulCloseTimeout = 3 * time.Second
+
 // RecoverPChannelSegmentAllocManager recovers the segment assignment manager at the specified pchannel.
+// TODO: current recovery process rely on the rootcoord and catalog.
+// and the alloc operation rely on datacoord.
+// we should refactor the code to remove the dependency on datacoord and rootcoord.
+// only use the wal and meta of streamingnode to recover the segment assignment manager.
 func RecoverPChannelSegmentAllocManager(
 	ctx context.Context,
-	pchannel types.PChannelInfo,
-	wal *syncutil.Future[wal.WAL],
+	param *interceptors.InterceptorBuildParam,
 ) (*PChannelSegmentAllocManager, error) {
-	// recover streaming node growing segment metas.
-	rawMetas, err := resource.Resource().StreamingNodeCatalog().ListSegmentAssignment(ctx, pchannel.Name)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to list segment assignment from catalog")
-	}
-	// get collection and parition info from rootcoord.
-	mix, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := mix.GetPChannelInfo(ctx, &rootcoordpb.GetPChannelInfoRequest{
-		Pchannel: pchannel.Name,
-	})
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return nil, errors.Wrap(err, "failed to get pchannel info from rootcoord")
-	}
-	metrics := metricsutil.NewSegmentAssignMetrics(pchannel.Name)
-	managers, waitForSealed := buildNewPartitionManagers(wal, pchannel, rawMetas, resp.GetCollections(), metrics)
+	metrics := metricsutil.NewSegmentAssignMetrics(param.ChannelInfo.Name)
+	managers, growingBelongs, growingStats, waitForSealed := buildNewPartitionManagers(param.WAL, param.ChannelInfo, param.InitialRecoverSnapshot, metrics)
 
 	// PChannelSegmentAllocManager is the segment assign manager of determined pchannel.
-	logger := log.With(zap.Any("pchannel", pchannel))
-
-	return &PChannelSegmentAllocManager{
-		lifetime: typeutil.NewLifetime(),
-		logger:   logger,
-		pchannel: pchannel,
-		managers: managers,
-		helper:   newSealQueue(logger, wal, waitForSealed, metrics),
-		metrics:  metrics,
-	}, nil
+	logger := log.With(zap.Stringer("pchannel", param.ChannelInfo))
+	m := &PChannelSegmentAllocManager{
+		lifetime:   typeutil.NewLifetime(),
+		logger:     logger,
+		pchannel:   param.ChannelInfo,
+		managers:   managers,
+		sealWorker: newSealQueue(logger, param.WAL, param.TxnManager, metrics),
+		metrics:    metrics,
+	}
+	// seal the sealed segments from recovery asynchronously.
+	if err := m.sealWorker.AsyncSeal(waitForSealed); err != nil {
+		panic(fmt.Sprintf("unreachable: failed to seal segments when recovery, %s", err.Error()))
+	}
+	// register the segment assignment manager to the global manager.
+	resource.Resource().SegmentAssignStatsManager().RegisterSealOperator(m, growingBelongs, growingStats)
+	return m, nil
 }
 
 // PChannelSegmentAllocManager is a segment assign manager of determined pchannel.
@@ -66,8 +58,8 @@ type PChannelSegmentAllocManager struct {
 	pchannel types.PChannelInfo
 	managers *partitionSegmentManagers
 	// There should always
-	helper  *sealQueue
-	metrics *metricsutil.SegmentAssignMetrics
+	sealWorker *sealQueue
+	metrics    *metricsutil.SegmentAssignMetrics
 }
 
 // Channel returns the pchannel info.
@@ -118,14 +110,8 @@ func (m *PChannelSegmentAllocManager) RemoveCollection(ctx context.Context, coll
 	}
 	defer m.lifetime.Done()
 
-	waitForSealed := m.managers.RemoveCollection(collectionID)
-	m.helper.AsyncSeal(waitForSealed...)
-
-	// trigger a seal operation in background rightnow.
-	inspector.GetSegmentSealedInspector().TriggerSealWaited(ctx, m.pchannel.Name)
-
-	// wait for all segment has been flushed.
-	return m.helper.WaitUntilNoWaitSeal(ctx)
+	_ = m.managers.RemoveCollection(collectionID)
+	return nil
 }
 
 // RemovePartition removes the specified partitions.
@@ -137,14 +123,8 @@ func (m *PChannelSegmentAllocManager) RemovePartition(ctx context.Context, colle
 
 	// Remove the given partition from the partition managers.
 	// And seal all segments that should be sealed.
-	waitForSealed := m.managers.RemovePartition(collectionID, partitionID)
-	m.helper.AsyncSeal(waitForSealed...)
-
-	// trigger a seal operation in background rightnow.
-	inspector.GetSegmentSealedInspector().TriggerSealWaited(ctx, m.pchannel.Name)
-
-	// wait for all segment has been flushed.
-	return m.helper.WaitUntilNoWaitSeal(ctx)
+	_ = m.managers.RemovePartition(collectionID, partitionID)
+	return nil
 }
 
 // SealAndFenceSegmentUntil seal all segment that contains the message less than the incoming timetick.
@@ -160,92 +140,35 @@ func (m *PChannelSegmentAllocManager) SealAndFenceSegmentUntil(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-
 	segmentIDs := make([]int64, 0, len(sealedSegments))
 	for _, segment := range sealedSegments {
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
-
-	// trigger a seal operation in background rightnow.
-	m.helper.AsyncSeal(sealedSegments...)
-
-	// wait for all segment has been flushed.
-	if err := m.helper.WaitUntilNoWaitSeal(ctx); err != nil {
-		return nil, err
-	}
-
 	return segmentIDs, nil
 }
 
-// TryToSealSegments tries to seal the specified segments.
-func (m *PChannelSegmentAllocManager) TryToSealSegments(ctx context.Context, infos ...stats.SegmentBelongs) {
+// AsyncMustSealSegments seals the specified segments asynchronously.
+func (m *PChannelSegmentAllocManager) AsyncMustSealSegments(signal utils.SealSegmentSignal) {
 	if !m.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return
 	}
 	defer m.lifetime.Done()
 
-	if len(infos) == 0 {
-		// if no segment info specified, try to seal all segments.
-		m.managers.Range(func(pm *partitionSegmentManager) {
-			m.helper.AsyncSeal(pm.CollectShouldBeSealed()...)
-		})
-	} else {
-		// if some segment info specified, try to seal the specified partition.
-		for _, info := range infos {
-			if pm, err := m.managers.Get(info.CollectionID, info.PartitionID); err == nil {
-				m.helper.AsyncSeal(pm.CollectShouldBeSealed()...)
+	if pm, err := m.managers.Get(signal.SegmentBelongs.CollectionID, signal.SegmentBelongs.PartitionID); err == nil {
+		if segment := pm.GetAndRemoveSegment(signal.SegmentBelongs.SegmentID); segment != nil {
+			segment.WithSealPolicy(signal.SealPolicy)
+			if err := m.sealWorker.AsyncSeal([]*segmentAllocManager{segment}); err != nil {
+				m.logger.Warn("failed to add segment into seal worker, may be recovered later", zap.Error(err))
 			}
+		} else {
+			m.logger.Info(
+				"segment not found when trigger must seal, may be already sealed",
+				zap.Int64("collectionID", signal.SegmentBelongs.CollectionID),
+				zap.Int64("partitionID", signal.SegmentBelongs.PartitionID),
+				zap.Int64("segmentID", signal.SegmentBelongs.SegmentID),
+			)
 		}
 	}
-	m.helper.SealAllWait(ctx)
-}
-
-func (m *PChannelSegmentAllocManager) MustSealSegments(ctx context.Context, infos ...stats.SegmentBelongs) {
-	if !m.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return
-	}
-	defer m.lifetime.Done()
-
-	for _, info := range infos {
-		if pm, err := m.managers.Get(info.CollectionID, info.PartitionID); err == nil {
-			if segment := pm.CollectionMustSealed(info.SegmentID); segment != nil {
-				m.helper.AsyncSeal(segment)
-			} else {
-				m.logger.Info(
-					"segment not found when trigger must seal, may be already sealed",
-					zap.Int64("collectionID", info.CollectionID),
-					zap.Int64("partitionID", info.PartitionID),
-					zap.Int64("segmentID", info.SegmentID),
-				)
-			}
-		}
-	}
-	m.helper.SealAllWait(ctx)
-}
-
-// TryToSealWaitedSegment tries to seal the wait for sealing segment.
-func (m *PChannelSegmentAllocManager) TryToSealWaitedSegment(ctx context.Context) {
-	if !m.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return
-	}
-	defer m.lifetime.Done()
-
-	m.helper.SealAllWait(ctx)
-}
-
-// IsNoWaitSeal returns whether the segment manager is no segment wait for seal.
-func (m *PChannelSegmentAllocManager) IsNoWaitSeal() bool {
-	return m.helper.IsEmpty()
-}
-
-// WaitUntilNoWaitSeal waits until no segment wait for seal.
-func (m *PChannelSegmentAllocManager) WaitUntilNoWaitSeal(ctx context.Context) error {
-	if err := m.checkLifetime(); err != nil {
-		return err
-	}
-	defer m.lifetime.Done()
-
-	return m.helper.WaitUntilNoWaitSeal(ctx)
 }
 
 // checkLifetime checks the lifetime of the segment manager.
@@ -258,42 +181,14 @@ func (m *PChannelSegmentAllocManager) checkLifetime() error {
 }
 
 // Close try to persist all stats and invalid the manager.
-func (m *PChannelSegmentAllocManager) Close(ctx context.Context) {
+func (m *PChannelSegmentAllocManager) Close() {
 	m.logger.Info("segment assignment manager start to close")
 	m.lifetime.SetState(typeutil.LifetimeStateStopped)
 	m.lifetime.Wait()
 
-	// Try to seal all wait
-	m.helper.SealAllWait(ctx)
-	m.logger.Info("seal all waited segments done, may be some not done here", zap.Int("waitCounter", m.helper.WaitCounter()))
-
-	segments := make([]*segmentAllocManager, 0)
-	m.managers.Range(func(pm *partitionSegmentManager) {
-		segments = append(segments, pm.CollectAllSegmentsAndClear()...)
-	})
-
-	// Try to seal the dirty segment to avoid generate too large segment.
-	protoSegments := make([]*streamingpb.SegmentAssignmentMeta, 0, len(segments))
-	growingCnt := 0
-	for _, segment := range segments {
-		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
-			growingCnt++
-		}
-		if segment.IsDirtyEnough() {
-			// Only persist the dirty segment.
-			protoSegments = append(protoSegments, segment.Snapshot())
-		}
-	}
-	m.logger.Info("segment assignment manager save all dirty segment assignments info",
-		zap.Int("dirtySegmentCount", len(protoSegments)),
-		zap.Int("growingSegmentCount", growingCnt),
-		zap.Int("segmentCount", len(segments)))
-	if err := resource.Resource().StreamingNodeCatalog().SaveSegmentAssignments(ctx, m.pchannel.Name, protoSegments); err != nil {
-		m.logger.Warn("commit segment assignment at pchannel failed", zap.Error(err))
-	}
-
-	// remove the stats from stats manager.
-	removedStatsSegmentCnt := resource.Resource().SegmentAssignStatsManager().UnregisterAllStatsOnPChannel(m.pchannel.Name)
-	m.logger.Info("segment assignment manager remove all segment stats from stats manager", zap.Int("removedStatsSegmentCount", removedStatsSegmentCnt))
+	m.sealWorker.Close()
+	m.logger.Info("seal worker closed")
+	// Remove the segment assignment manager from the global manager.
+	resource.Resource().SegmentAssignStatsManager().UnregisterSealOperator(m)
 	m.metrics.Close()
 }

@@ -6,10 +6,13 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -53,10 +56,26 @@ func adaptImplsToWAL(
 		// if the wal is read-only, return it directly.
 		return roWAL, nil
 	}
+
+	// recover the wal state.
 	param, err := buildInterceptorParams(ctx, basicWAL)
 	if err != nil {
 		return nil, err
 	}
+	rs, snapshot, err := recovery.RecoverRecoveryStorage(ctx, newRecoveryStreamBuilder(roWAL), param.LastTimeTickMessage)
+	if err != nil {
+		return nil, err
+	}
+	param.InitialRecoverSnapshot = snapshot
+	param.TxnManager = txn.NewTxnManager(param.ChannelInfo, snapshot.TxnBuffer)
+
+	// start the flusher to flush and generate recovery info.
+	flusher := flusherimpl.RecoverWALFlusher(&flusherimpl.RecoverWALFlusherParam{
+		WAL:              param.WAL,
+		RecoveryStorage:  rs,
+		ChannelInfo:      basicWAL.Channel(),
+		RecoverySnapshot: snapshot,
+	})
 
 	// build append interceptor for a wal.
 	wal := &walAdaptorImpl{
@@ -66,6 +85,7 @@ func adaptImplsToWAL(
 		appendExecutionPool:    conc.NewPool[struct{}](0),
 		param:                  param,
 		interceptorBuildResult: buildInterceptor(builders, param),
+		flusher:                flusher,
 		writeMetrics:           metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
 	}
 	param.WAL.Set(wal)
@@ -80,6 +100,7 @@ type walAdaptorImpl struct {
 	appendExecutionPool    *conc.Pool[struct{}]
 	param                  *interceptors.InterceptorBuildParam
 	interceptorBuildResult interceptorBuildResult
+	flusher                *flusherimpl.WALFlusherImpl
 	writeMetrics           *metricsutil.WriteMetrics
 }
 
@@ -189,6 +210,10 @@ func (w *walAdaptorImpl) Close() {
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	close(w.available)
 	w.lifetime.Wait()
+
+	// close the flusher.
+	w.Logger().Info("wal begin to close flusher...")
+	w.flusher.Close()
 
 	w.Logger().Info("wal begin to close scanners...")
 

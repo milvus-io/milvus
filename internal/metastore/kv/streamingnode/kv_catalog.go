@@ -24,12 +24,18 @@ import (
 //
 //	├── pchannel-1
 //	│   ├── checkpoint
+//	│   ├── vchannels
+//	│   │   ├── vchannel-1
+//	│   │   └── vchannel-2
 //	│   └── segment-assign
 //	│       ├── 456398247934
 //	│       ├── 456398247936
 //	│       └── 456398247939
 //	└── pchannel-2
 //	    ├── checkpoint
+//	    ├── vchannels
+//	    │   ├── vchannel-1
+//	    │   └── vchannel-2
 //	    └── segment-assign
 //	        ├── 456398247934
 //	        ├── 456398247935
@@ -43,6 +49,58 @@ func NewCataLog(metaKV kv.MetaKv) metastore.StreamingNodeCataLog {
 // catalog is a kv based catalog.
 type catalog struct {
 	metaKV kv.MetaKv
+}
+
+// ListVChannel lists the vchannel info of the pchannel.
+func (c *catalog) ListVChannel(ctx context.Context, pchannelName string) ([]*streamingpb.VChannelMeta, error) {
+	prefix := buildVChannelMetaPath(pchannelName)
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]*streamingpb.VChannelMeta, 0, len(values))
+	for k, value := range values {
+		info := &streamingpb.VChannelMeta{}
+		if err = proto.Unmarshal([]byte(value), info); err != nil {
+			return nil, errors.Wrapf(err, "unmarshal pchannel %s failed", keys[k])
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
+// SaveVChannels save vchannel on current pchannel.
+func (c *catalog) SaveVChannels(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error {
+	kvs := make(map[string]string, len(vchannels))
+	removes := make([]string, 0)
+	for _, info := range vchannels {
+		key := buildVChannelMetaPathOfVChannel(pchannelName, info.GetVchannel())
+		if info.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+			// Flushed segment should be removed from meta
+			removes = append(removes, key)
+			continue
+		}
+
+		data, err := proto.Marshal(info)
+		if err != nil {
+			return errors.Wrapf(err, "marshal vchannel %d at pchannel %s failed", info.GetVchannel(), pchannelName)
+		}
+		kvs[key] = string(data)
+	}
+
+	if len(removes) > 0 {
+		if err := etcd.RemoveByBatchWithLimit(removes, util.MaxEtcdTxnNum, func(partialRemoves []string) error {
+			return c.metaKV.MultiRemove(ctx, partialRemoves)
+		}); err != nil {
+			return err
+		}
+	}
+	if len(kvs) > 0 {
+		return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+			return c.metaKV.MultiSave(ctx, partialKvs)
+		})
+	}
+	return nil
 }
 
 // ListSegmentAssignment lists the segment assignment info of the pchannel.
@@ -65,7 +123,7 @@ func (c *catalog) ListSegmentAssignment(ctx context.Context, pChannelName string
 }
 
 // SaveSegmentAssignments saves the segment assignment info to meta storage.
-func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName string, infos []*streamingpb.SegmentAssignmentMeta) error {
+func (c *catalog) SaveSegmentAssignments(ctx context.Context, pChannelName string, infos map[int64]*streamingpb.SegmentAssignmentMeta) error {
 	kvs := make(map[string]string, len(infos))
 	removes := make([]string, 0)
 	for _, info := range infos {
@@ -124,6 +182,16 @@ func (c *catalog) SaveConsumeCheckpoint(ctx context.Context, pchannelName string
 		return err
 	}
 	return c.metaKV.Save(ctx, key, string(value))
+}
+
+// buildVChannelMetaPath builds the path for vchannel meta
+func buildVChannelMetaPath(pChannelName string) string {
+	return path.Join(buildWALDirectory(pChannelName), DirectoryVChannel) + "/"
+}
+
+// buildVChannelMetaPathOfVChannel builds the path for vchannel meta
+func buildVChannelMetaPathOfVChannel(pChannelName string, vchannelName string) string {
+	return path.Join(buildVChannelMetaPath(pChannelName), vchannelName)
 }
 
 // buildSegmentAssignmentMetaPath builds the path for segment assignment

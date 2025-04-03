@@ -9,11 +9,11 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -23,32 +23,48 @@ import (
 func buildNewPartitionManagers(
 	wal *syncutil.Future[wal.WAL],
 	pchannel types.PChannelInfo,
-	rawMetas []*streamingpb.SegmentAssignmentMeta,
-	collectionInfos []*rootcoordpb.CollectionInfoOnPChannel,
+	recoverInfos *recovery.RecoverySnapshot,
 	metrics *metricsutil.SegmentAssignMetrics,
-) (*partitionSegmentManagers, []*segmentAllocManager) {
+) (partitionManager *partitionSegmentManagers,
+	growingBelongs []stats.SegmentBelongs,
+	growingStats []*stats.SegmentStats,
+	waitForSealed []*segmentAllocManager,
+) {
 	// create a map to check if the partition exists.
-	partitionExist := make(map[int64]struct{}, len(collectionInfos))
+	partitionExist := make(map[int64]struct{}, len(recoverInfos.VChannels))
 	// collectionMap is a map from collectionID to collectionInfo.
-	collectionInfoMap := make(map[int64]*rootcoordpb.CollectionInfoOnPChannel, len(collectionInfos))
-	for _, collectionInfo := range collectionInfos {
-		for _, partition := range collectionInfo.GetPartitions() {
-			partitionExist[partition.GetPartitionId()] = struct{}{}
+	collectionInfoMap := make(map[int64]*CollectionInfo, len(recoverInfos.VChannels))
+	for _, vchannelInfo := range recoverInfos.VChannels {
+		currentPartition := make(map[int64]struct{}, len(vchannelInfo.CollectionInfo.Partitions))
+		for _, partition := range vchannelInfo.CollectionInfo.Partitions {
+			partitionExist[partition.PartitionId] = struct{}{}
+			currentPartition[partition.PartitionId] = struct{}{}
 		}
-		collectionInfoMap[collectionInfo.GetCollectionId()] = collectionInfo
+		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = &CollectionInfo{
+			VChannel:     vchannelInfo.Vchannel,
+			PartitionIDs: currentPartition,
+		}
 	}
 
 	// recover the segment infos from the streaming node segment assignment meta storage
-	waitForSealed := make([]*segmentAllocManager, 0)
 	metaMaps := make(map[int64][]*segmentAllocManager)
-	for _, rawMeta := range rawMetas {
-		m := newSegmentAllocManagerFromProto(pchannel, rawMeta, metrics)
+	for _, rawMeta := range recoverInfos.SegmentAssignments {
+		m, stat := newSegmentAllocManagerFromProto(pchannel, rawMeta, metrics)
 		if _, ok := partitionExist[rawMeta.GetPartitionId()]; !ok {
 			// related collection or partition is not exist.
 			// should be sealed right now.
-			waitForSealed = append(waitForSealed, m.WithSealPolicy(policy.PolicyNamePartitionNotFound))
-			continue
+			panic("segment assignment meta is dirty, a critical bug in system")
 		}
+
+		// The stats of growing segment should be managed by global stats manager.
+		growingBelongs = append(growingBelongs, stats.SegmentBelongs{
+			PChannel:     pchannel.Name,
+			VChannel:     m.GetVChannel(),
+			CollectionID: rawMeta.GetCollectionId(),
+			PartitionID:  rawMeta.GetPartitionId(),
+			SegmentID:    m.GetSegmentID(),
+		})
+		growingStats = append(growingStats, stat)
 		if _, ok := metaMaps[rawMeta.GetPartitionId()]; !ok {
 			metaMaps[rawMeta.GetPartitionId()] = make([]*segmentAllocManager, 0, 2)
 		}
@@ -58,19 +74,19 @@ func buildNewPartitionManagers(
 	// create managers list.
 	managers := typeutil.NewConcurrentMap[int64, *partitionSegmentManager]()
 	for collectionID, collectionInfo := range collectionInfoMap {
-		for _, partition := range collectionInfo.GetPartitions() {
+		for partitionID := range collectionInfo.PartitionIDs {
 			segmentManagers := make([]*segmentAllocManager, 0)
 			// recovery meta is recovered , use it.
-			if managers, ok := metaMaps[partition.GetPartitionId()]; ok {
+			if managers, ok := metaMaps[partitionID]; ok {
 				segmentManagers = managers
 			}
 			// otherwise, just create a new manager.
-			_, ok := managers.GetOrInsert(partition.GetPartitionId(), newPartitionSegmentManager(
+			_, ok := managers.GetOrInsert(partitionID, newPartitionSegmentManager(
 				wal,
 				pchannel,
-				collectionInfo.GetVchannel(),
+				collectionInfo.VChannel,
 				collectionID,
-				partition.GetPartitionId(),
+				partitionID,
 				segmentManagers,
 				metrics,
 			))
@@ -92,7 +108,7 @@ func buildNewPartitionManagers(
 		metrics:         metrics,
 	}
 	m.updateMetrics()
-	return m, waitForSealed
+	return m, growingBelongs, growingStats, waitForSealed
 }
 
 // partitionSegmentManagers is a collection of partition managers.
@@ -103,8 +119,13 @@ type partitionSegmentManagers struct {
 	wal             *syncutil.Future[wal.WAL]
 	pchannel        types.PChannelInfo
 	managers        *typeutil.ConcurrentMap[int64, *partitionSegmentManager] // map partitionID to partition manager
-	collectionInfos map[int64]*rootcoordpb.CollectionInfoOnPChannel          // map collectionID to collectionInfo
+	collectionInfos map[int64]*CollectionInfo                                // map collectionID to collectionInfo
 	metrics         *metricsutil.SegmentAssignMetrics
+}
+
+type CollectionInfo struct {
+	VChannel     string
+	PartitionIDs map[int64]struct{}
 }
 
 // NewCollection creates a new partition manager.
@@ -155,14 +176,19 @@ func (m *partitionSegmentManagers) NewPartition(collectionID int64, partitionID 
 		)
 		return
 	}
-	m.collectionInfos[collectionID].Partitions = append(m.collectionInfos[collectionID].Partitions, &rootcoordpb.PartitionInfoOnPChannel{
-		PartitionId: partitionID,
-	})
+	if _, ok := m.collectionInfos[collectionID].PartitionIDs[partitionID]; ok {
+		m.logger.Warn("partition already exists when NewPartition in segment assignment service, it's may be a bug in system",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("partitionID", partitionID),
+		)
+		return
+	}
 
+	m.collectionInfos[collectionID].PartitionIDs[partitionID] = struct{}{}
 	if _, loaded := m.managers.GetOrInsert(partitionID, newPartitionSegmentManager(
 		m.wal,
 		m.pchannel,
-		m.collectionInfos[collectionID].Vchannel,
+		m.collectionInfos[collectionID].VChannel,
 		collectionID,
 		partitionID,
 		make([]*segmentAllocManager, 0),
@@ -175,7 +201,7 @@ func (m *partitionSegmentManagers) NewPartition(collectionID int64, partitionID 
 	}
 	m.logger.Info("partition created in segment assignment service",
 		zap.Int64("collectionID", collectionID),
-		zap.String("vchannel", m.collectionInfos[collectionID].Vchannel),
+		zap.String("vchannel", m.collectionInfos[collectionID].VChannel),
 		zap.Int64("partitionID", partitionID))
 	m.updateMetrics()
 }
@@ -203,18 +229,18 @@ func (m *partitionSegmentManagers) RemoveCollection(collectionID int64) []*segme
 	delete(m.collectionInfos, collectionID)
 
 	needSealed := make([]*segmentAllocManager, 0)
-	partitionIDs := make([]int64, 0, len(collectionInfo.Partitions))
-	segmentIDs := make([]int64, 0, len(collectionInfo.Partitions))
-	for _, partition := range collectionInfo.Partitions {
-		pm, ok := m.managers.Get(partition.PartitionId)
+	partitionIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
+	segmentIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
+	for partitionID := range collectionInfo.PartitionIDs {
+		pm, ok := m.managers.Get(partitionID)
 		if ok {
-			segments := pm.CollectAllCanBeSealedAndClear(policy.PolicyNameCollectionRemoved)
-			partitionIDs = append(partitionIDs, partition.PartitionId)
+			segments := pm.CollectAllAndClear(policy.PolicyCollectionRemoved())
+			partitionIDs = append(partitionIDs, partitionID)
 			for _, segment := range segments {
 				segmentIDs = append(segmentIDs, segment.GetSegmentID())
 			}
 			needSealed = append(needSealed, segments...)
-			m.managers.Remove(partition.PartitionId)
+			m.managers.Remove(partitionID)
 		}
 	}
 	m.logger.Info(
@@ -237,13 +263,13 @@ func (m *partitionSegmentManagers) RemovePartition(collectionID int64, partition
 		m.logger.Warn("collection not exists when RemovePartition in segment assignment service", zap.Int64("collectionID", collectionID))
 		return nil
 	}
-	partitions := make([]*rootcoordpb.PartitionInfoOnPChannel, 0, len(collectionInfo.Partitions)-1)
-	for _, partition := range collectionInfo.Partitions {
-		if partition.PartitionId != partitionID {
-			partitions = append(partitions, partition)
-		}
+	if _, ok := collectionInfo.PartitionIDs[partitionID]; !ok {
+		m.logger.Warn("partition not exists when RemovePartition in segment assignment service",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("partitionID", partitionID))
+		return nil
 	}
-	collectionInfo.Partitions = partitions
+	delete(collectionInfo.PartitionIDs, partitionID)
 
 	pm, loaded := m.managers.GetAndRemove(partitionID)
 	if !loaded {
@@ -252,7 +278,7 @@ func (m *partitionSegmentManagers) RemovePartition(collectionID int64, partition
 			zap.Int64("partitionID", partitionID))
 		return nil
 	}
-	segments := pm.CollectAllCanBeSealedAndClear(policy.PolicyNamePartitionRemoved)
+	segments := pm.CollectAllAndClear(policy.PolicyPartitionRemoved())
 	segmentIDs := make([]int64, 0, len(segments))
 	for _, segment := range segments {
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
@@ -281,13 +307,13 @@ func (m *partitionSegmentManagers) SealAndFenceSegmentUntil(collectionID int64, 
 	sealedSegments := make([]*segmentAllocManager, 0)
 	segmentIDs := make([]int64, 0)
 	// collect all partitions
-	for _, partition := range collectionInfo.Partitions {
+	for partitionID := range collectionInfo.PartitionIDs {
 		// Seal all segments and fence assign to the partition manager.
-		pm, ok := m.managers.Get(partition.PartitionId)
+		pm, ok := m.managers.Get(partitionID)
 		if !ok {
 			m.logger.Warn("partition not found when Flush in segment assignment service, it's may be a bug in system",
 				zap.Int64("collectionID", collectionID),
-				zap.Int64("partitionID", partition.PartitionId))
+				zap.Int64("partitionID", partitionID))
 			return nil, errors.New("partition not found")
 		}
 		newSealedSegments := pm.SealAndFenceSegmentUntil(timetick)
@@ -319,16 +345,13 @@ func (m *partitionSegmentManagers) updateMetrics() {
 }
 
 // newCollectionInfo creates a new collection info.
-func newCollectionInfo(collectionID int64, vchannel string, partitionIDs []int64) *rootcoordpb.CollectionInfoOnPChannel {
-	info := &rootcoordpb.CollectionInfoOnPChannel{
-		CollectionId: collectionID,
-		Vchannel:     vchannel,
-		Partitions:   make([]*rootcoordpb.PartitionInfoOnPChannel, 0, len(partitionIDs)),
+func newCollectionInfo(collectionID int64, vchannel string, partitionIDs []int64) *CollectionInfo {
+	info := &CollectionInfo{
+		VChannel:     vchannel,
+		PartitionIDs: make(map[int64]struct{}, len(partitionIDs)),
 	}
 	for _, partitionID := range partitionIDs {
-		info.Partitions = append(info.Partitions, &rootcoordpb.PartitionInfoOnPChannel{
-			PartitionId: partitionID,
-		})
+		info.PartitionIDs[partitionID] = struct{}{}
 	}
 	return info
 }

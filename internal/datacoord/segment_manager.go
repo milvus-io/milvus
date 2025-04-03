@@ -403,10 +403,13 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 }
 
 func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, req AllocNewGrowingSegmentRequest) (*SegmentInfo, error) {
-	maxNumOfRows, err := s.estimateMaxNumOfRows(req.CollectionID)
-	if err != nil {
-		log.Error("failed to open new segment while estimateMaxNumOfRows", zap.Error(err))
-		return nil, err
+	var maxNumOfRows int
+	if !req.IsCreatedByStreaming {
+		var err error
+		if maxNumOfRows, err = s.estimateMaxNumOfRows(req.CollectionID); err != nil {
+			log.Error("failed to open new segment while estimateMaxNumOfRows", zap.Error(err))
+			return nil, err
+		}
 	}
 
 	segmentInfo := &datapb.SegmentInfo{

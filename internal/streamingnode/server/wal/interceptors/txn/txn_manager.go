@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -18,31 +19,65 @@ import (
 )
 
 // NewTxnManager creates a new transaction manager.
-func NewTxnManager(pchannel types.PChannelInfo) *TxnManager {
-	return &TxnManager{
-		mu:       sync.Mutex{},
-		sessions: make(map[message.TxnID]*TxnSession),
-		closed:   nil,
-		metrics:  metricsutil.NewTxnMetrics(pchannel.Name),
-		logger:   resource.Resource().Logger().With(log.FieldComponent("txn-manager")),
+func NewTxnManager(pchannel types.PChannelInfo, buffer *utility.TxnBuffer) *TxnManager {
+	m := metricsutil.NewTxnMetrics(pchannel.Name)
+	builders := buffer.GetUncommittedMessageBuilder()
+	sessions := make(map[message.TxnID]*TxnSession, len(builders))
+	recoveredSessions := make(map[message.TxnID]struct{}, 0)
+	for _, builder := range builders {
+		beginMessages, body := builder.Messages()
+		session := newTxnSession(
+			beginMessages.VChannel(),
+			*beginMessages.TxnContext(),
+			beginMessages.TimeTick(),
+			m.BeginTxn(),
+		)
+		for _, msg := range body {
+			session.AddNewMessage(context.Background(), msg.TimeTick())
+			session.AddNewMessageDoneAndKeepalive(msg.TimeTick())
+		}
+		sessions[session.TxnContext().TxnID] = session
+		recoveredSessions[session.TxnContext().TxnID] = struct{}{}
 	}
+	txnManager := &TxnManager{
+		mu:                        sync.Mutex{},
+		recoveredSessions:         recoveredSessions,
+		recoveredSessionsDoneChan: make(chan struct{}),
+		sessions:                  sessions,
+		closed:                    nil,
+		metrics:                   m,
+		logger:                    resource.Resource().Logger().With(log.FieldComponent("txn-manager")),
+	}
+	txnManager.notifyRecoverDone()
+	return txnManager
 }
 
 // TxnManager is the manager of transactions.
 // We don't support cross wal transaction by now and
 // We don't support the transaction lives after the wal transferred to another streaming node.
 type TxnManager struct {
-	mu       sync.Mutex
-	sessions map[message.TxnID]*TxnSession
-	closed   lifetime.SafeChan
-	metrics  *metricsutil.TxnMetrics
-	logger   *log.MLogger
+	mu                        sync.Mutex
+	recoveredSessions         map[message.TxnID]struct{}
+	recoveredSessionsDoneChan chan struct{}
+	sessions                  map[message.TxnID]*TxnSession
+	closed                    lifetime.SafeChan
+	metrics                   *metricsutil.TxnMetrics
+	logger                    *log.MLogger
+}
+
+// RecoverDone returns a channel that is closed when all transactions are cleaned up.
+func (m *TxnManager) RecoverDone() <-chan struct{} {
+	return m.recoveredSessionsDoneChan
 }
 
 // BeginNewTxn starts a new transaction with a session.
 // We only support a transaction work on a streaming node, once the wal is transferred to another node,
 // the transaction is treated as expired (rollback), and user will got a expired error, then perform a retry.
-func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive time.Duration) (*TxnSession, error) {
+func (m *TxnManager) BeginNewTxn(ctx context.Context, msg message.MutableBeginTxnMessageV2) (*TxnSession, error) {
+	timetick := msg.TimeTick()
+	vchannel := msg.VChannel()
+	keepalive := time.Duration(msg.Header().KeepaliveMilliseconds) * time.Millisecond
+
 	if keepalive == 0 {
 		// If keepalive is 0, the txn set the keepalive with default keepalive.
 		keepalive = paramtable.Get().StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse()
@@ -62,22 +97,38 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive
 	if m.closed != nil {
 		return nil, status.NewTransactionExpired("manager closed")
 	}
-	metricsGuard := m.metrics.BeginTxn()
-	session := &TxnSession{
-		mu:           sync.Mutex{},
-		lastTimetick: timetick,
-		txnContext: message.TxnContext{
-			TxnID:     message.TxnID(id),
-			Keepalive: keepalive,
-		},
-		inFlightCount: 0,
-		state:         message.TxnStateBegin,
-		doneWait:      nil,
-		rollback:      false,
-		metricsGuard:  metricsGuard,
+	txnCtx := message.TxnContext{
+		TxnID:     message.TxnID(id),
+		Keepalive: keepalive,
 	}
+	session := newTxnSession(
+		vchannel,
+		txnCtx,
+		timetick,
+		m.metrics.BeginTxn(),
+	)
 	m.sessions[session.TxnContext().TxnID] = session
 	return session, nil
+}
+
+// FailTxnAtVChannel fails all transactions at the specified vchannel.
+func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
+	// avoid the txn to be commited.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ids := make([]int64, 0, len(m.sessions))
+	for id, session := range m.sessions {
+		if session.VChannel() == vchannel {
+			session.Cleanup()
+			delete(m.sessions, id)
+			delete(m.recoveredSessions, id)
+			ids = append(ids, int64(id))
+		}
+	}
+	if len(ids) > 0 {
+		m.logger.Info("transaction at vchannel is failed because of incoming exclusive required message", zap.String("vchannel", vchannel), zap.Int64s("txnIDs", ids))
+	}
+	m.notifyRecoverDone()
 }
 
 // CleanupTxnUntil cleans up the transactions until the specified timestamp.
@@ -89,12 +140,22 @@ func (m *TxnManager) CleanupTxnUntil(ts uint64) {
 		if session.IsExpiredOrDone(ts) {
 			session.Cleanup()
 			delete(m.sessions, id)
+			delete(m.recoveredSessions, id)
 		}
 	}
 
 	// If the manager is on graceful shutdown and all transactions are cleaned up.
 	if len(m.sessions) == 0 && m.closed != nil {
 		m.closed.Close()
+	}
+
+	m.notifyRecoverDone()
+}
+
+func (m *TxnManager) notifyRecoverDone() {
+	if len(m.recoveredSessions) == 0 && m.recoveredSessions != nil {
+		close(m.recoveredSessionsDoneChan)
+		m.recoveredSessions = nil
 	}
 }
 

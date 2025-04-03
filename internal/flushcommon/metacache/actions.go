@@ -96,6 +96,12 @@ func (f SegmentFilterFunc) AddFilter(criterion *segmentCriterion) {
 	criterion.others = append(criterion.others, f)
 }
 
+func WithAll() SegmentFilter {
+	return SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return true
+	})
+}
+
 func WithPartitionID(partitionID int64) SegmentFilter {
 	return SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return partitionID == common.AllPartitionsID || info.partitionID == partitionID

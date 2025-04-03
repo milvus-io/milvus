@@ -66,14 +66,14 @@ func TestCatalogSegmentAssignments(t *testing.T) {
 	kv.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(nil)
 	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
 
-	err = catalog.SaveSegmentAssignments(ctx, "p1", []*streamingpb.SegmentAssignmentMeta{
-		{
+	err = catalog.SaveSegmentAssignments(ctx, "p1", map[int64]*streamingpb.SegmentAssignmentMeta{
+		1: {
 			SegmentId: 1,
 			State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
 		},
-		{
+		2: {
 			SegmentId: 2,
-			State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_PENDING,
+			State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
 		},
 	})
 	assert.NoError(t, err)

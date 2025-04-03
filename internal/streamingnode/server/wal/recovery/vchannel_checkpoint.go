@@ -1,4 +1,4 @@
-package flusherimpl
+package recovery
 
 import (
 	"container/heap"
@@ -9,9 +9,9 @@ import (
 )
 
 var (
-	errVChannelAlreadyExists = errors.New("vchannel already exists")
-	errVChannelNotFound      = errors.New("vchannel not found")
-	errRollbackCheckpoint    = errors.New("rollback a checkpoint is not allow")
+	ErrVChannelAlreadyExists = errors.New("vchannel already exists")
+	ErrVChannelNotFound      = errors.New("vchannel not found")
+	ErrRollbackCheckpoint    = errors.New("rollback a checkpoint is not allow")
 )
 
 // newVChannelCheckpointManager creates a new vchannelCheckpointManager
@@ -42,7 +42,7 @@ type vchannelCheckpointManager struct {
 // Add adds a vchannel with a checkpoint to the manager
 func (m *vchannelCheckpointManager) Add(vchannel string, checkpoint message.MessageID) error {
 	if _, ok := m.index[vchannel]; ok {
-		return errVChannelAlreadyExists
+		return ErrVChannelAlreadyExists
 	}
 	vc := &vchannelCheckpoint{
 		vchannel:   vchannel,
@@ -57,7 +57,7 @@ func (m *vchannelCheckpointManager) Add(vchannel string, checkpoint message.Mess
 func (m *vchannelCheckpointManager) Drop(vchannel string) error {
 	vc, ok := m.index[vchannel]
 	if !ok {
-		return errVChannelNotFound
+		return ErrVChannelNotFound
 	}
 	heap.Remove(&m.checkpointHeap, vc.index)
 	delete(m.index, vchannel)
@@ -68,10 +68,10 @@ func (m *vchannelCheckpointManager) Drop(vchannel string) error {
 func (m *vchannelCheckpointManager) Update(vchannel string, checkpoint message.MessageID) error {
 	previous, ok := m.index[vchannel]
 	if !ok {
-		return errVChannelNotFound
+		return ErrVChannelNotFound
 	}
 	if checkpoint.LT(previous.checkpoint) {
-		return errors.Wrapf(errRollbackCheckpoint, "checkpoint: %s, previous: %s", checkpoint, previous.checkpoint)
+		return errors.Wrapf(ErrRollbackCheckpoint, "checkpoint: %s, previous: %s", checkpoint, previous.checkpoint)
 	}
 	if checkpoint.EQ(previous.checkpoint) {
 		return nil

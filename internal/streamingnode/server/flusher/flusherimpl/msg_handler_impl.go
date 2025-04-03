@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
@@ -49,9 +50,9 @@ type msgHandlerImpl struct {
 }
 
 func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, vchannel string, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error {
-	body, err := createSegmentMsg.Body()
-	if err != nil {
-		return errors.Wrap(err, "failed to get create segment message body")
+	body := createSegmentMsg.MustBody()
+	if err := impl.createNewGrowingSegment(ctx, vchannel, body); err != nil {
+		return err
 	}
 	for _, segmentInfo := range body.GetSegments() {
 		if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, segmentInfo.GetPartitionId(), segmentInfo.GetSegmentId()); err != nil {
@@ -70,11 +71,40 @@ func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, vchannel st
 	return nil
 }
 
-func (impl *msgHandlerImpl) HandleFlush(vchannel string, flushMsg message.ImmutableFlushMessageV2) error {
-	body, err := flushMsg.Body()
+func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchannel string, body *message.CreateSegmentMessageBody) error {
+	// Transfer the pending segment into growing state.
+	// Alloc the growing segment at datacoord first.
+	mix, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to get flush message body")
+		return err
 	}
+	logger := log.With(zap.Int64("collectionID", body.CollectionId))
+	return retry.Do(ctx, func() (err error) {
+		for _, segmentInfo := range body.GetSegments() {
+			logger := logger.With(
+				zap.Int64("partitionID", segmentInfo.PartitionId),
+				zap.Int64("segmentID", segmentInfo.SegmentId),
+			)
+			resp, err := mix.AllocSegment(ctx, &datapb.AllocSegmentRequest{
+				CollectionId:         body.CollectionId,
+				PartitionId:          segmentInfo.PartitionId,
+				SegmentId:            segmentInfo.SegmentId,
+				Vchannel:             vchannel,
+				StorageVersion:       segmentInfo.StorageVersion,
+				IsCreatedByStreaming: true,
+			})
+			if err := merr.CheckRPCCall(resp, err); err != nil {
+				logger.Warn("failed to alloc growing segment at datacoord")
+				return errors.Wrap(err, "failed to alloc growing segment at datacoord")
+			}
+			logger.Info("alloc growing segment at datacoord")
+		}
+		return nil
+	}, retry.AttemptAlways())
+}
+
+func (impl *msgHandlerImpl) HandleFlush(vchannel string, flushMsg message.ImmutableFlushMessageV2) error {
+	body := flushMsg.MustBody()
 	if err := impl.wbMgr.SealSegments(context.Background(), vchannel, body.GetSegmentId()); err != nil {
 		return errors.Wrap(err, "failed to seal segments")
 	}
@@ -82,9 +112,8 @@ func (impl *msgHandlerImpl) HandleFlush(vchannel string, flushMsg message.Immuta
 }
 
 func (impl *msgHandlerImpl) HandleManualFlush(vchannel string, flushMsg message.ImmutableManualFlushMessageV2) error {
-	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.Header().GetFlushTs()); err != nil {
-		return errors.Wrap(err, "failed to flush channel")
-	}
+	impl.wbMgr.SealAllSegments(context.Background(), vchannel)
+	impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.Header().GetFlushTs()) // may be redundant.
 	broadcastID := flushMsg.BroadcastHeader().BroadcastID
 	if broadcastID == 0 {
 		return nil
@@ -96,6 +125,7 @@ func (impl *msgHandlerImpl) HandleManualFlush(vchannel string, flushMsg message.
 }
 
 func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, vchannel string, msg *adaptor.SchemaChangeMessageBody) error {
+	impl.wbMgr.SealAllSegments(context.Background(), vchannel)
 	return streaming.WAL().Broadcast().Ack(ctx, types.BroadcastAckRequest{
 		BroadcastID: msg.BroadcastID,
 		VChannel:    vchannel,

@@ -1,8 +1,6 @@
 package segment
 
 import (
-	"context"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -20,10 +18,8 @@ type interceptorBuilder struct{}
 
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	assignManager := syncutil.NewFuture[*manager.PChannelSegmentAllocManager]()
-	ctx, cancel := context.WithCancel(context.Background())
 	segmentInterceptor := &segmentInterceptor{
-		ctx:    ctx,
-		cancel: cancel,
+		notifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		logger: resource.Resource().Logger().With(
 			log.FieldComponent("segment-assigner"),
 			zap.Any("pchannel", param.ChannelInfo),
