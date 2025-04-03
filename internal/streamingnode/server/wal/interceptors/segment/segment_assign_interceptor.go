@@ -9,7 +9,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/manager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
@@ -31,8 +30,7 @@ var (
 
 // segmentInterceptor is the implementation of segment assignment interceptor.
 type segmentInterceptor struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	notifier *syncutil.AsyncTaskNotifier[struct{}]
 
 	logger        *log.MLogger
 	assignManager *syncutil.Future[*manager.PChannelSegmentAllocManager]
@@ -224,17 +222,19 @@ func (impl *segmentInterceptor) handleManualFlushMessage(ctx context.Context, ms
 
 // Close closes the segment interceptor.
 func (impl *segmentInterceptor) Close() {
-	impl.cancel()
+	impl.notifier.Cancel()
+	impl.notifier.BlockUntilFinish()
+
 	assignManager := impl.assignManager.Get()
 	if assignManager != nil {
-		// unregister the pchannels
-		inspector.GetSegmentSealedInspector().UnregisterPChannelManager(assignManager)
-		assignManager.Close(context.Background())
+		assignManager.Close()
 	}
 }
 
 // recoverPChannelManager recovers PChannel Assignment Manager.
 func (impl *segmentInterceptor) recoverPChannelManager(param *interceptors.InterceptorBuildParam) {
+	defer impl.notifier.Finish(struct{}{})
+
 	timer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
 		Default: time.Second,
 		Backoff: typeutil.BackoffConfig{
@@ -245,13 +245,13 @@ func (impl *segmentInterceptor) recoverPChannelManager(param *interceptors.Inter
 	})
 	timer.EnableBackoff()
 	for counter := 0; ; counter++ {
-		pm, err := manager.RecoverPChannelSegmentAllocManager(impl.ctx, param.ChannelInfo, param.WAL)
+		pm, err := manager.RecoverPChannelSegmentAllocManager(impl.notifier.Context(), param.ChannelInfo, param.WAL)
 		if err != nil {
 			ch, d := timer.NextTimer()
 			impl.logger.Warn("recover PChannel Assignment Manager failed, wait a backoff", zap.Int("retry", counter), zap.Duration("nextRetryInterval", d), zap.Error(err))
 			select {
-			case <-impl.ctx.Done():
-				impl.logger.Info("segment interceptor has been closed", zap.Error(impl.ctx.Err()))
+			case <-impl.notifier.Context().Done():
+				impl.logger.Info("segment interceptor has been closed", zap.Error(impl.notifier.Context().Err()))
 				impl.assignManager.Set(nil)
 				return
 			case <-ch:
@@ -260,7 +260,6 @@ func (impl *segmentInterceptor) recoverPChannelManager(param *interceptors.Inter
 		}
 
 		// register the manager into inspector, to do the seal asynchronously
-		inspector.GetSegmentSealedInspector().RegisterPChannelManager(pm)
 		impl.assignManager.Set(pm)
 		impl.logger.Info("recover PChannel Assignment Manager success")
 		return
