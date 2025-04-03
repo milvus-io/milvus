@@ -26,10 +26,6 @@ namespace milvus::storage {
 
 class InsertData : public DataCodec {
  public:
-    explicit InsertData(FieldDataPtr data)
-        : DataCodec(data, CodecType::InsertDataType) {
-    }
-
     explicit InsertData(std::shared_ptr<PayloadReader> payload_reader)
         : DataCodec(payload_reader, CodecType::InsertDataType) {
     }

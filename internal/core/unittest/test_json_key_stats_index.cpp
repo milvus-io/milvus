@@ -16,16 +16,15 @@
 #include <memory>
 
 #include "common/Tracer.h"
-#include "index/BitmapIndex.h"
 #include "storage/Util.h"
 #include "storage/InsertData.h"
-#include "indexbuilder/IndexFactory.h"
 #include "index/IndexFactory.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "index/Meta.h"
 #include "index/JsonKeyStatsInvertedIndex.h"
 #include "common/Json.h"
 #include "common/Types.h"
+#include "storage/PayloadReader.h"
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
 using namespace milvus;
@@ -91,7 +90,9 @@ class JsonKeyStatsIndexTest : public ::testing::TestWithParam<bool> {
             field_data->FillFieldData(data_.data(), data_.size());
         }
 
-        storage::InsertData insert_data(field_data);
+        auto payload_reader =
+            std::make_shared<milvus::storage::PayloadReader>(field_data);
+        storage::InsertData insert_data(payload_reader);
         insert_data.SetFieldDataMeta(field_meta);
         insert_data.SetTimestamps(0, 100);
 

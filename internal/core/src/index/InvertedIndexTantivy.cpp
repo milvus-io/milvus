@@ -188,7 +188,6 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         inverted_index_files.end());
 
     std::vector<std::string> null_offset_files;
-    std::shared_ptr<FieldDataBase> null_offset_data;
 
     auto find_file = [&](const std::string& file) -> auto {
         return std::find_if(inverted_index_files.begin(),
@@ -197,6 +196,12 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                                 return f.substr(f.find_last_of('/') + 1) ==
                                        file;
                             });
+    };
+
+    auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
+        folly::SharedMutex::WriteHolder lock(mutex_);
+        null_offset_.resize((size_t)size / sizeof(size_t));
+        memcpy(null_offset_.data(), data, (size_t)size);
     };
 
     if (auto it = find_file(INDEX_FILE_SLICE_META);
@@ -216,24 +221,24 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
 
         auto index_datas =
             mem_file_manager_->LoadIndexToMemory(null_offset_files);
-        AssembleIndexDatas(index_datas);
-        null_offset_data = index_datas.at(INDEX_NULL_OFFSET_FILE_NAME);
+
+        auto null_offsets_data = CompactIndexDatas(index_datas);
+        auto null_offsets_data_codecs =
+            std::move(null_offsets_data.at(INDEX_NULL_OFFSET_FILE_NAME));
+        for (auto&& null_offsets_codec : null_offsets_data_codecs.codecs_) {
+            fill_null_offsets(null_offsets_codec->PayloadData(),
+                              null_offsets_codec->PayloadSize());
+        }
     } else if (auto it = find_file(INDEX_NULL_OFFSET_FILE_NAME);
                it != inverted_index_files.end()) {
         // null offset file is not sliced
         null_offset_files.push_back(*it);
         auto index_datas = mem_file_manager_->LoadIndexToMemory({*it});
-        null_offset_data = index_datas.at(INDEX_NULL_OFFSET_FILE_NAME);
+        auto null_offset_data =
+            std::move(index_datas.at(INDEX_NULL_OFFSET_FILE_NAME));
+        fill_null_offsets(null_offset_data->PayloadData(),
+                          null_offset_data->PayloadSize());
     }
-
-    if (null_offset_data) {
-        auto data = null_offset_data->Data();
-        auto size = null_offset_data->DataSize();
-        folly::SharedMutex::WriteHolder lock(mutex_);
-        null_offset_.resize((size_t)size / sizeof(size_t));
-        memcpy(null_offset_.data(), data, (size_t)size);
-    }
-
     // remove from inverted_index_files
     inverted_index_files.erase(
         std::remove_if(inverted_index_files.begin(),
