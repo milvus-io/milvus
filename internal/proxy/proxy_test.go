@@ -520,7 +520,7 @@ func TestProxy(t *testing.T) {
 	// an int64 field (pk) & a float vector field
 	constructCollectionSchema := func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -530,7 +530,7 @@ func TestProxy(t *testing.T) {
 			AutoID:       true,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         floatVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -545,7 +545,7 @@ func TestProxy(t *testing.T) {
 			AutoID:      false,
 		}
 		bVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      102,
 			Name:         binaryVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -3669,7 +3669,7 @@ func TestProxy(t *testing.T) {
 
 	constructCollectionSchema = func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -3679,7 +3679,7 @@ func TestProxy(t *testing.T) {
 			AutoID:       false,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         floatVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -3694,7 +3694,7 @@ func TestProxy(t *testing.T) {
 			AutoID:      false,
 		}
 		bVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      102,
 			Name:         binaryVecField,
 			IsPrimaryKey: false,
 			Description:  "",
