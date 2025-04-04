@@ -57,6 +57,21 @@ func NewProtoFromPChannelInfo(pchannel PChannelInfo) *streamingpb.PChannelInfo {
 	}
 }
 
+// ChannelID is the unique identifier of a pchannel.
+type ChannelID struct {
+	Name string
+	// TODO: add replica id in future.
+}
+
+func (id ChannelID) String() string {
+	return id.Name
+}
+
+// LT is used to make a ChannelID sortable.
+func (id1 ChannelID) LT(id2 ChannelID) bool {
+	return id1.Name < id2.Name
+}
+
 // PChannelInfo is the struct for pchannel info.
 type PChannelInfo struct {
 	Name       string     // name of pchannel.
@@ -64,6 +79,10 @@ type PChannelInfo struct {
 	AccessMode AccessMode // Access mode, if AccessModeRO, the wal impls should be read-only, the append operation will panics.
 	// If accessMode is AccessModeRW, the wal impls should be read-write,
 	// and it will fence the old rw wal impls or wait the old rw wal impls close.
+}
+
+func (c PChannelInfo) ChannelID() ChannelID {
+	return ChannelID{Name: c.Name}
 }
 
 func (c PChannelInfo) String() string {

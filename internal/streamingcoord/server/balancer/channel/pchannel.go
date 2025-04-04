@@ -41,6 +41,11 @@ func (c *PChannelMeta) Name() string {
 	return c.inner.GetChannel().GetName()
 }
 
+// ChannelID returns the channel id.
+func (c *PChannelMeta) ChannelID() types.ChannelID {
+	return types.ChannelID{Name: c.inner.Channel.Name}
+}
+
 // ChannelInfo returns the channel info.
 func (c *PChannelMeta) ChannelInfo() types.PChannelInfo {
 	return types.NewPChannelInfoFromProto(c.inner.Channel)
