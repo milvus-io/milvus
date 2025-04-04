@@ -256,12 +256,15 @@ func (s *Server) getSystemInfoMetrics(
 func (s *Server) getDataCoordMetrics(ctx context.Context) metricsinfo.DataCoordInfos {
 	used, total, err := hardware.GetDiskUsage(paramtable.Get().LocalStorageCfg.Path.GetValue())
 	if err != nil {
-		log.Ctx(ctx).Warn("get disk usage failed", zap.Error(err))
+		log.Ctx(ctx).Debug("get disk usage failed", zap.Error(err))
+		used = 0
+		total = 0
 	}
 
 	ioWait, err := hardware.GetIOWait()
 	if err != nil {
-		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
+		log.Ctx(ctx).Debug("get iowait failed", zap.Error(err))
+		ioWait = 0
 	}
 
 	ret := metricsinfo.DataCoordInfos{
