@@ -86,6 +86,7 @@ message GetJobStatsResponse {
   int64 enqueue_job_num = 4;
   int64 task_slots = 5;
   repeated index.JobInfo job_infos = 6;
+  // deprecated
   bool enable_disk = 7;
 }
 

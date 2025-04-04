@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -45,7 +44,6 @@ type WorkerManager interface {
 	StoppingNode(nodeID typeutil.UniqueID)
 	PickClient() (typeutil.UniqueID, types.DataNodeClient)
 	QuerySlots() map[int64]int64
-	ClientSupportDisk() bool
 	GetAllClients() map[typeutil.UniqueID]types.DataNodeClient
 	GetClientByID(nodeID typeutil.UniqueID) (types.DataNodeClient, bool)
 }
@@ -203,57 +201,6 @@ func (nm *IndexNodeManager) PickClient() (typeutil.UniqueID, types.DataNodeClien
 	}
 
 	return 0, nil
-}
-
-func (nm *IndexNodeManager) ClientSupportDisk() bool {
-	log := log.Ctx(nm.ctx)
-	log.Debug("check if client support disk index")
-	allClients := nm.GetAllClients()
-	if len(allClients) == 0 {
-		log.Warn("there is no IndexNode online")
-		return false
-	}
-
-	// Note: In order to quickly end other goroutines, an error is returned when the client is successfully selected
-	ctx, cancel := context.WithCancel(nm.ctx)
-	var (
-		enableDisk = false
-		nodeMutex  = lock.Mutex{}
-		wg         = sync.WaitGroup{}
-	)
-
-	for nodeID, client := range allClients {
-		nodeID := nodeID
-		client := client
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			resp, err := client.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
-			if err := merr.CheckRPCCall(resp, err); err != nil {
-				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
-				return
-			}
-			log.Debug("get job stats success", zap.Int64("nodeID", nodeID), zap.Bool("enable disk", resp.GetEnableDisk()))
-			if resp.GetEnableDisk() {
-				nodeMutex.Lock()
-				defer nodeMutex.Unlock()
-				cancel()
-				if !enableDisk {
-					enableDisk = true
-				}
-				return
-			}
-		}()
-	}
-	wg.Wait()
-	cancel()
-	if enableDisk {
-		log.Info("IndexNode support disk index")
-		return true
-	}
-
-	log.Error("all IndexNodes do not support disk indexes")
-	return false
 }
 
 func (nm *IndexNodeManager) GetAllClients() map[typeutil.UniqueID]types.DataNodeClient {
