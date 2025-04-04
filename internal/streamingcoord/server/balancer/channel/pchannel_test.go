@@ -10,6 +10,9 @@ import (
 )
 
 func TestPChannel(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
 	pchannel := newPChannelMetaFromProto(&streamingpb.PChannelMeta{
 		Channel: &streamingpb.PChannelInfo{
 			Name: "test-channel",

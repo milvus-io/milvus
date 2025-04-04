@@ -27,8 +27,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -39,7 +39,7 @@ import (
 
 func Test_NewServer(t *testing.T) {
 	paramtable.Init()
-	coordclient.ResetRegistration()
+	testutil.ResetEnvironment()
 
 	ctx := context.Background()
 	mockDataCoord := mocks.NewMockDataCoord(t)
@@ -337,7 +337,7 @@ func Test_Run(t *testing.T) {
 	t.Run("test run success", func(t *testing.T) {
 		parameters := []string{"tikv", "etcd"}
 		for _, v := range parameters {
-			coordclient.ResetRegistration()
+			testutil.ResetEnvironment()
 			paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
 			ctx := context.Background()
 			getTiKVClient = func(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
@@ -373,7 +373,7 @@ func Test_Run(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, "etcd")
 
 	t.Run("test init error", func(t *testing.T) {
-		coordclient.ResetRegistration()
+		testutil.ResetEnvironment()
 		ctx := context.Background()
 		server, err := NewServer(ctx, nil)
 		assert.NotNil(t, server)
@@ -394,7 +394,7 @@ func Test_Run(t *testing.T) {
 	})
 
 	t.Run("test register error", func(t *testing.T) {
-		coordclient.ResetRegistration()
+		testutil.ResetEnvironment()
 		ctx := context.Background()
 		server, err := NewServer(ctx, nil)
 		assert.NoError(t, err)
@@ -416,7 +416,7 @@ func Test_Run(t *testing.T) {
 	})
 
 	t.Run("test start error", func(t *testing.T) {
-		coordclient.ResetRegistration()
+		testutil.ResetEnvironment()
 		ctx := context.Background()
 		server, err := NewServer(ctx, nil)
 		assert.NoError(t, err)
@@ -439,7 +439,7 @@ func Test_Run(t *testing.T) {
 	})
 
 	t.Run("test stop error", func(t *testing.T) {
-		coordclient.ResetRegistration()
+		testutil.ResetEnvironment()
 		ctx := context.Background()
 		server, err := NewServer(ctx, nil)
 		assert.NoError(t, err)

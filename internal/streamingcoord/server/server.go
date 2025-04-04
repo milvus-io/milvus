@@ -57,7 +57,7 @@ func (s *Server) initBasicComponent(ctx context.Context) (err error) {
 			s.logger.Info("start recovery balancer...")
 			// Read new incoming topics from configuration, and register it into balancer.
 			newIncomingTopics := util.GetAllTopicsFromConfiguration()
-			balancer, err := balancer.RecoverBalancer(ctx, "pchannel_count_fair", newIncomingTopics.Collect()...)
+			balancer, err := balancer.RecoverBalancer(ctx, newIncomingTopics.Collect()...)
 			if err != nil {
 				s.logger.Warn("recover balancer failed", zap.Error(err))
 				return struct{}{}, err
