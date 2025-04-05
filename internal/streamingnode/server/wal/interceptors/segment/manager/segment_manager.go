@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -28,22 +29,18 @@ var (
 )
 
 // newSegmentAllocManagerFromProto creates a new segment assignment meta from proto.
+// if the segment is growing, the stat should be registered to stats manager,
+// so it will be returned.
 func newSegmentAllocManagerFromProto(
 	pchannel types.PChannelInfo,
 	inner *streamingpb.SegmentAssignmentMeta,
 	metrics *metricsutil.SegmentAssignMetrics,
-) *segmentAllocManager {
-	stat := stats.NewSegmentStatFromProto(inner.Stat)
+) (m *segmentAllocManager, growingStat *stats.SegmentStats) {
+	stat := utils.NewSegmentStatFromProto(inner.Stat)
 	// Growing segment's stat should be registered to stats manager.
 	// Async sealed policy will use it.
 	if inner.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
-		resource.Resource().SegmentAssignStatsManager().RegisterNewGrowingSegment(stats.SegmentBelongs{
-			CollectionID: inner.GetCollectionId(),
-			PartitionID:  inner.GetPartitionId(),
-			SegmentID:    inner.GetSegmentId(),
-			PChannel:     pchannel.Name,
-			VChannel:     inner.GetVchannel(),
-		}, inner.GetSegmentId(), stat)
+		growingStat = stat
 		stat = nil
 	}
 	metrics.UpdateGrowingSegmentState(streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_UNKNOWN, inner.GetState())
@@ -55,7 +52,7 @@ func newSegmentAllocManagerFromProto(
 		txnSem:        atomic.NewInt32(0),
 		dirtyBytes:    0,
 		metrics:       metrics,
-	}
+	}, growingStat
 }
 
 // newSegmentAllocManager creates a new segment assignment meta.
@@ -109,17 +106,17 @@ type segmentAllocManager struct {
 	dirtyBytes    uint64              // records the dirty bytes that didn't persist.
 	txnSem        *atomic.Int32       // the runnint txn count of the segment.
 	metrics       *metricsutil.SegmentAssignMetrics
-	sealPolicy    policy.PolicyName
+	sealPolicy    policy.SealPolicy
 }
 
 // WithSealPolicy sets the seal policy of the segment assignment meta.
-func (s *segmentAllocManager) WithSealPolicy(policy policy.PolicyName) *segmentAllocManager {
+func (s *segmentAllocManager) WithSealPolicy(policy policy.SealPolicy) *segmentAllocManager {
 	s.sealPolicy = policy
 	return s
 }
 
 // SealPolicy returns the seal policy of the segment assignment meta.
-func (s *segmentAllocManager) SealPolicy() policy.PolicyName {
+func (s *segmentAllocManager) SealPolicy() policy.SealPolicy {
 	return s.sealPolicy
 }
 
@@ -210,7 +207,7 @@ func (s *segmentAllocManager) AllocRows(ctx context.Context, req *AssignSegmentR
 // Snapshot returns the snapshot of the segment assignment meta.
 func (s *segmentAllocManager) Snapshot() *streamingpb.SegmentAssignmentMeta {
 	copied := proto.Clone(s.inner).(*streamingpb.SegmentAssignmentMeta)
-	copied.Stat = stats.NewProtoFromSegmentStat(s.GetStat())
+	copied.Stat = utils.NewProtoFromSegmentStat(s.GetStat())
 	return copied
 }
 
@@ -260,7 +257,7 @@ func (m *mutableSegmentAssignmentMeta) IntoPending() {
 }
 
 // IntoGrowing transfers the segment assignment meta into growing state.
-func (m *mutableSegmentAssignmentMeta) IntoGrowing(limitation *policy.SegmentLimitation, createSegmentTimeTick uint64) {
+func (m *mutableSegmentAssignmentMeta) IntoGrowing(limitation *segmentLimitation, createSegmentTimeTick uint64) {
 	if m.modifiedCopy.State != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_PENDING {
 		panic("tranfer state to growing from non-pending state")
 	}
@@ -307,7 +304,7 @@ func (m *mutableSegmentAssignmentMeta) Commit(ctx context.Context) error {
 			SegmentID:    m.original.GetSegmentID(),
 			PChannel:     m.original.pchannel.Name,
 			VChannel:     m.original.GetVChannel(),
-		}, m.original.GetSegmentID(), stats.NewSegmentStatFromProto(m.modifiedCopy.Stat))
+		}, utils.NewSegmentStatFromProto(m.modifiedCopy.Stat))
 	} else if m.original.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING &&
 		m.modifiedCopy.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
 		// if the state transferred from growing into others, remove the stats from stats manager.
