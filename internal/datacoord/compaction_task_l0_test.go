@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -160,6 +161,48 @@ func (s *L0CompactionTaskSuite) TestProcessRefreshPlan_SelectZeroSegmentsL0() {
 	}, nil, s.mockMeta, nil)
 	_, err := task.BuildCompactionRequest()
 	s.Error(err)
+}
+
+func (s *L0CompactionTaskSuite) TestL0ResultsSegments() {
+	s.mockSessMgr.EXPECT().GetCompactionPlanResult(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
+		State: datapb.CompactionTaskState_failed,
+	}, nil).Once()
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
+	task := newL0CompactionTask(&datapb.CompactionTask{
+		PlanID:         1,
+		TriggerID:      19530,
+		CollectionID:   1,
+		PartitionID:    10,
+		Type:           datapb.CompactionType_Level0DeleteCompaction,
+		NodeID:         1,
+		State:          datapb.CompactionTaskState_executing,
+		InputSegments:  []int64{100, 101},
+		ResultSegments: []int64{200},
+	}, nil, s.mockMeta, s.mockSessMgr)
+	ok := task.processExecuting()
+	assert.False(s.T(), ok)
+	assert.Equal(s.T(), datapb.CompactionTaskState_pipelining, task.GetTaskProto().State)
+}
+
+func (s *L0CompactionTaskSuite) TestL0SelectResultsSegments() {
+	s.mockMeta.EXPECT().GetSegment(mock.Anything, mock.Anything).Return(&SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID: 200,
+		},
+	}).Once()
+	task := newL0CompactionTask(&datapb.CompactionTask{
+		PlanID:         1,
+		TriggerID:      19530,
+		CollectionID:   1,
+		PartitionID:    10,
+		Type:           datapb.CompactionType_Level0DeleteCompaction,
+		NodeID:         1,
+		State:          datapb.CompactionTaskState_executing,
+		InputSegments:  []int64{100, 101},
+		ResultSegments: []int64{200},
+	}, nil, s.mockMeta, s.mockSessMgr)
+	segmentIDs, _ := task.selectSealedSegment()
+	assert.Equal(s.T(), []int64{200}, segmentIDs)
 }
 
 func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
