@@ -511,8 +511,9 @@ type GetJobStatsResponse struct {
 	EnqueueJobNum    int64              `protobuf:"varint,4,opt,name=enqueue_job_num,json=enqueueJobNum,proto3" json:"enqueue_job_num,omitempty"`
 	AvailableSlots   int64              `protobuf:"varint,5,opt,name=available_slots,json=availableSlots,proto3" json:"available_slots,omitempty"`
 	JobInfos         []*indexpb.JobInfo `protobuf:"bytes,6,rep,name=job_infos,json=jobInfos,proto3" json:"job_infos,omitempty"`
-	EnableDisk       bool               `protobuf:"varint,7,opt,name=enable_disk,json=enableDisk,proto3" json:"enable_disk,omitempty"`
-	TotalSlots       int64              `protobuf:"varint,8,opt,name=total_slots,json=totalSlots,proto3" json:"total_slots,omitempty"`
+	// deprecated
+	EnableDisk bool  `protobuf:"varint,7,opt,name=enable_disk,json=enableDisk,proto3" json:"enable_disk,omitempty"`
+	TotalSlots int64 `protobuf:"varint,8,opt,name=total_slots,json=totalSlots,proto3" json:"total_slots,omitempty"`
 }
 
 func (x *GetJobStatsResponse) Reset() {

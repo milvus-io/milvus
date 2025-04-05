@@ -510,8 +510,6 @@ indexCoord:
 indexNode:
   scheduler:
     buildParallel: 1
-  enableDisk: true # enable index node build disk vector index
-  maxDiskUsagePercentage: 95
   ip:  # TCP/IP address of indexNode. If not specified, use the first unicastable address
   port: 21121 # TCP port of indexNode
   grpc:
