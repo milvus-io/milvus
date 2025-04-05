@@ -5,6 +5,7 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -66,10 +67,16 @@ func withLevelAndTrace(ctx context.Context) context.Context {
 		if len(requestID) >= 1 {
 			// inject traceid in order to pass client request id
 			newctx = metadata.AppendToOutgoingContext(newctx, clientRequestIDKey, requestID[0])
-			// inject traceid from client for info/debug/warn/error logs
-			newctx = log.WithTraceID(newctx, requestID[0])
+			var err error
+			// if client_request_id is a valid traceID, use traceID path
+			traceID, err = trace.TraceIDFromHex(requestID[0])
+			if err != nil {
+				// set request id to custom field
+				newctx = log.WithFields(newctx, zap.String(clientRequestIDKey, requestID[0]))
+			}
 		}
 	}
+	// traceID not valid, generate a new one
 	if !traceID.IsValid() {
 		traceID = trace.SpanContextFromContext(newctx).TraceID()
 	}
