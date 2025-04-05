@@ -14,6 +14,7 @@ from chaos.checker import (CollectionCreateChecker,
                            QueryChecker,
                            TextMatchChecker,
                            PhraseMatchChecker,
+                           JsonQueryChecker,
                            IndexCreateChecker,
                            DeleteChecker,
                            CollectionDropChecker,
@@ -82,6 +83,7 @@ class TestOperations(TestBase):
             Op.query: QueryChecker(collection_name=c_name),
             Op.text_match: TextMatchChecker(collection_name=c_name),
             Op.phrase_match: PhraseMatchChecker(collection_name=c_name),
+            Op.json_query: JsonQueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
             Op.drop: CollectionDropChecker(collection_name=c_name)
         }
