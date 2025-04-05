@@ -69,10 +69,12 @@ const (
 	OffsetKey            = "offset"
 	LimitKey             = "limit"
 
-	SearchIterV2Key        = "search_iter_v2"
-	SearchIterBatchSizeKey = "search_iter_batch_size"
-	SearchIterLastBoundKey = "search_iter_last_bound"
-	SearchIterIdKey        = "search_iter_id"
+	SearchIterV2Key            = "search_iter_v2"
+	SearchIterBatchSizeKey     = "search_iter_batch_size"
+	SearchIterLastBoundKey     = "search_iter_last_bound"
+	SearchIterIdKey            = "search_iter_id"
+	QueryGroupByFieldsKey      = "group_by_fields"
+	QueryGroupByIgnoreNullKeys = "ignore_null_keys"
 
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
