@@ -807,7 +807,7 @@ func NewBinlogValueWriter(rw BinlogRecordWriter, batchSize int,
 ) *BinlogValueWriter {
 	return &BinlogValueWriter{
 		BinlogRecordWriter: rw,
-		SerializeWriter: NewSerializeRecordWriter[*Value](rw, func(v []*Value) (Record, error) {
+		SerializeWriter: NewSerializeRecordWriter(rw, func(v []*Value) (Record, error) {
 			return ValueSerializer(v, rw.Schema().Fields)
 		}, batchSize),
 	}

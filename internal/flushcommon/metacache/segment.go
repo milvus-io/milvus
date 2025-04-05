@@ -115,6 +115,7 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		level:            s.level,
 		syncingTasks:     s.syncingTasks,
 		bm25stats:        s.bm25stats,
+		storageVersion:   s.storageVersion,
 	}
 }
 

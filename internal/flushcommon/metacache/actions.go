@@ -163,6 +163,12 @@ func SetStartPositionIfNil(startPos *msgpb.MsgPosition) SegmentAction {
 	}
 }
 
+func SetStorageVersion(version int64) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.storageVersion = version
+	}
+}
+
 func UpdateBufferedRows(bufferedRows int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.bufferRows = bufferedRows

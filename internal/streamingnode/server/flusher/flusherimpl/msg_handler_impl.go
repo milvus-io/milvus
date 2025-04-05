@@ -53,7 +53,7 @@ func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, vchannel st
 		return errors.Wrap(err, "failed to get create segment message body")
 	}
 	for _, segmentInfo := range body.GetSegments() {
-		if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, segmentInfo.GetPartitionId(), segmentInfo.GetSegmentId(), segmentInfo.StorageVersion); err != nil {
+		if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, segmentInfo.GetPartitionId(), segmentInfo.GetSegmentId()); err != nil {
 			log.Warn("fail to create new growing segment",
 				zap.String("vchannel", vchannel),
 				zap.Int64("partition_id", segmentInfo.GetPartitionId()),

@@ -115,6 +115,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		Dropped:        pack.pack.isDrop,
 		Channel:        pack.channelName,
 		SegLevel:       pack.level,
+		StorageVersion: segment.GetStorageVersion(),
 	}
 	err := retry.Handle(ctx, func() (bool, error) {
 		err := b.broker.SaveBinlogPaths(ctx, req)

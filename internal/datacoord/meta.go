@@ -849,6 +849,27 @@ func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateO
 	}
 }
 
+// Set storage version
+func SetStorageVersion(segmentID int64, version int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update storage version failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		if segment.GetStorageVersion() == version {
+			log.Ctx(context.TODO()).Info("meta update: segment stats already is target version",
+				zap.Int64("segmentID", segmentID), zap.Int64("version", version))
+			return false
+		}
+
+		segment.StorageVersion = version
+		return true
+	}
+}
+
 func UpdateCompactedOperator(segmentID int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)

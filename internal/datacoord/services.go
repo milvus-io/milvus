@@ -575,6 +575,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Status(err), nil
 		}
 
+		// Set storage version
+		operators = append(operators, SetStorageVersion(req.GetSegmentID(), req.GetStorageVersion()))
+
 		// Set segment state
 		if req.GetDropped() {
 			// segmentManager manages growing segments
