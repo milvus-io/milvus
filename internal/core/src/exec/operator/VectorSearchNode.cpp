@@ -35,7 +35,8 @@ PhyVectorSearchNode::PhyVectorSearchNode(
     : Operator(driverctx,
                search_node->output_type(),
                operator_id,
-               search_node->id()) {
+               search_node->id(),
+               "PhyVectorSearchNode") {
     ExecContext* exec_context = operator_context_->get_exec_context();
     query_context_ = exec_context->get_query_context();
     segment_ = query_context_->get_segment();
