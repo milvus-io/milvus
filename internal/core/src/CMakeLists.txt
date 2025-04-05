@@ -92,4 +92,11 @@ endif()
 
 target_link_libraries(milvus_core ${LINK_TARGETS})
 
+
+# build segcore bloom filter demo
+# add_executable(bf_test common/bloom_filter_demo.cpp)
+# target_link_libraries(bf_test milvus_core)
+# install(TARGETS bf_test DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
 install(TARGETS milvus_core DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+
