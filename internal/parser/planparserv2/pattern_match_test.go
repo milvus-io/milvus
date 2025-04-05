@@ -150,3 +150,55 @@ func Test_translatePatternMatch(t *testing.T) {
 		})
 	}
 }
+
+func TestOptimizeLikePattern(t *testing.T) {
+	tests := []struct {
+		pattern      string
+		expectedType planpb.OpType
+		expectedStr  string
+		expectedOk   bool
+	}{
+		// inner match
+		{"%abc%", planpb.OpType_InnerMatch, "abc", true},
+		{"%a\\%b%", planpb.OpType_InnerMatch, "a%b", true},
+		{"%a\\_b%", planpb.OpType_InnerMatch, "a_b", true},
+		{"%a\\\\%", planpb.OpType_InnerMatch, "a\\", true},
+		{"%a\t%", planpb.OpType_InnerMatch, "a\t", true},
+		{"%", planpb.OpType_Invalid, "", false},
+		{"%%", planpb.OpType_Invalid, "", false},
+		{"%a%b%", planpb.OpType_Invalid, "", false},
+		{"%a_b%", planpb.OpType_Invalid, "", false},
+		{"%abc\\", planpb.OpType_Invalid, "", false},
+
+		// prefix match
+		{"abc%", planpb.OpType_PrefixMatch, "abc", true},
+		{"a\\%bc%", planpb.OpType_PrefixMatch, "a%bc", true},
+		{"a\\_bc%", planpb.OpType_PrefixMatch, "a_bc", true},
+		{"_abc%", planpb.OpType_Invalid, "", false},
+
+		// posix match
+		{"%abc", planpb.OpType_PostfixMatch, "abc", true},
+		{"%a\\_bc", planpb.OpType_PostfixMatch, "a_bc", true},
+		{"%abc_", planpb.OpType_Invalid, "", false},
+		{"%abc\\", planpb.OpType_Invalid, "", false},
+
+		// equal match
+		{"abc", planpb.OpType_Equal, "abc", true},
+		{"a\\%bc", planpb.OpType_Equal, "a%bc", true},
+		{"a\\_bc", planpb.OpType_Equal, "a_bc", true},
+		{"abc_", planpb.OpType_Invalid, "", false},
+		{"abc\\", planpb.OpType_Invalid, "", false},
+
+		// null pattern
+		{"", planpb.OpType_Equal, "", false},
+	}
+
+	for _, test := range tests {
+		actualType, actualStr, actualOk := optimizeLikePattern(test.pattern)
+		if actualType != test.expectedType || actualStr != test.expectedStr || actualOk != test.expectedOk {
+			t.Errorf("optimizeLikePattern(%q) = (%q, %q, %v), expected (%q, %q, %v)",
+				test.pattern, actualType, actualStr, actualOk,
+				test.expectedType, test.expectedStr, test.expectedOk)
+		}
+	}
+}

@@ -20,6 +20,7 @@ enum OpType {
   NotIn = 12;
   TextMatch = 13;   // text match
   PhraseMatch = 14; // phrase match
+  InnerMatch = 15; // substring (e.g., "%value%")
 };
 
 enum ArithOpType {

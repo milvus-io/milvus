@@ -54,24 +54,117 @@ func findLastNotOfWildcards(pattern string) int {
 	return loc
 }
 
+func optimizeLikePattern(pattern string) (planpb.OpType, string, bool) {
+	if len(pattern) == 0 {
+		return planpb.OpType_Equal, "", false
+	}
+
+	if pattern[0] == '%' && pattern[len(pattern)-1] == '%' {
+		if len(pattern) < 3 {
+			return planpb.OpType_Invalid, "", false
+		}
+		var subStrBuilder strings.Builder
+		escaping := false
+		for i := 1; i < len(pattern)-1; i++ {
+			c := pattern[i]
+			if escaping {
+				subStrBuilder.WriteByte(c)
+				escaping = false
+			} else if c == '\\' {
+				escaping = true
+			} else if c == '%' || c == '_' {
+				return planpb.OpType_Invalid, "", false
+			} else {
+				subStrBuilder.WriteByte(c)
+			}
+		}
+		if escaping {
+			return planpb.OpType_Invalid, "", false
+		}
+		return planpb.OpType_InnerMatch, subStrBuilder.String(), true
+	} else if pattern[0] == '%' {
+		var subStrBuilder strings.Builder
+		escaping := false
+		for i := 1; i < len(pattern); i++ {
+			c := pattern[i]
+			if escaping {
+				subStrBuilder.WriteByte(c)
+				escaping = false
+			} else if c == '\\' {
+				escaping = true
+			} else if c == '_' || c == '%' {
+				return planpb.OpType_Invalid, "", false
+			} else {
+				subStrBuilder.WriteByte(c)
+			}
+		}
+		if escaping {
+			return planpb.OpType_Invalid, "", false
+		}
+		return planpb.OpType_PostfixMatch, subStrBuilder.String(), true
+	} else if pattern[len(pattern)-1] == '%' {
+		var subStrBuilder strings.Builder
+		escaping := false
+		for i := 0; i < len(pattern)-1; i++ {
+			c := pattern[i]
+			if escaping {
+				subStrBuilder.WriteByte(c)
+				escaping = false
+			} else if c == '\\' {
+				escaping = true
+			} else if c == '_' || c == '%' {
+				return planpb.OpType_Invalid, "", false
+			} else {
+				subStrBuilder.WriteByte(c)
+			}
+		}
+		if escaping {
+			return planpb.OpType_Invalid, "", false
+		}
+		return planpb.OpType_PrefixMatch, subStrBuilder.String(), true
+	} else {
+		var subStrBuilder strings.Builder
+		escaping := false
+		for i := 0; i < len(pattern); i++ {
+			c := pattern[i]
+			if escaping {
+				subStrBuilder.WriteByte(c)
+				escaping = false
+			} else if c == '\\' {
+				escaping = true
+			} else if c == '%' || c == '_' {
+				return planpb.OpType_Invalid, "", false
+			} else {
+				subStrBuilder.WriteByte(c)
+			}
+		}
+		if escaping {
+			return planpb.OpType_Invalid, "", false
+		}
+
+		return planpb.OpType_Equal, subStrBuilder.String(), true
+	}
+}
+
+func isAllPercentLoop(s string) bool {
+	for _, char := range s {
+		if char != '%' {
+			return false
+		}
+	}
+	return true
+}
+
 // translatePatternMatch translates pattern to related op type and operand.
 func translatePatternMatch(pattern string) (op planpb.OpType, operand string, err error) {
-	l := len(pattern)
-	loc := findLastNotOfWildcards(pattern)
+	op, operand, ok := optimizeLikePattern(pattern)
+	if ok {
+		return op, operand, nil
+	}
 
-	if loc < 0 {
-		// always match.
+	// if pattern is all %, return prefix match and empty operand, means all match
+	if isAllPercentLoop(pattern) {
 		return planpb.OpType_PrefixMatch, "", nil
-	}
-
-	newPattern, exist := hasWildcards(pattern[:loc+1])
-	if loc >= l-1 && !exist {
-		// equal match.
-		return planpb.OpType_Equal, newPattern, nil
-	}
-	if !exist {
-		// prefix match.
-		return planpb.OpType_PrefixMatch, newPattern, nil
 	}
 
 	return planpb.OpType_Match, pattern, nil
