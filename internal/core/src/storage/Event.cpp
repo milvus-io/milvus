@@ -212,9 +212,9 @@ BaseEventData::BaseEventData(BinlogReaderPtr reader,
                              DataType data_type,
                              bool nullable,
                              bool is_field_data) {
-    auto ast = reader->Read(sizeof(start_timestamp), &start_timestamp);
+    auto ast = reader->ReadSingleValue<Timestamp>(start_timestamp);
     AssertInfo(ast.ok(), "read start timestamp failed");
-    ast = reader->Read(sizeof(end_timestamp), &end_timestamp);
+    ast = reader->ReadSingleValue<Timestamp>(end_timestamp);
     AssertInfo(ast.ok(), "read end timestamp failed");
 
     int payload_length =
@@ -223,103 +223,120 @@ BaseEventData::BaseEventData(BinlogReaderPtr reader,
     AssertInfo(res.first.ok(), "read payload failed");
     payload_reader = std::make_shared<PayloadReader>(
         res.second.get(), payload_length, data_type, nullable, is_field_data);
-    if (is_field_data) {
-        field_data = payload_reader->get_field_data();
-    }
 }
 
 std::vector<uint8_t>
 BaseEventData::Serialize() {
-    auto data_type = field_data->get_data_type();
-    std::shared_ptr<PayloadWriter> payload_writer;
-    if (IsVectorDataType(data_type) &&
-        !IsSparseFloatVectorDataType(data_type)) {
-        payload_writer = std::make_unique<PayloadWriter>(
-            data_type, field_data->get_dim(), field_data->IsNullable());
+    if (payload_reader->has_binary_payload()) {
+        // for index slice, directly copy payload slice
+        auto payload_size = payload_reader->get_payload_size();
+        auto payload_data = payload_reader->get_payload_data();
+        auto len =
+            sizeof(start_timestamp) + sizeof(end_timestamp) + payload_size;
+        std::vector<uint8_t> res(len);
+        int offset = 0;
+        memcpy(res.data() + offset, &start_timestamp, sizeof(start_timestamp));
+        offset += sizeof(start_timestamp);
+        memcpy(res.data() + offset, &end_timestamp, sizeof(end_timestamp));
+        offset += sizeof(end_timestamp);
+        memcpy(res.data() + offset, payload_data, payload_size);
+        return res;
     } else {
-        payload_writer = std::make_unique<PayloadWriter>(
-            data_type, field_data->IsNullable());
-    }
-    switch (data_type) {
-        case DataType::VARCHAR:
-        case DataType::STRING:
-        case DataType::TEXT: {
-            for (size_t offset = 0; offset < field_data->get_num_rows();
-                 ++offset) {
-                auto str = static_cast<const std::string*>(
-                    field_data->RawValue(offset));
-                auto size = field_data->is_valid(offset) ? str->size() : -1;
-                payload_writer->add_one_string_payload(str->c_str(), size);
-            }
-            break;
+        // for insert bin log, use field_data to serialize
+        auto field_data = payload_reader->get_field_data();
+        auto data_type = field_data->get_data_type();
+        std::shared_ptr<PayloadWriter> payload_writer;
+        if (IsVectorDataType(data_type) &&
+            !IsSparseFloatVectorDataType(data_type)) {
+            payload_writer = std::make_unique<PayloadWriter>(
+                data_type, field_data->get_dim(), field_data->IsNullable());
+        } else {
+            payload_writer = std::make_unique<PayloadWriter>(
+                data_type, field_data->IsNullable());
         }
-        case DataType::ARRAY: {
-            for (size_t offset = 0; offset < field_data->get_num_rows();
-                 ++offset) {
-                auto array =
-                    static_cast<const Array*>(field_data->RawValue(offset));
-                auto array_string = array->output_data().SerializeAsString();
-                auto size =
-                    field_data->is_valid(offset) ? array_string.size() : -1;
-
-                payload_writer->add_one_binary_payload(
-                    reinterpret_cast<const uint8_t*>(array_string.c_str()),
-                    size);
-            }
-            break;
-        }
-        case DataType::JSON: {
-            for (size_t offset = 0; offset < field_data->get_num_rows();
-                 ++offset) {
-                auto string_view =
-                    static_cast<const Json*>(field_data->RawValue(offset))
-                        ->data();
-                auto size =
-                    field_data->is_valid(offset) ? string_view.size() : -1;
-                payload_writer->add_one_binary_payload(
-                    reinterpret_cast<const uint8_t*>(
-                        std::string(string_view).c_str()),
-                    size);
-            }
-            break;
-        }
-        case DataType::VECTOR_SPARSE_FLOAT: {
-            for (size_t offset = 0; offset < field_data->get_num_rows();
-                 ++offset) {
-                auto row =
-                    static_cast<const knowhere::sparse::SparseRow<float>*>(
+        switch (data_type) {
+            case DataType::VARCHAR:
+            case DataType::STRING:
+            case DataType::TEXT: {
+                for (size_t offset = 0; offset < field_data->get_num_rows();
+                     ++offset) {
+                    auto str = static_cast<const std::string*>(
                         field_data->RawValue(offset));
-                payload_writer->add_one_binary_payload(
-                    static_cast<const uint8_t*>(row->data()),
-                    row->data_byte_size());
+                    auto size = field_data->is_valid(offset) ? str->size() : -1;
+                    payload_writer->add_one_string_payload(str->c_str(), size);
+                }
+                break;
             }
-            break;
+            case DataType::ARRAY: {
+                for (size_t offset = 0; offset < field_data->get_num_rows();
+                     ++offset) {
+                    auto array =
+                        static_cast<const Array*>(field_data->RawValue(offset));
+                    auto array_string =
+                        array->output_data().SerializeAsString();
+                    auto size =
+                        field_data->is_valid(offset) ? array_string.size() : -1;
+
+                    payload_writer->add_one_binary_payload(
+                        reinterpret_cast<const uint8_t*>(array_string.c_str()),
+                        size);
+                }
+                break;
+            }
+            case DataType::JSON: {
+                for (size_t offset = 0; offset < field_data->get_num_rows();
+                     ++offset) {
+                    auto string_view =
+                        static_cast<const Json*>(field_data->RawValue(offset))
+                            ->data();
+                    auto size =
+                        field_data->is_valid(offset) ? string_view.size() : -1;
+                    payload_writer->add_one_binary_payload(
+                        reinterpret_cast<const uint8_t*>(
+                            std::string(string_view).c_str()),
+                        size);
+                }
+                break;
+            }
+            case DataType::VECTOR_SPARSE_FLOAT: {
+                for (size_t offset = 0; offset < field_data->get_num_rows();
+                     ++offset) {
+                    auto row =
+                        static_cast<const knowhere::sparse::SparseRow<float>*>(
+                            field_data->RawValue(offset));
+                    payload_writer->add_one_binary_payload(
+                        static_cast<const uint8_t*>(row->data()),
+                        row->data_byte_size());
+                }
+                break;
+            }
+            default: {
+                auto payload =
+                    Payload{data_type,
+                            static_cast<const uint8_t*>(field_data->Data()),
+                            field_data->ValidData(),
+                            field_data->get_num_rows(),
+                            field_data->get_dim(),
+                            field_data->IsNullable()};
+                payload_writer->add_payload(payload);
+            }
         }
-        default: {
-            auto payload =
-                Payload{data_type,
-                        static_cast<const uint8_t*>(field_data->Data()),
-                        field_data->ValidData(),
-                        field_data->get_num_rows(),
-                        field_data->get_dim(),
-                        field_data->IsNullable()};
-            payload_writer->add_payload(payload);
-        }
+
+        payload_writer->finish();
+        auto payload_buffer = payload_writer->get_payload_buffer();
+        auto len = sizeof(start_timestamp) + sizeof(end_timestamp) +
+                   payload_buffer.size();
+        std::vector<uint8_t> res(len);
+        int offset = 0;
+        memcpy(res.data() + offset, &start_timestamp, sizeof(start_timestamp));
+        offset += sizeof(start_timestamp);
+        memcpy(res.data() + offset, &end_timestamp, sizeof(end_timestamp));
+        offset += sizeof(end_timestamp);
+        memcpy(
+            res.data() + offset, payload_buffer.data(), payload_buffer.size());
+
+        return res;
     }
-
-    payload_writer->finish();
-    auto payload_buffer = payload_writer->get_payload_buffer();
-    auto len =
-        sizeof(start_timestamp) + sizeof(end_timestamp) + payload_buffer.size();
-    std::vector<uint8_t> res(len);
-    int offset = 0;
-    memcpy(res.data() + offset, &start_timestamp, sizeof(start_timestamp));
-    offset += sizeof(start_timestamp);
-    memcpy(res.data() + offset, &end_timestamp, sizeof(end_timestamp));
-    offset += sizeof(end_timestamp);
-    memcpy(res.data() + offset, payload_buffer.data(), payload_buffer.size());
-
-    return res;
 }
 
 BaseEvent::BaseEvent(BinlogReaderPtr reader,
