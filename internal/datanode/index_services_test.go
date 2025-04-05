@@ -481,7 +481,6 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 			NumClusters:         1,
 			MinClusterSizeRatio: 0.01,
 			MaxClusterSizeRatio: 10,
-			MaxClusterSize:      5 * 1024 * 1024 * 1024,
 		}
 
 		status, err := s.in.CreateJobV2(ctx, &workerpb.CreateJobV2Request{

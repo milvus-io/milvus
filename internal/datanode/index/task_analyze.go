@@ -146,7 +146,7 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 		TrainSize:       int64(float64(hardware.GetMemoryCount()) * at.req.GetMaxTrainSizeRatio()),
 		MinClusterRatio: at.req.GetMinClusterSizeRatio(),
 		MaxClusterRatio: at.req.GetMaxClusterSizeRatio(),
-		MaxClusterSize:  at.req.GetMaxClusterSize(),
+		MaxClusterSize:  int64(float64(hardware.GetMemoryCount()) * 0.5),
 		NumRows:         numRowsMap,
 		InsertFiles:     segmentInsertFilesMap,
 		FieldSchema:     field,

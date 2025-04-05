@@ -222,7 +222,6 @@ func (at *analyzeTask) PreCheck(ctx context.Context, dependency *taskScheduler) 
 	// config to detect data skewness
 	at.req.MinClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMinClusterSizeRatio.GetAsFloat()
 	at.req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
-	at.req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 
 	return true
 }
