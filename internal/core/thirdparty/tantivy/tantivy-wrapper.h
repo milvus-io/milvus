@@ -18,10 +18,9 @@ using Map = std::map<std::string, std::string>;
 
 static constexpr const char* DEFAULT_TOKENIZER_NAME = "milvus_tokenizer";
 static const char* DEFAULT_analyzer_params = "{}";
-static constexpr uintptr_t DEFAULT_NUM_THREADS =
-    1;  // Every field with index writer will generate a thread, make huge thread amount, wait for refactoring.
-static constexpr uintptr_t DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES =
-    DEFAULT_NUM_THREADS * 15 * 1024 * 1024;
+static constexpr uintptr_t DEFAULT_NUM_THREADS_FOR_QUERY_NODE = 1;
+static constexpr uintptr_t DEFAULT_NUM_THREADS_FOR_INDEX_NODE = 4;
+static constexpr uintptr_t DEFAULT_MEMORY_BUDGET_PER_THREAD = 15 * 1024 * 1024;
 
 template <typename T>
 inline TantivyDataType
@@ -82,11 +81,10 @@ struct TantivyIndexWrapper {
     TantivyIndexWrapper(const char* field_name,
                         TantivyDataType data_type,
                         const char* path,
+                        uintptr_t num_threads,
+                        uintptr_t overall_memory_budget_in_bytes,
                         uint32_t tantivy_index_version,
-                        bool inverted_single_semgnent = false,
-                        uintptr_t num_threads = DEFAULT_NUM_THREADS,
-                        uintptr_t overall_memory_budget_in_bytes =
-                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+                        bool inverted_single_semgnent = false) {
         RustResultWrapper res;
         if (inverted_single_semgnent) {
             res = RustResultWrapper(tantivy_create_index_with_single_segment(
@@ -122,12 +120,11 @@ struct TantivyIndexWrapper {
     TantivyIndexWrapper(const char* field_name,
                         bool in_ram,
                         const char* path,
+                        uintptr_t num_threads,
+                        uintptr_t overall_memory_budget_in_bytes,
                         uint32_t tantivy_index_version,
                         const char* tokenizer_name = DEFAULT_TOKENIZER_NAME,
-                        const char* analyzer_params = DEFAULT_analyzer_params,
-                        uintptr_t num_threads = DEFAULT_NUM_THREADS,
-                        uintptr_t overall_memory_budget_in_bytes =
-                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+                        const char* analyzer_params = DEFAULT_analyzer_params) {
         auto res = RustResultWrapper(
             tantivy_create_text_writer(field_name,
                                        path,
