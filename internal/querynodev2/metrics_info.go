@@ -75,9 +75,6 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	collections := node.manager.Collection.ListWithName()
 	nodeID := fmt.Sprint(node.GetNodeID())
 
-	metrics.QueryNodeNumEntities.Reset()
-	metrics.QueryNodeEntitiesSize.Reset()
-
 	var totalGrowingSize int64
 	growingSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
 	growingGroupByCollection := lo.GroupBy(growingSegments, func(seg segments.Segment) int64 {
