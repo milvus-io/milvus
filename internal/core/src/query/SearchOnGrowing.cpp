@@ -42,10 +42,9 @@ FloatSegmentIndexSearch(const segcore::SegmentGrowingImpl& segment,
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
     auto dim = is_sparse ? 0 : field.get_dim();
 
-    AssertInfo(field.get_data_type() == DataType::VECTOR_FLOAT ||
-                   field.get_data_type() == DataType::VECTOR_SPARSE_FLOAT,
-               "[FloatSearch]Field data type isn't VECTOR_FLOAT or "
-               "VECTOR_SPARSE_FLOAT");
+    AssertInfo(IsVectorDataType(field.get_data_type()),
+               "[FloatSearch]Field data type isn't VECTOR_FLOAT, "
+               "VECTOR_FLOAT16, VECTOR_BFLOAT16 or VECTOR_SPARSE_FLOAT");
     dataset::SearchDataset search_dataset{info.metric_type_,
                                           num_queries,
                                           info.topk_,
