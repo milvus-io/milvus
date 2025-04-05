@@ -233,7 +233,8 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load index");
-    auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
+    auto index_datas = file_manager_->LoadIndexToMemory(
+        index_files.value(), config[milvus::THREAD_POOL_PRIORITY]);
     AssembleIndexDatas(index_datas);
     BinarySet binary_set;
     for (auto& [key, data] : index_datas) {

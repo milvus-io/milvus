@@ -214,15 +214,16 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
             }
         }
 
-        auto index_datas =
-            mem_file_manager_->LoadIndexToMemory(null_offset_files);
+        auto index_datas = mem_file_manager_->LoadIndexToMemory(
+            null_offset_files, config[milvus::THREAD_POOL_PRIORITY]);
         AssembleIndexDatas(index_datas);
         null_offset_data = index_datas.at(INDEX_NULL_OFFSET_FILE_NAME);
     } else if (auto it = find_file(INDEX_NULL_OFFSET_FILE_NAME);
                it != inverted_index_files.end()) {
         // null offset file is not sliced
         null_offset_files.push_back(*it);
-        auto index_datas = mem_file_manager_->LoadIndexToMemory({*it});
+        auto index_datas = mem_file_manager_->LoadIndexToMemory(
+            {*it}, config[milvus::THREAD_POOL_PRIORITY]);
         null_offset_data = index_datas.at(INDEX_NULL_OFFSET_FILE_NAME);
     }
 
@@ -244,7 +245,8 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                                             file) != null_offset_files.end();
                        }),
         inverted_index_files.end());
-    disk_file_manager_->CacheIndexToDisk(inverted_index_files);
+    disk_file_manager_->CacheIndexToDisk(inverted_index_files,
+                                         config[milvus::THREAD_POOL_PRIORITY]);
     path_ = prefix;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
 }

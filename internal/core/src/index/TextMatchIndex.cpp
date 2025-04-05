@@ -136,7 +136,8 @@ TextMatchIndex::Load(const Config& config) {
         std::vector<std::string> file;
         file.push_back(*it);
         files_value.erase(it);
-        auto index_datas = mem_file_manager_->LoadIndexToMemory(file);
+        auto index_datas = mem_file_manager_->LoadIndexToMemory(
+            file, config[milvus::THREAD_POOL_PRIORITY]);
         AssembleIndexDatas(index_datas);
         BinarySet binary_set;
         for (auto& [key, data] : index_datas) {
@@ -153,7 +154,8 @@ TextMatchIndex::Load(const Config& config) {
                index_valid_data->data.get(),
                (size_t)index_valid_data->size);
     }
-    disk_file_manager_->CacheTextLogToDisk(files_value);
+    disk_file_manager_->CacheTextLogToDisk(
+        files_value, config[milvus::THREAD_POOL_PRIORITY]);
     AssertInfo(
         tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());

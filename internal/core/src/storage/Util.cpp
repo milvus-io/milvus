@@ -639,8 +639,9 @@ EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
 
 std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
-              const std::vector<std::string>& remote_files) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+              const std::vector<std::string>& remote_files,
+              milvus::ThreadPoolPriority priority) {
+    auto& pool = ThreadPools::GetThreadPool(priority);
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     futures.reserve(remote_files.size());
     for (auto& file : remote_files) {
@@ -657,7 +658,7 @@ PutIndexData(ChunkManager* remote_chunk_manager,
              const std::vector<std::string>& slice_names,
              FieldDataMeta& field_meta,
              IndexMeta& index_meta) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
     std::vector<std::future<std::pair<std::string, size_t>>> futures;
     AssertInfo(data_slices.size() == slice_sizes.size(),
                "inconsistent data slices size {} with slice sizes {}",
@@ -856,6 +857,20 @@ GetByteSizeOfFieldDatas(const std::vector<FieldDataPtr>& field_datas) {
     }
 
     return result;
+}
+
+LoadedFieldDatasInfo
+CollectFieldDataChannelWithInfos(FieldDataChannelPtr& channel) {
+    std::vector<FieldDataPtr> result;
+    FieldDataPtr field_data;
+    int64_t field_data_size = 0;
+    int64_t field_data_rows = 0;
+    while (channel->pop(field_data)) {
+        result.push_back(field_data);
+        field_data_size += field_data->DataSize();
+        field_data_rows += field_data->get_num_rows();
+    }
+    return {result, field_data_size, field_data_rows};
 }
 
 std::vector<FieldDataPtr>
