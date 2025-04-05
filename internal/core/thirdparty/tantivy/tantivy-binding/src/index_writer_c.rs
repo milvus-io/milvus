@@ -8,6 +8,7 @@ use crate::{
     error::Result,
     index_writer::IndexWriterWrapper,
     util::{create_binding, free_binding},
+    TantivyIndexVersion,
 };
 
 macro_rules! convert_to_rust_slice {
@@ -25,17 +26,25 @@ pub extern "C" fn tantivy_create_index(
     field_name: *const c_char,
     data_type: TantivyDataType,
     path: *const c_char,
+    tantivy_index_version: u32,
     num_threads: usize,
     overall_memory_budget_in_bytes: usize,
 ) -> RustResult {
     let field_name_str = cstr_to_str!(field_name);
     let path_str = cstr_to_str!(path);
+
+    let tantivy_index_version = match TantivyIndexVersion::from_u32(tantivy_index_version) {
+        Ok(v) => v,
+        Err(e) => return RustResult::from_error(e.to_string()),
+    };
+
     match IndexWriterWrapper::new(
-        String::from(field_name_str),
+        field_name_str,
         data_type,
         String::from(path_str),
         num_threads,
         overall_memory_budget_in_bytes,
+        tantivy_index_version,
     ) {
         Ok(wrapper) => RustResult::from_ptr(create_binding(wrapper)),
         Err(e) => RustResult::from_error(e.to_string()),
@@ -47,13 +56,21 @@ pub extern "C" fn tantivy_create_index_with_single_segment(
     field_name: *const c_char,
     data_type: TantivyDataType,
     path: *const c_char,
+    tantivy_index_version: u32,
 ) -> RustResult {
     let field_name_str = cstr_to_str!(field_name);
     let path_str = cstr_to_str!(path);
+
+    let tantivy_index_version = match TantivyIndexVersion::from_u32(tantivy_index_version) {
+        Ok(v) => v,
+        Err(e) => return RustResult::from_error(e.to_string()),
+    };
+
     match IndexWriterWrapper::new_with_single_segment(
-        String::from(field_name_str),
+        field_name_str,
         data_type,
         String::from(path_str),
+        tantivy_index_version,
     ) {
         Ok(wrapper) => RustResult::from_ptr(create_binding(wrapper)),
         Err(e) => RustResult::from_error(e.to_string()),
@@ -90,25 +107,31 @@ pub extern "C" fn tantivy_create_reader_from_writer(ptr: *mut c_void) -> RustRes
 }
 
 // -------------------------build--------------------
-fn execute<T: Copy>(
-    arr: &[T],
+fn execute<T: Copy, I>(
+    arr: I,
     offset: i64,
-    e: fn(&mut IndexWriterWrapper, T, i64) -> Result<()>,
+    e: fn(&mut IndexWriterWrapper, T, Option<i64>) -> Result<()>,
     w: &mut IndexWriterWrapper,
-) -> Result<()> {
-    for (index, data) in arr.iter().enumerate() {
-        e(w, *data, offset + (index as i64))?;
+) -> Result<()>
+where
+    I: IntoIterator<Item = T>,
+{
+    for (index, data) in arr.into_iter().enumerate() {
+        e(w, data, Some(offset + (index as i64)))?;
     }
     Ok(())
 }
 
-fn execute_by_single_segment_writer<T: Copy>(
-    arr: &[T],
-    e: fn(&mut IndexWriterWrapper, T) -> Result<()>,
+fn execute_by_single_segment_writer<T: Copy, I>(
+    arr: I,
+    e: fn(&mut IndexWriterWrapper, T, Option<i64>) -> Result<()>,
     w: &mut IndexWriterWrapper,
-) -> Result<()> {
-    for (_, data) in arr.iter().enumerate() {
-        e(w, *data)?;
+) -> Result<()>
+where
+    I: IntoIterator<Item = T>,
+{
+    for data in arr.into_iter() {
+        e(w, data, None)?;
     }
     Ok(())
 }
@@ -122,7 +145,15 @@ pub extern "C" fn tantivy_index_add_int8s(
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
     let arr = unsafe { slice::from_raw_parts(array, len) };
-    unsafe { execute(arr, offset_begin, IndexWriterWrapper::add_i8, &mut (*real)).into() }
+    unsafe {
+        execute(
+            arr.into_iter().map(|num| *num as i64),
+            offset_begin,
+            IndexWriterWrapper::add::<i64>,
+            &mut (*real),
+        )
+        .into()
+    }
 }
 
 #[no_mangle]
@@ -135,8 +166,8 @@ pub extern "C" fn tantivy_index_add_int8s_by_single_segment_writer(
     let arr = unsafe { slice::from_raw_parts(array, len) };
     unsafe {
         execute_by_single_segment_writer(
-            arr,
-            IndexWriterWrapper::add_i8_by_single_segment_writer,
+            arr.into_iter().map(|num| *num as i64),
+            IndexWriterWrapper::add::<i64>,
             &mut (*real),
         )
         .into()
@@ -152,7 +183,15 @@ pub extern "C" fn tantivy_index_add_int16s(
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
     let arr = unsafe { slice::from_raw_parts(array, len) };
-    unsafe { execute(arr, offset_begin, IndexWriterWrapper::add_i16, &mut (*real)).into() }
+    unsafe {
+        execute(
+            arr.into_iter().map(|num| *num as i64),
+            offset_begin,
+            IndexWriterWrapper::add::<i64>,
+            &mut (*real),
+        )
+        .into()
+    }
 }
 
 #[no_mangle]
@@ -165,8 +204,8 @@ pub extern "C" fn tantivy_index_add_int16s_by_single_segment_writer(
     let arr = unsafe { slice::from_raw_parts(array, len) };
     unsafe {
         execute_by_single_segment_writer(
-            arr,
-            IndexWriterWrapper::add_i16_by_single_segment_writer,
+            arr.into_iter().map(|num| *num as i64),
+            IndexWriterWrapper::add::<i64>,
             &mut (*real),
         )
         .into()
@@ -182,7 +221,15 @@ pub extern "C" fn tantivy_index_add_int32s(
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
     let arr = unsafe { slice::from_raw_parts(array, len) };
-    unsafe { execute(arr, offset_begin, IndexWriterWrapper::add_i32, &mut (*real)).into() }
+    unsafe {
+        execute(
+            arr.into_iter().map(|num| *num as i64),
+            offset_begin,
+            IndexWriterWrapper::add::<i64>,
+            &mut (*real),
+        )
+        .into()
+    }
 }
 
 #[no_mangle]
@@ -195,8 +242,8 @@ pub extern "C" fn tantivy_index_add_int32s_by_single_segment_writer(
     let arr = unsafe { slice::from_raw_parts(array, len) };
     unsafe {
         execute_by_single_segment_writer(
-            arr,
-            IndexWriterWrapper::add_i32_by_single_segment_writer,
+            arr.into_iter().map(|num| *num as i64),
+            IndexWriterWrapper::add::<i64>,
             &mut (*real),
         )
         .into()
@@ -213,7 +260,15 @@ pub extern "C" fn tantivy_index_add_int64s(
     let real = ptr as *mut IndexWriterWrapper;
     let arr = unsafe { slice::from_raw_parts(array, len) };
 
-    unsafe { execute(arr, offset_begin, IndexWriterWrapper::add_i64, &mut (*real)).into() }
+    unsafe {
+        execute(
+            arr.iter().copied(),
+            offset_begin,
+            IndexWriterWrapper::add::<i64>,
+            &mut (*real),
+        )
+        .into()
+    }
 }
 
 #[no_mangle]
@@ -227,8 +282,8 @@ pub extern "C" fn tantivy_index_add_int64s_by_single_segment_writer(
 
     unsafe {
         execute_by_single_segment_writer(
-            arr,
-            IndexWriterWrapper::add_i64_by_single_segment_writer,
+            arr.iter().copied(),
+            IndexWriterWrapper::add::<i64>,
             &mut (*real),
         )
         .into()
@@ -244,7 +299,15 @@ pub extern "C" fn tantivy_index_add_f32s(
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
     let arr = unsafe { slice::from_raw_parts(array, len) };
-    unsafe { execute(arr, offset_begin, IndexWriterWrapper::add_f32, &mut (*real)).into() }
+    unsafe {
+        execute(
+            arr.into_iter().map(|num| *num as f64),
+            offset_begin,
+            IndexWriterWrapper::add::<f64>,
+            &mut (*real),
+        )
+        .into()
+    }
 }
 
 #[no_mangle]
@@ -257,8 +320,8 @@ pub extern "C" fn tantivy_index_add_f32s_by_single_segment_writer(
     let arr = unsafe { slice::from_raw_parts(array, len) };
     unsafe {
         execute_by_single_segment_writer(
-            arr,
-            IndexWriterWrapper::add_f32_by_single_segment_writer,
+            arr.into_iter().map(|num| *num as f64),
+            IndexWriterWrapper::add::<f64>,
             &mut (*real),
         )
         .into()
@@ -274,7 +337,15 @@ pub extern "C" fn tantivy_index_add_f64s(
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
     let arr = unsafe { slice::from_raw_parts(array, len) };
-    unsafe { execute(arr, offset_begin, IndexWriterWrapper::add_f64, &mut (*real)).into() }
+    unsafe {
+        execute(
+            arr.iter().copied(),
+            offset_begin,
+            IndexWriterWrapper::add::<f64>,
+            &mut (*real),
+        )
+        .into()
+    }
 }
 
 #[no_mangle]
@@ -287,8 +358,8 @@ pub extern "C" fn tantivy_index_add_f64s_by_single_segment_writer(
     let arr = unsafe { slice::from_raw_parts(array, len) };
     unsafe {
         execute_by_single_segment_writer(
-            arr,
-            IndexWriterWrapper::add_f64_by_single_segment_writer,
+            arr.into_iter().map(|num| *num as f64),
+            IndexWriterWrapper::add::<f64>,
             &mut (*real),
         )
         .into()
@@ -306,9 +377,9 @@ pub extern "C" fn tantivy_index_add_bools(
     let arr = unsafe { slice::from_raw_parts(array, len) };
     unsafe {
         execute(
-            arr,
+            arr.iter().copied(),
             offset_begin,
-            IndexWriterWrapper::add_bool,
+            IndexWriterWrapper::add::<bool>,
             &mut (*real),
         )
         .into()
@@ -325,8 +396,8 @@ pub extern "C" fn tantivy_index_add_bools_by_single_segment_writer(
     let arr = unsafe { slice::from_raw_parts(array, len) };
     unsafe {
         execute_by_single_segment_writer(
-            arr,
-            IndexWriterWrapper::add_bool_by_single_segment_writer,
+            arr.iter().copied(),
+            IndexWriterWrapper::add::<bool>,
             &mut (*real),
         )
         .into()
@@ -343,7 +414,7 @@ pub extern "C" fn tantivy_index_add_string(
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
     let s = cstr_to_str!(s);
-    unsafe { (*real).add_string(s, offset).into() }
+    unsafe { (*real).add::<&str>(s, Some(offset)).into() }
 }
 
 #[no_mangle]
@@ -353,7 +424,7 @@ pub extern "C" fn tantivy_index_add_string_by_single_segment_writer(
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
     let s = cstr_to_str!(s);
-    unsafe { (*real).add_string_by_single_segment_writer(s).into() }
+    unsafe { (*real).add::<&str>(s, None).into() }
 }
 
 // --------------------------------------------- array ------------------------------------------
@@ -368,7 +439,9 @@ pub extern "C" fn tantivy_index_add_array_int8s(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_i8s(arr, offset).into()
+        (*real)
+            .add_array::<i64, _>(arr.into_iter().map(|num| *num as i64), Some(offset))
+            .into()
     }
 }
 
@@ -381,7 +454,9 @@ pub extern "C" fn tantivy_index_add_array_int8s_by_single_segment_writer(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_i8s_by_single_segment_writer(arr).into()
+        (*real)
+            .add_array::<i64, _>(arr.into_iter().map(|num| *num as i64), None)
+            .into()
     }
 }
 
@@ -395,7 +470,9 @@ pub extern "C" fn tantivy_index_add_array_int16s(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_i16s(arr, offset).into()
+        (*real)
+            .add_array::<i64, _>(arr.into_iter().map(|num| *num as i64), Some(offset))
+            .into()
     }
 }
 
@@ -408,7 +485,9 @@ pub extern "C" fn tantivy_index_add_array_int16s_by_single_segment_writer(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_i16s_by_single_segment_writer(arr).into()
+        (*real)
+            .add_array::<i64, _>(arr.into_iter().map(|num| *num as i64), None)
+            .into()
     }
 }
 
@@ -422,7 +501,9 @@ pub extern "C" fn tantivy_index_add_array_int32s(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_i32s(arr, offset).into()
+        (*real)
+            .add_array::<i64, _>(arr.into_iter().map(|num| *num as i64), Some(offset))
+            .into()
     }
 }
 
@@ -435,7 +516,9 @@ pub extern "C" fn tantivy_index_add_array_int32s_by_single_segment_writer(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_i32s_by_single_segment_writer(arr).into()
+        (*real)
+            .add_array::<i64, _>(arr.into_iter().map(|num| *num as i64), None)
+            .into()
     }
 }
 
@@ -449,7 +532,9 @@ pub extern "C" fn tantivy_index_add_array_int64s(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_i64s(arr, offset).into()
+        (*real)
+            .add_array::<i64, _>(arr.iter().copied(), Some(offset))
+            .into()
     }
 }
 
@@ -462,7 +547,9 @@ pub extern "C" fn tantivy_index_add_array_int64s_by_single_segment_writer(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_i64s_by_single_segment_writer(arr).into()
+        (*real)
+            .add_array::<i64, _>(arr.iter().copied(), None)
+            .into()
     }
 }
 
@@ -476,7 +563,9 @@ pub extern "C" fn tantivy_index_add_array_f32s(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_f32s(arr, offset).into()
+        (*real)
+            .add_array::<f64, _>(arr.into_iter().map(|num| *num as f64), Some(offset))
+            .into()
     }
 }
 
@@ -489,7 +578,9 @@ pub extern "C" fn tantivy_index_add_array_f32s_by_single_segment_writer(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_f32s_by_single_segment_writer(arr).into()
+        (*real)
+            .add_array::<f64, _>(arr.into_iter().map(|num| *num as f64), None)
+            .into()
     }
 }
 
@@ -503,7 +594,9 @@ pub extern "C" fn tantivy_index_add_array_f64s(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_f64s(arr, offset).into()
+        (*real)
+            .add_array::<f64, _>(arr.iter().copied(), Some(offset))
+            .into()
     }
 }
 
@@ -516,7 +609,9 @@ pub extern "C" fn tantivy_index_add_array_f64s_by_single_segment_writer(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_f64s_by_single_segment_writer(arr).into()
+        (*real)
+            .add_array::<f64, _>(arr.iter().copied(), None)
+            .into()
     }
 }
 
@@ -530,7 +625,9 @@ pub extern "C" fn tantivy_index_add_array_bools(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_bools(arr, offset).into()
+        (*real)
+            .add_array::<bool, _>(arr.iter().copied(), Some(offset))
+            .into()
     }
 }
 
@@ -543,7 +640,9 @@ pub extern "C" fn tantivy_index_add_array_bools_by_single_segment_writer(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_bools_by_single_segment_writer(arr).into()
+        (*real)
+            .add_array::<bool, _>(arr.iter().copied(), None)
+            .into()
     }
 }
 
@@ -557,7 +656,7 @@ pub extern "C" fn tantivy_index_add_array_keywords(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_keywords(arr, offset).into()
+        (*real).add_array_keywords(arr, Some(offset)).into()
     }
 }
 
@@ -570,8 +669,6 @@ pub extern "C" fn tantivy_index_add_array_keywords_by_single_segment_writer(
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
         let arr = convert_to_rust_slice!(array, len);
-        (*real)
-            .add_array_keywords_by_single_segment_writer(arr)
-            .into()
+        (*real).add_array_keywords(arr, None).into()
     }
 }

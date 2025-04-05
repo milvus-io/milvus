@@ -22,8 +22,11 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 var errBufferFull = errors.New("buffer full")
@@ -82,6 +85,10 @@ func (c *doubleCacheBuffer[T]) RegisterL0(segmentList ...segments.Segment) {
 	for _, seg := range segmentList {
 		if seg != nil {
 			c.l0Segments = append(c.l0Segments, seg)
+			log.Info("register l0 from delete buffer",
+				zap.Int64("segmentID", seg.ID()),
+				zap.Time("startPosition", tsoutil.PhysicalTime(seg.StartPosition().GetTimestamp())),
+			)
 		}
 	}
 }
@@ -100,6 +107,11 @@ func (c *doubleCacheBuffer[T]) UnRegister(ts uint64) {
 	for _, s := range c.l0Segments {
 		if s.StartPosition().GetTimestamp() < ts {
 			s.Release(context.TODO())
+			log.Info("unregister l0 from delete buffer",
+				zap.Int64("segmentID", s.ID()),
+				zap.Time("startPosition", tsoutil.PhysicalTime(s.StartPosition().GetTimestamp())),
+				zap.Time("cleanTs", tsoutil.PhysicalTime(ts)),
+			)
 			continue
 		}
 		newSegments = append(newSegments, s)

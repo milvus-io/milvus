@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestTextEmbeddingFunction(t *testing.T) {
@@ -43,6 +44,7 @@ type TextEmbeddingFunctionSuite struct {
 }
 
 func (s *TextEmbeddingFunctionSuite) SetupTest() {
+	paramtable.Init()
 	s.schema = &schemapb.CollectionSchema{
 		Name: "test",
 		Fields: []*schemapb.FieldSchema{
@@ -272,7 +274,29 @@ func (s *TextEmbeddingFunctionSuite) TestAliEmbedding() {
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
-							Data: strings.Split(strings.Repeat("Element,", 1000), ","),
+							Data: strings.Split(strings.Repeat("Element,", 1000), ",")[:999],
+						},
+					},
+				},
+			},
+		}
+		data = append(data, &f)
+		_, err := runner.ProcessInsert(context.Background(), data)
+		s.Error(err)
+	}
+
+	// empty string
+	{
+		data := []*schemapb.FieldData{}
+		f := schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldId:   101,
+			IsDynamic: false,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: strings.Split(strings.Repeat("Element,", 10), ","),
 						},
 					},
 				},
@@ -610,7 +634,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearchFloat32() {
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
-							Data: strings.Split(strings.Repeat("Element,", 1000), ","),
+							Data: strings.Split(strings.Repeat("Element,", 1000), ",")[0:999],
 						},
 					},
 				},
@@ -635,7 +659,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearchFloat32() {
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
-							Data: strings.Split(strings.Repeat("Element,", 100), ","),
+							Data: strings.Split(strings.Repeat("Element,", 100), ",")[:99],
 						},
 					},
 				},
@@ -777,7 +801,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearchInt8() {
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
-							Data: strings.Split(strings.Repeat("Element,", 100), ","),
+							Data: strings.Split(strings.Repeat("Element,", 100), ",")[:99],
 						},
 					},
 				},
@@ -790,6 +814,31 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearchInt8() {
 		proto.Unmarshal(placeholderGroupBytes, &placeholderGroup)
 		_, err = runner.ProcessSearch(context.Background(), &placeholderGroup)
 		s.NoError(err)
+	}
+
+	// empty text
+	{
+		f := &schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldId:   101,
+			IsDynamic: false,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: strings.Split(strings.Repeat("Element,", 100), ","),
+						},
+					},
+				},
+			},
+		}
+
+		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(f)
+		s.NoError(err)
+		placeholderGroup := commonpb.PlaceholderGroup{}
+		proto.Unmarshal(placeholderGroupBytes, &placeholderGroup)
+		_, err = runner.ProcessSearch(context.Background(), &placeholderGroup)
+		s.Error(err)
 	}
 }
 
@@ -832,6 +881,15 @@ func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertFloat32() {
 	{
 		input := []storage.FieldData{data.Data[102]}
 		_, err := runner.ProcessBulkInsert(input)
+		s.Error(err)
+	}
+
+	// empty texts
+	{
+		input := []storage.FieldData{data.Data[101]}
+		err := input[0].AppendRow("")
+		s.NoError(err)
+		_, err = runner.ProcessBulkInsert(input)
 		s.Error(err)
 	}
 }

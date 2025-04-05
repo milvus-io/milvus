@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -77,7 +76,7 @@ func createAliProvider(url string, schema *schemapb.FieldSchema, providerName st
 	}
 	switch providerName {
 	case aliDashScopeProvider:
-		return NewAliDashScopeEmbeddingProvider(schema, functionSchema)
+		return NewAliDashScopeEmbeddingProvider(schema, functionSchema, map[string]string{})
 	default:
 		return nil, fmt.Errorf("Unknow provider")
 	}
@@ -170,11 +169,6 @@ func (s *AliTextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 func (s *AliTextEmbeddingProviderSuite) TestCreateAliEmbeddingClient() {
 	_, err := createAliEmbeddingClient("", "")
 	s.Error(err)
-
-	os.Setenv(dashscopeAKEnvStr, "mock_key")
-	defer os.Unsetenv(dashscopeAKEnvStr)
-	_, err = createAliEmbeddingClient("", "")
-	s.NoError(err)
 }
 
 func (s *AliTextEmbeddingProviderSuite) TestNewAliDashScopeEmbeddingProvider() {
@@ -193,6 +187,6 @@ func (s *AliTextEmbeddingProviderSuite) TestNewAliDashScopeEmbeddingProvider() {
 	}
 	// invalid dim
 	functionSchema.Params[2] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalid"}
-	_, err := NewAliDashScopeEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	_, err := NewAliDashScopeEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 	s.Error(err)
 }

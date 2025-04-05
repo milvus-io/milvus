@@ -145,6 +145,7 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     if (info->opt_fields().size()) {
         config["opt_fields"] = get_opt_field(info->opt_fields());
     }
+    config["lack_binlog_rows"] = info->lack_binlog_rows();
     if (info->partition_key_isolation()) {
         config["partition_key_isolation"] = info->partition_key_isolation();
     }
@@ -266,10 +267,16 @@ BuildTextIndex(ProtoLayoutInterface result,
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager);
 
+        uint32_t tantivy_index_version =
+            milvus::index::GetValueFromConfig<int32_t>(
+                config, milvus::index::TANTIVY_INDEX_VERSION)
+                .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
+
         auto field_schema =
             FieldMeta::ParseFrom(build_index_info->field_schema());
         auto index = std::make_unique<index::TextMatchIndex>(
             fileManagerContext,
+            tantivy_index_version,
             "milvus_tokenizer",
             field_schema.get_analyzer_params().c_str());
         index->Build(config);

@@ -1,15 +1,14 @@
-
 use core::result::Result::Err;
 
+use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
 use lindera::token::Token as LToken;
-use lindera::tokenizer::{Tokenizer as LTokenizer, TokenizerBuilder};
-use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
-use tantivy::tokenizer::{Token, Tokenizer, TokenStream};
+use lindera::tokenizer::Tokenizer as LTokenizer;
+use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
+use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
-use crate::error::{Result,TantivyBindingError};
 
 pub struct LinderaTokenStream<'a> {
     pub tokens: Vec<LToken<'a>>,
@@ -52,7 +51,7 @@ impl LinderaTokenizer {
     pub fn from_json(params: &json::Map<String, json::Value>) -> Result<LinderaTokenizer> {
         let kind = fetch_lindera_kind(params)?;
         let dictionary = load_dictionary_from_kind(kind);
-        if dictionary.is_err(){
+        if dictionary.is_err() {
             return Err(TantivyBindingError::InvalidArgument(format!(
                 "lindera tokenizer with invalid dict_kind"
             )));
@@ -87,9 +86,9 @@ trait DictionaryKindParser {
     fn into_dict_kind(self) -> Result<DictionaryKind>;
 }
 
-impl DictionaryKindParser for &str{
+impl DictionaryKindParser for &str {
     fn into_dict_kind(self) -> Result<DictionaryKind> {
-        match self{
+        match self {
             "ipadic" => Ok(DictionaryKind::IPADIC),
             "ipadic-neologd" => Ok(DictionaryKind::IPADICNEologd),
             "unidic" => Ok(DictionaryKind::UniDic),
@@ -98,21 +97,21 @@ impl DictionaryKindParser for &str{
             other => Err(TantivyBindingError::InvalidArgument(format!(
                 "unsupported lindera dict type: {}",
                 other
-            )))
+            ))),
         }
     }
 }
 
-fn fetch_lindera_kind(params:&json::Map<String, json::Value>) -> Result<DictionaryKind>{
-    match params.get("dict_kind"){
+fn fetch_lindera_kind(params: &json::Map<String, json::Value>) -> Result<DictionaryKind> {
+    match params.get("dict_kind") {
         Some(val) => {
-            if !val.is_string(){
+            if !val.is_string() {
                 return Err(TantivyBindingError::InvalidArgument(format!(
                     "lindera tokenizer dict kind should be string"
-                )))
+                )));
             }
             val.as_str().unwrap().into_dict_kind()
-        },
+        }
         _ => {
             return Err(TantivyBindingError::InvalidArgument(format!(
                 "lindera tokenizer dict_kind must be set"
@@ -128,28 +127,28 @@ mod tests {
     use crate::analyzer::tokenizers::lindera_tokenizer::LinderaTokenizer;
 
     #[test]
-    fn test_lindera_tokenizer(){
+    fn test_lindera_tokenizer() {
         let params = r#"{
             "type": "lindera",
             "dict_kind": "ipadic"
         }"#;
         let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
         assert!(json_param.is_ok());
-        
+
         let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap());
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
     }
 
     #[test]
     #[cfg(feature = "lindera-cc-cedict")]
-    fn test_lindera_tokenizer_cc(){
+    fn test_lindera_tokenizer_cc() {
         let params = r#"{
             "type": "lindera",
             "dict_kind": "cc-cedict"
         }"#;
         let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
         assert!(json_param.is_ok());
-        
+
         let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap());
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
     }

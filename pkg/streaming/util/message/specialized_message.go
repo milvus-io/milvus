@@ -73,6 +73,11 @@ var systemMessageType = map[MessageType]struct{}{
 	MessageTypeTxn:         {},
 }
 
+var cipherMessageType = map[MessageType]struct{}{
+	MessageTypeInsert: {},
+	MessageTypeDelete: {},
+}
+
 // List all specialized message types.
 type (
 	MutableTimeTickMessageV1         = specializedMutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
@@ -244,7 +249,7 @@ func (m *specializedMutableMessageImpl[H, B]) Header() H {
 
 // Body returns the message body.
 func (m *specializedMutableMessageImpl[H, B]) Body() (B, error) {
-	return unmarshalProtoB[B](m.payload)
+	return unmarshalProtoB[B](m.Payload())
 }
 
 // OverwriteMessageHeader overwrites the message header.
@@ -270,7 +275,7 @@ func (m *specializedImmutableMessageImpl[H, B]) Header() H {
 
 // Body returns the message body.
 func (m *specializedImmutableMessageImpl[H, B]) Body() (B, error) {
-	return unmarshalProtoB[B](m.payload)
+	return unmarshalProtoB[B](m.Payload())
 }
 
 func unmarshalProtoB[B proto.Message](data []byte) (B, error) {

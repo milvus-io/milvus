@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -136,7 +137,15 @@ func (suite *JobSuite) SetupSuite() {
 	}
 
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-		Return(nil, nil)
+		Return(&milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100},
+					{FieldID: 101},
+					{FieldID: 102},
+				},
+			},
+		}, nil)
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).
 		Return(nil, nil).Maybe()
 

@@ -4,6 +4,7 @@ use core::{fmt, str};
 pub enum TantivyBindingError {
     JsonError(serde_json::Error),
     TantivyError(tantivy::TantivyError),
+    TantivyErrorV5(tantivy_5::TantivyError),
     InvalidArgument(String),
     InternalError(String),
 }
@@ -20,11 +21,18 @@ impl From<tantivy::TantivyError> for TantivyBindingError {
     }
 }
 
+impl From<tantivy_5::TantivyError> for TantivyBindingError {
+    fn from(value: tantivy_5::TantivyError) -> Self {
+        TantivyBindingError::TantivyErrorV5(value)
+    }
+}
+
 impl fmt::Display for TantivyBindingError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             TantivyBindingError::JsonError(e) => write!(f, "JsonError: {}", e),
             TantivyBindingError::TantivyError(e) => write!(f, "TantivyError: {}", e),
+            TantivyBindingError::TantivyErrorV5(e) => write!(f, "TantivyErrorV5: {}", e),
             TantivyBindingError::InvalidArgument(e) => write!(f, "InvalidArgument: {}", e),
             TantivyBindingError::InternalError(e) => write!(f, "InternalError: {}", e),
         }
@@ -36,6 +44,7 @@ impl std::error::Error for TantivyBindingError {
         match self {
             TantivyBindingError::JsonError(e) => Some(e),
             TantivyBindingError::TantivyError(e) => Some(e),
+            TantivyBindingError::TantivyErrorV5(e) => Some(e),
             TantivyBindingError::InvalidArgument(_) => None,
             TantivyBindingError::InternalError(_) => None,
         }

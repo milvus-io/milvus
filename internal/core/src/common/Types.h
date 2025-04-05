@@ -103,6 +103,7 @@ using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertRecordProto = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
+using DefaultValueType = proto::schema::ValueField;
 
 inline size_t
 GetDataTypeSize(DataType data_type, int dim = 1) {
@@ -233,6 +234,7 @@ IsPrimaryKeyDataType(DataType data_type) {
 inline bool
 IsIntegerDataType(DataType data_type) {
     switch (data_type) {
+        case DataType::BOOL:
         case DataType::INT8:
         case DataType::INT16:
         case DataType::INT32:

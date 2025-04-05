@@ -205,8 +205,9 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        error = {ct.err_code: 1, ct.err_msg: f"Unexpected error, message=<unsupported operand type(s) for +: 'float' and 'str'>"}
-        self.list_databases(client, db_name,
+        error = {ct.err_code: 1, ct.err_msg: f"Unexpected error, message=<GrpcHandler.list_database() "
+                                             f"got an unexpected keyword argument 'db_name'"}
+        self.list_databases(client, db_name=db_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)

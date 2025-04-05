@@ -1560,6 +1560,13 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Value: fmt.Sprintf("%v", httpReq.Params["partitionKeyIsolation"]),
 		})
 	}
+	if _, ok := httpReq.Params[common.MmapEnabledKey]; ok {
+		req.Properties = append(req.Properties, &commonpb.KeyValuePair{
+			Key:   common.MmapEnabledKey,
+			Value: fmt.Sprintf("%v", httpReq.Params[common.MmapEnabledKey]),
+		})
+	}
+
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateCollection(reqCtx, req.(*milvuspb.CreateCollectionRequest))
 	})

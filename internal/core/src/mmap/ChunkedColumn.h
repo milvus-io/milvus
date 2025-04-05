@@ -379,7 +379,10 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         }
 
         auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
-        std::string_view str_view = std::static_pointer_cast<StringChunk>(chunks_[chunk_id])->operator[](offset_in_chunk);
+        std::string_view str_view =
+            std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
+                ->
+                operator[](offset_in_chunk);
         return ViewType(str_view.data(), str_view.size());
     }
 

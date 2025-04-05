@@ -30,7 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -61,7 +61,7 @@ func (s *ClusteringCompactionTaskSuite) SetupSuite() {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 }
 
-func (s *ClusteringCompactionTaskSuite) SetupTest() {
+func (s *ClusteringCompactionTaskSuite) setupTest() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -92,8 +92,16 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 		}},
 		TimeoutInSeconds: 10,
 		Type:             datapb.CompactionType_ClusteringCompaction,
+		PreAllocatedLogIDs: &datapb.IDRange{
+			Begin: 200,
+			End:   2000,
+		},
 	}
 	s.task.plan = s.plan
+}
+
+func (s *ClusteringCompactionTaskSuite) SetupTest() {
+	s.setupTest()
 }
 
 func (s *ClusteringCompactionTaskSuite) SetupSubTest() {
@@ -168,7 +176,7 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 	s.Equal(8, s.task.flushPool.Cap())
 }
 
-func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
+func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 	dblobs, err := getInt64DeltaBlobs(
 		1,
 		[]int64{100},
@@ -194,6 +202,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	segWriter.FlushAndIsFull()
 
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
+
 	s.NoError(err)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)
 
@@ -216,11 +225,18 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 		Begin: 1,
 		End:   101,
 	}
+	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
+		Begin: 200,
+		End:   2000,
+	}
+}
 
+func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
+	s.preparScalarCompactionNormalTask()
 	// 8+8+8+4+7+4*4=51
 	// 51*1024 = 52224
 	// writer will automatically flush after 1024 rows.
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "52223")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "60000")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
 
 	compactionResult, err := s.task.Compact()
@@ -245,7 +261,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 			statsRowNum += b.GetEntriesNum()
 		}
 	}
-	s.Equal(2, totalBinlogNum/len(schema.GetFields()))
+	s.Equal(2, totalBinlogNum/len(s.plan.Schema.GetFields()))
 	s.Equal(1, statsBinlogNum)
 	s.Equal(totalRowNum, statsRowNum)
 
@@ -256,7 +272,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	)
 }
 
-func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit() {
+func (s *ClusteringCompactionTaskSuite) prepareScalarCompactionNormalByMemoryLimit() {
 	schema := genCollectionSchema()
 	var segmentID int64 = 1001
 	segWriter, err := NewSegmentWriter(schema, 1000, compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{})
@@ -300,11 +316,18 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 		Begin: 1,
 		End:   1000,
 	}
+	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
+		Begin: 1001,
+		End:   2000,
+	}
+}
 
+func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit() {
+	s.prepareScalarCompactionNormalByMemoryLimit()
 	// 8+8+8+4+7+4*4=51
 	// 51*1024 = 52224
 	// writer will automatically flush after 1024 rows.
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "52223")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "60000")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key)
@@ -331,12 +354,13 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 			statsRowNum += b.GetEntriesNum()
 		}
 	}
-	s.Equal(5, totalBinlogNum/len(schema.GetFields()))
+	s.Equal(5, totalBinlogNum/len(s.task.plan.Schema.GetFields()))
 	s.Equal(1, statsBinlogNum)
 	s.Equal(totalRowNum, statsRowNum)
 }
 
-func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
+func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() {
+	s.SetupTest()
 	schema := genCollectionSchemaWithBM25()
 	var segmentID int64 = 1001
 	segWriter, err := NewSegmentWriter(schema, 1000, compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{102})
@@ -374,13 +398,20 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 		Begin: 1,
 		End:   1000,
 	}
+	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
+		Begin: 1001,
+		End:   2000,
+	}
+}
 
+func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 	// 8 + 8 + 8 + 7 + 8 = 39
 	// 39*1024 = 39936
-	// plus buffer on null bitsets etc., let's make it 45000
+	// plus buffer on null bitsets etc., let's make it 50000
 	// writer will automatically flush after 1024 rows.
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "45000")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "50000")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
+	s.prepareCompactionWithBM25FunctionTask()
 
 	compactionResult, err := s.task.Compact()
 	s.Require().NoError(err)
@@ -404,7 +435,7 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 			statsRowNum += b.GetEntriesNum()
 		}
 	}
-	s.Equal(2, totalBinlogNum/len(schema.GetFields()))
+	s.Equal(2, totalBinlogNum/len(s.task.plan.Schema.GetFields()))
 	s.Equal(1, statsBinlogNum)
 	s.Equal(totalRowNum, statsRowNum)
 

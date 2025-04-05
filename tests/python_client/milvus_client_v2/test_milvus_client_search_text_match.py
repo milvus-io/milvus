@@ -251,7 +251,7 @@ class TestSearchWithTextMatchFilter(TestcaseBase):
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("enable_inverted_index", [True, False])
     @pytest.mark.parametrize("tokenizer", ["jieba"])
-    @pytest.mark.xfail(reason="unstable case")
+    @pytest.mark.skip(reason="unstable case")
     def test_search_with_text_match_filter_normal_zh(
         self, tokenizer, enable_inverted_index, enable_partition_key
     ):

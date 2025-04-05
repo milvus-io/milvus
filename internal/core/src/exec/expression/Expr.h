@@ -103,7 +103,7 @@ class Expr {
         PanicInfo(ErrorCode::NotImplemented, "not implemented");
     }
 
-    const std::vector<std::shared_ptr<Expr>>&
+    std::vector<std::shared_ptr<Expr>>&
     GetInputsRef() {
         return inputs_;
     }
@@ -136,12 +136,14 @@ class SegmentExpr : public Expr {
                 const std::vector<std::string> nested_path,
                 const DataType value_type,
                 int64_t active_count,
-                int64_t batch_size)
+                int64_t batch_size,
+                bool allow_any_json_cast_type = false)
         : Expr(DataType::BOOL, std::move(input), name),
           segment_(segment),
           field_id_(field_id),
           nested_path_(nested_path),
           value_type_(value_type),
+          allow_any_json_cast_type_(allow_any_json_cast_type),
           active_count_(active_count),
           batch_size_(batch_size) {
         size_per_chunk_ = segment_->size_per_chunk();
@@ -168,7 +170,10 @@ class SegmentExpr : public Expr {
         if (field_meta.get_data_type() == DataType::JSON) {
             auto pointer = milvus::Json::pointer(nested_path_);
             if (is_index_mode_ =
-                    segment_->HasIndex(field_id_, pointer, value_type_)) {
+                    segment_->HasIndex(field_id_,
+                                       pointer,
+                                       value_type_,
+                                       allow_any_json_cast_type_)) {
                 num_index_chunk_ = 1;
             }
         } else {
@@ -933,7 +938,8 @@ class SegmentExpr : public Expr {
 
             bool access_sealed_variable_column = false;
             if constexpr (std::is_same_v<T, std::string_view> ||
-                          std::is_same_v<T, Json>) {
+                          std::is_same_v<T, Json> ||
+                          std::is_same_v<T, ArrayView>) {
                 if (segment_->type() == SegmentType::Sealed) {
                     auto [data_vec, valid_data] = segment_->get_batch_views<T>(
                         field_id_, i, data_pos, size);
@@ -1140,6 +1146,7 @@ class SegmentExpr : public Expr {
     std::vector<std::string> nested_path_;
     DataType field_type_;
     DataType value_type_;
+    bool allow_any_json_cast_type_{false};
     bool is_index_mode_{false};
     bool is_data_mode_{false};
     // sometimes need to skip index and using raw data

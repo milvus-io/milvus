@@ -55,15 +55,22 @@ InvertedIndexTantivy<T>::InitForBuildIndex() {
                   "build inverted index temp dir:{} not empty",
                   path_);
     }
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        field.c_str(), d_type_, path_.c_str(), inverted_index_single_segment_);
+    wrapper_ =
+        std::make_shared<TantivyIndexWrapper>(field.c_str(),
+                                              d_type_,
+                                              path_.c_str(),
+                                              tantivy_index_version_,
+                                              inverted_index_single_segment_);
 }
 
 template <typename T>
 InvertedIndexTantivy<T>::InvertedIndexTantivy(
-    const storage::FileManagerContext& ctx, bool inverted_index_single_segment)
+    uint32_t tantivy_index_version,
+    const storage::FileManagerContext& ctx,
+    bool inverted_index_single_segment)
     : ScalarIndex<T>(INVERTED_INDEX_TYPE),
       schema_(ctx.fieldDataMeta.field_schema),
+      tantivy_index_version_(tantivy_index_version),
       inverted_index_single_segment_(inverted_index_single_segment) {
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
@@ -162,6 +169,24 @@ InvertedIndexTantivy<T>::Build(const Config& config) {
     AssertInfo(insert_files.has_value(), "insert_files were empty");
     auto field_datas =
         mem_file_manager_->CacheRawDataToMemory(insert_files.value());
+    auto lack_binlog_rows =
+        GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
+    if (lack_binlog_rows.has_value()) {
+        auto field_schema = mem_file_manager_->GetFieldDataMeta().field_schema;
+        auto default_value = [&]() -> std::optional<DefaultValueType> {
+            if (!field_schema.has_default_value()) {
+                return std::nullopt;
+            }
+            return field_schema.default_value();
+        }();
+        auto field_data = storage::CreateFieldData(
+            static_cast<DataType>(field_schema.data_type()),
+            true,
+            1,
+            lack_binlog_rows.value());
+        field_data->FillFieldData(default_value, lack_binlog_rows.value());
+        field_datas.insert(field_datas.begin(), field_data);
+    }
     BuildWithFieldData(field_datas);
 }
 
@@ -447,8 +472,16 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
         GetValueFromConfig<int32_t>(config,
                                     milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1) == 0;
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        field.c_str(), d_type_, path_.c_str(), inverted_index_single_segment_);
+    tantivy_index_version_ =
+        GetValueFromConfig<int32_t>(config,
+                                    milvus::index::TANTIVY_INDEX_VERSION)
+            .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
+    wrapper_ =
+        std::make_shared<TantivyIndexWrapper>(field.c_str(),
+                                              d_type_,
+                                              path_.c_str(),
+                                              tantivy_index_version_,
+                                              inverted_index_single_segment_);
     if (!inverted_index_single_segment_) {
         if (config.find("is_array") != config.end()) {
             // only used in ut.

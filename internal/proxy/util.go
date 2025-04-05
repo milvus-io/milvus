@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -52,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -475,6 +477,48 @@ func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 				return fmt.Errorf("only primary field can speficy AutoID with true, field name = %s", field.Name)
 			}
 		}
+	}
+	return nil
+}
+
+func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchema) error {
+	// validate field name
+	var err error
+	if err := validateFieldName(field.Name); err != nil {
+		return err
+	}
+	// validate dense vector field type parameters
+	isVectorType := typeutil.IsVectorType(field.DataType)
+	if isVectorType {
+		err = validateDimension(field)
+		if err != nil {
+			return err
+		}
+	}
+	// valid max length per row parameters
+	// if max_length not specified, return error
+	if field.DataType == schemapb.DataType_VarChar ||
+		(field.GetDataType() == schemapb.DataType_Array && field.GetElementType() == schemapb.DataType_VarChar) {
+		err = validateMaxLengthPerRow(schema.Name, field)
+		if err != nil {
+			return err
+		}
+	}
+	// valid max capacity for array per row parameters
+	// if max_capacity not specified, return error
+	if field.DataType == schemapb.DataType_Array {
+		if err = validateMaxCapacityPerRow(schema.Name, field); err != nil {
+			return err
+		}
+	}
+	// TODO should remove the index params in the field schema
+	indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
+	if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
+		return err
+	}
+
+	if err := ctokenizer.ValidateTextSchema(field, wasBm25FunctionInputField(schema, field)); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1330,7 +1374,11 @@ func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResul
 //	output_fields=["*"] 	 ==> [A,B,C,D]
 //	output_fields=["*",A] 	 ==> [A,B,C,D]
 //	output_fields=["*",C]    ==> [A,B,C,D]
-func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary bool) ([]string, []string, []string, error) {
+//
+// 4th return value is true if user requested pk field explicitly or using wildcard.
+// if removePkField is true, pk field will not be include in the first(resultFieldNames)/second(userOutputFields)
+// return value.
+func translateOutputFields(outputFields []string, schema *schemaInfo, removePkField bool) ([]string, []string, []string, bool, error) {
 	var primaryFieldName string
 	var dynamicField *schemapb.FieldSchema
 	allFieldNameMap := make(map[string]*schemapb.FieldSchema)
@@ -1351,9 +1399,15 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 		allFieldNameMap[field.Name] = field
 	}
 
+	userRequestedPkFieldExplicitly := false
+
 	for _, outputFieldName := range outputFields {
 		outputFieldName = strings.TrimSpace(outputFieldName)
+		if outputFieldName == primaryFieldName {
+			userRequestedPkFieldExplicitly = true
+		}
 		if outputFieldName == "*" {
+			userRequestedPkFieldExplicitly = true
 			for fieldName, field := range allFieldNameMap {
 				// skip Cold field and fields that can't be output
 				if schema.IsFieldLoaded(field.GetFieldID()) && schema.CanRetrieveRawFieldData(field) {
@@ -1365,20 +1419,20 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 		} else {
 			if field, ok := allFieldNameMap[outputFieldName]; ok {
 				if !schema.CanRetrieveRawFieldData(field) {
-					return nil, nil, nil, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
+					return nil, nil, nil, false, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
 				}
 				if schema.IsFieldLoaded(field.GetFieldID()) {
 					resultFieldNameMap[outputFieldName] = true
 					userOutputFieldsMap[outputFieldName] = true
 				} else {
-					return nil, nil, nil, fmt.Errorf("field %s is not loaded", outputFieldName)
+					return nil, nil, nil, false, fmt.Errorf("field %s is not loaded", outputFieldName)
 				}
 			} else {
 				if schema.EnableDynamicField {
 					if schema.IsFieldLoaded(dynamicField.GetFieldID()) {
 						schemaH, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
 						if err != nil {
-							return nil, nil, nil, err
+							return nil, nil, nil, false, err
 						}
 						err = planparserv2.ParseIdentifier(schemaH, outputFieldName, func(expr *planpb.Expr) error {
 							if len(expr.GetColumnExpr().GetInfo().GetNestedPath()) == 1 &&
@@ -1389,25 +1443,25 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 						})
 						if err != nil {
 							log.Info("parse output field name failed", zap.String("field name", outputFieldName))
-							return nil, nil, nil, fmt.Errorf("parse output field name failed: %s", outputFieldName)
+							return nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
 						}
 						resultFieldNameMap[common.MetaFieldName] = true
 						userOutputFieldsMap[outputFieldName] = true
 						userDynamicFieldsMap[outputFieldName] = true
 					} else {
 						// TODO after cold field be able to fetched with chunk cache, this check shall be removed
-						return nil, nil, nil, fmt.Errorf("field %s cannot be returned since dynamic field not loaded", outputFieldName)
+						return nil, nil, nil, false, fmt.Errorf("field %s cannot be returned since dynamic field not loaded", outputFieldName)
 					}
 				} else {
-					return nil, nil, nil, fmt.Errorf("field %s not exist", outputFieldName)
+					return nil, nil, nil, false, fmt.Errorf("field %s not exist", outputFieldName)
 				}
 			}
 		}
 	}
 
-	if addPrimary {
-		resultFieldNameMap[primaryFieldName] = true
-		userOutputFieldsMap[primaryFieldName] = true
+	if removePkField {
+		delete(resultFieldNameMap, primaryFieldName)
+		delete(userOutputFieldsMap, primaryFieldName)
 	}
 
 	for fieldName := range resultFieldNameMap {
@@ -1422,7 +1476,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, addPrimary
 		}
 	}
 
-	return resultFieldNames, userOutputFields, userDynamicFields, nil
+	return resultFieldNames, userOutputFields, userDynamicFields, userRequestedPkFieldExplicitly, nil
 }
 
 func validateIndexName(indexName string) error {
@@ -1621,7 +1675,11 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 // now only support utf-8
 func checkInputUtf8Compatiable(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
 	checkeFields := lo.FilterMap(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
-		if field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_Text {
+		if field.DataType == schemapb.DataType_VarChar {
+			return field.GetFieldID(), true
+		}
+
+		if field.DataType != schemapb.DataType_Text {
 			return 0, false
 		}
 
@@ -1642,9 +1700,11 @@ func checkInputUtf8Compatiable(schema *schemapb.CollectionSchema, insertMsg *msg
 			continue
 		}
 
-		for row, data := range fieldData.GetScalars().GetStringData().GetData() {
+		strData := fieldData.GetScalars().GetStringData()
+		for row, data := range strData.GetData() {
 			ok := utf8.ValidString(data)
 			if !ok {
+				log.Warn("string field data not utf-8 format", zap.String("messageVersion", strData.ProtoReflect().Descriptor().Syntax().GoString()))
 				return merr.WrapErrAsInputError(fmt.Errorf("input with analyzer should be utf-8 format, but row: %d not utf-8 format. data: %s", row, data))
 			}
 		}
@@ -1709,12 +1769,12 @@ func checkUpsertPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *m
 	if !primaryFieldSchema.GetAutoID() {
 		return ids, ids, nil
 	}
-	newIds, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
+	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
 	if err != nil {
 		log.Warn("parse primary field data to IDs failed", zap.Error(err))
 		return nil, nil, err
 	}
-	return newIds, ids, nil
+	return newIDs, ids, nil
 }
 
 func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) (*schemapb.FieldData, error) {

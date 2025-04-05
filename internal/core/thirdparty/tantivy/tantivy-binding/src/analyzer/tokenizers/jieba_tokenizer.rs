@@ -6,6 +6,7 @@ lazy_static! {
     static ref JIEBA: jieba_rs::Jieba = jieba_rs::Jieba::new();
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub enum JiebaMode {
     Exact,

@@ -193,6 +193,10 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		}
 	}
 
+	if jsonCastType, exist := indexParamsMap[common.JSONCastTypeKey]; exist {
+		indexParamsMap[common.JSONCastTypeKey] = strings.ToUpper(strings.TrimSpace(jsonCastType))
+	}
+
 	if err := ValidateAutoIndexMmapConfig(isVecIndex, indexParamsMap); err != nil {
 		return err
 	}
@@ -392,6 +396,13 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			if !funcutil.SliceContain(indexparamcheck.IntVectorMetrics, metricType) {
 				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "int vector index does not support metric type: "+metricType)
 			}
+		}
+	}
+
+	// auto fill json path with field name if not specified for json index
+	if typeutil.IsJSONType(cit.fieldSchema.DataType) {
+		if _, exist := indexParamsMap[common.JSONPathKey]; !exist {
+			indexParamsMap[common.JSONPathKey] = cit.req.FieldName
 		}
 	}
 

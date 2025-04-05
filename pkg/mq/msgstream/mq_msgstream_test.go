@@ -56,12 +56,12 @@ func TestMain(m *testing.M) {
 	paramtable.Init()
 	Params = paramtable.Get()
 	mockKafkaCluster, err := kafka.NewMockCluster(1)
-	defer mockKafkaCluster.Close()
 	if err != nil {
 		// nolint
 		fmt.Printf("Failed to create MockCluster: %s\n", err)
 		os.Exit(1)
 	}
+	defer mockKafkaCluster.Close()
 	broker := mockKafkaCluster.BootstrapServers()
 	Params.Save("kafka.brokerList", broker)
 	// Disable pursuit mode for unit test by default
