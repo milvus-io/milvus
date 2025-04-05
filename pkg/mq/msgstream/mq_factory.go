@@ -250,3 +250,96 @@ func NewRocksmqFactory(path string, cfg *paramtable.ServiceParam) Factory {
 		MQBufSize:         cfg.MQCfg.MQBufSize.GetAsInt64(),
 	}
 }
+
+var _ Factory = &WpmsFactory{}
+
+type WpmsFactory struct{}
+
+func (w WpmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
+	//TODO implement me
+	return &WpMsgStream{}, nil
+}
+
+func (w WpmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
+	//TODO implement me
+	return nil, nil
+}
+
+func (w WpmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
+	//TODO implement me
+	return nil
+}
+
+var _ MsgStream = &WpMsgStream{}
+
+type WpMsgStream struct {
+}
+
+func (w WpMsgStream) Close() {
+	// NO-OP
+}
+
+func (w WpMsgStream) AsProducer(ctx context.Context, channels []string) {
+	// NO-OP
+}
+
+func (w WpMsgStream) Produce(ctx context.Context, pack *MsgPack) error {
+	// NO-OP
+	return nil
+}
+
+func (w WpMsgStream) SetRepackFunc(repackFunc RepackFunc) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (w WpMsgStream) GetProduceChannels() []string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (w WpMsgStream) Broadcast(ctx context.Context, pack *MsgPack) (map[string][]MessageID, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (w WpMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (w WpMsgStream) Chan() <-chan *ConsumeMsgPack {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (w WpMsgStream) GetUnmarshalDispatcher() UnmarshalDispatcher {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (w WpMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, includeCurrentMsg bool) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (w WpMsgStream) GetLatestMsgID(channel string) (MessageID, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (w WpMsgStream) CheckTopicValid(channel string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (w WpMsgStream) ForceEnableProduce(can bool) {
+	//TODO implement me
+	// NO-OP
+}
+
+// NewWpmsFactory creates a new message stream factory based on woodpecker
+func NewWpmsFactory(cfg *paramtable.ServiceParam) Factory {
+	// TODO should not be used in mq wrapper
+	return &WpmsFactory{}
+}
