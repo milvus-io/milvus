@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -106,35 +105,18 @@ func GetShardLeadersWithChannels(ctx context.Context, m *meta.Meta, targetMgr me
 ) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
 	for _, channel := range channels {
-		log := log.With(zap.String("channel", channel.GetChannelName()))
+		log := log.Ctx(ctx).With(zap.String("channel", channel.GetChannelName()))
 
-		var channelErr error
-		leaders := dist.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel.GetChannelName()))
-		if len(leaders) == 0 {
-			channelErr = merr.WrapErrChannelLack(channel.GetChannelName(), "channel not subscribed")
-		}
-
-		readableLeaders := make(map[int64]*meta.LeaderView)
-		for _, leader := range leaders {
-			if leader.UnServiceableError != nil {
-				multierr.AppendInto(&channelErr, leader.UnServiceableError)
-				continue
-			}
-			readableLeaders[leader.ID] = leader
-		}
-
-		if len(readableLeaders) == 0 {
-			msg := fmt.Sprintf("channel %s is not available in any replica", channel.GetChannelName())
-			log.Warn(msg, zap.Error(channelErr))
-			err := merr.WrapErrChannelNotAvailable(channel.GetChannelName(), channelErr.Error())
-			return nil, err
-		}
-
-		readableLeaders = filterDupLeaders(ctx, m.ReplicaManager, readableLeaders)
+		leaders := dist.ShardLeaderManager.GetShardLeaderList(channel.GetChannelName())
 		ids := make([]int64, 0, len(leaders))
 		addrs := make([]string, 0, len(leaders))
-		for _, leader := range readableLeaders {
-			info := nodeMgr.Get(leader.ID)
+		for replicaID, leader := range leaders {
+			if !leader.Serviceable {
+				log.WithRateGroup("util.GetShardLeaders", 1, 60).
+					Warn("leader is not available in replica", zap.Int64("leaderID", leader.NodeID), zap.Int64("replicaID", replicaID))
+				continue
+			}
+			info := nodeMgr.Get(leader.NodeID)
 			if info != nil {
 				ids = append(ids, info.ID())
 				addrs = append(addrs, info.Addr())
@@ -143,12 +125,9 @@ func GetShardLeadersWithChannels(ctx context.Context, m *meta.Meta, targetMgr me
 
 		// to avoid node down during GetShardLeaders
 		if len(ids) == 0 {
-			if channelErr == nil {
-				channelErr = merr.WrapErrChannelNotAvailable(channel.GetChannelName())
-			}
+			err := merr.WrapErrChannelNotAvailable(channel.GetChannelName())
 			msg := fmt.Sprintf("channel %s is not available in any replica", channel.GetChannelName())
-			log.Warn(msg, zap.Error(channelErr))
-			err := merr.WrapErrChannelNotAvailable(channel.GetChannelName(), channelErr.Error())
+			log.Warn(msg, zap.Error(err))
 			return nil, err
 		}
 

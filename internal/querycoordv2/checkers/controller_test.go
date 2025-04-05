@@ -124,8 +124,22 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	suite.targetManager.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// set dist
-	suite.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	suite.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}))
+	suite.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View:    utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}),
+	})
+	suite.dist.ShardLeaderManager.Update(&meta.ShardLeader{
+		NodeID:      2,
+		ChannelName: "test-insert-channel",
+		ReplicaID:   1,
+		Version:     1,
+		Serviceable: true,
+	})
 
 	counter := atomic.NewInt64(0)
 	suite.scheduler.EXPECT().Add(mock.Anything).Run(func(task task.Task) {
@@ -154,8 +168,22 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	}, 3*time.Second, 1*time.Millisecond)
 
 	// until new channel has been subscribed
-	suite.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel2"))
-	suite.dist.LeaderViewManager.Update(1, utils.CreateTestLeaderView(1, 1, "test-insert-channel2", map[int64]int64{}, map[int64]*meta.Segment{}))
+	suite.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel2",
+		},
+		Node:    1,
+		Version: 1,
+		View:    utils.CreateTestLeaderView(1, 1, "test-insert-channel2", map[int64]int64{}, map[int64]*meta.Segment{}),
+	})
+	suite.dist.ShardLeaderManager.Update(&meta.ShardLeader{
+		NodeID:      1,
+		ChannelName: "test-insert-channel2",
+		ReplicaID:   1,
+		Version:     1,
+		Serviceable: true,
+	})
 
 	// expect assign segment after channel has been subscribed
 	suite.Eventually(func() bool {

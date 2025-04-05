@@ -24,9 +24,47 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+type LeaderView struct {
+	ID                     int64
+	CollectionID           int64
+	Channel                string
+	Version                int64
+	Segments               map[int64]*querypb.SegmentDist
+	GrowingSegments        map[int64]*Segment
+	TargetVersion          int64
+	NumOfGrowingRows       int64
+	PartitionStatsVersions map[int64]int64
+	Status                 *querypb.LeaderViewStatus
+}
+
+func (view *LeaderView) Clone() *LeaderView {
+	segments := make(map[int64]*querypb.SegmentDist)
+	for k, v := range view.Segments {
+		segments[k] = v
+	}
+
+	growings := make(map[int64]*Segment)
+	for k, v := range view.GrowingSegments {
+		growings[k] = v
+	}
+
+	return &LeaderView{
+		ID:                     view.ID,
+		CollectionID:           view.CollectionID,
+		Channel:                view.Channel,
+		Version:                view.Version,
+		Segments:               segments,
+		GrowingSegments:        growings,
+		TargetVersion:          view.TargetVersion,
+		NumOfGrowingRows:       view.NumOfGrowingRows,
+		PartitionStatsVersions: view.PartitionStatsVersions,
+	}
+}
 
 type channelDistCriterion struct {
 	nodeIDs        typeutil.Set[int64]
@@ -116,6 +154,7 @@ type DmChannel struct {
 	*datapb.VchannelInfo
 	Node    int64
 	Version int64
+	View    *LeaderView
 }
 
 func DmChannelFromVChannel(channel *datapb.VchannelInfo) *DmChannel {
@@ -171,6 +210,14 @@ func composeNodeChannels(channels ...*DmChannel) nodeChannels {
 	}
 }
 
+type ChannelDistManagerInterface interface {
+	GetByFilter(filters ...ChannelDistFilter) []*DmChannel
+	GetByCollectionAndFilter(collectionID int64, filters ...ChannelDistFilter) []*DmChannel
+	Update(nodeID typeutil.UniqueID, channels ...*DmChannel)
+	GetChannelDist(collectionID int64) []*metricsinfo.DmChannel
+	GetLeaderView(collectionID int64) []*metricsinfo.LeaderView
+}
+
 type ChannelDistManager struct {
 	rwmutex sync.RWMutex
 
@@ -186,39 +233,6 @@ func NewChannelDistManager() *ChannelDistManager {
 		channels:        make(map[typeutil.UniqueID]nodeChannels),
 		collectionIndex: make(map[int64][]*DmChannel),
 	}
-}
-
-// todo by liuwei: should consider the case of duplicate leader exists
-// GetShardLeader returns the node whthin the given replicaNodes and subscribing the given shard,
-// returns (0, false) if not found.
-func (m *ChannelDistManager) GetShardLeader(replica *Replica, shard string) (int64, bool) {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	for _, node := range replica.GetNodes() {
-		channels := m.channels[node]
-		_, ok := channels.nameChannel[shard]
-		if ok {
-			return node, true
-		}
-	}
-
-	return 0, false
-}
-
-// todo by liuwei: should consider the case of duplicate leader exists
-func (m *ChannelDistManager) GetShardLeadersByReplica(replica *Replica) map[string]int64 {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	ret := make(map[string]int64)
-	for _, node := range replica.GetNodes() {
-		channels := m.channels[node]
-		for _, dmc := range channels.collChannels[replica.GetCollectionID()] {
-			ret[dmc.GetChannelName()] = node
-		}
-	}
-	return ret
 }
 
 // return all channels in list which match all given filters
@@ -320,4 +334,57 @@ func (m *ChannelDistManager) GetChannelDist(collectionID int64) []*metricsinfo.D
 		}
 	}
 	return ret
+}
+
+// GetLeaderView returns a slice of LeaderView objects, each representing the state of a leader node.
+// It traverses the views map, converts each LeaderView to a metricsinfo.LeaderView, and collects them into a slice.
+// The method locks the views map for reading to ensure thread safety.
+func (m *ChannelDistManager) GetLeaderView(collectionID int64) []*metricsinfo.LeaderView {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	var ret []*metricsinfo.LeaderView
+	if collectionID > 0 {
+		if channels, ok := m.collectionIndex[collectionID]; ok {
+			for _, channel := range channels {
+				ret = append(ret, newMetricsLeaderViewFrom(channel.View))
+			}
+		}
+		return ret
+	}
+
+	for _, channels := range m.collectionIndex {
+		for _, channel := range channels {
+			ret = append(ret, newMetricsLeaderViewFrom(channel.View))
+		}
+	}
+	return ret
+}
+
+func newMetricsLeaderViewFrom(lv *LeaderView) *metricsinfo.LeaderView {
+	leaderView := &metricsinfo.LeaderView{
+		LeaderID:         lv.ID,
+		CollectionID:     lv.CollectionID,
+		Channel:          lv.Channel,
+		Version:          lv.Version,
+		SealedSegments:   make([]*metricsinfo.Segment, 0, len(lv.Segments)),
+		GrowingSegments:  make([]*metricsinfo.Segment, 0, len(lv.GrowingSegments)),
+		TargetVersion:    lv.TargetVersion,
+		NumOfGrowingRows: lv.NumOfGrowingRows,
+	}
+
+	for segID, seg := range lv.Segments {
+		leaderView.SealedSegments = append(leaderView.SealedSegments, &metricsinfo.Segment{
+			SegmentID: segID,
+			NodeID:    seg.NodeID,
+		})
+	}
+
+	for _, seg := range lv.GrowingSegments {
+		leaderView.GrowingSegments = append(leaderView.GrowingSegments, &metricsinfo.Segment{
+			SegmentID: seg.ID,
+			NodeID:    seg.Node,
+		})
+	}
+	return leaderView
 }

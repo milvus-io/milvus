@@ -49,6 +49,7 @@ type DistHandlerSuite struct {
 	executedFlagChan chan struct{}
 	dist             *meta.DistributionManager
 	target           *meta.MockTargetManager
+	replicaMgr       meta.ReplicaManagerInterface
 
 	handler *distHandler
 }
@@ -69,6 +70,10 @@ func (suite *DistHandlerSuite) SetupSuite() {
 	suite.target.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetDmChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
+
+	mockReplicaMgr := meta.NewMockReplicaManager(suite.T())
+	suite.replicaMgr = mockReplicaMgr
+	mockReplicaMgr.EXPECT().GetByCollectionAndNode(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 }
 
 func (suite *DistHandlerSuite) TestBasic() {
@@ -114,8 +119,7 @@ func (suite *DistHandlerSuite) TestBasic() {
 		LastModifyTs: 1,
 	}, nil)
 
-	syncTargetVersionFn := func(collectionID int64) {}
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, syncTargetVersionFn)
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, suite.replicaMgr)
 	defer suite.handler.stop()
 
 	time.Sleep(3 * time.Second)
@@ -135,8 +139,7 @@ func (suite *DistHandlerSuite) TestGetDistributionFailed() {
 	}))
 	suite.client.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("fake error"))
 
-	syncTargetVersionFn := func(collectionID int64) {}
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, syncTargetVersionFn)
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, suite.replicaMgr)
 	defer suite.handler.stop()
 
 	time.Sleep(3 * time.Second)
@@ -184,8 +187,7 @@ func (suite *DistHandlerSuite) TestForcePullDist() {
 		LastModifyTs: 1,
 	}, nil)
 	suite.executedFlagChan <- struct{}{}
-	syncTargetVersionFn := func(collectionID int64) {}
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, syncTargetVersionFn)
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, suite.replicaMgr)
 	defer suite.handler.stop()
 
 	time.Sleep(300 * time.Millisecond)

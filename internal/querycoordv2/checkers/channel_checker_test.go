@@ -169,10 +169,37 @@ func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
 
-	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel1"))
-	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel1"})
-	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel2"))
-	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel2"})
+	checker.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel1",
+		},
+		Node:    1,
+		Version: 1,
+		View:    utils.CreateTestLeaderView(1, 1, "test-insert-channel1", map[int64]int64{}, map[int64]*meta.Segment{}),
+	}, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel2",
+		},
+		Node:    1,
+		Version: 1,
+		View:    utils.CreateTestLeaderView(1, 1, "test-insert-channel1", map[int64]int64{}, map[int64]*meta.Segment{}),
+	})
+	checker.dist.ShardLeaderManager.Update(&meta.ShardLeader{
+		NodeID:      1,
+		ChannelName: "test-insert-channel1",
+		ReplicaID:   1,
+		Version:     1,
+		Serviceable: true,
+	}, &meta.ShardLeader{
+		NodeID:      1,
+		ChannelName: "test-insert-channel2",
+		ReplicaID:   1,
+		Version:     1,
+		Serviceable: true,
+	})
+
 	suite.setNodeAvailable(1)
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -210,15 +237,45 @@ func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
-	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
-	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 2, "test-insert-channel"))
+	checker.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    1,
+		Version: 1,
+		View:    utils.CreateTestLeaderView(1, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}),
+	})
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 2,
+		View:    utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}),
+	})
+	checker.dist.ShardLeaderManager.Update(&meta.ShardLeader{
+		NodeID:      1,
+		ChannelName: "test-insert-channel",
+		ReplicaID:   1,
+		Version:     1,
+		Serviceable: true,
+	})
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 0)
 
 	suite.setNodeAvailable(1, 2)
-	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel"})
-	checker.dist.LeaderViewManager.Update(2, &meta.LeaderView{ID: 2, Channel: "test-insert-channel"})
+
+	checker.dist.ShardLeaderManager.Update(&meta.ShardLeader{
+		NodeID:      2,
+		ChannelName: "test-insert-channel",
+		ReplicaID:   1,
+		Version:     2,
+		Serviceable: true,
+	})
+
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.EqualValues(1, tasks[0].ReplicaID())
@@ -266,10 +323,21 @@ func (suite *ChannelCheckerTestSuite) TestReleaseDirtyChannels() {
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
-	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 2, "test-insert-channel"))
+	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 2, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel"})
-	checker.dist.LeaderViewManager.Update(2, &meta.LeaderView{ID: 2, Channel: "test-insert-channel"})
+	checker.dist.ShardLeaderManager.Update(&meta.ShardLeader{
+		NodeID:      1,
+		ChannelName: "test-insert-channel",
+		ReplicaID:   1,
+		Version:     1,
+		Serviceable: true,
+	}, &meta.ShardLeader{
+		NodeID:      2,
+		ChannelName: "test-insert-channel",
+		ReplicaID:   2,
+		Version:     2,
+		Serviceable: true,
+	})
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
