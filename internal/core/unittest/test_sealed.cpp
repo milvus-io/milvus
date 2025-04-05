@@ -17,6 +17,7 @@
 #include "common/Tracer.h"
 #include "index/IndexFactory.h"
 #include "knowhere/version.h"
+#include "milvus-storage/common/metadata.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "storage/MmapManager.h"
 #include "storage/MinioChunkManager.h"
@@ -2375,6 +2376,12 @@ TEST(Sealed, QueryAllNullableFields) {
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
     auto segment_sealed = CreateSealedSegment(schema, metaPtr);
     auto segment = dynamic_cast<SegmentSealedImpl*>(segment_sealed.get());
+
+    auto fieldIdInfo = FieldDataInfo(100, 0);
+    EXPECT_THROW(
+        segment->LoadColumnGroupData(
+            FieldId(100), fieldIdInfo, milvus_storage::FieldIDList(), false),
+        std::runtime_error);
 
     int64_t dataset_size = 1000;
     int64_t dim = 128;

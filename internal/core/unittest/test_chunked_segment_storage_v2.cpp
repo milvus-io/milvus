@@ -1,24 +1,28 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
+#include <arrow/record_batch.h>
 #include <arrow/util/key_value_metadata.h>
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdint>
 #include "arrow/table_builder.h"
 #include "arrow/type_fwd.h"
-#include "common/BitsetView.h"
 #include "common/Consts.h"
 #include "common/FieldDataInterface.h"
-#include "common/QueryInfo.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "expr/ITypeExpr.h"
@@ -26,144 +30,25 @@
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
-#include "knowhere/comp/index_param.h"
 #include "milvus-storage/common/constants.h"
-#include "mmap/ChunkedColumn.h"
+#include "milvus-storage/common/metadata.h"
 #include "mmap/Types.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
-#include "query/SearchOnSealed.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/Types.h"
-#include "test_utils/DataGen.h"
 #include <memory>
 #include <numeric>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-struct DeferRelease {
-    using functype = std::function<void()>;
-    void
-    AddDefer(const functype& closure) {
-        closures.push_back(closure);
-    }
-
-    ~DeferRelease() {
-        for (auto& closure : closures) {
-            closure();
-        }
-    }
-
-    std::vector<functype> closures;
-};
-
 using namespace milvus;
-TEST(test_chunk_segment, TestSearchOnSealed) {
-    DeferRelease defer;
 
-    int dim = 16;
-    int chunk_num = 3;
-    int chunk_size = 100;
-    int total_row_count = chunk_num * chunk_size;
-    int bitset_size = (total_row_count + 7) / 8;
-
-    auto column = std::make_shared<ChunkedColumn>();
-    auto schema = std::make_shared<Schema>();
-    auto fakevec_id = schema->AddDebugField(
-        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::COSINE);
-
-    for (int i = 0; i < chunk_num; i++) {
-        auto dataset = segcore::DataGen(schema, chunk_size);
-        auto data = dataset.get_col<float>(fakevec_id);
-        auto buf_size = 4 * data.size();
-
-        char* buf = new char[buf_size];
-        defer.AddDefer([buf]() { delete[] buf; });
-        memcpy(buf, data.data(), 4 * data.size());
-
-        auto chunk = std::make_shared<FixedWidthChunk>(
-            chunk_size, dim, buf, buf_size, 4, false);
-        column->AddChunk(chunk);
-    }
-
-    SearchInfo search_info;
-    auto search_conf = knowhere::Json{
-        {knowhere::meta::METRIC_TYPE, knowhere::metric::COSINE},
-    };
-    search_info.search_params_ = search_conf;
-    search_info.field_id_ = fakevec_id;
-    search_info.metric_type_ = knowhere::metric::COSINE;
-    // expect to return all rows
-    search_info.topk_ = total_row_count;
-
-    uint8_t* bitset_data = new uint8_t[bitset_size];
-    defer.AddDefer([bitset_data]() { delete[] bitset_data; });
-    std::fill(bitset_data, bitset_data + bitset_size, 0);
-    BitsetView bv(bitset_data, total_row_count);
-
-    auto query_ds = segcore::DataGen(schema, 1);
-    auto col_query_data = query_ds.get_col<float>(fakevec_id);
-    auto query_data = col_query_data.data();
-    auto index_info = std::map<std::string, std::string>{};
-    SearchResult search_result;
-
-    query::SearchOnSealed(*schema,
-                          column,
-                          search_info,
-                          index_info,
-                          query_data,
-                          1,
-                          total_row_count,
-                          bv,
-                          search_result);
-
-    std::set<int64_t> offsets;
-    for (auto& offset : search_result.seg_offsets_) {
-        if (offset != -1) {
-            offsets.insert(offset);
-        }
-    }
-    // check all rows are returned
-    ASSERT_EQ(total_row_count, offsets.size());
-    for (int i = 0; i < total_row_count; i++) {
-        ASSERT_TRUE(offsets.find(i) != offsets.end());
-    }
-
-    // test with group by
-    search_info.group_by_field_id_ = fakevec_id;
-    std::fill(bitset_data, bitset_data + bitset_size, 0);
-    query::SearchOnSealed(*schema,
-                          column,
-                          search_info,
-                          index_info,
-                          query_data,
-                          1,
-                          total_row_count,
-                          bv,
-                          search_result);
-
-    ASSERT_EQ(1, search_result.vector_iterators_->size());
-
-    auto iter = search_result.vector_iterators_->at(0);
-    // collect all offsets
-    offsets.clear();
-    while (iter->HasNext()) {
-        auto [offset, distance] = iter->Next().value();
-        offsets.insert(offset);
-    }
-
-    ASSERT_EQ(total_row_count, offsets.size());
-    for (int i = 0; i < total_row_count; i++) {
-        ASSERT_TRUE(offsets.find(i) != offsets.end());
-    }
-}
-
-class TestChunkSegment : public testing::TestWithParam<bool> {
+class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
  protected:
     void
     SetUp() override {
@@ -177,11 +62,8 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
             schema->AddDebugField("string1", DataType::VARCHAR, true);
         auto str2_fid =
             schema->AddDebugField("string2", DataType::VARCHAR, true);
-        schema->AddField(FieldName("ts"),
-                         TimestampFieldID,
-                         DataType::INT64,
-                         true,
-                         std::nullopt);
+        schema->AddField(
+            FieldName("ts"), TimestampFieldID, DataType::INT64, true);
         schema->set_primary_field_id(pk_fid);
         segment = segcore::CreateSealedSegment(
             schema,
@@ -247,9 +129,9 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
         chunk_num = 2;
 
         std::vector<FieldDataInfo> field_infos;
-        for (auto fid : field_ids) {
+        for (int i = 0; i < 2; i++) {
             FieldDataInfo field_info;
-            field_info.field_id = fid.get();
+            field_info.field_id = int64_t(i);
             field_info.row_count = test_data_count * chunk_num;
             field_infos.push_back(field_info);
         }
@@ -285,33 +167,53 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
             status = str_builder->Finish(&arrow_str);
             ASSERT_TRUE(status.ok());
 
-            for (int i = 0; i < arrow_fields.size(); i++) {
-                auto f = arrow_fields[i];
-                auto fid = field_ids[i];
-                auto arrow_schema =
-                    std::make_shared<arrow::Schema>(arrow::FieldVector(1, f));
+            auto short_column_schema = arrow::schema(
+                {arrow_fields[0], arrow_fields[3], arrow_fields[4]});
+            std::shared_ptr<arrow::RecordBatch> short_column_record_batch =
+                arrow::RecordBatch::Make(
+                    short_column_schema,
+                    arrow_int64->length(),
+                    {arrow_int64,
+                     pk_is_string ? arrow_str : arrow_int64,
+                     arrow_int64});
 
-                auto col = i < 3 && (field_ids[i] != pk_fid || !pk_is_string)
-                               ? arrow_int64
-                               : arrow_str;
-                auto record_batch = arrow::RecordBatch::Make(
-                    arrow_schema, arrow_int64->length(), {col});
+            auto short_column_channel = std::make_shared<ArrowDataWrapper>();
+            short_column_channel->record_batches.push_back(
+                std::move(short_column_record_batch));
 
-                auto res2 = arrow::RecordBatchReader::Make({record_batch});
-                ASSERT_TRUE(res2.ok());
-                auto arrow_reader = res2.ValueOrDie();
+            field_infos[0].arrow_reader_channel->push(short_column_channel);
 
-                field_infos[i].arrow_reader_channel->push(
-                    std::make_shared<ArrowDataWrapper>(
-                        arrow_reader, nullptr, nullptr));
-            }
+            auto long_column_schema =
+                arrow::schema({arrow_fields[1], arrow_fields[2]});
+            std::shared_ptr<arrow::RecordBatch> long_column_record_batch =
+                arrow::RecordBatch::Make(long_column_schema,
+                                         arrow_int64->length(),
+                                         {arrow_str, arrow_str});
+
+            auto long_column_channel = std::make_shared<ArrowDataWrapper>();
+            long_column_channel->record_batches.push_back(
+                std::move(long_column_record_batch));
+
+            field_infos[1].arrow_reader_channel->push(long_column_channel);
+        }
+
+        for (int i = 0; i < field_infos.size(); i++) {
+            field_infos[i].arrow_reader_channel->close();
         }
 
         // load
-        for (int i = 0; i < field_infos.size(); i++) {
-            field_infos[i].arrow_reader_channel->close();
-            segment->LoadFieldData(field_ids[i], field_infos[i]);
-        }
+        segment->LoadColumnGroupData(
+            FieldId(0),
+            field_infos[0],
+            milvus_storage::FieldIDList(
+                std::vector<milvus_storage::FieldID>{1, 101, 100}),
+            false);
+        segment->LoadColumnGroupData(
+            FieldId(1),
+            field_infos[1],
+            milvus_storage::FieldIDList(
+                std::vector<milvus_storage::FieldID>{103, 102}),
+            false);
     }
 
     segcore::SegmentSealedUPtr segment;
@@ -320,9 +222,11 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
     std::unordered_map<std::string, FieldId> fields;
 };
 
-INSTANTIATE_TEST_SUITE_P(TestChunkSegment, TestChunkSegment, testing::Bool());
+INSTANTIATE_TEST_SUITE_P(TestChunkSegmentStorageV2,
+                         TestChunkSegmentStorageV2,
+                         testing::Bool());
 
-TEST_P(TestChunkSegment, TestTermExpr) {
+TEST_P(TestChunkSegmentStorageV2, TestTermExpr) {
     bool pk_is_string = GetParam();
     // query int64 expr
     std::vector<proto::plan::GenericValue> filter_data;
@@ -378,7 +282,7 @@ TEST_P(TestChunkSegment, TestTermExpr) {
     ASSERT_EQ(1, final.count());
 }
 
-TEST_P(TestChunkSegment, TestCompareExpr) {
+TEST_P(TestChunkSegmentStorageV2, TestCompareExpr) {
     srand(time(NULL));
     bool pk_is_string = GetParam();
     DataType pk_data_type = pk_is_string ? DataType::VARCHAR : DataType::INT64;

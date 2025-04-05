@@ -37,10 +37,12 @@
 #include "common/File.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
+#include "common/Schema.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "google/protobuf/message_lite.h"
 #include "index/VectorMemIndex.h"
+#include "milvus-storage/common/metadata.h"
 #include "mmap/Column.h"
 #include "mmap/Utils.h"
 #include "mmap/Types.h"
@@ -52,6 +54,9 @@
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/MmapManager.h"
+
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::segcore {
 
@@ -570,6 +575,15 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
 }
 
 void
+SegmentSealedImpl::LoadColumnGroupData(FieldId column_group_id,
+                                       FieldDataInfo& data,
+                                       milvus_storage::FieldIDList field_ids,
+                                       bool use_mmap) {
+    PanicInfo(ErrorCode::Unsupported,
+              "load column group data is not supported");
+}
+
+void
 SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
     auto filepath = std::filesystem::path(data.mmap_dir_path) / "raw_data" /
                     std::to_string(get_segment_id()) /
@@ -865,6 +879,7 @@ const Schema&
 SegmentSealedImpl::get_schema() const {
     return *schema_;
 }
+
 std::vector<SegOffset>
 SegmentSealedImpl::search_pk(const PkType& pk, Timestamp timestamp) const {
     if (!is_sorted_by_pk_) {

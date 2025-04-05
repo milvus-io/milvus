@@ -27,8 +27,11 @@
 #include "pb/schema.pb.h"
 #include "Consts.h"
 
+#include "arrow/type.h"
+
 namespace milvus {
 
+using ArrowSchemaPtr = std::shared_ptr<arrow::Schema>;
 static int64_t debug_id = START_USER_FIELDID;
 
 class Schema {
@@ -242,6 +245,9 @@ class Schema {
     get_dynamic_field_id() const {
         return dynamic_field_id_opt_;
     }
+
+    const ArrowSchemaPtr
+    ConvertToArrowSchema() const;
 
  public:
     static std::shared_ptr<Schema>

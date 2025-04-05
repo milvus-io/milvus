@@ -22,6 +22,8 @@
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
 
+#include "milvus-storage/common/type_fwd.h"
+
 namespace milvus::segcore {
 
 class SegmentSealed : public SegmentInternalInterface {
@@ -37,6 +39,11 @@ class SegmentSealed : public SegmentInternalInterface {
 
     virtual void
     LoadFieldData(FieldId field_id, FieldDataInfo& data) = 0;
+    virtual void
+    LoadColumnGroupData(FieldId column_group_id,
+                        FieldDataInfo& data,
+                        milvus_storage::FieldIDList field_ids,
+                        bool use_mmap) = 0;
     virtual void
     MapFieldData(const FieldId field_id, FieldDataInfo& data) = 0;
     virtual void

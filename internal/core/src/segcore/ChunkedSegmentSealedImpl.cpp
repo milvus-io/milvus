@@ -28,6 +28,7 @@
 
 #include "Utils.h"
 #include "Types.h"
+#include "arrow/type_fwd.h"
 #include "common/Array.h"
 #include "common/Chunk.h"
 #include "common/ChunkWriter.h"
@@ -54,6 +55,9 @@
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/MmapManager.h"
+
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::segcore {
 
@@ -219,6 +223,19 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
 void
 ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
+    switch (load_info.storage_version) {
+        case 2:
+            load_column_group_data_internal(load_info);
+            break;
+        default:
+            load_field_data_internal(load_info);
+            break;
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::load_field_data_internal(
+    const LoadFieldDataInfo& load_info) {
     // NOTE: lock only when data is ready to avoid starvation
     // only one field for now, parallel load field data in golang
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
@@ -270,8 +287,131 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
 }
 
 void
+ChunkedSegmentSealedImpl::load_column_group_data_internal(
+    const LoadFieldDataInfo& load_info) {
+    // NOTE: lock only when data is ready to avoid starvation
+    // only one field for now, parallel load field data in golang
+    size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
+    ArrowSchemaPtr arrow_schema = schema_->ConvertToArrowSchema();
+
+    for (auto& [id, info] : load_info.field_infos) {
+        AssertInfo(info.row_count > 0, "The row count of field data is 0");
+
+        auto column_group_id = FieldId(id);
+        auto insert_files = info.insert_files;
+        std::sort(insert_files.begin(),
+                  insert_files.end(),
+                  [](const std::string& a, const std::string& b) {
+                      return std::stol(a.substr(a.find_last_of('/') + 1)) <
+                             std::stol(b.substr(b.find_last_of('/') + 1));
+                  });
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        auto file_reader =
+            std::make_shared<milvus_storage::FileRecordBatchReader>(
+                fs, insert_files[0], arrow_schema);
+        std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
+            file_reader->file_metadata();
+
+        auto field_id_mapping = metadata->GetFieldIDMapping();
+
+        milvus_storage::FieldIDList field_ids =
+            metadata->GetGroupFieldIDList().GetFieldIDList(
+                column_group_id.get());
+        std::vector<std::shared_ptr<arrow::Field>> arrow_fields;
+        for (int i = 0; i < field_ids.size(); ++i) {
+            auto field_id = field_ids.Get(i);
+            arrow_fields.push_back(
+                arrow_schema->field(field_id_mapping[field_id].col_index));
+        }
+        auto column_group_schema = arrow::schema(arrow_fields);
+
+        auto parallel_degree = static_cast<uint64_t>(
+            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+        auto column_group_info = FieldDataInfo(
+            column_group_id.get(), num_rows, load_info.mmap_dir_path, false);
+        LOG_INFO("segment {} loads column group {} with num_rows {}",
+                 this->get_segment_id(),
+                 column_group_id.get(),
+                 num_rows);
+
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        pool.Submit(LoadArrowReaderFromStorageV2,
+                    insert_files,
+                    column_group_schema,
+                    column_group_info.arrow_reader_channel,
+                    FILE_SLICE_SIZE,
+                    parallel_degree);
+
+        LOG_INFO("segment {} submits load fields {} task to thread pool",
+                 this->get_segment_id(),
+                 field_ids.ToString());
+
+        LoadColumnGroupData(
+            column_group_id, column_group_info, field_ids, info.enable_mmap);
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::LoadColumnGroupData(
+    FieldId column_group_id,
+    FieldDataInfo& data,
+    milvus_storage::FieldIDList field_ids,
+    bool use_mmap) {
+    std::vector<std::vector<arrow::ArrayVector>> column_group_chunks;
+    column_group_chunks.resize(field_ids.size());
+    int64_t num_rows = data.row_count;
+    std::shared_ptr<milvus::ArrowDataWrapper> r;
+
+    while (data.arrow_reader_channel->pop(r)) {
+        std::vector<arrow::ArrayVector> array_vecs;
+        array_vecs.resize(field_ids.size());
+        for (const auto& batch : r->record_batches) {
+            for (int i = 0; i < batch->num_columns(); i++) {
+                array_vecs[i].push_back(std::move(batch->column(i)));
+            }
+        }
+        for (int i = 0; i < field_ids.size(); ++i) {
+            column_group_chunks[i].push_back(array_vecs[i]);
+        }
+    }
+
+    for (int i = 0; i < field_ids.size(); ++i) {
+        FieldId field_id = FieldId(field_ids.Get(i));
+        if (!use_mmap || SystemProperty::Instance().IsSystem(field_id)) {
+            load_column_in_memory(field_id, column_group_chunks[i], num_rows);
+        } else {
+            load_field_data_mmap(field_id,
+                                 data.row_count,
+                                 data.mmap_dir_path,
+                                 column_group_chunks[i]);
+        }
+        LOG_INFO("segment {} loads field {} mmap {} done",
+                 this->get_segment_id(),
+                 field_id.get(),
+                 use_mmap);
+    }
+}
+
+void
 ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
-    auto num_rows = data.row_count;
+    std::vector<arrow::ArrayVector> chunks;
+    int64_t num_rows = data.row_count;
+    std::shared_ptr<milvus::ArrowDataWrapper> r;
+
+    while (data.arrow_reader_channel->pop(r)) {
+        arrow::ArrayVector array_vec = read_single_column_batches(r->reader);
+        chunks.push_back(std::move(array_vec));
+    }
+    load_column_in_memory(field_id, chunks, num_rows);
+}
+
+void
+ChunkedSegmentSealedImpl::load_column_in_memory(
+    FieldId field_id,
+    std::vector<arrow::ArrayVector> chunks,
+    int64_t num_rows) {
     if (SystemProperty::Instance().IsSystem(field_id)) {
         auto system_field_type =
             SystemProperty::Instance().GetSystemFieldType(field_id);
@@ -284,32 +424,22 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                                  false,
                                  std::nullopt);
             std::shared_ptr<milvus::ArrowDataWrapper> r;
-            while (data.arrow_reader_channel->pop(r)) {
+            for (auto& array_vec : chunks) {
                 auto chunk = std::dynamic_pointer_cast<FixedWidthChunk>(
-                    create_chunk(field_meta, 1, r->reader));
+                    create_chunk(field_meta, 1, array_vec));
                 std::copy_n(static_cast<const Timestamp*>(chunk->Span().data()),
                             chunk->Span().row_count(),
                             timestamps.data() + offset);
                 offset += chunk->Span().row_count();
             }
 
-            // for (auto& data : field_data) {
-            //     int64_t row_count = data->get_num_rows();
-            //     std::copy_n(static_cast<const Timestamp*>(data->Data()),
-            //                 row_count,
-            //                 timestamps.data() + offset);
-            //     offset += row_count;
-            // }
-
             TimestampIndex index;
             auto min_slice_length = num_rows < 4096 ? 1 : 4096;
             auto meta = GenerateFakeSlices(
                 timestamps.data(), num_rows, min_slice_length);
             index.set_length_meta(std::move(meta));
-            // todo ::opt to avoid copy timestamps from field data
             index.build_with(timestamps.data(), num_rows);
 
-            // use special index
             std::unique_lock lck(mutex_);
             AssertInfo(insert_record_.timestamps_.empty(), "already exists");
             insert_record_.timestamps_.set_data_raw(
@@ -317,98 +447,31 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             insert_record_.timestamp_index_ = std::move(index);
             AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
                        "num chunk not equal to 1 for sealed segment");
-            stats_.mem_size += sizeof(Timestamp) * data.row_count;
+            stats_.mem_size += sizeof(Timestamp) * num_rows;
         } else {
             AssertInfo(system_field_type == SystemFieldType::RowId,
                        "System field type of id column is not RowId");
-            // Consume rowid field data but not really load it
-            // storage::CollectFieldDataChannel(data.arrow_reader_channel);
-            std::shared_ptr<milvus::ArrowDataWrapper> r;
-            while (data.arrow_reader_channel->pop(r)) {
-            }
         }
         ++system_ready_count_;
     } else {
-        // prepare data
         auto& field_meta = (*schema_)[field_id];
         auto data_type = field_meta.get_data_type();
-
-        // Don't allow raw data and index exist at the same time
-        //        AssertInfo(!get_bit(index_ready_bitset_, field_id),
-        //                   "field data can't be loaded when indexing exists");
-
         std::shared_ptr<ChunkedColumnBase> column{};
+
         if (IsVariableDataType(data_type)) {
             int64_t field_data_size = 0;
-            switch (data_type) {
-                case milvus::DataType::STRING:
-                case milvus::DataType::VARCHAR:
-                case milvus::DataType::TEXT: {
-                    auto var_column =
-                        std::make_shared<ChunkedVariableColumn<std::string>>(
-                            field_meta);
-                    std::shared_ptr<milvus::ArrowDataWrapper> r;
-                    while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
-                        var_column->AddChunk(chunk);
-                    }
-                    // var_column->Seal();
-                    field_data_size = var_column->DataByteSize();
-                    stats_.mem_size += var_column->DataByteSize();
-                    LoadStringSkipIndex(field_id, 0, *var_column);
-                    column = std::move(var_column);
-                    break;
-                }
-                case milvus::DataType::JSON: {
-                    auto var_column =
-                        std::make_shared<ChunkedVariableColumn<milvus::Json>>(
-                            field_meta);
-                    std::shared_ptr<milvus::ArrowDataWrapper> r;
-                    while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
-                        var_column->AddChunk(chunk);
-                    }
-                    // var_column->Seal();
-                    stats_.mem_size += var_column->DataByteSize();
-                    field_data_size = var_column->DataByteSize();
-                    column = std::move(var_column);
-                    break;
-                }
-                case milvus::DataType::ARRAY: {
-                    auto var_column =
-                        std::make_shared<ChunkedArrayColumn>(field_meta);
-                    std::shared_ptr<milvus::ArrowDataWrapper> r;
-                    while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
-                        var_column->AddChunk(chunk);
-                    }
-                    column = std::move(var_column);
-                    break;
-                }
-                case milvus::DataType::VECTOR_SPARSE_FLOAT: {
-                    auto col =
-                        std::make_shared<ChunkedSparseFloatColumn>(field_meta);
-                    std::shared_ptr<milvus::ArrowDataWrapper> r;
-                    while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
-                        col->AddChunk(chunk);
-                    }
-                    column = std::move(col);
-                    break;
-                }
-                default: {
-                    PanicInfo(DataTypeInvalid,
-                              fmt::format("unsupported data type", data_type));
-                }
-            }
+            column = load_variable_datatype_column(field_id,
+                                                   data_type,
+                                                   field_meta,
+                                                   chunks,
+                                                   field_data_size,
+                                                   stats_);
 
-            // update average row data size
             SegmentInternalInterface::set_field_avg_size(
                 field_id, num_rows, field_data_size);
         } else {
             column = std::make_shared<ChunkedColumn>(field_meta);
-            std::shared_ptr<milvus::ArrowDataWrapper> r;
-            while (data.arrow_reader_channel->pop(r)) {
+            for (auto& array_vec : chunks) {
                 auto chunk =
                     create_chunk(field_meta,
                                  IsVectorDataType(field_meta.get_data_type()) &&
@@ -416,9 +479,7 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                                              field_meta.get_data_type())
                                      ? field_meta.get_dim()
                                      : 1,
-                                 r->reader);
-                // column->AppendBatch(field_data);
-                // stats_.mem_size += field_data->Size();
+                                 array_vec);
                 column->AddChunk(chunk);
             }
 
@@ -436,7 +497,7 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         AssertInfo(column->NumRows() == num_rows,
                    fmt::format("data lost while loading column {}: loaded "
                                "num rows {} but expected {}",
-                               data.field_id,
+                               field_id.get(),
                                column->NumRows(),
                                num_rows));
 
@@ -445,7 +506,6 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             fields_.emplace(field_id, column);
         }
 
-        // set pks to offset
         if (schema_->get_primary_field_id() == field_id && !is_sorted_by_pk_) {
             AssertInfo(field_id.get() != -1, "Primary key is -1");
             AssertInfo(insert_record_.empty_pks(), "already exists");
@@ -455,7 +515,6 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
 
         bool use_temp_index = false;
         {
-            // update num_rows to build temperate binlog index
             std::unique_lock lck(mutex_);
             update_row_count(num_rows);
         }
@@ -478,10 +537,94 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
     }
 }
 
+std::shared_ptr<ChunkedColumnBase>
+ChunkedSegmentSealedImpl::load_variable_datatype_column(
+    FieldId field_id,
+    milvus::DataType data_type,
+    const FieldMeta& field_meta,
+    std::vector<arrow::ArrayVector>& chunks,
+    int64_t& field_data_size,
+    SegmentStats& stats) {
+    std::shared_ptr<ChunkedColumnBase> column;
+
+    switch (data_type) {
+        case milvus::DataType::STRING:
+        case milvus::DataType::VARCHAR:
+        case milvus::DataType::TEXT: {
+            auto var_column =
+                std::make_shared<ChunkedVariableColumn<std::string>>(
+                    field_meta);
+            for (auto& array_vec : chunks) {
+                auto chunk = create_chunk(field_meta, 1, array_vec);
+                var_column->AddChunk(chunk);
+            }
+            field_data_size = var_column->DataByteSize();
+            stats.mem_size += field_data_size;
+            LoadStringSkipIndex(field_id, 0, *var_column);
+            column = std::move(var_column);
+            break;
+        }
+        case milvus::DataType::JSON: {
+            auto var_column =
+                std::make_shared<ChunkedVariableColumn<milvus::Json>>(
+                    field_meta);
+            for (auto& array_vec : chunks) {
+                auto chunk = create_chunk(field_meta, 1, array_vec);
+                var_column->AddChunk(chunk);
+            }
+            field_data_size = var_column->DataByteSize();
+            stats.mem_size += field_data_size;
+            column = std::move(var_column);
+            break;
+        }
+        case milvus::DataType::ARRAY: {
+            auto var_column = std::make_shared<ChunkedArrayColumn>(field_meta);
+            for (auto& array_vec : chunks) {
+                auto chunk = create_chunk(field_meta, 1, array_vec);
+                var_column->AddChunk(chunk);
+            }
+            column = std::move(var_column);
+            break;
+        }
+        case milvus::DataType::VECTOR_SPARSE_FLOAT: {
+            auto col = std::make_shared<ChunkedSparseFloatColumn>(field_meta);
+            for (auto& array_vec : chunks) {
+                auto chunk = create_chunk(field_meta, 1, array_vec);
+                col->AddChunk(chunk);
+            }
+            column = std::move(col);
+            break;
+        }
+        default: {
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("unsupported data type: {}", data_type));
+        }
+    }
+
+    return column;
+}
+
 void
 ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
                                        FieldDataInfo& data) {
-    auto filepath = std::filesystem::path(data.mmap_dir_path) /
+    std::vector<arrow::ArrayVector> array_vec_chunks;
+    std::shared_ptr<milvus::ArrowDataWrapper> r;
+
+    while (data.arrow_reader_channel->pop(r)) {
+        arrow::ArrayVector array_vec = read_single_column_batches(r->reader);
+        array_vec_chunks.push_back(std::move(array_vec));
+    }
+    load_field_data_mmap(
+        field_id, data.row_count, data.mmap_dir_path, array_vec_chunks);
+}
+
+void
+ChunkedSegmentSealedImpl::load_field_data_mmap(
+    const FieldId field_id,
+    size_t row_count,
+    std::string mmap_dir_path,
+    std::vector<arrow::ArrayVector> array_vec_chunks) {
+    auto filepath = std::filesystem::path(mmap_dir_path) /
                     std::to_string(get_segment_id()) /
                     std::to_string(field_id.get());
     auto dir = filepath.parent_path();
@@ -500,14 +643,7 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
 
     size_t file_offset = 0;
     std::vector<std::shared_ptr<Chunk>> chunks;
-    while (data.arrow_reader_channel->pop(r)) {
-        // WriteFieldData(file,
-        //                data_type,
-        //                field_data,
-        //                total_written,
-        //                indices,
-        //                element_indices,
-        //                valid_data);
+    for (auto& array_vec : array_vec_chunks) {
         auto chunk = create_chunk(
             field_meta,
             IsVectorDataType(field_meta.get_data_type()) &&
@@ -516,13 +652,13 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
                 : 1,
             file,
             file_offset,
-            r->reader);
+            array_vec);
         file_offset += chunk->Size();
         chunks.push_back(chunk);
     }
     // WriteFieldPadding(file, data_type, total_written);
     std::shared_ptr<ChunkedColumnBase> column{};
-    auto num_rows = data.row_count;
+    auto num_rows = row_count;
     if (IsVariableDataType(data_type)) {
         switch (data_type) {
             case milvus::DataType::STRING:
