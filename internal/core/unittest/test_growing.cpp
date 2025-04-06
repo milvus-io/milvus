@@ -39,7 +39,7 @@ TEST(Growing, DeleteCount) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    Timestamp begin_ts = 100;
+    milvus::Timestamp begin_ts = 100;
     auto tss = GenTss(c, begin_ts);
     auto del_pks = GenPKs(pks.begin(), pks.end());
     auto status = segment->Delete(offset, c, del_pks.get(), tss.data());
@@ -163,6 +163,7 @@ TEST_P(GrowingTest, FillData) {
     auto float_array_field =
         schema->AddDebugField("float_array", DataType::ARRAY, DataType::FLOAT);
     auto vec = schema->AddDebugField("embeddings", data_type, 128, metric_type);
+    auto timestamp_field = schema->AddDebugField("timestamp", DataType::TIMESTAMP);
     schema->set_primary_field_id(int64_field);
 
     std::map<std::string, std::string> index_params = {
@@ -213,6 +214,8 @@ TEST_P(GrowingTest, FillData) {
             varchar_field, ids_ds->GetIds(), num_inserted);
         auto json_result =
             segment->bulk_subscript(json_field, ids_ds->GetIds(), num_inserted);
+        auto timestamp_result = segment->bulk_subscript(
+            timestamp_field, ids_ds->GetIds(), num_inserted);
         auto int_array_result = segment->bulk_subscript(
             int_array_field, ids_ds->GetIds(), num_inserted);
         auto long_array_result = segment->bulk_subscript(
@@ -241,6 +244,7 @@ TEST_P(GrowingTest, FillData) {
         EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
                   num_inserted);
         EXPECT_EQ(json_result->scalars().json_data().data_size(), num_inserted);
+        EXPECT_EQ(timestamp_result->scalars().long_data().data_size(), num_inserted);
         if (data_type == DataType::VECTOR_FLOAT) {
             EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
                       num_inserted * dim);
@@ -310,6 +314,7 @@ TEST(Growing, FillNullableData) {
     auto vec = schema->AddDebugField(
         "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
     schema->set_primary_field_id(int64_field);
+    auto timestamp_field = schema->AddDebugField("timestamp", DataType::TIMESTAMP, true);
 
     std::map<std::string, std::string> index_params = {
         {"index_type", "IVF_FLAT"},
@@ -392,6 +397,8 @@ TEST(Growing, FillNullableData) {
             float_array_field, ids_ds->GetIds(), num_inserted);
         auto vec_result =
             segment->bulk_subscript(vec, ids_ds->GetIds(), num_inserted);
+        auto timestamp_result = segment->bulk_subscript(
+            timestamp_field, ids_ds->GetIds(), num_inserted);
 
         EXPECT_EQ(bool_result->scalars().bool_data().data_size(), num_inserted);
         EXPECT_EQ(int8_result->scalars().int_data().data_size(), num_inserted);
@@ -434,5 +441,6 @@ TEST(Growing, FillNullableData) {
         EXPECT_EQ(string_array_result->valid_data_size(), num_inserted);
         EXPECT_EQ(double_array_result->valid_data_size(), num_inserted);
         EXPECT_EQ(float_array_result->valid_data_size(), num_inserted);
+        EXPECT_EQ(timestamp_result->valid_data_size(), num_inserted);
     }
 }

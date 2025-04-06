@@ -601,6 +601,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                              ->mutable_data());
             break;
         }
+        case DataType::TIMESTAMP:
         case DataType::INT64: {
             bulk_subscript_impl<int64_t>(vec_ptr,
                                          seg_offsets,

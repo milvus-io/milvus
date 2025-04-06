@@ -262,6 +262,7 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
             obj->mutable_data()->Resize(count, 0);
             break;
         }
+        case DataType::TIMESTAMP:
         case DataType::INT64: {
             auto obj = scalar_array->mutable_long_data();
             obj->mutable_data()->Resize(count, 0);

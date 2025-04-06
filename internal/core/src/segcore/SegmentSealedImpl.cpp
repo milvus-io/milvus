@@ -1528,6 +1528,7 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
                                              ->mutable_data());
             break;
         }
+        case DataType::TIMESTAMP:
         case DataType::INT64: {
             bulk_subscript_impl<int64_t>(column->Data(0),
                                          seg_offsets,
