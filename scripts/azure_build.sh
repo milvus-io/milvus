@@ -36,13 +36,6 @@ if [[ ${ARCHITECTURE} == "aarch64" ]]; then
   export VCPKG_FORCE_SYSTEM_BINARIES="arm"
 fi
 
-if [[ "$(uname)" == "Darwin" ]]; then
-  export CC=$(xcrun -find clang)
-  export CXX=$(xcrun -find clang++)
-  export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
-  export MACOSX_DEPLOYMENT_TARGET=$(sw_vers -productVersion | cut -d. -f1,2)
-fi
-
 AZURE_CMAKE_CMD="cmake -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
 ${SOURCE_DIR}"

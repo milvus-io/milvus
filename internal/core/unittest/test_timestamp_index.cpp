@@ -19,7 +19,7 @@ using namespace milvus::segcore;
 
 TEST(TimestampIndex, Naive) {
     SUCCEED();
-    std::vector<Timestamp> timestamps{
+    std::vector<milvus::Timestamp> timestamps{
         1,
         2,
         14,
@@ -41,7 +41,7 @@ TEST(TimestampIndex, Naive) {
         ASSERT_EQ(guessed_slice[i], lengths[i]);
     }
 
-    Timestamp query_ts = 0;
+    milvus::Timestamp query_ts = 0;
     auto range = index.get_active_range(query_ts);
     ASSERT_EQ(range.first, 0);
     ASSERT_EQ(range.second, 0);

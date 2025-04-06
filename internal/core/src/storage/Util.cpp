@@ -1,4 +1,3 @@
-
 // Licensed to the LF AI & Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
@@ -207,6 +206,23 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                       "add_one_binary_payload",
                       data_type);
         }
+        case DataType::TIMESTAMP: {
+            auto timestamp_data = reinterpret_cast<int64_t*>(raw_data);
+            auto timestamp_builder = std::dynamic_pointer_cast<arrow::TimestampBuilder>(builder);
+            AssertInfo(timestamp_builder != nullptr,
+                       "builder is not a valid TimestampBuilder");
+            arrow::Status status;
+            if (nullable) {
+                auto iter = genValidIter(payload.valid_data, length);
+                status = timestamp_builder->AppendValues(timestamp_data,
+                                                         timestamp_data + length, iter.begin());
+            } else {
+                status = timestamp_builder->AppendValues(timestamp_data,
+                                                         timestamp_data + length);
+            }
+            AssertInfo(status.ok(), "append timestamp values to arrow builder failed: {}", status.ToString());
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
         }
@@ -283,6 +299,10 @@ CreateArrowBuilder(DataType data_type) {
         // sparse float vector doesn't require a dim
         case DataType::VECTOR_SPARSE_FLOAT: {
             return std::make_shared<arrow::BinaryBuilder>();
+        }
+        case DataType::TIMESTAMP: {
+            std::shared_ptr<arrow::DataType> ts_type = arrow::timestamp(arrow::TimeUnit::MICRO);
+            return std::make_shared<arrow::TimestampBuilder>(ts_type, arrow::default_memory_pool());
         }
         default: {
             PanicInfo(
@@ -372,6 +392,10 @@ CreateArrowSchema(DataType data_type, bool nullable) {
         case DataType::VECTOR_SPARSE_FLOAT: {
             return arrow::schema(
                 {arrow::field("val", arrow::binary(), nullable)});
+        }
+        case DataType::TIMESTAMP: {
+            return arrow::schema(
+                {arrow::field("val", arrow::timestamp(arrow::TimeUnit::MICRO), nullable)});
         }
         default: {
             PanicInfo(
@@ -841,6 +865,9 @@ CreateFieldData(const DataType& type,
         case DataType::VECTOR_INT8:
             return std::make_shared<FieldData<Int8Vector>>(
                 dim, type, total_num_rows);
+        case DataType::TIMESTAMP:
+            return std::make_shared<FieldData<TIMESTAMP>>(
+                type, nullable, total_num_rows);
         default:
             PanicInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +

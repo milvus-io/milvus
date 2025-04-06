@@ -470,6 +470,7 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
+            case DataType::TIMESTAMP:
             case DataType::INT64: {
                 auto data_ptr = result->mutable_scalars()
                                     ->mutable_long_data()
