@@ -354,6 +354,9 @@ IndexFactory::CreatePrimitiveScalarIndex(
         case DataType::VARCHAR:
             return CreatePrimitiveScalarIndex<std::string>(
                 create_index_info, file_manager_context);
+        case DataType::TIMESTAMP:
+            return CreatePrimitiveScalarIndex<int64_t>(
+                create_index_info, file_manager_context);
         default:
             PanicInfo(
                 DataTypeInvalid,
@@ -431,6 +434,7 @@ IndexFactory::CreateScalarIndex(
         case DataType::DOUBLE:
         case DataType::VARCHAR:
         case DataType::STRING:
+        case DataType::TIMESTAMP:
             return CreatePrimitiveScalarIndex(
                 data_type, create_index_info, file_manager_context);
         case DataType::ARRAY: {

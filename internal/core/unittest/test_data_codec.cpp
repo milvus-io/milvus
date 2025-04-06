@@ -48,7 +48,7 @@ TEST(storage, InsertDataBool) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::BOOL);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -78,7 +78,7 @@ TEST(storage, InsertDataBoolNullable) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::BOOL);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -111,7 +111,7 @@ TEST(storage, InsertDataInt8) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT8);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -140,7 +140,7 @@ TEST(storage, InsertDataInt8Nullable) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT8);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -171,7 +171,7 @@ TEST(storage, InsertDataInt16) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT16);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -200,7 +200,7 @@ TEST(storage, InsertDataInt16Nullable) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT16);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -231,7 +231,7 @@ TEST(storage, InsertDataInt32) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT32);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -260,7 +260,7 @@ TEST(storage, InsertDataInt32Nullable) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT32);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -291,7 +291,7 @@ TEST(storage, InsertDataInt64) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT64);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -320,7 +320,7 @@ TEST(storage, InsertDataInt64Nullable) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::INT64);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -352,7 +352,7 @@ TEST(storage, InsertDataString) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::VARCHAR);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -386,7 +386,7 @@ TEST(storage, InsertDataStringNullable) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::STRING);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -420,7 +420,7 @@ TEST(storage, InsertDataFloat) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::FLOAT);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -449,7 +449,7 @@ TEST(storage, InsertDataFloatNullable) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::FLOAT);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -479,7 +479,7 @@ TEST(storage, InsertDataDouble) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::DOUBLE);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -508,7 +508,7 @@ TEST(storage, InsertDataDoubleNullable) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::DOUBLE);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -540,7 +540,7 @@ TEST(storage, InsertDataFloatVector) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::VECTOR_FLOAT);
     ASSERT_EQ(new_payload->get_num_rows(), data.size() / DIM);
@@ -572,7 +572,7 @@ TEST(storage, InsertDataSparseFloat) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_TRUE(new_payload->get_data_type() ==
                 storage::DataType::VECTOR_SPARSE_FLOAT);
@@ -611,7 +611,7 @@ TEST(storage, InsertDataBinaryVector) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::VECTOR_BINARY);
     ASSERT_EQ(new_payload->get_num_rows(), data.size() * 8 / DIM);
@@ -640,7 +640,7 @@ TEST(storage, InsertDataFloat16Vector) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::VECTOR_FLOAT16);
     ASSERT_EQ(new_payload->get_num_rows(), data.size() / DIM);
@@ -672,7 +672,7 @@ TEST(storage, IndexData) {
                                                        serialized_bytes.size());
     ASSERT_EQ(new_index_data->GetCodecType(), storage::IndexDataType);
     ASSERT_EQ(new_index_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_field_data = new_index_data->GetFieldData();
     ASSERT_EQ(new_field_data->get_data_type(), storage::DataType::INT8);
     ASSERT_EQ(new_field_data->Size(), data.size());
@@ -706,7 +706,7 @@ TEST(storage, InsertDataStringArray) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::ARRAY);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -751,7 +751,7 @@ TEST(storage, InsertDataStringArrayNullable) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::ARRAY);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -787,7 +787,7 @@ TEST(storage, InsertDataJsonNullable) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::JSON);
     ASSERT_EQ(new_payload->get_num_rows(), data.size());
@@ -815,11 +815,77 @@ TEST(storage, InsertDataJsonFillWithNull) {
         serialized_data_ptr, serialized_bytes.size());
     ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
     ASSERT_EQ(new_insert_data->GetTimeRage(),
-              std::make_pair(Timestamp(0), Timestamp(100)));
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
     auto new_payload = new_insert_data->GetFieldData();
     ASSERT_EQ(new_payload->get_data_type(), storage::DataType::JSON);
     ASSERT_EQ(new_payload->get_num_rows(), size);
     ASSERT_EQ(new_payload->get_null_count(), size);
+    ASSERT_EQ(*new_payload->ValidData(), *valid_data);
+    delete[] valid_data;
+}
+
+TEST(storage, InsertDataTIMESTAMP) {
+    FixedVector<milvus::TIMESTAMP> data = {milvus::TIMESTAMP(1),
+                                           milvus::TIMESTAMP(2),
+                                           milvus::TIMESTAMP(3),
+                                           milvus::TIMESTAMP(4),
+                                           milvus::TIMESTAMP(5)};
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::TIMESTAMP, false);
+    field_data->FillFieldData(data.data(), data.size());
+
+    storage::InsertData insert_data(field_data);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+    ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
+    ASSERT_EQ(new_insert_data->GetTimeRage(),
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
+    auto new_payload = new_insert_data->GetFieldData();
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::TIMESTAMP);
+    ASSERT_EQ(new_payload->get_num_rows(), data.size());
+    ASSERT_EQ(new_payload->get_null_count(), 0);
+    FixedVector<milvus::TIMESTAMP> new_data(data.size());
+    for (int i = 0; i < data.size(); ++i) {
+        new_data[i] = *static_cast<const milvus::TIMESTAMP*>(new_payload->RawValue(i));
+    }
+    ASSERT_EQ(data, new_data);
+}
+
+TEST(storage, InsertDataTIMESTAMPNullable) {
+    FixedVector<milvus::TIMESTAMP> data = {milvus::TIMESTAMP(1),
+                                           milvus::TIMESTAMP(2),
+                                           milvus::TIMESTAMP(3),
+                                           milvus::TIMESTAMP(4),
+                                           milvus::TIMESTAMP(5)};
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::TIMESTAMP, true);
+    uint8_t* valid_data = new uint8_t[1]{0x01};
+    field_data->FillFieldData(data.data(), valid_data, data.size());
+
+    storage::InsertData insert_data(field_data);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+    ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
+    ASSERT_EQ(new_insert_data->GetTimeRage(),
+              std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
+    auto new_payload = new_insert_data->GetFieldData();
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::TIMESTAMP);
+    ASSERT_EQ(new_payload->get_num_rows(), data.size());
+    ASSERT_EQ(new_payload->get_null_count(), 1);
     ASSERT_EQ(*new_payload->ValidData(), *valid_data);
     delete[] valid_data;
 }

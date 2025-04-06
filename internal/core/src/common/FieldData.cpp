@@ -213,6 +213,18 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             }
             return FillFieldData(values.data(), element_count);
         }
+        case DataType::TIMESTAMP: {
+            AssertInfo(array->type()->id() == arrow::Type::type::TIMESTAMP,
+                       "inconsistent data type for TIMESTAMP");
+            // Get raw pointer to timestamp data (which are int64_t values)
+            // We use arrow::TimestampArray with the TIMESTAMP type.
+            auto array_info = GetDataInfoFromArray<arrow::TimestampArray,
+                                                   arrow::Type::type::TIMESTAMP>(array);
+            if (nullable_) {
+                return FillFieldData(array_info.first, array->null_bitmap_data(), element_count);
+            }
+            return FillFieldData(array_info.first, array_info.second);
+        }
         case DataType::ARRAY: {
             auto array_array =
                 std::dynamic_pointer_cast<arrow::BinaryArray>(array);
@@ -438,6 +450,9 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
                 type, nullable, cap_rows);
         case DataType::JSON:
             return std::make_shared<FieldData<Json>>(type, nullable, cap_rows);
+        case DataType::TIMESTAMP:
+            return std::make_shared<FieldData<TIMESTAMP>>(
+                type, nullable, cap_rows);
         default:
             PanicInfo(DataTypeInvalid,
                       "InitScalarFieldData not support data type " +

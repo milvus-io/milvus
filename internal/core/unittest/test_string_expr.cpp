@@ -1609,7 +1609,7 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
     SetTargetEntry(plan_proto, {str_meta.get_id().get()});
     auto plan = ProtoParser(*schema).CreateRetrievePlan(*plan_proto);
 
-    Timestamp time = MAX_TIMESTAMP;
+    milvus::Timestamp time = MAX_TIMESTAMP;
 
     auto retrieved = segment->Retrieve(
         nullptr, plan.get(), time, DEFAULT_MAX_OUTPUT_SIZE, false);
@@ -1652,7 +1652,7 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFieldsNullable) {
     SetTargetEntry(plan_proto, {str_meta.get_id().get()});
     auto plan = ProtoParser(*schema).CreateRetrievePlan(*plan_proto);
 
-    Timestamp time = MAX_TIMESTAMP;
+    milvus::Timestamp time = MAX_TIMESTAMP;
 
     auto retrieved = segment->Retrieve(
         nullptr, plan.get(), time, DEFAULT_MAX_OUTPUT_SIZE, false);

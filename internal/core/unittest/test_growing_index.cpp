@@ -179,7 +179,7 @@ TEST_P(GrowingIndexTest, Correctness) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-        Timestamp timestamp = 1000000;
+        milvus::Timestamp timestamp = 1000000;
         auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
         EXPECT_EQ(sr->total_nq_, num_queries);
         EXPECT_EQ(sr->unity_topK_, top_k);
