@@ -48,7 +48,7 @@ class JsonInvertedIndexParseErrorRecorder {
         }
         for (const auto& [error_code, stats] : error_map_) {
             LOG_INFO("Error code: {}, count: {}, first instance: {}",
-                     error_code,
+                     error_message(error_code),
                      stats.count,
                      stats.first_instance.json_str);
         }
