@@ -66,4 +66,26 @@ class ThreadPools {
 
 }  // namespace milvus
 
+template <>
+struct fmt::formatter<milvus::ThreadPoolPriority> : formatter<std::string> {
+    auto
+    format(milvus::ThreadPoolPriority priority, format_context& ctx) const {
+        std::string name;
+        switch (priority) {
+            case milvus::HIGH:
+                name = "HIGH";
+                break;
+            case milvus::MIDDLE:
+                name = "MIDDLE";
+                break;
+            case milvus::LOW:
+                name = "LOW";
+                break;
+            default:
+                name = "UNKNOWN";
+        }
+        return formatter<std::string>::format(name, ctx);
+    }
+};
+
 #endif  //MILVUS_THREADPOOLS_H

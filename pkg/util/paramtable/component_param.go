@@ -5039,52 +5039,6 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.BuildParallel.Init(base.mgr)
-
-	p.EnableDisk = ParamItem{
-		Key:          "indexNode.enableDisk",
-		Version:      "2.2.0",
-		DefaultValue: "false",
-		PanicIfEmpty: true,
-		Doc:          "enable build disk vector index",
-		Export:       true,
-	}
-	p.EnableDisk.Init(base.mgr)
-
-	p.DiskCapacityLimit = ParamItem{
-		Key:     "LOCAL_STORAGE_SIZE",
-		Version: "2.2.0",
-		Formatter: func(v string) string {
-			if len(v) == 0 {
-				// use local storage path to check correct device
-				localStoragePath := base.Get("localStorage.path")
-				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
-					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
-						log.Fatal("failed to mkdir", zap.String("localStoragePath", localStoragePath), zap.Error(err))
-					}
-				}
-				diskUsage, err := disk.Usage(localStoragePath)
-				if err != nil {
-					log.Fatal("failed to get disk usage", zap.String("localStoragePath", localStoragePath), zap.Error(err))
-				}
-				return strconv.FormatUint(diskUsage.Total, 10)
-			}
-			diskSize := getAsInt64(v)
-			return strconv.FormatInt(diskSize*1024*1024*1024, 10)
-		},
-	}
-	p.DiskCapacityLimit.Init(base.mgr)
-
-	p.MaxDiskUsagePercentage = ParamItem{
-		Key:          "indexNode.maxDiskUsagePercentage",
-		Version:      "2.2.0",
-		DefaultValue: "95",
-		PanicIfEmpty: true,
-		Formatter: func(v string) string {
-			return fmt.Sprintf("%f", getAsFloat(v)/100)
-		},
-		Export: true,
-	}
-	p.MaxDiskUsagePercentage.Init(base.mgr)
 }
 
 type streamingConfig struct {
