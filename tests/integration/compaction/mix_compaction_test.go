@@ -127,10 +127,6 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 		s.True(len(segments) > 0)
 
 		for _, segment := range segments {
-			segment.String()
-		}
-
-		for _, segment := range segments {
 			log.Info("show segment result", zap.Any("segment", segment))
 		}
 	}
