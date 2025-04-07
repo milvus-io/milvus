@@ -63,7 +63,7 @@ func (s *MetaWatcherSuite) TestShowSegments() {
 
 	constructCollectionSchema := func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -73,7 +73,7 @@ func (s *MetaWatcherSuite) TestShowSegments() {
 			AutoID:       true,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         floatVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -166,7 +166,7 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 
 	constructCollectionSchema := func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -176,7 +176,7 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 			AutoID:       true,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         floatVecField,
 			IsPrimaryKey: false,
 			Description:  "",

@@ -36,6 +36,13 @@ func TestCheckPartitionsEqual(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			args: args{
+				partitionsA: []*Partition{{PartitionName: "not_default"}, {PartitionName: "_default"}},
+				partitionsB: []*Partition{{PartitionName: "_default"}, {PartitionName: "not_default"}},
+			},
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

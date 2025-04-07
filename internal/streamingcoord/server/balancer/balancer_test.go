@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_manager"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	_ "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/policy"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -33,6 +34,8 @@ func TestBalancer(t *testing.T) {
 
 	etcdClient, err := etcd.GetEmbedEtcdClient()
 	assert.NoError(t, err)
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
 
 	streamingNodeManager := mock_manager.NewMockManagerClient(t)
 	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
@@ -114,7 +117,7 @@ func TestBalancer(t *testing.T) {
 	resource.Resource().ETCD().Put(context.Background(), dataNodePath, string(data))
 
 	ctx := context.Background()
-	b, err := balancer.RecoverBalancer(ctx, "pchannel_count_fair")
+	b, err := balancer.RecoverBalancer(ctx)
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
 

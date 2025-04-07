@@ -55,7 +55,7 @@ func (s *JSONExprSuite) TestJsonEnableDynamicSchema() {
 
 	constructCollectionSchema := func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         integration.Int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -65,7 +65,7 @@ func (s *JSONExprSuite) TestJsonEnableDynamicSchema() {
 			AutoID:       true,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         integration.FloatVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -138,7 +138,7 @@ func (s *JSONExprSuite) TestJSON_InsertWithoutDynamicData() {
 
 	constructCollectionSchema := func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         integration.Int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -148,7 +148,7 @@ func (s *JSONExprSuite) TestJSON_InsertWithoutDynamicData() {
 			AutoID:       true,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         integration.FloatVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -228,7 +228,7 @@ func (s *JSONExprSuite) TestJSON_DynamicSchemaWithJSON() {
 
 	constructCollectionSchema := func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         integration.Int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -238,7 +238,7 @@ func (s *JSONExprSuite) TestJSON_DynamicSchemaWithJSON() {
 			AutoID:       true,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         integration.FloatVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -920,7 +920,7 @@ func (s *JSONExprSuite) TestJsonWithEscapeString() {
 
 	constructCollectionSchema := func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         integration.Int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -930,7 +930,7 @@ func (s *JSONExprSuite) TestJsonWithEscapeString() {
 			AutoID:       true,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         integration.FloatVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -1039,7 +1039,7 @@ func (s *JSONExprSuite) TestJsonContains() {
 
 	constructCollectionSchema := func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         integration.Int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -1049,7 +1049,7 @@ func (s *JSONExprSuite) TestJsonContains() {
 			AutoID:       true,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         integration.FloatVecField,
 			IsPrimaryKey: false,
 			Description:  "",

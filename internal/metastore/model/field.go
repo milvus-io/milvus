@@ -85,9 +85,13 @@ func CheckFieldsEqual(fieldsA, fieldsB []*Field) bool {
 	if len(fieldsA) != len(fieldsB) {
 		return false
 	}
-	l := len(fieldsA)
-	for i := 0; i < l; i++ {
-		if !fieldsA[i].Equal(*fieldsB[i]) {
+	mapA := make(map[int64]*Field)
+	for _, f := range fieldsA {
+		mapA[f.FieldID] = f
+	}
+
+	for _, f := range fieldsB {
+		if other, exists := mapA[f.FieldID]; !exists || !f.Equal(*other) {
 			return false
 		}
 	}
