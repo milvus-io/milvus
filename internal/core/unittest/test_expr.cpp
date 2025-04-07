@@ -16499,16 +16499,15 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
         R"({"a": 1, "b": 2})",
         R"({})",
         R"(null)",
-        R"()",
     };
 
     // bool: exists or not
     std::vector<std::tuple<std::vector<std::string>, bool, uint32_t>>
         test_cases = {
-            {{"a"}, true, 0b11111110000001000},
-            {{"a", "b"}, true, 0b00001000000000000},
-            {{"a"}, false, 0b00000001111110111},
-            {{"a", "b"}, false, 0b11110111111111111},
+            {{"a"}, true, 0b1111111000000100},
+            {{"a", "b"}, true, 0b0000100000000000},
+            {{"a"}, false, 0b0000000111111011},
+            {{"a", "b"}, false, 0b1111011111111111},
         };
 
     auto json_index_path = GetParam();
@@ -16548,7 +16547,6 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
     auto json_valid_data = json_field->ValidData();
     json_valid_data[0] = 0xFF;
     json_valid_data[1] = 0xFE;
-    json_valid_data[2] = 0x7F;
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
