@@ -450,14 +450,15 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		}
 
 		buildIndexParams := &indexcgopb.BuildIndexInfo{
-			BuildID:       taskID,
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			SegmentID:     segmentID,
-			IndexVersion:  version,
-			InsertFiles:   files,
-			FieldSchema:   field,
-			StorageConfig: newStorageConfig,
+			BuildID:             taskID,
+			CollectionID:        collectionID,
+			PartitionID:         partitionID,
+			SegmentID:           segmentID,
+			IndexVersion:        version,
+			InsertFiles:         files,
+			FieldSchema:         field,
+			StorageConfig:       newStorageConfig,
+			CurrentIndexVersion: st.req.GetCurrentScalarIndexVersion(),
 		}
 
 		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)

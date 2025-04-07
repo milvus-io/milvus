@@ -179,6 +179,11 @@ CreateIndex(CIndex* res_index,
             build_index_info->current_scalar_index_version();
         config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
             scalar_index_engine_version;
+        auto tantivy_index_version =
+            scalar_index_engine_version <= 1
+                ? 5
+                : milvus::index::TANTIVY_INDEX_LATEST_VERSION;
+        config[milvus::index::TANTIVY_INDEX_VERSION] = tantivy_index_version;
 
         // init file manager
         milvus::storage::FieldDataMeta field_meta{
@@ -343,10 +348,15 @@ BuildTextIndex(ProtoLayoutInterface result,
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager);
 
-        uint32_t tantivy_index_version =
-            milvus::index::GetValueFromConfig<int32_t>(
-                config, milvus::index::TANTIVY_INDEX_VERSION)
-                .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
+        auto scalar_index_engine_version =
+            build_index_info->current_scalar_index_version();
+        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
+            scalar_index_engine_version;
+        auto tantivy_index_version =
+            scalar_index_engine_version <= 1
+                ? 5
+                : milvus::index::TANTIVY_INDEX_LATEST_VERSION;
+        config[milvus::index::TANTIVY_INDEX_VERSION] = tantivy_index_version;
 
         auto field_schema =
             FieldMeta::ParseFrom(build_index_info->field_schema());
