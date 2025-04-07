@@ -12,6 +12,7 @@ use crate::vec_collector::VecCollector;
 
 use crate::error::{Result, TantivyBindingError};
 
+#[allow(dead_code)]
 pub(crate) struct IndexReaderWrapper {
     pub(crate) field_name: String,
     pub(crate) field: Field,
@@ -288,8 +289,8 @@ mod test {
 
     use tantivy::{
         doc,
-        schema::{self, Schema, STORED, STRING, TEXT},
-        Index, IndexWriter,
+        schema::{Schema, STORED, STRING},
+        Index,
     };
 
     use super::IndexReaderWrapper;

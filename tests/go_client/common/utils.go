@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 var (
@@ -61,10 +61,14 @@ func GenInvalidNames() []string {
 		"   ",
 		"(mn)",
 		"中文",
+		"シャオミン",
+		"샤오밍",
+		"ಸೂರ್ಯ",
 		"%$#",
 		"1",
 		"[10]",
 		"a  b",
+		"user@name",
 		DefaultDynamicFieldName,
 		GenLongString(MaxCollectionNameLen + 1),
 	}
@@ -207,7 +211,12 @@ func GenText(lang string) string {
 		object = chineseObjects[rand.Intn(len(chineseObjects))]
 		return fmt.Sprintf("%s%s%s", topic, verb, object)
 	default:
-		return "Unsupported language"
+		// Fallback to en for unsupported languages
+		log.Warn("Unsupported language, fallback to English", zap.String("language", lang))
+		topic = englishTopics[rand.Intn(len(englishTopics))]
+		verb = englishVerbs[rand.Intn(len(englishVerbs))]
+		object = englishObjects[rand.Intn(len(englishObjects))]
+		return fmt.Sprintf("%s %s %s", topic, verb, object)
 	}
 }
 

@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -272,16 +273,9 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	defer func() {
 		if err != nil {
 			node.delegators.GetAndRemove(channel.GetChannelName())
+			delegator.Close()
 		}
 	}()
-
-	// create tSafe
-	// node.tSafeManager.Add(ctx, channel.ChannelName, channel.GetSeekPosition().GetTimestamp())
-	// defer func() {
-	// 	if err != nil {
-	// 		node.tSafeManager.Remove(ctx, channel.ChannelName)
-	// 	}
-	// }()
 
 	pipeline, err := node.pipelineManager.Add(req.GetCollectionID(), channel.GetChannelName())
 	if err != nil {
@@ -306,9 +300,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 			// remove legacy growing
 			node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel.GetChannelName()),
 				segments.WithType(segments.SegmentTypeGrowing))
-			// remove legacy l0 segments
-			node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel.GetChannelName()),
-				segments.WithLevel(datapb.SegmentLevel_L0))
 		}
 	}()
 
@@ -366,15 +357,13 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	defer node.unsubscribingChannels.Remove(req.GetChannelName())
 	delegator, ok := node.delegators.GetAndRemove(req.GetChannelName())
 	if ok {
+		node.pipelineManager.Remove(req.GetChannelName())
+
 		// close the delegator first to block all coming query/search requests
 		delegator.Close()
 
-		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
-		_, sealed := node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
-		// node.tSafeManager.Remove(ctx, req.GetChannelName())
-
-		node.manager.Collection.Unref(req.GetCollectionID(), uint32(1+sealed))
+		node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
 	log.Info("unsubscribed channel")
 
@@ -704,13 +693,16 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	tr := timerecord.NewTimeRecorder("searchSegments")
 	log.Debug("search segments...")
 
-	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
-	if collection == nil {
+	if !node.manager.Collection.Ref(req.Req.GetCollectionID(), 1) {
 		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
 		log.Warn("failed to search segments", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	defer func() {
+		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
+	}()
 
 	var task scheduler.Task
 	if paramtable.Get().QueryNodeCfg.UseStreamComputing.GetAsBool() {
@@ -853,11 +845,16 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	defer cancel()
 
 	tr := timerecord.NewTimeRecorder("querySegments")
-	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
-	if collection == nil {
-		resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.Req.GetCollectionID()))
+	if !node.manager.Collection.Ref(req.Req.GetCollectionID(), 1) {
+		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
+		log.Warn("failed to query segments", zap.Error(err))
+		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	defer func() {
+		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
+	}()
 
 	// Send task to scheduler and wait until it finished.
 	task := tasks.NewQueryTask(queryCtx, collection, node.manager, req)
@@ -1307,7 +1304,11 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				})
 			})
 		case querypb.SyncType_UpdateVersion:
-			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()), zap.Int64s("partitions", req.GetLoadMeta().GetPartitionIDs()))
+			log.Info("sync action",
+				zap.Int64("TargetVersion", action.GetTargetVersion()),
+				zap.Time("checkPoint", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())),
+				zap.Time("deleteCP", tsoutil.PhysicalTime(action.GetDeleteCP().GetTimestamp())),
+				zap.Int64s("partitions", req.GetLoadMeta().GetPartitionIDs()))
 			droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
 				if action.GetCheckpoint() == nil {
 					return id, typeutil.MaxTimestamp
@@ -1322,8 +1323,16 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				return id, action.GetCheckpoint().Timestamp
 			})
 			shardDelegator.AddExcludedSegments(flushedInfo)
+			deleteCP := action.GetDeleteCP()
+			if deleteCP == nil {
+				// for compatible with 2.4, we use checkpoint as deleteCP when deleteCP is nil
+				deleteCP = action.GetCheckpoint()
+				log.Info("use checkpoint as deleteCP",
+					zap.String("channelName", req.GetChannel()),
+					zap.Time("deleteSeekPos", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())))
+			}
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), req.GetLoadMeta().GetPartitionIDs(), action.GetGrowingInTarget(),
-				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
+				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint(), deleteCP)
 		case querypb.SyncType_UpdatePartitionStats:
 			log.Info("sync update partition stats versions")
 			shardDelegator.SyncPartitionStats(ctx, action.PartitionStatsVersions)
@@ -1388,8 +1397,17 @@ func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (
 	}
 
 	pks := storage.ParseIDs2PrimaryKeysBatch(req.GetPrimaryKeys())
+	var err error
 	for _, segment := range segments {
-		err := segment.Delete(ctx, pks, req.GetTimestamps())
+		if req.GetUseLoad() {
+			var dd *storage.DeltaData
+			dd, err = storage.NewDeltaDataWithData(pks, req.GetTimestamps())
+			if err == nil {
+				err = segment.LoadDeltaData(ctx, dd)
+			}
+		} else {
+			err = segment.Delete(ctx, pks, req.GetTimestamps())
+		}
 		if err != nil {
 			log.Warn("segment delete failed", zap.Error(err))
 			return merr.Status(err), nil

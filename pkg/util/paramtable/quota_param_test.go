@@ -37,6 +37,24 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, defaultMax, qc.DDLPartitionRate.GetAsFloat())
 	})
 
+	t.Run("test deny all ddl", func(t *testing.T) {
+		params.Init(NewBaseTable(SkipRemote(true)))
+		qc := &params.QuotaConfig
+		assert.Equal(t, false, qc.ForceDenyAllDDL.GetAsBool())
+		params.Save(params.QuotaConfig.ForceDenyAllDDL.Key, "true")
+		defer params.Reset(params.QuotaConfig.ForceDenyAllDDL.Key)
+		assert.Equal(t, true, qc.ForceDenyAllDDL.GetAsBool())
+		assert.EqualValues(t, 0, qc.DDLCollectionRate.GetAsFloat())
+		assert.EqualValues(t, 0, qc.DDLCollectionRatePerDB.GetAsFloat())
+		assert.EqualValues(t, 0, qc.DDLPartitionRate.GetAsFloat())
+		assert.EqualValues(t, 0, qc.DDLPartitionRatePerDB.GetAsFloat())
+		assert.EqualValues(t, 0, qc.MaxIndexRate.GetAsFloat())
+		assert.EqualValues(t, 0, qc.MaxIndexRatePerDB.GetAsFloat())
+		assert.EqualValues(t, 0, qc.MaxCompactionRate.GetAsFloat())
+		assert.EqualValues(t, 0, qc.MaxCompactionRatePerDB.GetAsFloat())
+		assert.EqualValues(t, 0, qc.MaxDBRate.GetAsFloat())
+	})
+
 	t.Run("test functional params", func(t *testing.T) {
 		assert.Equal(t, false, qc.IndexLimitEnabled.GetAsBool())
 		assert.Equal(t, defaultMax, qc.MaxIndexRate.GetAsFloat())

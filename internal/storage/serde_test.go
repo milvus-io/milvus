@@ -21,9 +21,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -131,11 +131,10 @@ func BenchmarkDeserializeReader(b *testing.B) {
 		assert.NoError(b, err)
 		defer reader.Close()
 		for i := 0; i < len; i++ {
-			err = reader.Next()
-			_ = reader.Value()
+			_, err = reader.NextValue()
 			assert.NoError(b, err)
 		}
-		err = reader.Next()
+		_, err = reader.NextValue()
 		assert.Equal(b, io.EOF, err)
 	}
 }
@@ -166,7 +165,7 @@ func TestCalculateArraySize(t *testing.T) {
 	tests := []struct {
 		name         string
 		arrayBuilder func() arrow.Array
-		expectedSize int
+		expectedSize uint64
 	}{
 		{
 			name: "Empty array",
@@ -185,7 +184,7 @@ func TestCalculateArraySize(t *testing.T) {
 				b.AppendValues([]int32{1, 2, 3, 4}, nil)
 				return b.NewArray()
 			},
-			expectedSize: 17, // 4 elements * 4 bytes + bitmap(1bytes)
+			expectedSize: 20, // 4 elements * 4 bytes + bitmap(4bytes)
 		},
 		{
 			name: "Variable-length string array",
@@ -195,7 +194,9 @@ func TestCalculateArraySize(t *testing.T) {
 				b.AppendValues([]string{"hello", "world"}, nil)
 				return b.NewArray()
 			},
-			expectedSize: 11, // "hello" (5 bytes) + "world" (5 bytes) + bitmap(1bytes)
+			expectedSize: 23, // bytes: "hello" (5 bytes) + "world" (5 bytes)
+			// offsets: 2+1 elements * 4 bytes
+			// bitmap(1 byte)
 		},
 		{
 			name: "Nested list array",
@@ -215,7 +216,9 @@ func TestCalculateArraySize(t *testing.T) {
 
 				return b.NewArray()
 			},
-			expectedSize: 21, // 3 + 2 elements in data buffer, plus bitmap(1bytes)
+			expectedSize: 44, // child buffer: 5 elements * 4 bytes, plus bitmap (4bytes)
+			// offsets: 3+1 elements * 4 bytes
+			// bitmap(4 bytes)
 		},
 	}
 
@@ -224,32 +227,10 @@ func TestCalculateArraySize(t *testing.T) {
 			arr := tt.arrayBuilder()
 			defer arr.Release()
 
-			size := calculateArraySize(arr)
+			size := arr.Data().SizeInBytes()
 			if size != tt.expectedSize {
 				t.Errorf("Expected size %d, got %d", tt.expectedSize, size)
 			}
 		})
-	}
-}
-
-func TestCalculateArraySizeWithOffset(t *testing.T) {
-	mem := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer mem.AssertSize(t, 0)
-
-	b := array.NewStringBuilder(mem)
-	defer b.Release()
-
-	b.AppendValues([]string{"zero", "one", "two", "three", "four"}, nil)
-	fullArray := b.NewArray()
-	defer fullArray.Release()
-
-	slicedArray := array.NewSlice(fullArray, 1, 4) // Offset = 1, End = 4
-	defer slicedArray.Release()
-
-	size := calculateArraySize(slicedArray)
-	expectedSize := len("one") + len("two") + len("three") + 1 // "one", "two", "three", bitmap(1 bytes)
-
-	if size != expectedSize {
-		t.Errorf("Expected size %d, got %d", expectedSize, size)
 	}
 }

@@ -2805,7 +2805,8 @@ class TestLoadCollection(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         error = {ct.err_code: 999,
-                 ct.err_msg: "failed to spawn replica for collection: resource group node not enough"}
+                 ct.err_msg: "call query coordinator LoadCollection: when load 3 replica count: service resource "
+                             "insufficient[currentStreamingNode=2][expectedStreamingNode=3]"}
         collection_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.ClusterOnly)
@@ -2835,20 +2836,17 @@ class TestLoadCollection(TestcaseBase):
         assert loading_progress == {'loading_progress': '100%'}
 
         # verify load different replicas thrown an exception
-        error = {ct.err_code: 1100, ct.err_msg: "call query coordinator LoadCollection: when load "
-                                                "2 replica count: service resource insufficient"
-                                                "[currentStreamingNode=1][expectedStreamingNode=2]"}
-        collection_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.load(replica_number=2)
         one_replica, _ = collection_w.get_replicas()
-        assert len(one_replica.groups) == 1
+        assert len(one_replica.groups) == 2
 
         collection_w.release()
-        collection_w.load(replica_number=1)
+        collection_w.load(replica_number=2)
         # replicas is not yet reflected in loading progress
         loading_progress, _ = self.utility_wrap.loading_progress(collection_w.name)
         assert loading_progress == {'loading_progress': '100%'}
         two_replicas, _ = collection_w.get_replicas()
-        assert len(two_replicas.groups) == 1
+        assert len(two_replicas.groups) == 2
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': [{'int64': 0}]})
 
@@ -2856,7 +2854,7 @@ class TestLoadCollection(TestcaseBase):
         seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
         num_entities = 0
         for seg in seg_info:
-            assert len(seg.nodeIds) == 1
+            assert len(seg.nodeIds) == 2
             num_entities += seg.num_rows
         assert num_entities == ct.default_nb
 
@@ -2864,7 +2862,7 @@ class TestLoadCollection(TestcaseBase):
     def test_load_replica_multi(self):
         """
         target: test load with multiple replicas
-        method: 1.create collection with one shards
+        method: 1.create collection with one shard
                 2.insert multiple segments
                 3.load with multiple replicas
                 4.query and search
@@ -2873,7 +2871,7 @@ class TestLoadCollection(TestcaseBase):
         # create, insert
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=1)
         tmp_nb = 1000
-        replica_number = 1  # only 1 streaming node
+        replica_number = 2
         for i in range(replica_number):
             df = cf.gen_default_dataframe_data(nb=tmp_nb, start=i * tmp_nb)
             insert_res, _ = collection_w.insert(df)
@@ -2912,9 +2910,9 @@ class TestLoadCollection(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb * 2
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
-        collection_w.load([partition_w.name], replica_number=1)  # only 1 StreamingNode
+        collection_w.load([partition_w.name], replica_number=2)
         for seg in self.utility_wrap.get_query_segment_info(collection_w.name)[0]:
-            assert len(seg.nodeIds) == 1
+            assert len(seg.nodeIds) == 2
         # default tag query 0 empty
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", partition_names=[ct.default_tag],
                            check_tasks=CheckTasks.check_query_empty)
@@ -3134,16 +3132,21 @@ class TestDescribeCollection(TestcaseBase):
         description = \
             {'collection_name': c_name, 'auto_id': False, 'num_shards': ct.default_shards_num, 'description': '',
              'fields': [
-                 {'field_id': 100, 'name': 'int64', 'description': '', 'type': 5, 'params': {}, 'is_primary': True},
-                 {'field_id': 101, 'name': 'float', 'description': '', 'type': 10, 'params': {}},
-                 {'field_id': 102, 'name': 'varchar', 'description': '', 'type': 21, 'params': {'max_length': 65535}},
-                 {'field_id': 103, 'name': 'json_field', 'description': '', 'type': 23, 'params': {}},
-                 {'field_id': 104, 'name': 'float_vector', 'description': '', 'type': 101, 'params': {'dim': 128}}
+                 {'field_id': 100, 'name': 'int64', 'description': '', 'type': DataType.INT64, 'params': {},
+                  'is_primary': True},
+                 {'field_id': 101, 'name': 'float', 'description': '', 'type': DataType.FLOAT, 'params': {}},
+                 {'field_id': 102, 'name': 'varchar', 'description': '', 'type': DataType.VARCHAR,
+                  'params': {'max_length': 65535}},
+                 {'field_id': 103, 'name': 'json_field', 'description': '', 'type': DataType.JSON, 'params': {}},
+                 {'field_id': 104, 'name': 'float_vector', 'description': '', 'type': DataType.FLOAT_VECTOR,
+                  'params': {'dim': 128}}
              ],
              'functions': [], 'aliases': [], 'consistency_level': 0, 'properties': {},
              'num_partitions': 1, 'enable_dynamic_field': False}
         res = collection_w.describe()[0]
+        assert isinstance(res['collection_id'], int) and isinstance(res['created_timestamp'], int)
         del res['collection_id']
+        del res['created_timestamp']
         log.info(res)
         assert description == res
 
@@ -3251,14 +3254,6 @@ class TestLoadPartition(TestcaseBase):
       The following cases are used to test `load_collection` function
     ******************************************************************
     """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        return request.param
-
     @pytest.fixture(
         scope="function",
         params=gen_binary_index()
@@ -3813,7 +3808,7 @@ class TestLoadPartition(TestcaseBase):
 class TestCollectionString(TestcaseBase):
     """
     ******************************************************************
-      The following cases are used to test about string 
+      The following cases are used to test about string
     ******************************************************************
     """
 
@@ -3903,7 +3898,7 @@ class TestCollectionString(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_string_field_is_primary_and_auto_id(self):
         """
-        target: test create collection with string field 
+        target: test create collection with string field
         method: create collection with string field, the string field primary and auto id are true
         expected: Create collection successfully
         """
@@ -3979,7 +3974,7 @@ class TestCollectionJSON(TestcaseBase):
         self.collection_wrap.init_collection(name=c_name, schema=schema,
                                              check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
-        
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
     def test_collection_multiple_json_fields_supported_primary_key(self, primary_field):
@@ -4764,4 +4759,35 @@ class TestCollectionDefaultValueValid(TestcaseBase):
         schema = cf.gen_collection_schema(fields=int_fields)
         self.collection_wrap.init_collection(c_name, schema=schema)
         self.collection_wrap.init_collection(c_name, schema=schema)
-        
+
+
+class TestCollectionInvalidFieldName(TestcaseBase):
+    """Test cases for collection creation with invalid field names"""
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("keyword", [
+        "$meta", "like", "exists", "EXISTS", "and", "or", "not", "in",
+        "json_contains", "JSON_CONTAINS", "json_contains_all", "JSON_CONTAINS_ALL",
+        "json_contains_any", "JSON_CONTAINS_ANY", "array_contains", "ARRAY_CONTAINS",
+        "array_contains_all", "ARRAY_CONTAINS_ALL", "array_contains_any", "ARRAY_CONTAINS_ANY",
+        "array_length", "ARRAY_LENGTH", "true", "True", "TRUE", "false", "False", "FALSE",
+        "text_match", "TEXT_MATCH", "phrase_match", "PHRASE_MATCH", "random_sample", "RANDOM_SAMPLE"
+    ])
+    def test_collection_field_name_with_keywords(self, keyword):
+        """
+        target: test collection creation with field name using Milvus keywords
+        method: create collection with field name using reserved keywords
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        fields = [
+            cf.gen_int64_field(is_primary=True),
+            cf.gen_float_vec_field(name=keyword)
+        ]
+        schema = cf.gen_collection_schema(fields=fields)
+        error = {ct.err_code: 1701, ct.err_msg: f"Invalid field name: {keyword}"}
+        self.collection_wrap.init_collection(c_name, schema=schema,
+                                           check_task=CheckTasks.err_res,
+                                           check_items=error)
+    

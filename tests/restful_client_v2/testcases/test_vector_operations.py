@@ -2429,6 +2429,7 @@ class TestSearchVector(TestBase):
                 {"collectionName": name, "data": vector_to_search, "filter": f"{expr}", "outputFields": ["*"]})
             assert rsp['code'] == 0, rsp
             for d in rsp['data']:
+                d[field] = re.sub(r'[^\w\s]','', d[field])
                 assert phrase in d[field]
             assert len(rsp['data']) >= target_data_len * len(vector_to_search)
 

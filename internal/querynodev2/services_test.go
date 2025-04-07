@@ -311,11 +311,11 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 	}
 
 	// mocks
-	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil)
-	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil)
-	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	suite.msgStream.EXPECT().Chan().Return(suite.msgChan)
-	suite.msgStream.EXPECT().Close()
+	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil).Maybe()
+	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil).Maybe()
+	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	suite.msgStream.EXPECT().Chan().Return(suite.msgChan).Maybe()
+	suite.msgStream.EXPECT().Close().Maybe()
 
 	// watchDmChannels
 	status, err := suite.node.WatchDmChannels(ctx, req)
@@ -363,11 +363,11 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 	}
 
 	// mocks
-	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil)
-	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil)
-	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	suite.msgStream.EXPECT().Chan().Return(suite.msgChan)
-	suite.msgStream.EXPECT().Close()
+	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil).Maybe()
+	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil).Maybe()
+	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	suite.msgStream.EXPECT().Chan().Return(suite.msgChan).Maybe()
+	suite.msgStream.EXPECT().Close().Maybe()
 
 	// watchDmChannels
 	status, err := suite.node.WatchDmChannels(ctx, req)
@@ -498,16 +498,6 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	suite.ErrorIs(merr.Error(status), merr.ErrChannelReduplicate)
 	suite.node.unsubscribingChannels.Remove(suite.vchannel)
 
-	// init msgstream failed
-	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil)
-	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil)
-	suite.msgStream.EXPECT().Close().Return()
-	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
-
-	status, err = suite.node.WatchDmChannels(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-
 	// load growing failed
 	badSegmentReq := typeutil.Clone(req)
 	for _, info := range badSegmentReq.SegmentInfos {
@@ -543,16 +533,6 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
 	// prepate
 	suite.TestWatchDmChannelsInt64()
 
-	l0Segment := segments.NewMockSegment(suite.T())
-	l0Segment.EXPECT().ID().Return(10000)
-	l0Segment.EXPECT().Collection().Return(suite.collectionID)
-	l0Segment.EXPECT().Level().Return(datapb.SegmentLevel_L0)
-	l0Segment.EXPECT().Type().Return(commonpb.SegmentState_Sealed)
-	l0Segment.EXPECT().Shard().Return(suite.channel)
-	l0Segment.EXPECT().Release(ctx).Return()
-
-	suite.node.manager.Segment.Put(ctx, segments.SegmentTypeSealed, l0Segment)
-
 	// data
 	req := &querypb.UnsubDmChannelRequest{
 		Base: &commonpb.MsgBase{
@@ -567,10 +547,6 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
 
 	status, err := suite.node.UnsubDmChannel(ctx, req)
 	suite.NoError(merr.CheckRPCCall(status, err))
-
-	suite.Len(suite.node.manager.Segment.GetBy(
-		segments.WithChannel(suite.vchannel),
-		segments.WithLevel(datapb.SegmentLevel_L0)), 0)
 }
 
 func (suite *ServiceSuite) TestUnsubDmChannels_Failed() {
@@ -1417,7 +1393,7 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 
 	syncVersionAction := &querypb.SyncAction{
 		Type:           querypb.SyncType_UpdateVersion,
-		SealedInTarget: []int64{1, 2, 3, 4},
+		SealedInTarget: []int64{1, 2, 3},
 		TargetVersion:  time.Now().UnixMilli(),
 	}
 
@@ -2134,7 +2110,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	suite.True(ok)
 	sealedSegments, _ := delegator.GetSegmentInfo(false)
 	// 1 level 0 + 3 sealed segments
-	suite.Len(sealedSegments[0].Segments, 4)
+	suite.Len(sealedSegments[0].Segments, 3)
 
 	// data
 	req := &querypb.SyncDistributionRequest{
@@ -2158,7 +2134,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 	sealedSegments, _ = delegator.GetSegmentInfo(false)
-	suite.Len(sealedSegments[0].Segments, 3)
+	suite.Len(sealedSegments[0].Segments, 2)
 
 	releaseAction = &querypb.SyncAction{
 		Type:      querypb.SyncType_Remove,
@@ -2172,7 +2148,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 	sealedSegments, _ = delegator.GetSegmentInfo(false)
-	suite.Len(sealedSegments[0].Segments, 2)
+	suite.Len(sealedSegments[0].Segments, 1)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_Failed() {
@@ -2229,6 +2205,38 @@ func (suite *ServiceSuite) TestDelete_Int64() {
 	status, err := suite.node.Delete(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+}
+
+func (suite *ServiceSuite) TestDelete_Int64_UseLoad() {
+	ctx := context.Background()
+	// prepare
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+	// data
+	req := &querypb.DeleteRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionId: suite.collectionID,
+		PartitionId:  suite.partitionIDs[0],
+		SegmentId:    suite.validSegmentIDs[0],
+		VchannelName: suite.vchannel,
+		Timestamps:   []uint64{0},
+		Scope:        querypb.DataScope_Historical,
+		UseLoad:      true,
+	}
+
+	// type int
+	req.PrimaryKeys = &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: []int64{111},
+			},
+		},
+	}
+	status, err := suite.node.Delete(ctx, req)
+	suite.NoError(merr.CheckRPCCall(status, err))
 }
 
 func (suite *ServiceSuite) TestDelete_VarChar() {

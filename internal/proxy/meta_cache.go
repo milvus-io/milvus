@@ -361,7 +361,7 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 
 	// The privilege info is a little more. And to get this info, the query operation of involving multiple table queries is required.
 	resp, err := rootCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
-	if err != nil {
+	if err = merr.CheckRPCCall(resp, err); err != nil {
 		log.Error("fail to init meta cache", zap.Error(err))
 		return err
 	}
@@ -860,7 +860,10 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 	if dbOk {
 		delete(m.collInfo[database], collectionName)
 	}
-	log.Ctx(ctx).Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
+	if database == "" {
+		delete(m.collInfo[defaultDB], collectionName)
+	}
+	log.Ctx(ctx).Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName), zap.Bool("dbok", dbOk))
 }
 
 func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string {

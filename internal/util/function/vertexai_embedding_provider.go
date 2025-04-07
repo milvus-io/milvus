@@ -30,24 +30,40 @@ import (
 )
 
 type vertexAIJsonKey struct {
-	jsonKey []byte
-	once    sync.Once
-	initErr error
+	mu       sync.Mutex
+	filePath string
+	jsonKey  []byte
 }
 
 var vtxKey vertexAIJsonKey
 
-func getVertexAIJsonKey() ([]byte, error) {
-	vtxKey.once.Do(func() {
-		jsonKeyPath := os.Getenv(vertexServiceAccountJSONEnv)
-		jsonKey, err := os.ReadFile(jsonKeyPath)
-		if err != nil {
-			vtxKey.initErr = fmt.Errorf("Read service account json file failed, %v", err)
-			return
-		}
-		vtxKey.jsonKey = jsonKey
-	})
-	return vtxKey.jsonKey, vtxKey.initErr
+func getVertexAIJsonKey(credentialsFilePath string) ([]byte, error) {
+	vtxKey.mu.Lock()
+	defer vtxKey.mu.Unlock()
+
+	var jsonKeyPath string
+	if credentialsFilePath == "" {
+		jsonKeyPath = os.Getenv(vertexServiceAccountJSONEnv)
+	} else {
+		jsonKeyPath = credentialsFilePath
+	}
+	if jsonKeyPath == "" {
+		return nil, fmt.Errorf("VetexAI credentials file path is empty")
+	}
+
+	if vtxKey.filePath == jsonKeyPath {
+		// The file path remains unchanged, using the data in the cache
+		return vtxKey.jsonKey, nil
+	}
+
+	jsonKey, err := os.ReadFile(jsonKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("Vertexai: read credentials file failed, %v", err)
+	}
+
+	vtxKey.jsonKey = jsonKey
+	vtxKey.filePath = jsonKeyPath
+	return vtxKey.jsonKey, nil
 }
 
 const (
@@ -55,16 +71,6 @@ const (
 	vertexAICodeRetrival string = "CODE_RETRIEVAL"
 	vertexAISTS          string = "STS"
 )
-
-func checkTask(modelName string, task string) error {
-	if task != vertexAIDocRetrival && task != vertexAICodeRetrival && task != vertexAISTS {
-		return fmt.Errorf("Unsupport task %s, the supported list: [%s, %s, %s]", task, vertexAIDocRetrival, vertexAICodeRetrival, vertexAISTS)
-	}
-	if modelName == textMultilingualEmbedding002 && task == vertexAICodeRetrival {
-		return fmt.Errorf("Model %s doesn't support %s task", textMultilingualEmbedding002, vertexAICodeRetrival)
-	}
-	return nil
-}
 
 type VertexAIEmbeddingProvider struct {
 	fieldDim int64
@@ -78,8 +84,8 @@ type VertexAIEmbeddingProvider struct {
 	timeoutSec int64
 }
 
-func createVertexAIEmbeddingClient(url string) (*vertexai.VertexAIEmbedding, error) {
-	jsonKey, err := getVertexAIJsonKey()
+func createVertexAIEmbeddingClient(url string, credentialsFilePath string) (*vertexai.VertexAIEmbedding, error) {
+	jsonKey, err := getVertexAIJsonKey(credentialsFilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +93,7 @@ func createVertexAIEmbeddingClient(url string) (*vertexai.VertexAIEmbedding, err
 	return c, nil
 }
 
-func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c *vertexai.VertexAIEmbedding) (*VertexAIEmbeddingProvider, error) {
+func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c *vertexai.VertexAIEmbedding, params map[string]string) (*VertexAIEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
@@ -117,22 +123,18 @@ func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 	if task == "" {
 		task = vertexAIDocRetrival
 	}
-	if err := checkTask(modelName, task); err != nil {
-		return nil, err
-	}
 
 	if location == "" {
 		location = "us-central1"
 	}
 
-	if modelName != textEmbedding005 && modelName != textMultilingualEmbedding002 {
-		return nil, fmt.Errorf("Unsupported model: %s, only support [%s, %s]",
-			modelName, textEmbedding005, textMultilingualEmbedding002)
+	url := params["url"]
+	if url == "" {
+		url = fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/google/models/%s:predict", location, projectID, location, modelName)
 	}
-	url := fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/google/models/%s:predict", location, projectID, location, modelName)
 	var client *vertexai.VertexAIEmbedding
 	if c == nil {
-		client, err = createVertexAIEmbeddingClient(url)
+		client, err = createVertexAIEmbeddingClient(url, params["credentials_file_path"])
 		if err != nil {
 			return nil, err
 		}
@@ -183,7 +185,7 @@ func (provider *VertexAIEmbeddingProvider) getTaskType(mode TextEmbeddingMode) s
 	return ""
 }
 
-func (provider *VertexAIEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) ([][]float32, error) {
+func (provider *VertexAIEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	taskType := provider.getTaskType(mode)
 	data := make([][]float32, 0, numRows)

@@ -1239,6 +1239,11 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 	return nil, errors.New("primary field is not found")
 }
 
+func IsFieldSparseFloatVector(schema *schemapb.CollectionSchema, fieldID int64) bool {
+	fieldSchema := GetField(schema, fieldID)
+	return fieldSchema != nil && IsSparseFloatVectorType(fieldSchema.DataType)
+}
+
 // GetPartitionKeyFieldSchema get partition field schema from collection schema
 func GetPartitionKeyFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
 	for _, fieldSchema := range schema.GetFields() {
@@ -1553,11 +1558,11 @@ func ComparePKInSlice(data *schemapb.IDs, i, j int) bool {
 
 // ComparePK returns if i-th PK of dataA > j-th PK of dataB
 func ComparePK(pkA, pkB interface{}) bool {
-	switch pkA.(type) {
+	switch v := pkA.(type) {
 	case int64:
-		return pkA.(int64) < pkB.(int64)
+		return v < pkB.(int64)
 	case string:
-		return pkA.(string) < pkB.(string)
+		return v < pkB.(string)
 	}
 	return false
 }

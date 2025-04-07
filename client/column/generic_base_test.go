@@ -148,6 +148,30 @@ func (s *GenericBaseSuite) TestConversion() {
 	s.Error(err)
 }
 
+func (s *GenericBaseSuite) TestNullable() {
+	name := fmt.Sprintf("test_%d", rand.Intn(10))
+	var values []int64
+	gb := &genericColumnBase[int64]{
+		name:      name,
+		fieldType: entity.FieldTypeInt64,
+		values:    values,
+	}
+
+	s.False(gb.Nullable())
+	s.NoError(gb.ValidateNullable())
+	s.Error(gb.AppendNull())
+	s.EqualValues(0, gb.Len())
+
+	gb.SetNullable(true)
+	s.NoError(gb.ValidateNullable())
+	s.NoError(gb.AppendNull())
+	s.EqualValues(1, gb.Len())
+
+	gb.SetNullable(false)
+	s.NoError(gb.ValidateNullable())
+	s.EqualValues(0, gb.Len())
+}
+
 func TestGenericBase(t *testing.T) {
 	suite.Run(t, new(GenericBaseSuite))
 }

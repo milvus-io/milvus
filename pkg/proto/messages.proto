@@ -92,6 +92,7 @@ message CreateSegmentMessageBody {
 message CreateSegmentInfo {
     int64 partition_id  = 1;
     int64 segment_id    = 2;
+    int64 storage_version = 3;
 }
 
 // BeginTxnMessageBody is the body of begin transaction message.
@@ -277,20 +278,9 @@ message ResourceKey {
     string key = 2;
 }
 
-// BroadcastEvent is the event of broadcast message.
-message BroadcastEvent {
-    oneof event {
-        BroadcastResourceKeyAckAll resource_key_ack_all = 1;
-        BroadcastResourceKeyAckOne resource_key_ack_one = 2;
-    }
-}
-
-// The resource key is acked by all vchannels.
-message BroadcastResourceKeyAckAll {
-    messages.ResourceKey resource_key = 1;
-}
-
-// The resource key is acked by any vchannel.
-message BroadcastResourceKeyAckOne {
-    messages.ResourceKey resource_key = 1;
+// CipherHeader is the header of a message that is encrypted.
+message CipherHeader {
+    int64 ez_id = 1; // related to the encryption zone id
+    bytes safe_key = 2; // the safe key
+    int64 payload_bytes = 3; // the size of the payload before encryption
 }

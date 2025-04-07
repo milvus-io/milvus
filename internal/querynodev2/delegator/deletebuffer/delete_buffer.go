@@ -17,10 +17,16 @@
 package deletebuffer
 
 import (
+	"context"
 	"sort"
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 var errBufferFull = errors.New("buffer full")
@@ -39,13 +45,24 @@ type DeleteBuffer[T timed] interface {
 	TryDiscard(uint64)
 	// Size returns current size information of delete buffer: entryNum and memory
 	Size() (entryNum, memorySize int64)
+
+	// Register L0 segment
+	RegisterL0(segments ...segments.Segment)
+	// ListAll L0
+	ListL0() []segments.Segment
+	// Clean delete data, include l0 segment and delete buffer
+	UnRegister(ts uint64)
+
+	// clean up delete buffer
+	Clear()
 }
 
 func NewDoubleCacheDeleteBuffer[T timed](startTs uint64, maxSize int64) DeleteBuffer[T] {
 	return &doubleCacheBuffer[T]{
-		head:    newCacheBlock[T](startTs, maxSize),
-		maxSize: maxSize,
-		ts:      startTs,
+		head:       newCacheBlock[T](startTs, maxSize),
+		maxSize:    maxSize,
+		ts:         startTs,
+		l0Segments: make([]segments.Segment, 0),
 	}
 }
 
@@ -55,6 +72,64 @@ type doubleCacheBuffer[T timed] struct {
 	head, tail *cacheBlock[T]
 	maxSize    int64
 	ts         uint64
+
+	// maintain l0 segment list
+	l0Segments []segments.Segment
+}
+
+func (c *doubleCacheBuffer[T]) RegisterL0(segmentList ...segments.Segment) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	// Filter out nil segments
+	for _, seg := range segmentList {
+		if seg != nil {
+			c.l0Segments = append(c.l0Segments, seg)
+			log.Info("register l0 from delete buffer",
+				zap.Int64("segmentID", seg.ID()),
+				zap.Time("startPosition", tsoutil.PhysicalTime(seg.StartPosition().GetTimestamp())),
+			)
+		}
+	}
+}
+
+func (c *doubleCacheBuffer[T]) ListL0() []segments.Segment {
+	c.mut.RLock()
+	defer c.mut.RUnlock()
+	return c.l0Segments
+}
+
+func (c *doubleCacheBuffer[T]) UnRegister(ts uint64) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+	var newSegments []segments.Segment
+
+	for _, s := range c.l0Segments {
+		if s.StartPosition().GetTimestamp() < ts {
+			s.Release(context.TODO())
+			log.Info("unregister l0 from delete buffer",
+				zap.Int64("segmentID", s.ID()),
+				zap.Time("startPosition", tsoutil.PhysicalTime(s.StartPosition().GetTimestamp())),
+				zap.Time("cleanTs", tsoutil.PhysicalTime(ts)),
+			)
+			continue
+		}
+		newSegments = append(newSegments, s)
+	}
+	c.l0Segments = newSegments
+}
+
+func (c *doubleCacheBuffer[T]) Clear() {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	for _, s := range c.l0Segments {
+		s.Release(context.TODO())
+	}
+	c.l0Segments = nil
+	// reset cache block
+	c.tail = c.head
+	c.head = newCacheBlock[T](c.ts, c.maxSize)
 }
 
 func (c *doubleCacheBuffer[T]) SafeTs() uint64 {

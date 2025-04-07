@@ -2,6 +2,8 @@ cluster:
   enabled: true
 streaming:
   enabled: true
+streamingNode:
+  replicas: 2
 common:
   security:
     authorizationEnabled: false
@@ -26,11 +28,13 @@ image:
     repository: harbor.milvus.io/milvus/milvus
     tag: nightly-20240821-ed4eaff
 indexCoordinator:
+  enabled: false
   gc:
     interval: 1
   profiling:
     enabled: true
 indexNode:
+  enabled: false
   disk:
     enabled: true
   profiling:

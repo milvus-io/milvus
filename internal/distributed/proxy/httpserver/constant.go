@@ -37,6 +37,7 @@ const (
 	PrivilegeGroupCategory  = "/privilege_groups/"
 	CollectionFieldCategory = "/collections/fields/"
 	ResourceGroupCategory   = "/resource_groups/"
+	SegmentCategory         = "/segments/"
 
 	ListAction           = "list"
 	HasAction            = "has"
@@ -80,6 +81,7 @@ const (
 const (
 	ContextRequest                = "request"
 	ContextUsername               = "username"
+	ContextToken                  = "token"
 	VectorCollectionsPath         = "/vector/collections"
 	VectorCollectionsCreatePath   = "/vector/collections/create"
 	VectorCollectionsDescribePath = "/vector/collections/describe"

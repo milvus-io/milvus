@@ -44,11 +44,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord"
 	grpcdatacoordclient2 "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
-	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
 	grpcquerycoordclient "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
@@ -61,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -230,45 +229,6 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 	return dn
 }
 
-func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexnode.Server {
-	var in *grpcindexnode.Server
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		factory := dependency.MockDefaultFactory(localMsg, Params)
-		var err error
-		in, err = grpcindexnode.NewServer(ctx, factory)
-		if err != nil {
-			panic(err)
-		}
-		etcd, err := etcd.GetEtcdClient(
-			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-			Params.EtcdCfg.Endpoints.GetAsStrings(),
-			Params.EtcdCfg.EtcdTLSCert.GetValue(),
-			Params.EtcdCfg.EtcdTLSKey.GetValue(),
-			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-		if err != nil {
-			panic(err)
-		}
-		in.SetEtcdClient(etcd)
-		if err = in.Prepare(); err != nil {
-			panic(err)
-		}
-		err = in.Run()
-		if err != nil {
-			panic(err)
-		}
-	}()
-	wg.Wait()
-
-	metrics.RegisterIndexNode(Registry)
-	return in
-}
-
 type proxyTestServer struct {
 	*Proxy
 	grpcServer *grpc.Server
@@ -371,7 +331,7 @@ func TestProxy(t *testing.T) {
 	var wg sync.WaitGroup
 	paramtable.Init()
 	params := paramtable.Get()
-	coordclient.ResetRegistration()
+	testutil.ResetEnvironment()
 
 	params.RootCoordGrpcServerCfg.IP = "localhost"
 	params.QueryCoordGrpcServerCfg.IP = "localhost"
@@ -379,7 +339,6 @@ func TestProxy(t *testing.T) {
 	params.ProxyGrpcServerCfg.IP = "localhost"
 	params.QueryNodeGrpcServerCfg.IP = "localhost"
 	params.DataNodeGrpcServerCfg.IP = "localhost"
-	params.IndexNodeGrpcServerCfg.IP = "localhost"
 	params.StreamingNodeGrpcServerCfg.IP = "localhost"
 
 	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
@@ -408,9 +367,6 @@ func TestProxy(t *testing.T) {
 
 	qn := runQueryNode(ctx, localMsg, alias)
 	log.Info("running QueryNode ...")
-
-	in := runIndexNode(ctx, localMsg, alias)
-	log.Info("running IndexNode ...")
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -479,7 +435,7 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	log.Info("Register proxy done")
 	defer func() {
-		a := []any{rc, dc, qc, qn, in, dn, proxy}
+		a := []any{rc, dc, qc, qn, dn, proxy}
 		fmt.Println(len(a))
 		// HINT: the order of stopping service refers to the `roles.go` file
 		log.Info("start to stop the services")
@@ -505,12 +461,6 @@ func TestProxy(t *testing.T) {
 			err := qn.Stop()
 			assert.NoError(t, err)
 			log.Info("stop query node")
-		}
-
-		{
-			err := in.Stop()
-			assert.NoError(t, err)
-			log.Info("stop IndexNode")
 		}
 
 		{
@@ -570,7 +520,7 @@ func TestProxy(t *testing.T) {
 	// an int64 field (pk) & a float vector field
 	constructCollectionSchema := func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -580,7 +530,7 @@ func TestProxy(t *testing.T) {
 			AutoID:       true,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         floatVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -595,7 +545,7 @@ func TestProxy(t *testing.T) {
 			AutoID:      false,
 		}
 		bVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      102,
 			Name:         binaryVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -1918,6 +1868,18 @@ func TestProxy(t *testing.T) {
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
+	t.Run("get segment info", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.GetSegmentsInfo(ctx, &internalpb.GetSegmentsInfoRequest{
+			DbName:       dbName,
+			CollectionID: 1,
+			SegmentIDs:   segmentIDs,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -3707,7 +3669,7 @@ func TestProxy(t *testing.T) {
 
 	constructCollectionSchema = func() *schemapb.CollectionSchema {
 		pk := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      100,
 			Name:         int64Field,
 			IsPrimaryKey: true,
 			Description:  "",
@@ -3717,7 +3679,7 @@ func TestProxy(t *testing.T) {
 			AutoID:       false,
 		}
 		fVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      101,
 			Name:         floatVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -3732,7 +3694,7 @@ func TestProxy(t *testing.T) {
 			AutoID:      false,
 		}
 		bVec := &schemapb.FieldSchema{
-			FieldID:      0,
+			FieldID:      102,
 			Name:         binaryVecField,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -4660,7 +4622,6 @@ func TestProxy_Import(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	b := mock_streaming.NewMockBroadcast(t)
 	wal.EXPECT().Broadcast().Return(b).Maybe()
-	b.EXPECT().BlockUntilResourceKeyAckOnce(mock.Anything, mock.Anything).Return(nil).Maybe()
 	streaming.SetWALForTest(wal)
 	defer streaming.RecoverWALForTest()
 
@@ -4689,7 +4650,6 @@ func TestProxy_Import(t *testing.T) {
 
 		chMgr := NewMockChannelsMgr(t)
 		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"foo"}, nil)
-		chMgr.EXPECT().getChannels(mock.Anything).Return([]string{"foo_v1"}, nil)
 		proxy.chMgr = chMgr
 
 		factory := dependency.NewDefaultFactory(true)
@@ -4716,7 +4676,6 @@ func TestProxy_Import(t *testing.T) {
 		b := mock_streaming.NewMockBroadcast(t)
 		wal.EXPECT().Broadcast().Return(b)
 		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil)
-		b.EXPECT().BlockUntilResourceKeyAckOnce(mock.Anything, mock.Anything).Return(nil).Maybe()
 		streaming.SetWALForTest(wal)
 		defer streaming.RecoverWALForTest()
 

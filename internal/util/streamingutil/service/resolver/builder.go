@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/resolver"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -24,33 +25,46 @@ var idAllocator = typeutil.NewIDAllocator()
 
 // NewChannelAssignmentBuilder creates a new resolver builder.
 func NewChannelAssignmentBuilder(w types.AssignmentDiscoverWatcher) Builder {
-	return newBuilder(ChannelAssignmentResolverScheme, discoverer.NewChannelAssignmentDiscoverer(w))
+	b := newBuilder(ChannelAssignmentResolverScheme,
+		discoverer.NewChannelAssignmentDiscoverer(w),
+		log.With(log.FieldComponent("grpc-resolver"), zap.String("scheme", ChannelAssignmentResolverScheme)))
+	return b
 }
 
 // NewSessionBuilder creates a new resolver builder.
 // Multiple sessions are allowed, use the role as prefix.
-func NewSessionBuilder(c *clientv3.Client, role string) Builder {
-	return newBuilder(SessionResolverScheme, discoverer.NewSessionDiscoverer(c, role, false, "2.4.0"))
+func NewSessionBuilder(c *clientv3.Client, role string, version string) Builder {
+	b := newBuilder(SessionResolverScheme,
+		discoverer.NewSessionDiscoverer(c, role, false, version),
+		log.With(log.FieldComponent("grpc-resolver"), zap.String("scheme", SessionResolverScheme), zap.String("role", role), zap.Bool("exclusive", false)))
+	return b
 }
 
 // NewSessionExclusiveBuilder creates a new resolver builder with exclusive.
 // Only one session is allowed, not use the prefix, only use the role directly.
-func NewSessionExclusiveBuilder(c *clientv3.Client, role string) Builder {
-	return newBuilder(SessionResolverScheme, discoverer.NewSessionDiscoverer(c, role, true, "2.4.0"))
+func NewSessionExclusiveBuilder(c *clientv3.Client, role string, version string) Builder {
+	b := newBuilder(
+		SessionResolverScheme,
+		discoverer.NewSessionDiscoverer(c, role, true, version),
+		log.With(log.FieldComponent("grpc-resolver"), zap.String("scheme", SessionResolverScheme), zap.String("role", role), zap.Bool("exclusive", true)))
+	return b
 }
 
 // newBuilder creates a new resolver builder.
-func newBuilder(scheme string, d discoverer.Discoverer) Builder {
-	resolver := newResolverWithDiscoverer(scheme, d, 1*time.Second) // configurable.
-	return &builderImpl{
+func newBuilder(scheme string, d discoverer.Discoverer, logger *log.MLogger) Builder {
+	resolver := newResolverWithDiscoverer(d, 1*time.Second, logger) // configurable.
+	b := &builderImpl{
 		lifetime: typeutil.NewLifetime(),
 		scheme:   scheme,
 		resolver: resolver,
 	}
+	b.SetLogger(logger)
+	return b
 }
 
 // builderImpl implements resolver.Builder.
 type builderImpl struct {
+	log.Binder
 	lifetime *typeutil.Lifetime
 	scheme   string
 	resolver *resolverWithDiscoverer
@@ -70,7 +84,8 @@ func (b *builderImpl) Build(_ resolver.Target, cc resolver.ClientConn, _ resolve
 	}
 	defer b.lifetime.Done()
 
-	r := newWatchBasedGRPCResolver(cc, b.resolver.logger.With(zap.Int64("id", idAllocator.Allocate())))
+	r := newWatchBasedGRPCResolver(cc)
+	r.SetLogger(b.resolver.Logger().With(zap.Int64("id", idAllocator.Allocate())))
 	b.resolver.RegisterNewWatcher(r)
 	return r, nil
 }

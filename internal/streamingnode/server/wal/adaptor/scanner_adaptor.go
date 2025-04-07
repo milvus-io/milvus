@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -24,7 +25,7 @@ var _ wal.Scanner = (*scannerAdaptorImpl)(nil)
 // newScannerAdaptor creates a new scanner adaptor.
 func newScannerAdaptor(
 	name string,
-	l walimpls.WALImpls,
+	l walimpls.ROWALImpls,
 	readOption wal.ReadOption,
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
@@ -58,7 +59,7 @@ func newScannerAdaptor(
 type scannerAdaptorImpl struct {
 	*helper.ScannerHelper
 	logger        *log.MLogger
-	innerWAL      walimpls.WALImpls
+	innerWAL      walimpls.ROWALImpls
 	readOption    wal.ReadOption
 	filterFunc    func(message.ImmutableMessage) bool
 	reorderBuffer *utility.ReOrderByTimeTickBuffer // support time tick reorder.
@@ -98,7 +99,9 @@ func (s *scannerAdaptorImpl) execute() {
 	s.logger.Info("scanner start background task")
 
 	msgChan := make(chan message.ImmutableMessage)
+
 	ch := make(chan struct{})
+	defer func() { <-ch }()
 	// TODO: optimize the extra goroutine here after msgstream is removed.
 	go func() {
 		defer close(ch)
@@ -116,25 +119,27 @@ func (s *scannerAdaptorImpl) execute() {
 		return
 	}
 	s.logger.Warn("the consuming event loop of scanner is closed with unexpected error", zap.Error(err))
-
-	// waiting for the produce event loop to close.
-	<-ch
 }
 
 // produceEventLoop produces the message from the wal and write ahead buffer.
 func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMessage) error {
-	wb, err := resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer(s.Context())
-	if err != nil {
-		return err
+	var wb wab.ROWriteAheadBuffer
+	var err error
+	if s.Channel().AccessMode == types.AccessModeRW {
+		if wb, err = resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer(s.Context()); err != nil {
+			return err
+		}
 	}
 
 	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)
-	s.logger.Info("start produce loop of scanner at mode", zap.String("mode", scanner.Mode()))
+	s.logger.Info("start produce loop of scanner at model", zap.String("model", getScannerModel(scanner)))
 	for {
 		if scanner, err = scanner.Do(s.Context()); err != nil {
 			return err
 		}
-		s.logger.Info("switch scanner mode", zap.String("mode", scanner.Mode()))
+		m := getScannerModel(scanner)
+		s.metrics.SwitchModel(m)
+		s.logger.Info("switch scanner model", zap.String("model", m))
 	}
 }
 
@@ -170,7 +175,9 @@ func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMe
 // handleUpstream handles the incoming message from the upstream.
 func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	// Observe the message.
-	s.metrics.ObserveMessage(msg.MessageType(), msg.EstimateSize())
+	var isTailing bool
+	msg, isTailing = isTailingScanImmutableMessage(msg)
+	s.metrics.ObserveMessage(isTailing, msg.MessageType(), msg.EstimateSize())
 	if msg.MessageType() == message.MessageTypeTimeTick {
 		// If the time tick message incoming,
 		// the reorder buffer can be consumed until latest confirmed timetick.
@@ -209,15 +216,16 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	// otherwise add message into reorder buffer directly.
 	if err := s.reorderBuffer.Push(msg); err != nil {
 		if errors.Is(err, utility.ErrTimeTickVoilation) {
-			s.metrics.ObserveTimeTickViolation(msg.MessageType())
+			s.metrics.ObserveTimeTickViolation(isTailing, msg.MessageType())
 		}
 		s.logger.Warn("failed to push message into reorder buffer",
 			zap.Any("msgID", msg.MessageID()),
 			zap.Uint64("timetick", msg.TimeTick()),
 			zap.String("vchannel", msg.VChannel()),
+			zap.Bool("tailing", isTailing),
 			zap.Error(err))
 	}
 	// Observe the filtered message.
 	s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
-	s.metrics.ObserveFilteredMessage(msg.MessageType(), msg.EstimateSize())
+	s.metrics.ObservePassedMessage(isTailing, msg.MessageType(), msg.EstimateSize())
 }

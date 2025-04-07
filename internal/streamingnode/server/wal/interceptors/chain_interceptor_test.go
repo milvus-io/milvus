@@ -2,6 +2,7 @@ package interceptors_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,12 +11,17 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
 func TestChainInterceptor(t *testing.T) {
 	for i := 0; i < 5; i++ {
-		testChainInterceptor(t, i)
+		testChainInterceptor(t, i, false)
+		testChainInterceptor(t, 5, true)
 	}
 }
 
@@ -71,7 +77,7 @@ func TestChainReady(t *testing.T) {
 	}
 }
 
-func testChainInterceptor(t *testing.T, count int) {
+func testChainInterceptor(t *testing.T, count int, named bool) {
 	type record struct {
 		before bool
 		after  bool
@@ -84,33 +90,71 @@ func testChainInterceptor(t *testing.T, count int) {
 		j := i
 		appendInterceptorRecords = append(appendInterceptorRecords, record{})
 
-		interceptor := mock_interceptors.NewMockInterceptor(t)
-		interceptor.EXPECT().DoAppend(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, mm message.MutableMessage, f func(context.Context, message.MutableMessage) (message.MessageID, error)) (message.MessageID, error) {
-				appendInterceptorRecords[j].before = true
-				msgID, err := f(ctx, mm)
-				appendInterceptorRecords[j].after = true
-				return msgID, err
+		if !named {
+			interceptor := mock_interceptors.NewMockInterceptor(t)
+
+			interceptor.EXPECT().DoAppend(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+				func(ctx context.Context, mm message.MutableMessage, f func(context.Context, message.MutableMessage) (message.MessageID, error)) (message.MessageID, error) {
+					appendInterceptorRecords[j].before = true
+					msgID, err := f(ctx, mm)
+					appendInterceptorRecords[j].after = true
+					return msgID, err
+				})
+			interceptor.EXPECT().Close().Run(func() {
+				appendInterceptorRecords[j].closed = true
 			})
-		interceptor.EXPECT().Close().Run(func() {
-			appendInterceptorRecords[j].closed = true
-		})
-		ips = append(ips, interceptor)
+			ips = append(ips, interceptor)
+		} else {
+			interceptor := mock_interceptors.NewMockInterceptorWithMetrics(t)
+			interceptor.EXPECT().DoAppend(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+				func(ctx context.Context, mm message.MutableMessage, f func(context.Context, message.MutableMessage) (message.MessageID, error)) (message.MessageID, error) {
+					appendInterceptorRecords[j].before = true
+					// time.Sleep(time.Duration(j) * 10 * time.Millisecond)
+					msgID, err := f(ctx, mm)
+					appendInterceptorRecords[j].after = true
+					// time.Sleep(time.Duration(j) * 20 * time.Millisecond)
+					return msgID, err
+				})
+			interceptor.EXPECT().Name().Return(fmt.Sprintf("interceptor-%d", j))
+			interceptor.EXPECT().Close().Run(func() {
+				appendInterceptorRecords[j].closed = true
+			})
+			ips = append(ips, interceptor)
+		}
 	}
 	interceptor := interceptors.NewChainedInterceptor(ips...)
 
 	// fast return
 	<-interceptor.Ready()
 
-	msg, err := interceptor.DoAppend(context.Background(), nil, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+	msg := mock_message.NewMockMutableMessage(t)
+	msg.EXPECT().MessageType().Return(message.MessageTypeDelete).Maybe()
+	msg.EXPECT().EstimateSize().Return(1).Maybe()
+	msg.EXPECT().TxnContext().Return(nil).Maybe()
+	mw := metricsutil.NewWriteMetrics(types.PChannelInfo{}, "rocksmq")
+	m := mw.StartAppend(msg)
+	ctx := utility.WithAppendMetricsContext(context.Background(), m)
+	msgID, err := interceptor.DoAppend(ctx, msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		return nil, nil
 	})
 	assert.NoError(t, err)
-	assert.Nil(t, msg)
+	assert.Nil(t, msgID)
 	interceptor.Close()
+	if named {
+		cnt := 0
+		m.RangeOverInterceptors(func(name string, ims []*metricsutil.InterceptorMetrics) {
+			assert.NotEmpty(t, name)
+			for _, im := range ims {
+				assert.NotZero(t, im.Before)
+				assert.NotZero(t, im.After)
+				cnt++
+			}
+		})
+		assert.Equal(t, count, cnt)
+	}
 	for i := 0; i < count; i++ {
-		assert.True(t, appendInterceptorRecords[i].before)
-		assert.True(t, appendInterceptorRecords[i].after)
-		assert.True(t, appendInterceptorRecords[i].closed)
+		assert.True(t, appendInterceptorRecords[i].before, i)
+		assert.True(t, appendInterceptorRecords[i].after, i)
+		assert.True(t, appendInterceptorRecords[i].closed, i)
 	}
 }

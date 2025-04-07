@@ -26,10 +26,11 @@ import "C"
 
 import (
 	"fmt"
+	"io"
 	"unsafe"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/cdata"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/cdata"
 )
 
 func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64) (*PackedReader, error) {
@@ -44,6 +45,7 @@ func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64)
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
+	defer cdata.ReleaseCArrowSchema(&cas)
 
 	cBufferSize := C.int64_t(bufferSize)
 
@@ -64,12 +66,16 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 	}
 
 	if cArr == nil {
-		return nil, nil // end of stream, no more records to read
+		return nil, io.EOF // end of stream, no more records to read
 	}
 
 	// Convert ArrowArray to Go RecordBatch using cdata
 	goCArr := (*cdata.CArrowArray)(unsafe.Pointer(cArr))
 	goCSchema := (*cdata.CArrowSchema)(unsafe.Pointer(cSchema))
+	defer func() {
+		cdata.ReleaseCArrowArray(goCArr)
+		cdata.ReleaseCArrowSchema(goCSchema)
+	}()
 	recordBatch, err := cdata.ImportCRecordBatch(goCArr, goCSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert ArrowArray to Record: %w", err)
@@ -80,9 +86,13 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 }
 
 func (pr *PackedReader) Close() error {
+	if pr.cPackedReader == nil {
+		return nil
+	}
 	status := C.CloseReader(pr.cPackedReader)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return err
 	}
+	pr.cPackedReader = nil
 	return nil
 }

@@ -113,7 +113,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="pymilvus issue 1554")
+    @pytest.mark.skip(reason="pymilvus issue 1554")
     def test_milvus_client_collection_invalid_primary_field(self):
         """
         target: test fast create collection name with invalid primary field
@@ -137,8 +137,8 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for the "
-                                                 f"field({default_primary_key_field_name}) of collection {collection_name}"}
+        error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for the field(id) "
+                                                 f"of collection {collection_name}"}
         self.create_collection(client, collection_name, default_dim, id_type="string", auto_id=True,
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -163,7 +163,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="pymilvus issue 1872")
+    @pytest.mark.skip(reason="pymilvus issue 1872")
     @pytest.mark.parametrize("metric_type", [1, " ", "invalid"])
     def test_milvus_client_collection_invalid_metric_type(self, metric_type):
         """
@@ -1114,7 +1114,7 @@ class TestMilvusClientUsingDatabaseInvalid(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="pymilvus issue 1900")
+    @pytest.mark.skip(reason="pymilvus issue 1900")
     @pytest.mark.parametrize("db_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
     def test_milvus_client_using_database_not_exist_db_name(self, db_name):
         """
@@ -1201,8 +1201,8 @@ class TestMilvusClientCollectionPropertiesInvalid(TestMilvusClientV2Base):
         properties = {'mmap.enabled': True}
         error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={drop_name}]"}
         self.drop_collection_properties(client, drop_name, properties,
-                                     check_task=CheckTasks.err_res,
-                                     check_items=error)
+                                        check_task=CheckTasks.err_res,
+                                        check_items=error)
         
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("property_keys", ["", {}, []])

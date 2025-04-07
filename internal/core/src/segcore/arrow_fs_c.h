@@ -34,7 +34,6 @@ InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config);
 void
 CleanRemoteArrowFileSystemSingleton();
 
-
 #ifdef __cplusplus
 }
 #endif

@@ -24,7 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // CreateCollection is the API for create a collection in Milvus.
@@ -95,6 +95,7 @@ func (c *Client) DescribeCollection(ctx context.Context, option DescribeCollecti
 			ConsistencyLevel: entity.ConsistencyLevel(resp.ConsistencyLevel),
 			ShardNum:         resp.GetShardsNum(),
 			Properties:       entity.KvPairsMap(resp.GetProperties()),
+			UpdateTimestamp:  resp.GetUpdateTimestamp(),
 		}
 		collection.Name = collection.Schema.CollectionName
 		return nil

@@ -13,7 +13,7 @@ import (
 
 func TestFullTextSearchDefault(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create -> insert -> flush -> index -> load
 	analyzerParams := map[string]any{"tokenizer": "standard"}
@@ -43,7 +43,7 @@ func TestFullTextSearchDefault(t *testing.T) {
 // TestSearchFullTextBase tests basic full text search functionality with different languages
 func TestSearchFullTextWithDiffLang(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// Test cases for different languages and analyzers
 	testCases := []struct {
@@ -103,7 +103,7 @@ func TestSearchFullTextWithDiffLang(t *testing.T) {
 // TestSearchFullTextWithDynamicField tests full text search with dynamic field enabled
 func TestSearchFullTextWithDynamicField(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// Test cases for different languages and analyzers
 	testCases := []struct {
 		name     string
@@ -162,7 +162,7 @@ func TestSearchFullTextWithDynamicField(t *testing.T) {
 // TestSearchFullTextWithPartitionKey tests full text search with partition key
 func TestSearchFullTextWithPartitionKey(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// Test cases for different languages and analyzers
 	testCases := []struct {
@@ -222,7 +222,7 @@ func TestSearchFullTextWithPartitionKey(t *testing.T) {
 // TestSearchFullTextWithEmptyData tests full text search with empty data
 func TestSearchFullTextWithEmptyData(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := createDefaultMilvusClient(ctx, t)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// Test cases for different empty percent
 	testCases := []struct {
@@ -241,7 +241,7 @@ func TestSearchFullTextWithEmptyData(t *testing.T) {
 			query:        "what is information retrieval and its applications?",
 			numRows:      3000,
 			topK:         5,
-			emptyPercent: 50,
+			emptyPercent: 90,
 		},
 		{
 			name:         "Chinese_Jieba",
@@ -250,7 +250,7 @@ func TestSearchFullTextWithEmptyData(t *testing.T) {
 			query:        "信息检索的应用",
 			numRows:      3000,
 			topK:         5,
-			emptyPercent: 80,
+			emptyPercent: 90,
 		},
 	}
 

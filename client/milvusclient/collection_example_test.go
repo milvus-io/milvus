@@ -25,7 +25,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 const (
@@ -154,6 +154,67 @@ func ExampleClient_CreateCollection_ttl() {
 	}
 }
 
+func ExampleClient_CreateCollection_quickSetup() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	collectionName := `quick_setup_1`
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		// handle err
+	}
+
+	err = cli.CreateCollection(ctx, milvusclient.SimpleCreateCollectionOptions(collectionName, 512))
+	if err != nil {
+		// handle error
+	}
+}
+
+func ExampleClient_CreateCollection_quickSetupWithIndexParams() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	collectionName := `quick_setup_2`
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		// handle err
+	}
+
+	err = cli.CreateCollection(ctx, milvusclient.SimpleCreateCollectionOptions(collectionName, 512).WithIndexOptions(
+		milvusclient.NewCreateIndexOption(collectionName, "vector", index.NewHNSWIndex(entity.L2, 64, 128)),
+	))
+	if err != nil {
+		log.Println(err.Error())
+		// handle error
+	}
+}
+
+func ExampleClient_CreateCollection_quickSetupCustomize() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	collectionName := `quick_setup_3`
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		// handle err
+	}
+
+	err = cli.CreateCollection(ctx, milvusclient.SimpleCreateCollectionOptions(collectionName, 512).
+		WithVarcharPK(true, 64).
+		WithShardNum(1),
+	)
+	if err != nil {
+		log.Println(err.Error())
+		// handle error
+	}
+}
+
 func ExampleClient_CreateCollection_consistencyLevel() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -245,7 +306,7 @@ func ExampleClient_RenameCollection() {
 	}
 }
 
-func ExampleClient_AlterCollection_setTTL() {
+func ExampleClient_AlterCollectionProperties_setTTL() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

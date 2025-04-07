@@ -5,8 +5,18 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = []
+lindera-ipadic = ["lindera/ipadic"]
+lindera-ipadic-neologd = ["lindera/ipadic-neologd"]
+lindera-unidic = ["lindera/unidic"]
+lindera-ko-dic = ["lindera/ko-dic"]
+lindera-cc-cedict = ["lindera/cc-cedict"]
+
 [dependencies]
-tantivy = { git = "https://github.com/milvus-io/tantivy", tag = "v0.1.0" } # we have make a private fix for milvus, should be removed in future after milvus fixing the bug.
+tantivy = { git = "https://github.com/zilliztech/tantivy.git" }
+tantivy-5 = { package = "tantivy", git = "https://github.com/milvus-io/tantivy.git", tag = "0.21.1-fix3" }
+lindera = "0.40.1"
 futures = "0.3.21"
 libc = "0.2"
 scopeguard = "1.2"

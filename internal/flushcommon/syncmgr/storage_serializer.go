@@ -197,7 +197,7 @@ func (s *storageV1Serializer) serializeDeltalog(pack *SyncPack) (*storage.Blob, 
 
 	for i := 0; i < len(pack.deltaData.Pks); i++ {
 		deleteLog := storage.NewDeleteLog(pack.deltaData.Pks[i], pack.deltaData.Tss[i])
-		err = writer.Write(deleteLog)
+		err = writer.WriteValue(deleteLog)
 		if err != nil {
 			return nil, err
 		}

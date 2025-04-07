@@ -10,7 +10,7 @@ pub(crate) struct DocIdCollector<T> {
 }
 
 pub(crate) struct DocIdChildCollector<T> {
-    docs: Vec<T>,
+    milvus_doc_ids: Vec<T>,
     column: Column<i64>,
 }
 
@@ -24,7 +24,7 @@ impl Collector for DocIdCollector<u32> {
         segment: &SegmentReader,
     ) -> tantivy::Result<Self::Child> {
         Ok(DocIdChildCollector {
-            docs: Vec::new(),
+            milvus_doc_ids: Vec::new(),
             column: segment.fast_fields().i64("doc_id").unwrap(),
         })
     }
@@ -51,14 +51,22 @@ impl Collector for DocIdCollector<u32> {
 impl SegmentCollector for DocIdChildCollector<u32> {
     type Fruit = Vec<u32>;
 
+    fn collect_block(&mut self, docs: &[DocId]) {
+        self.milvus_doc_ids.extend(
+            self.column
+                .values_for_docs_flatten(docs)
+                .into_iter()
+                .map(|val| val as u32),
+        );
+    }
+
     fn collect(&mut self, doc: DocId, _score: Score) {
-        self.column.values_for_doc(doc).for_each(|doc_id| {
-            self.docs.push(doc_id as u32);
-        })
+        // Unreachable code actually.
+        self.collect_block(&[doc]);
     }
 
     fn harvest(self) -> Self::Fruit {
-        self.docs
+        self.milvus_doc_ids
     }
 }
 
@@ -72,7 +80,7 @@ impl Collector for DocIdCollector<i64> {
         segment: &SegmentReader,
     ) -> tantivy::Result<Self::Child> {
         Ok(DocIdChildCollector {
-            docs: Vec::new(),
+            milvus_doc_ids: Vec::new(),
             column: segment.fast_fields().i64("doc_id").unwrap(),
         })
     }
@@ -99,13 +107,17 @@ impl Collector for DocIdCollector<i64> {
 impl SegmentCollector for DocIdChildCollector<i64> {
     type Fruit = Vec<i64>;
 
+    fn collect_block(&mut self, docs: &[DocId]) {
+        self.milvus_doc_ids
+            .extend(self.column.values_for_docs_flatten(docs));
+    }
+
     fn collect(&mut self, doc: DocId, _score: Score) {
-        self.column.values_for_doc(doc).for_each(|doc_id| {
-            self.docs.push(doc_id);
-        })
+        // Unreachable code actually.
+        self.collect_block(&[doc]);
     }
 
     fn harvest(self) -> Self::Fruit {
-        self.docs
+        self.milvus_doc_ids
     }
 }

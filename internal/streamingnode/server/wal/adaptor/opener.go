@@ -45,7 +45,7 @@ func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.
 	defer o.lifetime.Done()
 
 	id := o.idAllocator.Allocate()
-	logger := o.logger.With(zap.Any("channel", opt.Channel), zap.Int64("id", id))
+	logger := o.logger.With(zap.String("channel", opt.Channel.String()), zap.Int64("id", id))
 
 	l, err := o.opener.Open(ctx, &walimpls.OpenOption{
 		Channel: opt.Channel,

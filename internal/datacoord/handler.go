@@ -86,10 +86,6 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 			// Skip bulk insert segments.
 			continue
 		}
-		if s.GetIsInvisible() {
-			// skip invisible segments
-			continue
-		}
 
 		if s.GetState() == commonpb.SegmentState_Dropped {
 			droppedIDs.Insert(s.GetID())
@@ -133,10 +129,11 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	}
 
 	var (
-		flushedIDs   = make(typeutil.UniqueSet)
-		droppedIDs   = make(typeutil.UniqueSet)
-		growingIDs   = make(typeutil.UniqueSet)
-		levelZeroIDs = make(typeutil.UniqueSet)
+		flushedIDs       = make(typeutil.UniqueSet)
+		droppedIDs       = make(typeutil.UniqueSet)
+		growingIDs       = make(typeutil.UniqueSet)
+		levelZeroIDs     = make(typeutil.UniqueSet)
+		deleteCheckPoint *msgpb.MsgPosition
 	)
 
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
@@ -171,6 +168,10 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 			growingIDs.Insert(s.GetID())
 		case s.GetLevel() == datapb.SegmentLevel_L0:
 			levelZeroIDs.Insert(s.GetID())
+			// use smallest start position of l0 segments as deleteCheckPoint, so query coord will only maintain stream delete record  after this ts
+			if deleteCheckPoint == nil || s.GetStartPosition().GetTimestamp() < deleteCheckPoint.GetTimestamp() {
+				deleteCheckPoint = s.GetStartPosition()
+			}
 		default:
 			flushedIDs.Insert(s.GetID())
 		}
@@ -212,15 +213,22 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		zap.Any("partition stats", partStatsVersionsMap),
 	)
 
+	seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
+	// if no l0 segment exist, use checkpoint as delete checkpoint
+	if len(levelZeroIDs) == 0 {
+		deleteCheckPoint = seekPosition
+	}
+
 	return &datapb.VchannelInfo{
 		CollectionID:           channel.GetCollectionID(),
 		ChannelName:            channel.GetName(),
-		SeekPosition:           h.GetChannelSeekPosition(channel, partitionIDs...),
+		SeekPosition:           seekPosition,
 		FlushedSegmentIds:      flushedIDs.Collect(),
 		UnflushedSegmentIds:    growingIDs.Collect(),
 		DroppedSegmentIds:      droppedIDs.Collect(),
 		LevelZeroSegmentIds:    levelZeroIDs.Collect(),
 		PartitionStatsVersions: partStatsVersionsMap,
+		DeleteCheckpoint:       deleteCheckPoint,
 	}
 }
 

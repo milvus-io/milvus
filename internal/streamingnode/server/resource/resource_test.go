@@ -40,6 +40,7 @@ func TestApply(t *testing.T) {
 	assert.NotNil(t, Resource().TSOAllocator())
 	assert.NotNil(t, Resource().ETCD())
 	assert.NotNil(t, Resource().RootCoordClient())
+	Release()
 }
 
 func TestInitForTest(t *testing.T) {

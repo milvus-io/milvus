@@ -598,7 +598,7 @@ func TestPrimaryField(t *testing.T) {
 
 func TestAnyToColumns(t *testing.T) {
 	t.Run("insert with dynamic field", func(t *testing.T) {
-		body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
+		body := []byte("{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 		var err error
@@ -615,7 +615,7 @@ func TestAnyToColumns(t *testing.T) {
 	})
 
 	t.Run("upsert with dynamic field", func(t *testing.T) {
-		body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
+		body := []byte("{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 		var err error
@@ -632,7 +632,7 @@ func TestAnyToColumns(t *testing.T) {
 	})
 
 	t.Run("insert with dynamic field, but pass pk when autoid==true", func(t *testing.T) {
-		body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
+		body := []byte("{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, true)
 		var err error
@@ -647,7 +647,7 @@ func TestAnyToColumns(t *testing.T) {
 	})
 
 	t.Run("pass more field", func(t *testing.T) {
-		body := "{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
+		body := []byte("{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
 		var err error
 		err, _, _ = checkAndSetData(body, coll)
@@ -656,7 +656,7 @@ func TestAnyToColumns(t *testing.T) {
 	})
 
 	t.Run("insert with autoid==false", func(t *testing.T) {
-		body := "{\"data\": {\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
+		body := []byte("{\"data\": {\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}")
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, false)
 		var err error
@@ -672,7 +672,7 @@ func TestAnyToColumns(t *testing.T) {
 	})
 
 	t.Run("insert with autoid==false but has no pk", func(t *testing.T) {
-		body := "{\"data\": { \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
+		body := []byte("{\"data\": { \"book_intro\": [0.1, 0.2], \"word_count\": 2}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, false)
 		var err error
 		err, _, _ = checkAndSetData(body, coll)
@@ -681,7 +681,7 @@ func TestAnyToColumns(t *testing.T) {
 	})
 
 	t.Run("insert with autoid==true", func(t *testing.T) {
-		body := "{\"data\": { \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
+		body := []byte("{\"data\": { \"book_intro\": [0.1, 0.2], \"word_count\": 2}}")
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
 		var err error
@@ -696,7 +696,7 @@ func TestAnyToColumns(t *testing.T) {
 	})
 
 	t.Run("upsert with autoid==true", func(t *testing.T) {
-		body := "{\"data\": {\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
+		body := []byte("{\"data\": {\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}")
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
 		var err error
@@ -712,7 +712,7 @@ func TestAnyToColumns(t *testing.T) {
 	})
 
 	t.Run("upsert with autoid==false", func(t *testing.T) {
-		body := "{\"data\": {\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}"
+		body := []byte("{\"data\": {\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2}}")
 		req := InsertReq{}
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
 		var err error
@@ -730,7 +730,7 @@ func TestAnyToColumns(t *testing.T) {
 
 func TestCheckAndSetData(t *testing.T) {
 	t.Run("invalid field name with dynamic field", func(t *testing.T) {
-		body := "{\"data\": {\"id\": 0,\"$meta\": 2,\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}"
+		body := []byte("{\"data\": {\"id\": 0,\"$meta\": 2,\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 		var err error
 		err, _, _ = checkAndSetData(body, coll)
@@ -738,7 +738,7 @@ func TestCheckAndSetData(t *testing.T) {
 		assert.Equal(t, true, strings.HasPrefix(err.Error(), "use the invalid field name"))
 	})
 	t.Run("without vector", func(t *testing.T) {
-		body := "{\"data\": {}}"
+		body := []byte("{\"data\": {}}")
 		var err error
 		primaryField := generatePrimaryField(schemapb.DataType_Int64, true)
 		floatVectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
@@ -800,7 +800,7 @@ func TestCheckAndSetData(t *testing.T) {
 
 	t.Run("with pk when autoID == True when upsert", func(t *testing.T) {
 		arrayFieldName := "array-int64"
-		body := "{\"data\": {\"book_id\": 9999999999999999, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}"
+		body := []byte("{\"data\": {\"book_id\": 9999999999999999, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
 		coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 			Name:        arrayFieldName,
@@ -815,7 +815,7 @@ func TestCheckAndSetData(t *testing.T) {
 
 	t.Run("without pk when autoID == True when insert", func(t *testing.T) {
 		arrayFieldName := "array-int64"
-		body := "{\"data\": {\"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}"
+		body := []byte("{\"data\": {\"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
 		coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 			Name:        arrayFieldName,
@@ -830,7 +830,7 @@ func TestCheckAndSetData(t *testing.T) {
 
 	t.Run("with pk when autoID == false", func(t *testing.T) {
 		arrayFieldName := "array-int64"
-		body := "{\"data\": {\"book_id\": 9999999999999999, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}"
+		body := []byte("{\"data\": {\"book_id\": 9999999999999999, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, false)
 		coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 			Name:        arrayFieldName,
@@ -846,7 +846,7 @@ func TestCheckAndSetData(t *testing.T) {
 
 func TestInsertWithInt64(t *testing.T) {
 	arrayFieldName := "array-int64"
-	body := "{\"data\": {\"book_id\": 9999999999999999, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}"
+	body := []byte("{\"data\": {\"book_id\": 9999999999999999, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}}")
 	coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
 		Name:        arrayFieldName,
@@ -875,7 +875,7 @@ func TestInsertWithNullableField(t *testing.T) {
 		DataType: schemapb.DataType_Int64,
 		Nullable: true,
 	})
-	body := "{\"data\": [{\"book_id\": 9999999999999999, \"\nullable\": null,\"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]},{\"book_id\": 1, \"nullable\": 1,\"book_intro\": [0.3, 0.4], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}]"
+	body := []byte("{\"data\": [{\"book_id\": 9999999999999999, \"\nullable\": null,\"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]},{\"book_id\": 1, \"nullable\": 1,\"book_intro\": [0.3, 0.4], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}]")
 	err, data, validData := checkAndSetData(body, coll)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 2, len(data))
@@ -911,7 +911,7 @@ func TestInsertWithDefaultValueField(t *testing.T) {
 			},
 		},
 	})
-	body := "{\"data\": [{\"book_id\": 9999999999999999, \"\fid\": null,\"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]},{\"book_id\": 1, \"fid\": 1,\"book_intro\": [0.3, 0.4], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}]"
+	body := []byte("{\"data\": [{\"book_id\": 9999999999999999, \"\fid\": null,\"book_intro\": [0.1, 0.2], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]},{\"book_id\": 1, \"fid\": 1,\"book_intro\": [0.3, 0.4], \"word_count\": 2, \"" + arrayFieldName + "\": [9999999999999999]}]")
 	err, data, validData := checkAndSetData(body, coll)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 2, len(data))
@@ -2074,7 +2074,7 @@ func newRowsWithArray(results []map[string]interface{}) []map[string]interface{}
 func TestArray(t *testing.T) {
 	body, _ := generateRequestBody(schemapb.DataType_Int64)
 	collectionSchema := generateCollectionSchema(schemapb.DataType_Int64, false, true)
-	err, rows, validRows := checkAndSetData(string(body), collectionSchema)
+	err, rows, validRows := checkAndSetData(body, collectionSchema)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 0, len(validRows))
 	assert.Equal(t, true, compareRows(rows, generateRawRows(schemapb.DataType_Int64), compareRow))
@@ -2084,7 +2084,7 @@ func TestArray(t *testing.T) {
 
 	body, _ = generateRequestBodyWithArray(schemapb.DataType_Int64)
 	collectionSchema = newCollectionSchemaWithArray(generateCollectionSchema(schemapb.DataType_Int64, false, true))
-	err, rows, validRows = checkAndSetData(string(body), collectionSchema)
+	err, rows, validRows = checkAndSetData(body, collectionSchema)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, 0, len(validRows))
 	assert.Equal(t, true, compareRows(rows, newRowsWithArray(generateRawRows(schemapb.DataType_Int64)), compareRow))
@@ -2171,7 +2171,7 @@ func TestVector(t *testing.T) {
 		},
 		EnableDynamicField: true,
 	}
-	err, rows, validRows := checkAndSetData(string(body), collectionSchema)
+	err, rows, validRows := checkAndSetData(body, collectionSchema)
 	assert.Equal(t, nil, err)
 	for i, row := range rows {
 		assert.Equal(t, 2, len(row[floatVector].([]float32)))
@@ -2207,7 +2207,7 @@ func TestVector(t *testing.T) {
 		}
 		row[field] = value
 		body, _ = wrapRequestBody([]map[string]interface{}{row})
-		err, _, _ = checkAndSetData(string(body), collectionSchema)
+		err, _, _ = checkAndSetData(body, collectionSchema)
 		assert.Error(t, err)
 	}
 

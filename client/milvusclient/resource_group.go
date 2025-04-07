@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func (c *Client) ListResourceGroups(ctx context.Context, opt ListResourceGroupsOption, callOptions ...grpc.CallOption) ([]string, error) {
@@ -141,4 +141,37 @@ func (c *Client) TransferReplica(ctx context.Context, opt TransferReplicaOption,
 	})
 
 	return err
+}
+
+func (c *Client) DescribeReplica(ctx context.Context, opt DescribeReplicaOption, callOptions ...grpc.CallOption) ([]*entity.ReplicaInfo, error) {
+	req := opt.Request()
+
+	var result []*entity.ReplicaInfo
+
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.GetReplicas(ctx, req, callOptions...)
+
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+
+		result = lo.Map(resp.GetReplicas(), func(replica *milvuspb.ReplicaInfo, _ int) *entity.ReplicaInfo {
+			return &entity.ReplicaInfo{
+				ReplicaID: replica.GetReplicaID(),
+				Shards: lo.Map(replica.GetShardReplicas(), func(shardReplica *milvuspb.ShardReplica, _ int) *entity.Shard {
+					return &entity.Shard{
+						ChannelName: shardReplica.GetDmChannelName(),
+						ShardNodes:  shardReplica.GetNodeIds(),
+						ShardLeader: shardReplica.GetLeaderID(),
+					}
+				}),
+				Nodes:             replica.GetNodeIds(),
+				ResourceGroupName: replica.GetResourceGroupName(),
+				NumOutboundNode:   replica.GetNumOutboundNode(),
+			}
+		})
+
+		return nil
+	})
+	return result, err
 }

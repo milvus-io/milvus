@@ -20,7 +20,12 @@ package function
 
 import (
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 type TextEmbeddingMode int
@@ -30,30 +35,32 @@ const (
 	SearchMode
 )
 
+type embeddingType int
+
+const (
+	unsupportEmbd embeddingType = iota
+	float32Embd
+	int8Embd
+)
+
 // common params
 const (
-	modelNameParamKey    string = "model_name"
-	dimParamKey          string = "dim"
-	embeddingURLParamKey string = "url"
-	apiKeyParamKey       string = "api_key"
+	modelNameParamKey           string = "model_name"
+	dimParamKey                 string = "dim"
+	embeddingURLParamKey        string = "url"
+	apiKeyParamKey              string = "api_key"
+	truncateParamKey            string = "truncate"
+	enableVerifiInfoInParamsKey string = "enableVerifiInfoInParams"
 )
 
 // ali text embedding
 const (
-	TextEmbeddingV1 string = "text-embedding-v1"
-	TextEmbeddingV2 string = "text-embedding-v2"
-	TextEmbeddingV3 string = "text-embedding-v3"
-
 	dashscopeAKEnvStr string = "MILVUSAI_DASHSCOPE_API_KEY"
 )
 
 // openai/azure text embedding
 
 const (
-	TextEmbeddingAda002 string = "text-embedding-ada-002"
-	TextEmbedding3Small string = "text-embedding-3-small"
-	TextEmbedding3Large string = "text-embedding-3-large"
-
 	openaiAKEnvStr string = "MILVUSAI_OPENAI_API_KEY"
 
 	azureOpenaiAKEnvStr     string = "MILVUSAI_AZURE_OPENAI_API_KEY"
@@ -65,11 +72,10 @@ const (
 // bedrock emebdding
 
 const (
-	BedRockTitanTextEmbeddingsV2 string = "amazon.titan-embed-text-v2:0"
-	awsAKIdParamKey              string = "aws_access_key_id"
-	awsSAKParamKey               string = "aws_secret_access_key"
-	regionParamKey               string = "regin"
-	normalizeParamKey            string = "normalize"
+	awsAKIdParamKey   string = "aws_access_key_id"
+	awsSAKParamKey    string = "aws_secret_access_key"
+	regionParamKey    string = "region"
+	normalizeParamKey string = "normalize"
 
 	bedrockAccessKeyId string = "MILVUSAI_BEDROCK_ACCESS_KEY_ID"
 	bedrockSAKEnvStr   string = "MILVUSAI_BEDROCK_SECRET_ACCESS_KEY"
@@ -82,40 +88,86 @@ const (
 	projectIDParamKey string = "projectid"
 	taskTypeParamKey  string = "task"
 
-	textEmbedding005             string = "text-embedding-005"
-	textMultilingualEmbedding002 string = "text-multilingual-embedding-002"
-
 	vertexServiceAccountJSONEnv string = "MILVUSAI_GOOGLE_APPLICATION_CREDENTIALS"
 )
 
 // voyageAI
 const (
-	voyage3Large   string = "voyage-3-large"
-	voyage3        string = "voyage-3"
-	voyage3Lite    string = "voyage-3-lite"
-	voyageCode3    string = "voyage-code-3"
-	voyageFinance2 string = "voyage-finance-2"
-	voyageLaw2     string = "voyage-law-2"
-	voyageCode2    string = "voyage-code-2"
-
-	voyageAIAKEnvStr string = "MILVUSAI_VOYAGEAI_API_KEY"
+	truncationParamKey string = "truncation"
+	voyageAIAKEnvStr   string = "MILVUSAI_VOYAGEAI_API_KEY"
 )
 
 // cohere
 
 const (
-	embedEnglishV30           string = "embed-english-v3.0"
-	embedMultilingualV30      string = "embed-multilingual-v3.0"
-	embedEnglishLightV30      string = "embed-english-light-v3.0"
-	embedMultilingualLightV30 string = "embed-multilingual-light-v3.0"
-	embedEnglishV20           string = "embed-english-v2.0"
-	embedEnglishLightV20      string = "embed-english-light-v2.0"
-	embedMultilingualV20      string = "embed-multilingual-v2.0"
-
-	truncateParamKey string = "truncate"
-
 	cohereAIAKEnvStr string = "MILVUSAI_COHERE_API_KEY"
 )
+
+// siliconflow
+
+const (
+	siliconflowAKEnvStr string = "MILVUSAI_SILICONFLOW_API_KEY"
+)
+
+// TEI
+
+const (
+	ingestionPromptParamKey     string = "ingestion_prompt"
+	searchPromptParamKey        string = "search_prompt"
+	maxClientBatchSizeParamKey  string = "max_client_batch_size"
+	truncationDirectionParamKey string = "truncation_direction"
+	endpointParamKey            string = "endpoint"
+
+	enableTeiEnvStr string = "MILVUSAI_ENABLE_TEI"
+)
+
+const enableVerifiInfoInParams string = "ENABLE_VERIFI_INFO_IN_PARAMS"
+
+func isEnableVerifiInfoInParamsKey(confParams map[string]string) bool {
+	enable := true
+	if strings.ToLower(confParams[enableVerifiInfoInParamsKey]) != "" {
+		// If enableVerifiInfoInParamsKey is configured in milvus.yaml, the configuration in milvus.yaml will be used.
+		enable, _ = strconv.ParseBool(confParams[enableVerifiInfoInParamsKey])
+	} else {
+		// If enableVerifiInfoInParamsKey is not configured in milvus.yaml, the configuration in env will be used.
+		if strings.ToLower(os.Getenv(enableVerifiInfoInParams)) != "" {
+			enable, _ = strconv.ParseBool(confParams[enableVerifiInfoInParamsKey])
+		}
+	}
+	return enable
+}
+
+func parseAKAndURL(params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string) (string, string) {
+	// function param > env > yaml
+	var apiKey, url string
+
+	// from function params
+	if isEnableVerifiInfoInParamsKey(confParams) {
+		for _, param := range params {
+			switch strings.ToLower(param.Key) {
+			case apiKeyParamKey:
+				apiKey = param.Value
+			case embeddingURLParamKey:
+				url = param.Value
+			}
+		}
+	}
+
+	// from milvus.yaml
+	if apiKey == "" {
+		apiKey = confParams[apiKeyParamKey]
+	}
+
+	if url == "" {
+		url = confParams[embeddingURLParamKey]
+	}
+
+	// from env, url doesn't support configuration in in env
+	if apiKey == "" {
+		url = os.Getenv(apiKeyEnv)
+	}
+	return apiKey, url
+}
 
 func parseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int64, error) {
 	dim, err := strconv.ParseInt(dimStr, 10, 64)
@@ -127,4 +179,45 @@ func parseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int
 		return 0, fmt.Errorf("Function output field:[%s]'s dimension [%d] does not match the dimension [%d] provided in Function params.", fieldName, fieldDim, dim)
 	}
 	return dim, nil
+}
+
+func getEmbdType(dtype schemapb.DataType) embeddingType {
+	switch dtype {
+	case schemapb.DataType_FloatVector:
+		return float32Embd
+	case schemapb.DataType_Int8Vector:
+		return int8Embd
+	default:
+		return unsupportEmbd
+	}
+}
+
+type EmbdResult struct {
+	floatEmbds [][]float32
+	int8Embds  [][]int8
+	eType      embeddingType
+}
+
+func newEmbdResult(size int, eType embeddingType) *EmbdResult {
+	embR := EmbdResult{}
+	embR.eType = eType
+	if eType == float32Embd {
+		embR.floatEmbds = make([][]float32, 0, size)
+	} else {
+		embR.int8Embds = make([][]int8, 0, size)
+	}
+	return &embR
+}
+
+func (embR *EmbdResult) append(newEmbd any) {
+	switch newEmbd := newEmbd.(type) {
+	case [][]float32:
+		embR.floatEmbds = append(embR.floatEmbds, newEmbd...)
+	case []float32:
+		embR.floatEmbds = append(embR.floatEmbds, newEmbd)
+	case [][]int8:
+		embR.int8Embds = append(embR.int8Embds, newEmbd...)
+	case []int8:
+		embR.int8Embds = append(embR.int8Embds, newEmbd)
+	}
 }

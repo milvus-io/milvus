@@ -27,7 +27,8 @@ class ChunkVectorBase {
     copy_to_chunk(int64_t chunk_id,
                   int64_t offest,
                   const Type* data,
-                  int64_t length) = 0;
+                  int64_t length,
+                  const std::optional<CheckDataValid>& check_data_valid) = 0;
     virtual void*
     get_chunk_data(int64_t index) = 0;
     virtual int64_t
@@ -83,10 +84,12 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     }
 
     void
-    copy_to_chunk(int64_t chunk_id,
-                  int64_t offset,
-                  const Type* data,
-                  int64_t length) override {
+    copy_to_chunk(
+        int64_t chunk_id,
+        int64_t offset,
+        const Type* data,
+        int64_t length,
+        const std::optional<CheckDataValid>& check_data_valid) override {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         AssertInfo(chunk_id < this->counter_,
                    fmt::format("index out of range, index={}, counter_={}",
@@ -103,7 +106,7 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
                     vec_[chunk_id].size()));
             std::copy_n(data, length, ptr + offset);
         } else {
-            vec_[chunk_id].set(data, offset, length);
+            vec_[chunk_id].set(data, offset, length, check_data_valid);
         }
     }
 

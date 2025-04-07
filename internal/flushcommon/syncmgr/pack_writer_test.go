@@ -150,14 +150,14 @@ func TestBulkPackWriter_Write(t *testing.T) {
 					{
 						EntriesNum: 10,
 						LogPath:    "files/delta_log/123/456/789/10000",
-						LogSize:    594,
-						MemorySize: 283,
+						LogSize:    592,
+						MemorySize: 327,
 					},
 				},
 			},
 			wantStats:     map[int64]*datapb.FieldBinlog{},
 			wantBm25Stats: map[int64]*datapb.FieldBinlog{},
-			wantSize:      594,
+			wantSize:      592,
 			wantErr:       nil,
 		},
 	}

@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -173,7 +174,12 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 	isVecIndex := typeutil.IsVectorType(cit.fieldSchema.DataType)
 	indexParamsMap := make(map[string]string)
 
+	keys := typeutil.NewSet[string]()
 	for _, kv := range cit.req.GetExtraParams() {
+		if keys.Contain(kv.GetKey()) {
+			return merr.WrapErrParameterInvalidMsg("duplicated index param (key=%s) (value=%s) found", kv.GetKey(), kv.GetValue())
+		}
+		keys.Insert(kv.GetKey())
 		if kv.Key == common.IndexParamsKey {
 			params, err := funcutil.JSONToMap(kv.Value)
 			if err != nil {
@@ -185,6 +191,10 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		} else {
 			indexParamsMap[kv.Key] = kv.Value
 		}
+	}
+
+	if jsonCastType, exist := indexParamsMap[common.JSONCastTypeKey]; exist {
+		indexParamsMap[common.JSONCastTypeKey] = strings.ToUpper(strings.TrimSpace(jsonCastType))
 	}
 
 	if err := ValidateAutoIndexMmapConfig(isVecIndex, indexParamsMap); err != nil {
@@ -386,6 +396,13 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			if !funcutil.SliceContain(indexparamcheck.IntVectorMetrics, metricType) {
 				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "int vector index does not support metric type: "+metricType)
 			}
+		}
+	}
+
+	// auto fill json path with field name if not specified for json index
+	if typeutil.IsJSONType(cit.fieldSchema.DataType) {
+		if _, exist := indexParamsMap[common.JSONPathKey]; !exist {
+			indexParamsMap[common.JSONPathKey] = cit.req.FieldName
 		}
 	}
 
@@ -801,10 +818,29 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 				params = wrapUserIndexParams(metricType)
 			}
 		}
+		fieldName := field.Name
+		if field.IsDynamic {
+			jsonPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, indexInfo.GetIndexParams())
+			if err != nil {
+				log.Ctx(ctx).Warn("failed to get json path for dynamic field", zap.Error(err))
+			} else if jsonPath != "" {
+				// Skip leading "/" and find next "/" to get first path segment
+				trimmedPath := strings.TrimPrefix(jsonPath, "/")
+				slashIndex := strings.Index(trimmedPath, "/")
+				if slashIndex == -1 {
+					fieldName = trimmedPath // Use full remaining path if no more "/"
+				} else {
+					fieldName = trimmedPath[:slashIndex]
+				}
+				// Unescape JSON Pointer path: ~1 -> / and ~0 -> ~
+				fieldName = strings.ReplaceAll(fieldName, "~1", "/")
+				fieldName = strings.ReplaceAll(fieldName, "~0", "~")
+			}
+		}
 		desc := &milvuspb.IndexDescription{
 			IndexName:            indexInfo.GetIndexName(),
 			IndexID:              indexInfo.GetIndexID(),
-			FieldName:            field.Name,
+			FieldName:            fieldName,
 			Params:               params,
 			IndexedRows:          indexInfo.GetIndexedRows(),
 			TotalRows:            indexInfo.GetTotalRows(),

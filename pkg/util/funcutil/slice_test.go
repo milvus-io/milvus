@@ -43,13 +43,13 @@ func Test_SliceContain(t *testing.T) {
 	}
 
 	for _, test := range cases {
-		switch test.item.(type) {
+		switch v := test.item.(type) {
 		case string:
-			if got := SliceContain(test.s.([]string), test.item.(string)); got != test.want {
+			if got := SliceContain(test.s.([]string), v); got != test.want {
 				t.Errorf("SliceContain(%v, %v) = %v", test.s, test.item, test.want)
 			}
 		case int:
-			if got := SliceContain(test.s.([]int), test.item.(int)); got != test.want {
+			if got := SliceContain(test.s.([]int), v); got != test.want {
 				t.Errorf("SliceContain(%v, %v) = %v", test.s, test.item, test.want)
 			}
 		}

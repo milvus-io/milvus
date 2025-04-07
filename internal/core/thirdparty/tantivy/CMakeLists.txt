@@ -1,3 +1,6 @@
+set(TANTIVY_FEATURES_LIST "" CACHE STRING "List of Cargo features to enable")
+string(REPLACE ";" "," TANTIVY_FEATURES "${TANTIVY_FEATURES_LIST}")
+
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CARGO_CMD cargo build)
     set(TARGET_DIR "debug")
@@ -5,6 +8,11 @@ else ()
     set(CARGO_CMD cargo build --release)
     set(TARGET_DIR "release")
 endif ()
+
+if (TANTIVY_FEATURES)
+    set(CARGO_CMD ${CARGO_CMD} --features ${TANTIVY_FEATURES})
+endif ()
+message("Cargo command: ${CARGO_CMD}")
 
 set(TANTIVY_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 set(TANTIVY_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/include")

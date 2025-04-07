@@ -152,6 +152,23 @@ func TestIsIndexMmapEnable(t *testing.T) {
 		})
 		assert.True(t, enable)
 	})
+
+	t.Run("mmap scalar index param not supported", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarIndex.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarIndex.Key)
+		enable := isIndexMmapEnable(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_String,
+		}, &querypb.FieldIndexInfo{
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "STL_SORT",
+				},
+				{Key: common.MmapEnabledKey, Value: "true"},
+			},
+		})
+		assert.False(t, enable)
+	})
 }
 
 func TestIsDataMmmapEnable(t *testing.T) {

@@ -69,6 +69,9 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	if !Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 		return nil
 	}
+	if n <= 0 {
+		return nil
+	}
 
 	m.quotaStatesMu.RLock()
 	defer m.quotaStatesMu.RUnlock()
@@ -366,6 +369,7 @@ func IsDDLRequest(rt internalpb.RateType) bool {
 	switch rt {
 	case internalpb.RateType_DDLCollection,
 		internalpb.RateType_DDLPartition,
+		internalpb.RateType_DDLDB,
 		internalpb.RateType_DDLIndex,
 		internalpb.RateType_DDLFlush,
 		internalpb.RateType_DDLCompaction:

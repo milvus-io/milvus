@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
@@ -160,12 +161,34 @@ func (st *statsTask) UpdateMetaBuildingState(meta *meta) error {
 }
 
 func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bool {
+	log := log.Ctx(ctx).With(zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID),
+		zap.Int64("targetSegmentID", st.targetSegmentID))
+
+	statsMeta := dependency.meta.statsTaskMeta.GetStatsTask(st.taskID)
+	if statsMeta == nil {
+		log.Warn("stats task meta is null, skip it")
+		st.SetState(indexpb.JobState_JobStateNone, "stats task meta is null")
+		return false
+	}
 	// set segment compacting
-	log := log.Ctx(ctx).With(zap.Int64("taskID", st.taskID), zap.Int64("segmentID", st.segmentID))
 	segment := dependency.meta.GetHealthySegment(ctx, st.segmentID)
 	if segment == nil {
 		log.Warn("segment is node healthy, skip stats")
 		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
+		return false
+	}
+
+	if segment.GetNumOfRows() == 0 {
+		st.setResult(&workerpb.StatsResult{
+			TaskID:       st.taskID,
+			State:        indexpb.JobState_JobStateFinished,
+			FailReason:   "segment num row is zero",
+			CollectionID: st.req.GetCollectionID(),
+			PartitionID:  st.req.GetPartitionID(),
+			SegmentID:    st.targetSegmentID,
+			Channel:      st.req.GetInsertChannel(),
+			NumRows:      0,
+		})
 		return false
 	}
 
@@ -190,7 +213,7 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		return false
 	}
 
-	binlogNum := (segment.getSegmentSize()/Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() + 1) * int64(len(collInfo.Schema.GetFields())) * 100
+	binlogNum := (segment.getSegmentSize()/Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() + 1) * int64(len(collInfo.Schema.GetFields())) * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
 	// binlogNum + BM25logNum + statslogNum
 	start, end, err := dependency.allocator.AllocN(binlogNum + int64(len(collInfo.Schema.GetFunctions())) + 1)
 	if err != nil {
@@ -215,13 +238,18 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		NumRows:         segment.GetNumOfRows(),
 		CollectionTtl:   collTtl.Nanoseconds(),
 		CurrentTs:       tsoutil.GetCurrentTime(),
-		BinlogMaxSize:   Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		// update version after check
+		TaskVersion:   statsMeta.GetVersion() + 1,
+		BinlogMaxSize: Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 	}
+
+	log.Info("stats task pre check successfully", zap.String("subJobType", st.subJobType.String()),
+		zap.Int64("num rows", segment.GetNumOfRows()), zap.Int64("task version", st.req.GetTaskVersion()))
 
 	return true
 }
 
-func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClient, meta *meta) bool {
+func (st *statsTask) AssignTask(ctx context.Context, client types.DataNodeClient, meta *meta) bool {
 	segment := meta.GetHealthySegment(ctx, st.segmentID)
 	if segment == nil {
 		log.Ctx(ctx).Warn("segment is node healthy, skip stats")
@@ -256,7 +284,7 @@ func (st *statsTask) AssignTask(ctx context.Context, client types.IndexNodeClien
 	return true
 }
 
-func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {
+func (st *statsTask) QueryResult(ctx context.Context, client types.DataNodeClient) {
 	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
@@ -274,13 +302,16 @@ func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClie
 
 	for _, result := range resp.GetStatsJobResults().GetResults() {
 		if result.GetTaskID() == st.GetTaskID() {
-			log.Ctx(ctx).Info("query stats task result success", zap.Int64("taskID", st.GetTaskID()),
-				zap.Int64("segmentID", st.segmentID), zap.String("result state", result.GetState().String()),
-				zap.String("failReason", result.GetFailReason()))
 			if result.GetState() == indexpb.JobState_JobStateFinished || result.GetState() == indexpb.JobState_JobStateRetry ||
 				result.GetState() == indexpb.JobState_JobStateFailed {
+				log.Ctx(ctx).Info("query stats task result success", zap.Int64("taskID", st.GetTaskID()),
+					zap.Int64("segmentID", st.segmentID), zap.String("result state", result.GetState().String()),
+					zap.String("failReason", result.GetFailReason()))
 				st.setResult(result)
 			} else if result.GetState() == indexpb.JobState_JobStateNone {
+				log.Ctx(ctx).Info("query stats task result success", zap.Int64("taskID", st.GetTaskID()),
+					zap.Int64("segmentID", st.segmentID), zap.String("result state", result.GetState().String()),
+					zap.String("failReason", result.GetFailReason()))
 				st.SetState(indexpb.JobState_JobStateRetry, "stats task state is none in info response")
 			}
 			// inProgress or unissued/init, keep InProgress state
@@ -292,7 +323,7 @@ func (st *statsTask) QueryResult(ctx context.Context, client types.IndexNodeClie
 	st.SetState(indexpb.JobState_JobStateRetry, "stats task is not in info response")
 }
 
-func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
+func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.DataNodeClient) bool {
 	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
@@ -349,5 +380,14 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 	log.Info("SetJobInfo for stats task success", zap.Int64("taskID", st.taskID),
 		zap.Int64("oldSegmentID", st.segmentID), zap.Int64("targetSegmentID", st.taskInfo.GetSegmentID()),
 		zap.String("subJobType", st.subJobType.String()), zap.String("state", st.taskInfo.GetState().String()))
+	return nil
+}
+
+func (st *statsTask) DropTaskMeta(ctx context.Context, meta *meta) error {
+	if err := meta.statsTaskMeta.DropStatsTask(st.taskID); err != nil {
+		log.Ctx(ctx).Warn("drop stats task failed", zap.Int64("taskID", st.taskID), zap.Error(err))
+		return err
+	}
+	log.Ctx(ctx).Info("drop stats task success", zap.Int64("taskID", st.taskID))
 	return nil
 }

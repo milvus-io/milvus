@@ -355,7 +355,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return errors.Wrap(err, "At LoadDeltaLogs")
 		}
 
-		loader.manager.Segment.Put(ctx, segmentType, segment)
+		if segment.Level() != datapb.SegmentLevel_L0 {
+			loader.manager.Segment.Put(ctx, segmentType, segment)
+		}
 		newSegments.GetAndRemove(segmentID)
 		loaded.Insert(segmentID, segment)
 		loader.notifyLoadFinish(loadInfo)
@@ -1244,15 +1246,14 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 	}
 	defer reader.Close()
 	for {
-		err := reader.Next()
+		dl, err := reader.NextValue()
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
 			return err
 		}
-		dl := reader.Value()
-		err = deltaData.Append(dl.Pk, dl.Ts)
+		err = deltaData.Append((*dl).Pk, (*dl).Ts)
 		if err != nil {
 			return err
 		}

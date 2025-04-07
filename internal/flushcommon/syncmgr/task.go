@@ -76,8 +76,10 @@ type SyncTask struct {
 
 	tr *timerecord.TimeRecorder
 
-	flushedSize int64
-	execTime    time.Duration
+	flushedSize         int64
+	execTime            time.Duration
+	multiPartUploadSize int64
+	syncBufferSize      int64
 }
 
 func (t *SyncTask) getLogger() *log.MLogger {
@@ -111,7 +113,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		}
 	}()
 
-	_, has := t.metacache.GetSegmentByID(t.segmentID)
+	segmentInfo, has := t.metacache.GetSegmentByID(t.segmentID)
 	if !has {
 		if t.pack.isDrop {
 			log.Info("segment dropped, discard sync task")
@@ -122,15 +124,36 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		return err
 	}
 
-	writer := NewBulkPackWriter(t.metacache, t.chunkManager, t.allocator, t.writeRetryOpts...)
-	t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
-	if err != nil {
-		log.Warn("failed to write sync data", zap.Error(err))
-		return err
+	switch segmentInfo.GetStorageVersion() {
+	case storage.StorageV2:
+		writer := NewBulkPackWriterV2(t.metacache, t.chunkManager, t.allocator, t.syncBufferSize, t.multiPartUploadSize, t.writeRetryOpts...)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
+		if err != nil {
+			log.Warn("failed to write sync data with storage v2 format", zap.Error(err))
+			return err
+		}
+	default:
+		writer := NewBulkPackWriter(t.metacache, t.chunkManager, t.allocator, t.writeRetryOpts...)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
+		if err != nil {
+			log.Warn("failed to write sync data", zap.Error(err))
+			return err
+		}
 	}
 
+	getDataCount := func(binlogs ...*datapb.FieldBinlog) int64 {
+		count := int64(0)
+		for _, binlog := range binlogs {
+			for _, fbinlog := range binlog.GetBinlogs() {
+				count += fbinlog.GetEntriesNum()
+			}
+		}
+		return count
+	}
+	metrics.DataNodeWriteDataCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, metrics.InsertLabel, fmt.Sprint(t.collectionID)).Add(float64(t.batchRows))
+	metrics.DataNodeWriteDataCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, metrics.DeleteLabel, fmt.Sprint(t.collectionID)).Add(float64(getDataCount(t.deltaBinlog)))
 	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, t.level.String()).Add(float64(t.flushedSize))
-	metrics.DataNodeWriteBinlogSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, fmt.Sprint(t.collectionID)).Add(float64(t.flushedSize))
+
 	metrics.DataNodeFlushedRows.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource).Add(float64(t.batchRows))
 
 	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))

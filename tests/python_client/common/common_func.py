@@ -785,14 +785,15 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
 
 
 def gen_all_datatype_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                       auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, **kwargs):
+                                       auto_id=False, dim=ct.default_dim, enable_dynamic_field=True, nullable=True,**kwargs):
     analyzer_params = {
         "tokenizer": "standard",
     }
     fields = [
         gen_int64_field(),
-        gen_float_field(),
-        gen_string_field(),
+        gen_float_field(nullable=nullable),
+        gen_string_field(nullable=nullable),
+        gen_string_field(name="document", max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable),
         gen_string_field(name="text", max_length=2000, enable_analyzer=True, enable_match=True,
                          analyzer_params=analyzer_params),
         gen_json_field(),
@@ -1779,6 +1780,10 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=None):
             if start is not None and field.dtype == DataType.INT64:
                 tmp[field.name] = start
                 start += 1
+            if field.nullable is True:
+                # 10% percent of data is null
+                if random.random() < 0.1:
+                    tmp[field.name] = None
         data.append(tmp)
     return data
 
@@ -1816,21 +1821,27 @@ def get_varchar_field_name(schema=None):
 def get_text_field_name(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
-    fields = schema.fields
-    for field in fields:
-        if field.dtype == DataType.VARCHAR and field.params.get("enable_analyzer", False):
-            return field.name
-    return None
+    if not hasattr(schema, "functions"):
+        return []
+    functions = schema.functions
+    bm25_func = [func for func in functions if func.type == FunctionType.BM25]
+    bm25_inputs = []
+    for func in bm25_func:
+        bm25_inputs.extend(func.input_field_names)
+    bm25_inputs = list(set(bm25_inputs))
+
+    return bm25_inputs
+
 
 def get_text_match_field_name(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
+    text_match_field_list = []
     fields = schema.fields
     for field in fields:
         if field.dtype == DataType.VARCHAR and field.params.get("enable_match", False):
-            return field.name
-    return None
-
+            text_match_field_list.append(field.name)
+    return text_match_field_list
 
 
 def get_float_field_name(schema=None):
@@ -2205,21 +2216,6 @@ def gen_default_binary_list_data(nb=ct.default_nb, dim=ct.default_dim):
     return data, binary_raw_values
 
 
-def gen_simple_index():
-    index_params = []
-    for i in range(len(ct.all_index_types)):
-        if ct.all_index_types[i] in ct.binary_support:
-            continue
-        elif ct.all_index_types[i] in ct.sparse_support:
-            continue
-        elif ct.all_index_types[i] in ct.gpu_support:
-            continue
-        dic = {"index_type": ct.all_index_types[i], "metric_type": "L2"}
-        dic.update({"params": ct.default_all_indexes_params[i]})
-        index_params.append(dic)
-    return index_params
-
-
 def gen_autoindex_params():
     index_params = [
         {},
@@ -2410,6 +2406,42 @@ def gen_json_field_expressions_and_templates():
          {"expr": "json_field['float'] <= {value_0} && json_field['float'] > {value_1} && json_field['float'] != {value_2}",
           "expr_params": {"value_0": -4**5/2, "value_1": 500-1, "value_2": 500/2+260}}],
     ]
+
+    return expressions
+
+
+def gen_json_field_expressions_all_single_operator():
+    """
+    Gen a list of filter in expression-format(as a string)
+    """
+    expressions = ["json_field['a'] <= 1", "json_field['a'] <= 1.0", "json_field['a'] >= 1", "json_field['a'] >= 1.0",
+                   "json_field['a'] < 2", "json_field['a'] < 2.0", "json_field['a'] > 0", "json_field['a'] > 0.0",
+                   "json_field['a'] <= '1'", "json_field['a'] >= '1'", "json_field['a'] < '2'", "json_field['a'] > '0'",
+                   "json_field['a'] == 1", "json_field['a'] == 1.0", "json_field['a'] == True",
+                   "json_field['a'] == 9707199254740993.0", "json_field['a'] == 9707199254740992", "json_field['a'] == '1'",
+                   "json_field['a'] != '1'", "json_field['a'] like '1%'", "json_field['a'] like '%1'",
+                   "json_field['a'] like '%1%'", "json_field['a'] LIKE '1%'", "json_field['a'] LIKE '%1'",
+                   "json_field['a'] LIKE '%1%'", "EXISTS json_field['a']", "exists json_field['a']",
+                   "EXISTS json_field['a']['b']", "exists json_field['a']['b']", "json_field['a'] + 1 >= 2",
+                   "json_field['a'] - 1 <= 0", "json_field['a'] + 1.0 >= 2", "json_field['a'] - 1.0 <= 0",
+                   "json_field['a'] * 2 == 2", "json_field['a'] * 1.0 == 1.0", "json_field / 1 == 1",
+                   "json_field['a'] / 1.0 == 1", "json_field['a'] % 10 == 1", "json_field['a'] == 1**2",
+                   "json_field['a'][0] == 1 && json_field['a'][1] == 2", "json_field['a'][0] == 1 and json_field['a'][1] == 2",
+                   "json_field['a'][0]['b'] >=1 && json_field['a'][2] == 3",
+                   "json_field['a'][0]['b'] >=1 and json_field['a'][2] == 3",
+                   "json_field['a'] == 1 || json_field['a'] == '1'", "json_field['a'] == 1 or json_field['a'] == '1'",
+                   "json_field['a'][0]['b'] >=1  || json_field['a']['b'] >=1",
+                   "json_field['a'][0]['b'] >=1 or json_field['a']['b'] >=1",
+                   "json_field['a'] in [1]", "json_contains(json_field['a'], 1)", "JSON_CONTAINS(json_field['a'], 1)",
+                   "json_contains_all(json_field['a'], [2.0, '4'])", "JSON_CONTAINS_ALL(json_field['a'], [2.0, '4'])",
+                   "json_contains_any(json_field['a'], [2.0, '4'])", "JSON_CONTAINS_ANY(json_field['a'], [2.0, '4'])",
+                   "array_contains(json_field['a'], 2)", "ARRAY_CONTAINS(json_field['a'], 2)",
+                   "array_contains_all(json_field['a'], [1.0, 2])", "ARRAY_CONTAINS_ALL(json_field['a'], [1.0, 2])",
+                   "array_contains_any(json_field['a'], [1.0, 2])", "ARRAY_CONTAINS_ANY(json_field['a'], [1.0, 2])",
+                   "array_length(json_field['a']) < 10", "ARRAY_LENGTH(json_field['a']) < 10",
+                   "json_field is null", "json_field IS NULL", "json_field is not null", "json_field IS NOT NULL"
+                   ]
+    
     return expressions
 
 
@@ -2797,12 +2829,14 @@ def index_to_dict(index):
 
 def get_index_params_params(index_type):
     """get default params of index params  by index type"""
-    return ct.default_all_indexes_params[ct.all_index_types.index(index_type)].copy()
+    params = ct.default_all_indexes_params[ct.all_index_types.index(index_type)].copy()
+    return params
 
 
 def get_search_params_params(index_type):
     """get default params of search params by index type"""
-    return ct.default_all_search_params_params[ct.all_index_types.index(index_type)].copy()
+    params = ct.default_all_search_params_params[ct.all_index_types.index(index_type)].copy()
+    return params
 
 
 def assert_json_contains(expr, list_data):
@@ -3217,7 +3251,7 @@ def gen_fp16_vectors(num, dim):
     return raw_vectors, fp16_vectors
 
 
-def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
+def gen_sparse_vectors(nb, dim=1000, sparse_format="dok", empty_percentage=0):
     # default sparse format is dok, dict of keys
     # another option is coo, coordinate List
 
@@ -3225,6 +3259,11 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok"):
     vectors = [{
         d: rng.random() for d in list(set(random.sample(range(dim), random.randint(20, 30)) + [0, 1]))
     } for _ in range(nb)]
+    if empty_percentage > 0:
+        empty_nb = int(nb * empty_percentage / 100)
+        empty_ids = random.sample(range(nb), empty_nb)
+        for i in empty_ids:
+            vectors[i] = {}
     if sparse_format == "coo":
         vectors = [
             {"indices": list(x.keys()), "values": list(x.values())} for x in vectors
@@ -3354,3 +3393,13 @@ def gen_unicode_string_batch(nb, string_len: int = 1):
 def gen_unicode_string_array_batch(nb, string_len: int = 1, max_capacity: int = ct.default_max_capacity):
     return [[''.join([gen_unicode_string() for _ in range(min(random.randint(1, string_len), 50))]) for _ in
              range(random.randint(0, max_capacity))] for _ in range(nb)]
+
+
+def iter_insert_list_data(data: list, batch: int, total_len: int):
+    nb_list = [batch for _ in range(int(total_len / batch))]
+    if total_len % batch > 0:
+        nb_list.append(total_len % batch)
+
+    data_obj = [iter(d) for d in data]
+    for n in nb_list:
+        yield [[next(o) for _ in range(n)] for o in data_obj]

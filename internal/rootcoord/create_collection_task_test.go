@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -567,6 +568,70 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
+	t.Run("duplicate_type_params", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxLengthKey,
+							Value: "256",
+						},
+						{
+							Key:   common.MmapEnabledKey,
+							Value: "true",
+						},
+						{
+							Key:   common.MmapEnabledKey,
+							Value: "True",
+						},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("duplicate_index_params", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "256",
+						},
+					},
+					IndexParams: []*commonpb.KeyValuePair{
+						{Key: common.MetricTypeKey, Value: "L2"},
+						{Key: common.MetricTypeKey, Value: "IP"},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
 	t.Run("normal case", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{
@@ -903,6 +968,8 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(coll, nil)
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return("", merr.WrapErrAliasNotFound("", ""))
 
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
 
@@ -950,6 +1017,8 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(coll, nil)
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return("", merr.WrapErrAliasNotFound("", ""))
 
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
 
@@ -972,10 +1041,11 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		ticker := newTickerWithMockFailStream()
 		shardNum := 2
 		pchans := ticker.getDmlChannelNames(shardNum)
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return nil, errors.New("error mock GetCollectionByName")
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, errors.New("error mock GetCollectionByName"))
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return("", merr.WrapErrAliasNotFound("", ""))
 		core := newTestCore(withTtSynchronizer(ticker), withMeta(meta))
 		schema := &schemapb.CollectionSchema{Name: "", Fields: []*schemapb.FieldSchema{{}}}
 		task := &createCollectionTask{
@@ -994,6 +1064,40 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		}
 		err := task.Execute(context.Background())
 		assert.Error(t, err)
+	})
+
+	t.Run("collection name duplicates an alias", func(t *testing.T) {
+		defer cleanTestEnv()
+
+		collectionName := funcutil.GenRandomStr()
+		ticker := newRocksMqTtSynchronizer()
+		field1 := funcutil.GenRandomStr()
+		schema := &schemapb.CollectionSchema{Name: collectionName, Fields: []*schemapb.FieldSchema{{Name: field1}}}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		// mock collection name duplicates an alias
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(collectionName, nil)
+
+		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
+		task := &createCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				DbName:         "mock-db",
+				CollectionName: collectionName,
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.ConsistencyLevel,
+						Value: "1",
+					},
+				},
+			},
+			schema: schema,
+		}
+		err := task.Execute(context.Background())
+		assert.Error(t, err)
+		assert.True(t, strings.Contains(err.Error(), "conflicts with an existing alias"))
 	})
 
 	t.Run("normal case", func(t *testing.T) {
@@ -1023,6 +1127,8 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return("", merr.WrapErrAliasNotFound("", ""))
 
 		dc := newMockDataCoord()
 		dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
@@ -1107,6 +1213,8 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("error mock ChangeCollectionState"))
+		meta.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return("", merr.WrapErrAliasNotFound("", ""))
 
 		removeCollectionCalled := false
 		removeCollectionChan := make(chan struct{}, 1)

@@ -65,8 +65,8 @@ type upsertTask struct {
 	partitionKeyMode bool
 	partitionKeys    *schemapb.FieldData
 	// automatic generate pk as new pk wehen autoID == true
-	// delete task need use the oldIds
-	oldIds          *schemapb.IDs
+	// delete task need use the oldIDs
+	oldIDs          *schemapb.IDs
 	schemaTimestamp uint64
 }
 
@@ -148,6 +148,8 @@ func (it *upsertTask) OnEnqueue() error {
 }
 
 func (it *upsertTask) insertPreExecute(ctx context.Context) error {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-insertPreExecute")
+	defer sp.End()
 	collectionName := it.upsertMsg.InsertMsg.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
 		log.Ctx(ctx).Error("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
@@ -156,13 +158,17 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 
 	// Calculate embedding fields
 	if function.HasNonBM25Functions(it.schema.CollectionSchema.Functions, []int64{}) {
+		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Proxy-Upsert-insertPreExecute-call-function-udf")
+		defer sp.End()
 		exec, err := function.NewFunctionExecutor(it.schema.CollectionSchema)
 		if err != nil {
 			return err
 		}
-		if err := exec.ProcessInsert(it.upsertMsg.InsertMsg); err != nil {
+		sp.AddEvent("Create-function-udf")
+		if err := exec.ProcessInsert(ctx, it.upsertMsg.InsertMsg); err != nil {
 			return err
 		}
+		sp.AddEvent("Call-function-udf")
 	}
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
 	// set upsertTask.insertRequest.rowIDs
@@ -202,7 +208,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	// use the passed pk as new pk when autoID == false
 	// automatic generate pk as new pk wehen autoID == true
 	var err error
-	it.result.IDs, it.oldIds, err = checkUpsertPrimaryFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
 	if err != nil {
 		log.Warn("check primary field data and hash primary key failed when upsert",
@@ -501,7 +507,7 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 		it.result.Status = merr.Status(err)
 		return err
 	}
-	it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIds
+	it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIDs
 	it.upsertMsg.DeleteMsg.HashValues = typeutil.HashPK2Channels(it.upsertMsg.DeleteMsg.PrimaryKeys, channelNames)
 
 	// repack delete msg by dmChannel

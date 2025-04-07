@@ -68,18 +68,7 @@ func loadL0Segments(ctx context.Context, delegator delegator.ShardDelegator, req
 		}
 	}
 
-	return delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
-		Base:          req.GetBase(),
-		DstNodeID:     req.GetNodeID(),
-		Infos:         l0Segments,
-		Schema:        req.GetSchema(),
-		CollectionID:  req.GetCollectionID(),
-		LoadMeta:      req.GetLoadMeta(),
-		ReplicaID:     req.GetReplicaID(),
-		Version:       req.GetVersion(),
-		NeedTransfer:  false,
-		IndexInfoList: req.GetIndexInfoList(),
-	})
+	return delegator.LoadL0(ctx, l0Segments, req.GetVersion())
 }
 
 func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator, req *querypb.WatchDmChannelsRequest) error {
@@ -235,12 +224,15 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 		req.GetSegmentIDs(),
 	))
 
-	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
-	if collection == nil {
+	if !node.manager.Collection.Ref(req.Req.GetCollectionID(), 1) {
 		err := merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
 		log.Warn("Query failed, failed to get collection", zap.Error(err))
 		return nil, err
 	}
+	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	defer func() {
+		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
+	}()
 
 	reducer := segments.CreateInternalReducer(req, collection.Schema())
 
@@ -317,10 +309,15 @@ func (node *QueryNode) queryStreamSegments(ctx context.Context, req *querypb.Que
 		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
 	)
 
-	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
-	if collection == nil {
-		return merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
+	if !node.manager.Collection.Ref(req.Req.GetCollectionID(), 1) {
+		err := merr.WrapErrCollectionNotFound(req.Req.GetCollectionID())
+		log.Warn("Query stream segments failed, failed to get collection", zap.Error(err))
+		return err
 	}
+	collection := node.manager.Collection.Get(req.Req.GetCollectionID())
+	defer func() {
+		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
+	}()
 
 	// Send task to scheduler and wait until it finished.
 
@@ -396,7 +393,7 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	resp, err := segments.ReduceSearchOnQueryNode(ctx, results,
 		reduce.NewReduceSearchResultInfo(req.GetReq().GetNq(),
 			req.GetReq().GetTopk()).WithMetricType(req.GetReq().GetMetricType()).WithGroupByField(req.GetReq().GetGroupByFieldId()).
-			WithGroupSize(req.GetReq().GetGroupByFieldId()).WithAdvance(req.GetReq().GetIsAdvanced()))
+			WithGroupSize(req.GetReq().GetGroupSize()).WithAdvance(req.GetReq().GetIsAdvanced()))
 	if err != nil {
 		return nil, err
 	}

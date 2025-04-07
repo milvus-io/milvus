@@ -16,7 +16,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
+const interceptorName = "timetick"
+
 var (
+	_ interceptors.InterceptorWithMetrics       = (*timeTickAppendInterceptor)(nil)
 	_ interceptors.InterceptorWithReady         = (*timeTickAppendInterceptor)(nil)
 	_ interceptors.InterceptorWithGracefulClose = (*timeTickAppendInterceptor)(nil)
 )
@@ -27,6 +30,10 @@ type timeTickAppendInterceptor struct {
 	txnManager *txn.TxnManager
 }
 
+func (impl *timeTickAppendInterceptor) Name() string {
+	return interceptorName
+}
+
 // Ready implements AppendInterceptor.
 func (impl *timeTickAppendInterceptor) Ready() <-chan struct{} {
 	return impl.operator.Ready()
@@ -34,16 +41,19 @@ func (impl *timeTickAppendInterceptor) Ready() <-chan struct{} {
 
 // Do implements AppendInterceptor.
 func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
-	// the cursor manager should beready since the timetick interceptor is ready.
-	cm, _ := impl.operator.MVCCManager(ctx)
+	cm, err := impl.operator.MVCCManager(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	defer func() {
 		if err == nil {
+			// the cursor manager should beready since the timetick interceptor is ready.
 			cm.UpdateMVCC(msg)
 		}
 	}()
 
 	ackManager := impl.operator.AckManager()
-
 	var txnSession *txn.TxnSession
 	if msg.MessageType() != message.MessageTypeTimeTick {
 		// Allocate new timestamp acker for message.

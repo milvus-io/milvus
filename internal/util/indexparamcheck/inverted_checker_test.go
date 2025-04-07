@@ -23,3 +23,10 @@ func Test_INVERTEDIndexChecker(t *testing.T) {
 
 	assert.Error(t, c.CheckValidDataType(IndexINVERTED, &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}))
 }
+
+func Test_CheckTrain(t *testing.T) {
+	c := newINVERTEDChecker()
+	assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, map[string]string{"json_cast_type": "BOOL", "json_path": "json['a']"}))
+	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, map[string]string{"json_cast_type": "array", "json_path": "json['a']"}))
+	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, map[string]string{"json_cast_type": "abc", "json_path": "json['a']"}))
+}

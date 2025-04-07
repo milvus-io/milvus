@@ -29,9 +29,11 @@ namespace index {
 
 template <typename T>
 HybridScalarIndex<T>::HybridScalarIndex(
+    uint32_t tantivy_index_version,
     const storage::FileManagerContext& file_manager_context)
     : ScalarIndex<T>(HYBRID_INDEX_TYPE),
       is_built_(false),
+      tantivy_index_version_(tantivy_index_version),
       bitmap_index_cardinality_limit_(
           DEFAULT_HYBRID_INDEX_BITMAP_CARDINALITY_LIMIT),
       file_manager_context_(file_manager_context) {
@@ -191,8 +193,8 @@ HybridScalarIndex<T>::GetInternalIndex() {
         internal_index_ =
             std::make_shared<ScalarIndexSort<T>>(file_manager_context_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
-        internal_index_ =
-            std::make_shared<InvertedIndexTantivy<T>>(file_manager_context_);
+        internal_index_ = std::make_shared<InvertedIndexTantivy<T>>(
+            tantivy_index_version_, file_manager_context_);
     } else {
         PanicInfo(UnexpectedError,
                   "unknown index type when get internal index");
@@ -215,7 +217,7 @@ HybridScalarIndex<std::string>::GetInternalIndex() {
             std::make_shared<StringIndexMarisa>(file_manager_context_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
         internal_index_ = std::make_shared<InvertedIndexTantivy<std::string>>(
-            file_manager_context_);
+            tantivy_index_version_, file_manager_context_);
     } else {
         PanicInfo(UnexpectedError,
                   "unknown index type when get internal index");
@@ -250,6 +252,25 @@ HybridScalarIndex<T>::Build(const Config& config) {
 
     auto field_datas =
         mem_file_manager_->CacheRawDataToMemory(insert_files.value());
+
+    auto lack_binlog_rows =
+        GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
+    if (lack_binlog_rows.has_value()) {
+        auto field_schema = mem_file_manager_->GetFieldDataMeta().field_schema;
+        auto default_value = [&]() -> std::optional<DefaultValueType> {
+            if (!field_schema.has_default_value()) {
+                return std::nullopt;
+            }
+            return field_schema.default_value();
+        }();
+        auto field_data = storage::CreateFieldData(
+            static_cast<DataType>(field_schema.data_type()),
+            true,
+            1,
+            lack_binlog_rows.value());
+        field_data->FillFieldData(default_value, lack_binlog_rows.value());
+        field_datas.insert(field_datas.begin(), field_data);
+    }
 
     SelectIndexBuildType(field_datas);
     BuildInternal(field_datas);

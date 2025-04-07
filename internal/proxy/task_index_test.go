@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"sort"
+	"strconv"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -665,7 +666,8 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 
@@ -708,7 +710,8 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 
@@ -936,7 +939,8 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 
@@ -965,7 +969,8 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 
@@ -994,7 +999,8 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
+			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
 
@@ -1090,6 +1096,103 @@ func Test_parseIndexParams(t *testing.T) {
 		err := cit.parseIndexParams(context.TODO())
 		// Out of range in json: param 'M' (3000) should be in range [2, 2048]
 		assert.Error(t, err)
+	})
+
+	t.Run("check_duplicated_extraparam", func(t *testing.T) {
+		cit := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "HNSW",
+					},
+					{
+						Key:   common.MetricTypeKey,
+						Value: metric.L2,
+					},
+					{
+						Key:   common.MetricTypeKey,
+						Value: metric.COSINE,
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldVector",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "768"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("create index with json field", func(t *testing.T) {
+		Params.Save(Params.AutoIndexConfig.ScalarAutoIndexEnable.Key, "false")
+		defer Params.Reset(Params.AutoIndexConfig.ScalarAutoIndexEnable.Key)
+		cit = &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.JSONCastTypeKey,
+						Value: "double",
+					},
+					{
+						Key:   common.IndexTypeKey,
+						Value: "INVERTED",
+					},
+				},
+				IndexName: "",
+				FieldName: "FieldJSON",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldJSON",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_JSON,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		jsonPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, cit.newIndexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, jsonPath, "FieldJSON")
+
+		cit = &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.JSONCastTypeKey,
+						Value: "double",
+					},
+					{
+						Key:   common.IndexTypeKey,
+						Value: "INVERTED",
+					},
+				},
+				IndexName: "",
+				FieldName: "DynamicField",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldJSON",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_JSON,
+				IsDynamic:    true,
+			},
+		}
+		err = cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		jsonPath, err = funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, cit.newIndexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, jsonPath, "DynamicField")
 	})
 }
 

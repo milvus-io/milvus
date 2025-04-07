@@ -359,24 +359,6 @@ func getSystemInfoMetrics(
 			})
 		}
 
-		// add data nodes to system topology graph
-		for _, indexNode := range dataCoordTopology.Cluster.ConnectedIndexNodes {
-			node := indexNode
-			identifier := int(node.ID)
-			identifierMap[indexNode.Name] = identifier
-			indexNodeTopologyNode := metricsinfo.SystemTopologyNode{
-				Identifier: identifier,
-				Connected:  nil,
-				Infos:      &node,
-			}
-			systemTopology.NodesInfo = append(systemTopology.NodesInfo, indexNodeTopologyNode)
-			dataCoordTopologyNode.Connected = append(dataCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-				ConnectedIdentifier: identifier,
-				Type:                metricsinfo.CoordConnectToNode,
-				TargetType:          typeutil.IndexNodeRole,
-			})
-		}
-
 		// add DataCoord to system topology graph
 		systemTopology.NodesInfo = append(systemTopology.NodesInfo, dataCoordTopologyNode)
 	}

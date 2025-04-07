@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -221,9 +222,9 @@ func (ms *mqMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 }
 
 func (ms *mqMsgStream) Close() {
-	log.Ctx(ms.ctx).Info("start to close mq msg stream",
-		zap.Int("producer num", len(ms.producers)),
-		zap.Int("consumer num", len(ms.consumers)))
+	log := log.Ctx(ms.ctx).With(zap.Strings("producers", ms.producerChannels),
+		zap.Strings("consumers", ms.consumerChannels))
+	log.Info("start to close mq msg stream")
 	ms.streamCancel()
 	ms.closeRWMutex.Lock()
 	defer ms.closeRWMutex.Unlock()
@@ -244,6 +245,7 @@ func (ms *mqMsgStream) Close() {
 	ms.client.Close()
 	close(ms.receiveBuf)
 	paramtable.Get().Unwatch(paramtable.Get().CommonCfg.TTMsgEnabled.Key, ms.configEvent)
+	log.Info("mq msg stream closed")
 }
 
 func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
@@ -458,6 +460,10 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 				log.Ctx(ms.ctx).Warn("MqMsgStream get msg whose payload is nil")
 				continue
 			}
+			if message.CheckIfMessageFromStreaming(msg.Properties()) {
+				log.Ctx(ms.ctx).Warn("MqMsgStream can not consume the message from streaming service")
+				continue
+			}
 
 			var err error
 			var packMsg ConsumeMsg
@@ -638,7 +644,7 @@ func (ms *MqTtMsgStream) AsConsumer(ctx context.Context, channels []string, subN
 				return errors.Wrapf(err, errMsg)
 			}
 
-			panic(fmt.Sprintf("%s, errors = %s", errMsg, err.Error()))
+			panic(fmt.Sprintf("%s, subName = %s, errors = %s", errMsg, subName, err.Error()))
 		}
 	}
 
@@ -840,6 +846,10 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 
 			if msg.Payload() == nil {
 				log.Warn("MqTtMsgStream get msg whose payload is nil")
+				continue
+			}
+			if message.CheckIfMessageFromStreaming(msg.Properties()) {
+				log.Warn("MqTtMsgStream can not consume the message from streaming service")
 				continue
 			}
 

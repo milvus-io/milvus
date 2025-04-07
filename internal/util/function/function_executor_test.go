@@ -19,8 +19,8 @@
 package function
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestFunctionExecutor(t *testing.T) {
@@ -44,6 +45,10 @@ func TestFunctionExecutor(t *testing.T) {
 
 type FunctionExecutorSuite struct {
 	suite.Suite
+}
+
+func (s *FunctionExecutorSuite) SetupTest() {
+	paramtable.Init()
 }
 
 func (s *FunctionExecutorSuite) creataSchema(url string) *schemapb.CollectionSchema {
@@ -149,7 +154,7 @@ func (s *FunctionExecutorSuite) TestExecutor() {
 	exec, err := NewFunctionExecutor(schema)
 	s.NoError(err)
 	msg := s.createMsg([]string{"sentence", "sentence"})
-	exec.ProcessInsert(msg)
+	exec.ProcessInsert(context.Background(), msg)
 	s.Equal(len(msg.FieldsData), 3)
 }
 
@@ -182,10 +187,9 @@ func (s *FunctionExecutorSuite) TestErrorEmbedding() {
 	defer ts.Close()
 	schema := s.creataSchema(ts.URL)
 	exec, err := NewFunctionExecutor(schema)
-	fmt.Println(err)
 	s.NoError(err)
 	msg := s.createMsg([]string{"sentence", "sentence"})
-	err = exec.ProcessInsert(msg)
+	err = exec.ProcessInsert(context.Background(), msg)
 	s.Error(err)
 }
 
@@ -227,7 +231,7 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearch() {
 			IsAdvanced:       false,
 			FieldId:          102,
 		}
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.NoError(err)
 
 		// No function found
@@ -237,7 +241,7 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearch() {
 			IsAdvanced:       false,
 			FieldId:          111,
 		}
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.Error(err)
 
 		// Large search nq
@@ -247,7 +251,7 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearch() {
 			IsAdvanced:       false,
 			FieldId:          102,
 		}
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.Error(err)
 	}
 
@@ -279,12 +283,12 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearch() {
 			IsAdvanced: true,
 			SubReqs:    []*internalpb.SubSearchRequest{subReq},
 		}
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.NoError(err)
 
 		// Large nq
 		subReq.Nq = 1000
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.Error(err)
 	}
 }
@@ -320,7 +324,7 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearchFailed() {
 			IsAdvanced:       false,
 			FieldId:          102,
 		}
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.Error(err)
 	}
 	// AdvanceSearch
@@ -334,7 +338,7 @@ func (s *FunctionExecutorSuite) TestInternalPrcessSearchFailed() {
 			IsAdvanced: true,
 			SubReqs:    []*internalpb.SubSearchRequest{subReq},
 		}
-		err = exec.ProcessSearch(req)
+		err = exec.ProcessSearch(context.Background(), req)
 		s.Error(err)
 	}
 }

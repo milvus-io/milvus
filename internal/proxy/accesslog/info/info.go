@@ -47,6 +47,7 @@ var MetricFuncMap = map[string]getMetricFunc{
 	"$sdk_version":       getSdkVersion,
 	"$cluster_prefix":    getClusterPrefix,
 	"$consistency_level": getConsistencyLevel,
+	"$anns_field":        getAnnsField,
 }
 
 type AccessInfo interface {
@@ -64,6 +65,7 @@ type AccessInfo interface {
 	ErrorMsg() string
 	ErrorType() string
 	DbName() string
+	AnnsField() string
 	CollectionName() string
 	PartitionName() string
 	Expression() string
@@ -163,6 +165,10 @@ func getOutputFields(i AccessInfo) string {
 
 func getConsistencyLevel(i AccessInfo) string {
 	return i.ConsistencyLevel()
+}
+
+func getAnnsField(i AccessInfo) string {
+	return i.AnnsField()
 }
 
 func getClusterPrefix(i AccessInfo) string {

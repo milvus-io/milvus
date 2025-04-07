@@ -1,6 +1,8 @@
 package metricsutil
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -13,7 +15,8 @@ import (
 type TimeTickMetrics struct {
 	mu                                 syncutil.ClosableLock
 	constLabel                         prometheus.Labels
-	allocatedTimeTickCounter           prometheus.Counter
+	allocatedTimeTickCounter           *prometheus.CounterVec
+	allocatedTimeTickDuration          prometheus.Observer
 	acknowledgedTimeTickCounterForSync prometheus.Counter
 	syncTimeTickCounterForSync         prometheus.Counter
 	acknowledgedTimeTickCounter        prometheus.Counter
@@ -35,7 +38,8 @@ func NewTimeTickMetrics(pchannel string) *TimeTickMetrics {
 	return &TimeTickMetrics{
 		mu:                                 syncutil.ClosableLock{},
 		constLabel:                         constLabel,
-		allocatedTimeTickCounter:           metrics.WALAllocateTimeTickTotal.With(constLabel),
+		allocatedTimeTickCounter:           metrics.WALAllocateTimeTickTotal.MustCurryWith(constLabel),
+		allocatedTimeTickDuration:          metrics.WALTimeTickAllocateDurationSeconds.With(constLabel),
 		acknowledgedTimeTickCounterForSync: metrics.WALAcknowledgeTimeTickTotal.MustCurryWith(constLabel).WithLabelValues("sync"),
 		syncTimeTickCounterForSync:         metrics.WALSyncTimeTickTotal.MustCurryWith(constLabel).WithLabelValues("sync"),
 		acknowledgedTimeTickCounter:        metrics.WALAcknowledgeTimeTickTotal.MustCurryWith(constLabel).WithLabelValues("common"),
@@ -49,13 +53,33 @@ func NewTimeTickMetrics(pchannel string) *TimeTickMetrics {
 	}
 }
 
-func (m *TimeTickMetrics) CountAllocateTimeTick(ts uint64) {
-	if !m.mu.LockIfNotClosed() {
+// StartAllocateTimeTick starts to allocate time tick.
+func (m *TimeTickMetrics) StartAllocateTimeTick() *AllocateTimeTickMetricsGuard {
+	return &AllocateTimeTickMetricsGuard{
+		start: time.Now(),
+		inner: m,
+	}
+}
+
+// AllocateTimeTickMetricsGuard is a guard for allocate time tick metrics.
+type AllocateTimeTickMetricsGuard struct {
+	inner *TimeTickMetrics
+	start time.Time
+}
+
+// Done finishes the allocate time tick metrics.
+func (g *AllocateTimeTickMetricsGuard) Done(ts uint64, err error) {
+	status := parseError(err)
+
+	if !g.inner.mu.LockIfNotClosed() {
 		return
 	}
-	m.allocatedTimeTickCounter.Inc()
-	m.lastAllocatedTimeTick.Set(tsoutil.PhysicalTimeSeconds(ts))
-	m.mu.Unlock()
+	g.inner.allocatedTimeTickDuration.Observe(time.Since(g.start).Seconds())
+	g.inner.allocatedTimeTickCounter.WithLabelValues(status).Inc()
+	if err == nil {
+		g.inner.lastAllocatedTimeTick.Set(tsoutil.PhysicalTimeSeconds(ts))
+	}
+	g.inner.mu.Unlock()
 }
 
 func (m *TimeTickMetrics) CountAcknowledgeTimeTick(isSync bool) {
@@ -107,7 +131,8 @@ func (m *TimeTickMetrics) UpdateLastConfirmedTimeTick(ts uint64) {
 func (m *TimeTickMetrics) Close() {
 	// mark as closed and delete all labeled metrics
 	m.mu.Close()
-	metrics.WALAllocateTimeTickTotal.Delete(m.constLabel)
+	metrics.WALAllocateTimeTickTotal.DeletePartialMatch(m.constLabel)
+	metrics.WALTimeTickAllocateDurationSeconds.DeletePartialMatch(m.constLabel)
 	metrics.WALLastAllocatedTimeTick.Delete(m.constLabel)
 	metrics.WALLastConfirmedTimeTick.Delete(m.constLabel)
 	metrics.WALAcknowledgeTimeTickTotal.DeletePartialMatch(m.constLabel)

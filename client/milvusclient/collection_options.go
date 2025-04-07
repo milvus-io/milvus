@@ -88,7 +88,7 @@ func (opt *createCollectionOption) WithVarcharPK(varcharPK bool, maxLen int) *cr
 }
 
 func (opt *createCollectionOption) WithIndexOptions(indexOpts ...CreateIndexOption) *createCollectionOption {
-	opt.indexOptions = append(opt.indexOptions, indexOpts...)
+	opt.indexOptions = indexOpts
 	return opt
 }
 
@@ -99,6 +99,26 @@ func (opt *createCollectionOption) WithProperty(key string, value any) *createCo
 
 func (opt *createCollectionOption) WithConsistencyLevel(cl entity.ConsistencyLevel) *createCollectionOption {
 	opt.consistencyLevel = cl
+	return opt
+}
+
+func (opt *createCollectionOption) WithMetricType(metricType entity.MetricType) *createCollectionOption {
+	opt.metricType = metricType
+	return opt
+}
+
+func (opt *createCollectionOption) WithPKFieldName(name string) *createCollectionOption {
+	opt.pkFieldName = name
+	return opt
+}
+
+func (opt *createCollectionOption) WithVectorFieldName(name string) *createCollectionOption {
+	opt.vectorFieldName = name
+	return opt
+}
+
+func (opt *createCollectionOption) WithNumPartitions(numPartitions int64) *createCollectionOption {
+	opt.numPartitions = numPartitions
 	return opt
 }
 
@@ -140,12 +160,12 @@ func (opt *createCollectionOption) Request() *milvuspb.CreateCollectionRequest {
 
 func (opt *createCollectionOption) Indexes() []CreateIndexOption {
 	// fast create
-	if opt.isFast {
+	if opt.isFast && opt.indexOptions == nil {
 		return []CreateIndexOption{
 			NewCreateIndexOption(opt.name, opt.vectorFieldName, index.NewGenericIndex("", map[string]string{})),
 		}
 	}
-	return nil
+	return opt.indexOptions
 }
 
 func (opt *createCollectionOption) IsFast() bool {

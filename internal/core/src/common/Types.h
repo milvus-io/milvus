@@ -103,6 +103,7 @@ using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertRecordProto = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
+using DefaultValueType = proto::schema::ValueField;
 
 inline size_t
 GetDataTypeSize(DataType data_type, int dim = 1) {
@@ -233,6 +234,7 @@ IsPrimaryKeyDataType(DataType data_type) {
 inline bool
 IsIntegerDataType(DataType data_type) {
     switch (data_type) {
+        case DataType::BOOL:
         case DataType::INT8:
         case DataType::INT16:
         case DataType::INT32:
@@ -252,6 +254,11 @@ IsFloatDataType(DataType data_type) {
         default:
             return false;
     }
+}
+
+inline bool
+IsNumericDataType(DataType data_type) {
+    return IsIntegerDataType(data_type) || IsFloatDataType(data_type);
 }
 
 inline bool
@@ -594,6 +601,23 @@ struct TypeTraits<DataType::VECTOR_FLOAT> {
     static constexpr const char* Name = "VECTOR_FLOAT";
 };
 
+inline DataType
+FromValCase(milvus::proto::plan::GenericValue::ValCase val_case) {
+    switch (val_case) {
+        case milvus::proto::plan::GenericValue::ValCase::kBoolVal:
+            return milvus::DataType::BOOL;
+        case milvus::proto::plan::GenericValue::ValCase::kInt64Val:
+            return DataType::INT64;
+        case milvus::proto::plan::GenericValue::ValCase::kFloatVal:
+            return DataType::DOUBLE;
+        case milvus::proto::plan::GenericValue::ValCase::kStringVal:
+            return DataType::STRING;
+        case milvus::proto::plan::GenericValue::ValCase::kArrayVal:
+            return DataType::ARRAY;
+        default:
+            return DataType::NONE;
+    }
+}
 }  // namespace milvus
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {

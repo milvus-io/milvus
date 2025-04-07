@@ -39,6 +39,11 @@ func (i *ImportMsg) SetID(id UniqueID) {
 	i.Base.MsgID = id
 }
 
+func (i *ImportMsg) SetTs(ts Timestamp) {
+	i.Base.Timestamp = ts
+	i.BaseMsg.SetTs(ts)
+}
+
 func (i *ImportMsg) Type() MsgType {
 	return i.Base.MsgType
 }

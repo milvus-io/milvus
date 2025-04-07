@@ -6,8 +6,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -15,31 +13,44 @@ func newPChannelMetrics() *channelMetrics {
 	constLabel := prometheus.Labels{metrics.NodeIDLabelName: paramtable.GetStringNodeID()}
 	return &channelMetrics{
 		pchannelInfo:      metrics.StreamingCoordPChannelInfo.MustCurryWith(constLabel),
+		vchannelTotal:     metrics.StreamingCoordVChannelTotal.MustCurryWith(constLabel),
 		assignmentVersion: metrics.StreamingCoordAssignmentVersion.With(constLabel),
 	}
 }
 
 type channelMetrics struct {
 	pchannelInfo      *prometheus.GaugeVec
+	vchannelTotal     *prometheus.GaugeVec
 	assignmentVersion prometheus.Gauge
 }
 
-// RemovePChannelStatus removes the pchannel status metric
-func (m *channelMetrics) RemovePChannelStatus(assigned types.PChannelInfoAssigned) {
-	m.pchannelInfo.Delete(prometheus.Labels{
-		metrics.WALChannelLabelName:     assigned.Channel.Name,
-		metrics.WALChannelTermLabelName: strconv.FormatInt(assigned.Channel.Term, 10),
-		metrics.StreamingNodeLabelName:  strconv.FormatInt(assigned.Node.ServerID, 10),
+// UpdateVChannelTotal updates the vchannel total metric
+func (m *channelMetrics) UpdateVChannelTotal(meta *PChannelMeta) {
+	if !StaticPChannelStatsManager.Ready() {
+		return
+	}
+	metrics.StreamingCoordVChannelTotal.DeletePartialMatch(prometheus.Labels{
+		metrics.WALChannelLabelName: meta.Name(),
 	})
+	stats := StaticPChannelStatsManager.Get().GetPChannelStats(meta.ChannelID())
+	m.vchannelTotal.With(prometheus.Labels{
+		metrics.WALChannelLabelName:    meta.Name(),
+		metrics.StreamingNodeLabelName: strconv.FormatInt(meta.CurrentServerID(), 10),
+	}).Set(float64(stats.VChannelCount()))
 }
 
 // AssignPChannelStatus assigns the pchannel status metric
-func (m *channelMetrics) AssignPChannelStatus(meta *streamingpb.PChannelMeta) {
+func (m *channelMetrics) AssignPChannelStatus(meta *PChannelMeta) {
+	metrics.StreamingCoordPChannelInfo.DeletePartialMatch(prometheus.Labels{
+		metrics.WALChannelLabelName: meta.Name(),
+	})
 	m.pchannelInfo.With(prometheus.Labels{
-		metrics.WALChannelLabelName:     meta.GetChannel().GetName(),
-		metrics.WALChannelTermLabelName: strconv.FormatInt(meta.GetChannel().GetTerm(), 10),
-		metrics.StreamingNodeLabelName:  strconv.FormatInt(meta.GetNode().GetServerId(), 10),
-	}).Set(float64(meta.GetState()))
+		metrics.WALChannelLabelName:     meta.Name(),
+		metrics.WALChannelTermLabelName: strconv.FormatInt(meta.ChannelInfo().Term, 10),
+		metrics.StreamingNodeLabelName:  strconv.FormatInt(meta.CurrentServerID(), 10),
+		metrics.WALStateLabelName:       meta.State().String(),
+	}).Set(1)
+	m.UpdateVChannelTotal(meta)
 }
 
 // UpdateAssignmentVersion updates the assignment version metric

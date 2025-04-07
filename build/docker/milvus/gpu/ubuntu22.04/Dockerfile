@@ -11,14 +11,15 @@ RUN apt-get update && \
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
     chmod +x /tini
 
-COPY --chown=root:root --chmod=774 ./bin/ /milvus/bin/
+RUN mkdir -p /milvus/bin
+COPY --chown=root:root --chmod=774 ./bin/milvus /milvus/bin/milvus 
 COPY --chown=root:root --chmod=774 ./configs/ /milvus/configs/
 COPY --chown=root:root --chmod=774 ./lib/ /milvus/lib/
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
-ENV MALLOC_CONF=background_thread:true
+ENV MALLOC_CONF=background_thread:true,prof:true
 
 ENTRYPOINT ["/tini", "--"]
 

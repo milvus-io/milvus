@@ -73,6 +73,22 @@ class HybridIndexTestV1 : public testing::Test {
          int64_t index_version) {
         proto::schema::FieldSchema field_schema;
         field_schema.set_nullable(nullable_);
+        if (has_default_value_) {
+            auto default_value = field_schema.mutable_default_value();
+            if constexpr (std::is_same_v<int8_t, T> ||
+                          std::is_same_v<int16_t, T> ||
+                          std::is_same_v<int32_t, T>) {
+                default_value->set_int_data(10);
+            } else if constexpr (std::is_same_v<int64_t, T>) {
+                default_value->set_long_data(10);
+            } else if constexpr (std::is_same_v<float, T>) {
+                default_value->set_float_data(10);
+            } else if constexpr (std::is_same_v<double, T>) {
+                default_value->set_double_data(10);
+            } else if constexpr (std::is_same_v<std::string, T>) {
+                default_value->set_string_data("10");
+            }
+        }
         if constexpr (std::is_same_v<int8_t, T>) {
             field_schema.set_data_type(proto::schema::DataType::Int8);
         } else if constexpr (std::is_same_v<int16_t, T>) {
@@ -142,6 +158,9 @@ class HybridIndexTestV1 : public testing::Test {
         config["index_type"] = milvus::index::HYBRID_INDEX_TYPE;
         config["insert_files"] = std::vector<std::string>{log_path};
         config["bitmap_cardinality_limit"] = "1000";
+        if (has_lack_binlog_row_) {
+            config["lack_binlog_rows"] = lack_binlog_row_;
+        }
 
         {
             auto build_index =
@@ -228,11 +247,26 @@ class HybridIndexTestV1 : public testing::Test {
         auto index_ptr =
             dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
         auto bitset = index_ptr->In(test_data.size(), test_data.data());
-        for (size_t i = 0; i < bitset.size(); i++) {
-            if (nullable_ && !valid_data_[i]) {
+        size_t start = 0;
+        if (has_lack_binlog_row_) {
+            for (int i = 0; i < lack_binlog_row_; i++) {
+                if (!has_default_value_) {
+                    ASSERT_EQ(bitset[i], false);
+                } else {
+                    if constexpr (std::is_same_v<std::string, T>) {
+                        ASSERT_EQ(bitset[i], s.find("10") != s.end());
+                    } else {
+                        ASSERT_EQ(bitset[i], s.find(10) != s.end());
+                    }
+                }
+            }
+            start += lack_binlog_row_;
+        }
+        for (size_t i = start; i < bitset.size(); i++) {
+            if (nullable_ && !valid_data_[i - start]) {
                 ASSERT_EQ(bitset[i], false);
             } else {
-                ASSERT_EQ(bitset[i], s.find(data_[i]) != s.end());
+                ASSERT_EQ(bitset[i], s.find(data_[i - start]) != s.end());
             }
         }
     }
@@ -249,11 +283,26 @@ class HybridIndexTestV1 : public testing::Test {
         auto index_ptr =
             dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
         auto bitset = index_ptr->NotIn(test_data.size(), test_data.data());
-        for (size_t i = 0; i < bitset.size(); i++) {
-            if (nullable_ && !valid_data_[i]) {
+        size_t start = 0;
+        if (has_lack_binlog_row_) {
+            for (int i = 0; i < lack_binlog_row_; i++) {
+                if (!has_default_value_) {
+                    ASSERT_EQ(bitset[i], false);
+                } else {
+                    if constexpr (std::is_same_v<std::string, T>) {
+                        ASSERT_EQ(bitset[i], s.find("10") == s.end());
+                    } else {
+                        ASSERT_EQ(bitset[i], s.find(10) == s.end());
+                    }
+                }
+            }
+            start += lack_binlog_row_;
+        }
+        for (size_t i = start; i < bitset.size(); i++) {
+            if (nullable_ && !valid_data_[i - start]) {
                 ASSERT_EQ(bitset[i], false);
             } else {
-                ASSERT_NE(bitset[i], s.find(data_[i]) != s.end());
+                ASSERT_NE(bitset[i], s.find(data_[i - start]) != s.end());
             }
         }
     }
@@ -263,8 +312,19 @@ class HybridIndexTestV1 : public testing::Test {
         auto index_ptr =
             dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
         auto bitset = index_ptr->IsNull();
-        for (size_t i = 0; i < bitset.size(); i++) {
-            if (nullable_ && !valid_data_[i]) {
+        size_t start = 0;
+        if (has_lack_binlog_row_) {
+            for (int i = 0; i < lack_binlog_row_; i++) {
+                if (has_default_value_) {
+                    ASSERT_EQ(bitset[i], false);
+                } else {
+                    ASSERT_EQ(bitset[i], true);
+                }
+            }
+            start += lack_binlog_row_;
+        }
+        for (size_t i = start; i < bitset.size(); i++) {
+            if (nullable_ && !valid_data_[i - start]) {
                 ASSERT_EQ(bitset[i], true);
             } else {
                 ASSERT_EQ(bitset[i], false);
@@ -277,8 +337,19 @@ class HybridIndexTestV1 : public testing::Test {
         auto index_ptr =
             dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
         auto bitset = index_ptr->IsNotNull();
-        for (size_t i = 0; i < bitset.size(); i++) {
-            if (nullable_ && !valid_data_[i]) {
+        size_t start = 0;
+        if (has_lack_binlog_row_) {
+            for (int i = 0; i < lack_binlog_row_; i++) {
+                if (has_default_value_) {
+                    ASSERT_EQ(bitset[i], true);
+                } else {
+                    ASSERT_EQ(bitset[i], false);
+                }
+            }
+            start += lack_binlog_row_;
+        }
+        for (size_t i = start; i < bitset.size(); i++) {
+            if (nullable_ && !valid_data_[i - start]) {
                 ASSERT_EQ(bitset[i], false);
             } else {
                 ASSERT_EQ(bitset[i], true);
@@ -290,28 +361,44 @@ class HybridIndexTestV1 : public testing::Test {
     TestCompareValueFunc() {
         if constexpr (!std::is_same_v<T, std::string>) {
             using RefFunc = std::function<bool(int64_t)>;
-            std::vector<std::tuple<T, OpType, RefFunc>> test_cases{
+            std::vector<std::tuple<T, OpType, RefFunc, bool>> test_cases{
                 {10,
                  OpType::GreaterThan,
-                 [&](int64_t i) -> bool { return data_[i] > 10; }},
+                 [&](int64_t i) -> bool { return data_[i] > 10; },
+                 false},
                 {10,
                  OpType::GreaterEqual,
-                 [&](int64_t i) -> bool { return data_[i] >= 10; }},
+                 [&](int64_t i) -> bool { return data_[i] >= 10; },
+                 true},
                 {10,
                  OpType::LessThan,
-                 [&](int64_t i) -> bool { return data_[i] < 10; }},
+                 [&](int64_t i) -> bool { return data_[i] < 10; },
+                 false},
                 {10,
                  OpType::LessEqual,
-                 [&](int64_t i) -> bool { return data_[i] <= 10; }},
+                 [&](int64_t i) -> bool { return data_[i] <= 10; },
+                 true},
             };
-            for (const auto& [test_value, op, ref] : test_cases) {
+            for (const auto& [test_value, op, ref, default_value_res] :
+                 test_cases) {
                 auto index_ptr =
                     dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
                 auto bitset = index_ptr->Range(test_value, op);
-                for (size_t i = 0; i < bitset.size(); i++) {
+                size_t start = 0;
+                if (has_lack_binlog_row_) {
+                    for (int i = 0; i < lack_binlog_row_; i++) {
+                        if (has_default_value_) {
+                            ASSERT_EQ(bitset[i], default_value_res);
+                        } else {
+                            ASSERT_EQ(bitset[i], false);
+                        }
+                    }
+                    start += lack_binlog_row_;
+                }
+                for (size_t i = start; i < bitset.size(); i++) {
                     auto ans = bitset[i];
-                    auto should = ref(i);
-                    if (nullable_ && !valid_data_[i]) {
+                    auto should = ref(i - start);
+                    if (nullable_ && !valid_data_[i - start]) {
                         ASSERT_EQ(ans, false)
                             << "op: " << op << ", @" << i << ", ans: " << ans
                             << ", ref: " << should;
@@ -335,6 +422,7 @@ class HybridIndexTestV1 : public testing::Test {
                 bool lower_inclusive;
                 bool upper_inclusive;
                 RefFunc ref;
+                bool default_value_res;
             };
             std::vector<TestParam> test_cases = {
                 {
@@ -343,6 +431,7 @@ class HybridIndexTestV1 : public testing::Test {
                     false,
                     false,
                     [&](int64_t i) { return 10 < data_[i] && data_[i] < 30; },
+                    false,
                 },
                 {
                     10,
@@ -350,6 +439,7 @@ class HybridIndexTestV1 : public testing::Test {
                     true,
                     false,
                     [&](int64_t i) { return 10 <= data_[i] && data_[i] < 30; },
+                    true,
                 },
                 {
                     10,
@@ -357,6 +447,7 @@ class HybridIndexTestV1 : public testing::Test {
                     true,
                     true,
                     [&](int64_t i) { return 10 <= data_[i] && data_[i] <= 30; },
+                    true,
                 },
                 {
                     10,
@@ -364,6 +455,7 @@ class HybridIndexTestV1 : public testing::Test {
                     false,
                     true,
                     [&](int64_t i) { return 10 < data_[i] && data_[i] <= 30; },
+                    false,
                 }};
 
             for (const auto& test_case : test_cases) {
@@ -373,10 +465,21 @@ class HybridIndexTestV1 : public testing::Test {
                                                test_case.lower_inclusive,
                                                test_case.upper_val,
                                                test_case.upper_inclusive);
-                for (size_t i = 0; i < bitset.size(); i++) {
+                size_t start = 0;
+                if (has_lack_binlog_row_) {
+                    for (int i = 0; i < lack_binlog_row_; i++) {
+                        if (has_default_value_) {
+                            ASSERT_EQ(bitset[i], test_case.default_value_res);
+                        } else {
+                            ASSERT_EQ(bitset[i], false);
+                        }
+                    }
+                    start += lack_binlog_row_;
+                }
+                for (size_t i = start; i < bitset.size(); i++) {
                     auto ans = bitset[i];
-                    auto should = test_case.ref(i);
-                    if (nullable_ && !valid_data_[i]) {
+                    auto should = test_case.ref(i - start);
+                    if (nullable_ && !valid_data_[i - start]) {
                         ASSERT_EQ(ans, false)
                             << "lower:" << test_case.lower_val
                             << "upper:" << test_case.upper_val << ", @" << i
@@ -403,6 +506,9 @@ class HybridIndexTestV1 : public testing::Test {
     FixedVector<bool> valid_data_;
     int index_build_id_;
     int index_version_;
+    bool has_default_value_{false};
+    bool has_lack_binlog_row_{false};
+    size_t lack_binlog_row_{100};
 };
 
 TYPED_TEST_SUITE_P(HybridIndexTestV1);
@@ -546,6 +652,114 @@ TYPED_TEST_P(HybridIndexTestNullable, TestRangeCompareFuncTest) {
     this->TestRangeCompareFunc();
 }
 
+template <typename T>
+class HybridIndexTestV3 : public HybridIndexTestV1<T> {
+ public:
+    virtual void
+    SetParam() override {
+        this->nb_ = 10000;
+        this->cardinality_ = 2000;
+        this->nullable_ = true;
+        this->index_version_ = 1003;
+        this->index_build_id_ = 1003;
+        this->has_default_value_ = false;
+        this->has_lack_binlog_row_ = true;
+        this->lack_binlog_row_ = 100;
+    }
+
+    virtual ~HybridIndexTestV3() {
+    }
+};
+
+TYPED_TEST_SUITE_P(HybridIndexTestV3);
+
+TYPED_TEST_P(HybridIndexTestV3, CountFuncTest) {
+    auto count = this->index_->Count();
+    if (this->has_lack_binlog_row_) {
+        EXPECT_EQ(count, this->nb_ + this->lack_binlog_row_);
+    } else {
+        EXPECT_EQ(count, this->nb_);
+    }
+}
+
+TYPED_TEST_P(HybridIndexTestV3, INFuncTest) {
+    this->TestInFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV3, NotINFuncTest) {
+    this->TestNotInFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV3, IsNullFuncTest) {
+    this->TestIsNullFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV3, IsNotNullFuncTest) {
+    this->TestIsNotNullFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV3, CompareValFuncTest) {
+    this->TestCompareValueFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV3, TestRangeCompareFuncTest) {
+    this->TestRangeCompareFunc();
+}
+
+template <typename T>
+class HybridIndexTestV4 : public HybridIndexTestV1<T> {
+ public:
+    virtual void
+    SetParam() override {
+        this->nb_ = 10000;
+        this->cardinality_ = 2000;
+        this->nullable_ = true;
+        this->index_version_ = 1003;
+        this->index_build_id_ = 1003;
+        this->has_default_value_ = true;
+        this->has_lack_binlog_row_ = true;
+        this->lack_binlog_row_ = 100;
+    }
+
+    virtual ~HybridIndexTestV4() {
+    }
+};
+
+TYPED_TEST_SUITE_P(HybridIndexTestV4);
+
+TYPED_TEST_P(HybridIndexTestV4, CountFuncTest) {
+    auto count = this->index_->Count();
+    if (this->has_lack_binlog_row_) {
+        EXPECT_EQ(count, this->nb_ + this->lack_binlog_row_);
+    } else {
+        EXPECT_EQ(count, this->nb_);
+    }
+}
+
+TYPED_TEST_P(HybridIndexTestV4, INFuncTest) {
+    this->TestInFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV4, NotINFuncTest) {
+    this->TestNotInFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV4, IsNullFuncTest) {
+    this->TestIsNullFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV4, IsNotNullFuncTest) {
+    this->TestIsNotNullFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV4, CompareValFuncTest) {
+    this->TestCompareValueFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV4, TestRangeCompareFuncTest) {
+    this->TestRangeCompareFunc();
+}
+
 using BitmapType =
     testing::Types<int8_t, int16_t, int32_t, int64_t, std::string>;
 
@@ -567,10 +781,36 @@ REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestNullable,
                             CompareValFuncTest,
                             TestRangeCompareFuncTest);
 
+REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV3,
+                            CountFuncTest,
+                            INFuncTest,
+                            IsNullFuncTest,
+                            IsNotNullFuncTest,
+                            NotINFuncTest,
+                            CompareValFuncTest,
+                            TestRangeCompareFuncTest);
+
+REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV4,
+                            CountFuncTest,
+                            INFuncTest,
+                            IsNullFuncTest,
+                            IsNotNullFuncTest,
+                            NotINFuncTest,
+                            CompareValFuncTest,
+                            TestRangeCompareFuncTest);
+
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HighCardinality,
                                HybridIndexTestV2,
                                BitmapType);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_Nullable,
                                HybridIndexTestNullable,
+                               BitmapType);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HasLackNullBinlog,
+                               HybridIndexTestV3,
+                               BitmapType);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HasLackDefaultValueBinlog,
+                               HybridIndexTestV4,
                                BitmapType);

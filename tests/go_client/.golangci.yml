@@ -1,15 +1,5 @@
 run:
-  go: "1.21"
-  skip-dirs:
-    - build
-    - configs
-    - deployments
-    - docs
-    - scripts
-    - internal/core
-    - cmake_build
-  skip-files:
-    - partial_search_test.go
+  go: "1.22"
 
 linters:
   disable-all: true
@@ -42,7 +32,6 @@ linters-settings:
       - prefix(github.com/milvus-io)
     custom-order: true
   gofumpt:
-    lang-version: "1.18"
     module-path: github.com/milvus-io
   goimports:
     local-prefixes: github.com/milvus-io
@@ -129,6 +118,16 @@ linters-settings:
       #- 'fmt\.Print.*' WIP
 
 issues:
+  exclude-dirs:
+    - build
+    - configs
+    - deployments
+    - docs
+    - scripts
+    - internal/core
+    - cmake_build
+  exclude-files:
+    - partial_search_test.go
   exclude-use-default: false
   exclude-rules:
     - path: .+_test\.go
@@ -161,6 +160,27 @@ issues:
     - SA1019
     # defer return errors
     - SA5001
+    # TODO: cleanup following exclusions, added on golangci-lint upgrade
+    - sloppyLen
+    - dupSubExpr
+    - assignOp
+    - ifElseChain
+    - elseif
+    - commentFormatting
+    - exitAfterDefer
+    - captLocal
+    - singleCaseSwitch
+    - typeSwitchVar
+    - indent-error-flow
+    - appendAssign
+    - deprecatedComment
+    - SA9009
+    - SA1006
+    - S1009
+    - offBy1
+    - unslice    
+    # Integer overflow conversion
+    - G115
 
   # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
   max-issues-per-linter: 0

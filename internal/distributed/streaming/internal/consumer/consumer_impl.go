@@ -53,7 +53,7 @@ type resumableConsumerImpl struct {
 	mh         *timeTickOrderMessageHandler
 	factory    factory
 	consumeErr *syncutil.Future[error]
-	metrics    *consumerMetrics
+	metrics    *resumingConsumerMetrics
 }
 
 type factory = func(ctx context.Context, opts *handler.ConsumerOptions) (consumer.Consumer, error)
@@ -130,6 +130,7 @@ func (rc *resumableConsumerImpl) createNewConsumer(opts *handler.ConsumerOptions
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 100 * time.Millisecond
 	backoff.MaxInterval = 10 * time.Second
+	backoff.MaxElapsedTime = 0
 	for {
 		// Create a new consumer.
 		// a underlying stream consumer life time should be equal to the resumable producer.
@@ -146,7 +147,7 @@ func (rc *resumableConsumerImpl) createNewConsumer(opts *handler.ConsumerOptions
 		}
 
 		logger.Info("resume on new consumer at new start message id")
-		return consumer, nil
+		return newConsumerWithMetrics(rc.opts.PChannel, consumer), nil
 	}
 }
 

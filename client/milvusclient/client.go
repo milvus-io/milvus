@@ -37,7 +37,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/common"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type Client struct {
@@ -48,7 +49,9 @@ type Client struct {
 	// mutable status
 	stateMut   sync.RWMutex
 	currentDB  string
-	identifier string
+	identifier string // Identifier for this connection
+
+	metadataHeaders map[string]string
 
 	collCache *CollectionCache
 }
@@ -67,7 +70,7 @@ func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 	addr := c.config.getParsedAddress()
 
 	// parse authentication parameters
-	c.config.parseAuthentication()
+	c.parseAuthentication()
 	// Parse grpc options
 	options := c.dialOptions()
 
@@ -115,6 +118,21 @@ func (c *Client) dialOptions() []grpc.DialOption {
 	))
 
 	return options
+}
+
+// parseAuthentication prepares authentication headers for grpc inteceptors based on the provided username, password or API key.
+func (c *Client) parseAuthentication() {
+	cfg := c.config
+	c.metadataHeaders = make(map[string]string)
+	if cfg.Username != "" || cfg.Password != "" {
+		value := crypto.Base64Encode(fmt.Sprintf("%s:%s", cfg.Username, cfg.Password))
+		c.metadataHeaders[authorizationHeader] = value
+	}
+	// API overwrites username & passwd
+	if cfg.APIKey != "" {
+		value := crypto.Base64Encode(cfg.APIKey)
+		c.metadataHeaders[authorizationHeader] = value
+	}
 }
 
 func (c *Client) Close(ctx context.Context) error {
@@ -217,4 +235,8 @@ func (c *Client) callService(fn func(milvusService milvuspb.MilvusServiceClient)
 	}
 
 	return fn(c.service)
+}
+
+func (c *Client) GetService() milvuspb.MilvusServiceClient {
+	return c.service
 }

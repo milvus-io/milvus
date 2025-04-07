@@ -79,6 +79,8 @@ const (
 
 	// InvalidNodeID indicates that node is not valid in querycoord replica or shard cluster.
 	InvalidNodeID = int64(-1)
+
+	SystemFieldsNum = int64(2)
 )
 
 const (
@@ -186,6 +188,13 @@ const (
 	DatabaseMaxCollectionsKey   = "database.max.collections"
 	DatabaseForceDenyWritingKey = "database.force.deny.writing"
 	DatabaseForceDenyReadingKey = "database.force.deny.reading"
+
+	DatabaseForceDenyDDLKey           = "database.force.deny.ddl" // all ddl
+	DatabaseForceDenyCollectionDDLKey = "database.force.deny.collectionDDL"
+	DatabaseForceDenyPartitionDDLKey  = "database.force.deny.partitionDDL"
+	DatabaseForceDenyIndexDDLKey      = "database.force.deny.index"
+	DatabaseForceDenyFlushDDLKey      = "database.force.deny.flush"
+	DatabaseForceDenyCompactionDDLKey = "database.force.deny.compaction"
 
 	// collection level load properties
 	CollectionReplicaNumber  = "collection.replica.number"
@@ -376,7 +385,7 @@ func CollectionLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, erro
 
 // GetCollectionLoadFields returns the load field ids according to the type params.
 func GetCollectionLoadFields(schema *schemapb.CollectionSchema, skipDynamicField bool) []int64 {
-	return lo.FilterMap(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
+	fields := lo.FilterMap(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
 		// skip system field
 		if IsSystemField(field.GetFieldID()) {
 			return field.GetFieldID(), false
@@ -394,6 +403,11 @@ func GetCollectionLoadFields(schema *schemapb.CollectionSchema, skipDynamicField
 		}
 		return field.GetFieldID(), v
 	})
+	// empty fields list means all fields will be loaded
+	if len(fields) == len(schema.GetFields())-int(SystemFieldsNum) {
+		return []int64{}
+	}
+	return fields
 }
 
 func ShouldFieldBeLoaded(kvs []*commonpb.KeyValuePair) (bool, error) {

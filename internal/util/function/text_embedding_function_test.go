@@ -19,6 +19,7 @@
 package function
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestTextEmbeddingFunction(t *testing.T) {
@@ -42,6 +44,7 @@ type TextEmbeddingFunctionSuite struct {
 }
 
 func (s *TextEmbeddingFunctionSuite) SetupTest() {
+	paramtable.Init()
 	s.schema = &schemapb.CollectionSchema{
 		Name: "test",
 		Fields: []*schemapb.FieldSchema{
@@ -126,16 +129,16 @@ func (s *TextEmbeddingFunctionSuite) TestProcessInsert() {
 
 		{
 			data := createData([]string{"sentence"})
-			ret, err2 := runner.ProcessInsert(data)
+			ret, err2 := runner.ProcessInsert(context.Background(), data)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
 			s.Equal(int64(4), ret[0].GetVectors().Dim)
-			s.Equal([]float32{0.0, 0.1, 0.2, 0.3}, ret[0].GetVectors().GetFloatVector().Data)
+			s.Equal([]float32{0.0, 1.0, 2.0, 3.0}, ret[0].GetVectors().GetFloatVector().Data)
 		}
 		{
 			data := createData([]string{"sentence 1", "sentence 2", "sentence 3"})
-			ret, _ := runner.ProcessInsert(data)
-			s.Equal([]float32{0.0, 0.1, 0.2, 0.3, 1.0, 1.1, 1.2, 1.3, 2.0, 2.1, 2.2, 2.3}, ret[0].GetVectors().GetFloatVector().Data)
+			ret, _ := runner.ProcessInsert(context.Background(), data)
+			s.Equal([]float32{0.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 4.0, 2.0, 3.0, 4.0, 5.0}, ret[0].GetVectors().GetFloatVector().Data)
 		}
 	}
 	{
@@ -158,16 +161,16 @@ func (s *TextEmbeddingFunctionSuite) TestProcessInsert() {
 
 		{
 			data := createData([]string{"sentence"})
-			ret, err2 := runner.ProcessInsert(data)
+			ret, err2 := runner.ProcessInsert(context.Background(), data)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
 			s.Equal(int64(4), ret[0].GetVectors().Dim)
-			s.Equal([]float32{0.0, 0.1, 0.2, 0.3}, ret[0].GetVectors().GetFloatVector().Data)
+			s.Equal([]float32{0.0, 1.0, 2.0, 3.0}, ret[0].GetVectors().GetFloatVector().Data)
 		}
 		{
 			data := createData([]string{"sentence 1", "sentence 2", "sentence 3"})
-			ret, _ := runner.ProcessInsert(data)
-			s.Equal([]float32{0.0, 0.1, 0.2, 0.3, 1.0, 1.1, 1.2, 1.3, 2.0, 2.1, 2.2, 2.3}, ret[0].GetVectors().GetFloatVector().Data)
+			ret, _ := runner.ProcessInsert(context.Background(), data)
+			s.Equal([]float32{0.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 4.0, 2.0, 3.0, 4.0, 5.0}, ret[0].GetVectors().GetFloatVector().Data)
 		}
 	}
 }
@@ -185,7 +188,7 @@ func (s *TextEmbeddingFunctionSuite) TestAliEmbedding() {
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: Provider, Value: aliDashScopeProvider},
-			{Key: modelNameParamKey, Value: TextEmbeddingV3},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: dimParamKey, Value: "4"},
 			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: embeddingURLParamKey, Value: ts.URL},
@@ -195,16 +198,16 @@ func (s *TextEmbeddingFunctionSuite) TestAliEmbedding() {
 
 	{
 		data := createData([]string{"sentence"})
-		ret, err2 := runner.ProcessInsert(data)
+		ret, err2 := runner.ProcessInsert(context.Background(), data)
 		s.NoError(err2)
 		s.Equal(1, len(ret))
 		s.Equal(int64(4), ret[0].GetVectors().Dim)
-		s.Equal([]float32{0.0, 0.1, 0.2, 0.3}, ret[0].GetVectors().GetFloatVector().Data)
+		s.Equal([]float32{0.0, 1.0, 2.0, 3.0}, ret[0].GetVectors().GetFloatVector().Data)
 	}
 	{
 		data := createData([]string{"sentence 1", "sentence 2", "sentence 3"})
-		ret, _ := runner.ProcessInsert(data)
-		s.Equal([]float32{0.0, 0.1, 0.2, 0.3, 1.0, 1.1, 1.2, 1.3, 2.0, 2.1, 2.2, 2.3}, ret[0].GetVectors().GetFloatVector().Data)
+		ret, _ := runner.ProcessInsert(context.Background(), data)
+		s.Equal([]float32{0.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 4.0, 2.0, 3.0, 4.0, 5.0}, ret[0].GetVectors().GetFloatVector().Data)
 	}
 
 	// multi-input
@@ -226,7 +229,7 @@ func (s *TextEmbeddingFunctionSuite) TestAliEmbedding() {
 		}
 		data = append(data, &f)
 		data = append(data, &f)
-		_, err := runner.ProcessInsert(data)
+		_, err := runner.ProcessInsert(context.Background(), data)
 		s.Error(err)
 	}
 
@@ -242,7 +245,7 @@ func (s *TextEmbeddingFunctionSuite) TestAliEmbedding() {
 			},
 		}
 		data = append(data, &f)
-		_, err := runner.ProcessInsert(data)
+		_, err := runner.ProcessInsert(context.Background(), data)
 		s.Error(err)
 	}
 	// empty input
@@ -257,7 +260,7 @@ func (s *TextEmbeddingFunctionSuite) TestAliEmbedding() {
 			},
 		}
 		data = append(data, &f)
-		_, err := runner.ProcessInsert(data)
+		_, err := runner.ProcessInsert(context.Background(), data)
 		s.Error(err)
 	}
 	// large input data
@@ -271,14 +274,36 @@ func (s *TextEmbeddingFunctionSuite) TestAliEmbedding() {
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
-							Data: strings.Split(strings.Repeat("Element,", 1000), ","),
+							Data: strings.Split(strings.Repeat("Element,", 1000), ",")[:999],
 						},
 					},
 				},
 			},
 		}
 		data = append(data, &f)
-		_, err := runner.ProcessInsert(data)
+		_, err := runner.ProcessInsert(context.Background(), data)
+		s.Error(err)
+	}
+
+	// empty string
+	{
+		data := []*schemapb.FieldData{}
+		f := schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldId:   101,
+			IsDynamic: false,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: strings.Split(strings.Repeat("Element,", 10), ","),
+						},
+					},
+				},
+			},
+		}
+		data = append(data, &f)
+		_, err := runner.ProcessInsert(context.Background(), data)
 		s.Error(err)
 	}
 }
@@ -377,26 +402,6 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 		s.Error(err)
 	}
 
-	// error model name
-	{
-		_, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
-			Name:             "test",
-			Type:             schemapb.FunctionType_TextEmbedding,
-			InputFieldNames:  []string{"text"},
-			OutputFieldNames: []string{"vector"},
-			InputFieldIds:    []int64{101},
-			OutputFieldIds:   []int64{102},
-			Params: []*commonpb.KeyValuePair{
-				{Key: Provider, Value: openAIProvider},
-				{Key: modelNameParamKey, Value: "text-embedding-ada-004"},
-				{Key: dimParamKey, Value: "4"},
-				{Key: apiKeyParamKey, Value: "mock"},
-				{Key: embeddingURLParamKey, Value: "mock"},
-			},
-		})
-		s.Error(err)
-	}
-
 	// no openai api  key
 	{
 		_, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
@@ -426,7 +431,7 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			OutputFieldIds:   []int64{102},
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: bedrockProvider},
-				{Key: modelNameParamKey, Value: BedRockTitanTextEmbeddingsV2},
+				{Key: modelNameParamKey, Value: TestModel},
 				{Key: awsAKIdParamKey, Value: "mock"},
 				{Key: awsSAKParamKey, Value: "mock"},
 				{Key: regionParamKey, Value: "mock"},
@@ -450,7 +455,7 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			OutputFieldIds:   []int64{102},
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: aliDashScopeProvider},
-				{Key: modelNameParamKey, Value: TextEmbeddingV1},
+				{Key: modelNameParamKey, Value: TestModel},
 				{Key: apiKeyParamKey, Value: "mock"},
 			},
 		}
@@ -472,7 +477,29 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			OutputFieldIds:   []int64{102},
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: voyageAIProvider},
-				{Key: modelNameParamKey, Value: voyage3},
+				{Key: modelNameParamKey, Value: TestModel},
+				{Key: apiKeyParamKey, Value: "mock"},
+			},
+		}
+
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		s.NoError(err)
+		fSchema.Params = []*commonpb.KeyValuePair{}
+		_, err = NewTextEmbeddingFunction(s.schema, fSchema)
+		s.Error(err)
+	}
+
+	{
+		fSchema := &schemapb.FunctionSchema{
+			Name:             "test",
+			Type:             schemapb.FunctionType_TextEmbedding,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{102},
+			Params: []*commonpb.KeyValuePair{
+				{Key: Provider, Value: siliconflowProvider},
+				{Key: modelNameParamKey, Value: TestModel},
 				{Key: apiKeyParamKey, Value: "mock"},
 			},
 		}
@@ -494,11 +521,31 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			OutputFieldIds:   []int64{102},
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: cohereProvider},
-				{Key: modelNameParamKey, Value: embedEnglishLightV20},
+				{Key: modelNameParamKey, Value: TestModel},
 				{Key: apiKeyParamKey, Value: "mock"},
 			},
 		}
 
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		s.NoError(err)
+		fSchema.Params = []*commonpb.KeyValuePair{}
+		_, err = NewTextEmbeddingFunction(s.schema, fSchema)
+		s.Error(err)
+	}
+
+	{
+		fSchema := &schemapb.FunctionSchema{
+			Name:             "test",
+			Type:             schemapb.FunctionType_TextEmbedding,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{102},
+			Params: []*commonpb.KeyValuePair{
+				{Key: Provider, Value: "tei"},
+				{Key: "endpoint", Value: "http://mock.com"},
+			},
+		}
 		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
 		s.NoError(err)
 		fSchema.Params = []*commonpb.KeyValuePair{}
@@ -538,9 +585,26 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
 		s.Error(err)
 	}
+
+	// Invalid output field
+	{
+		fSchema := &schemapb.FunctionSchema{
+			Name:             "test",
+			Type:             schemapb.FunctionType_TextEmbedding,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"int64"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{100},
+			Params: []*commonpb.KeyValuePair{
+				{Key: Provider, Value: "tei"},
+			},
+		}
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		s.Error(err)
+	}
 }
 
-func (s *TextEmbeddingFunctionSuite) TestProcessSearch() {
+func (s *TextEmbeddingFunctionSuite) TestProcessSearchFloat32() {
 	ts := CreateOpenAIEmbeddingServer()
 	defer ts.Close()
 	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
@@ -570,7 +634,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearch() {
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
-							Data: strings.Split(strings.Repeat("Element,", 1000), ","),
+							Data: strings.Split(strings.Repeat("Element,", 1000), ",")[0:999],
 						},
 					},
 				},
@@ -581,11 +645,178 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearch() {
 		s.NoError(err)
 		placeholderGroup := commonpb.PlaceholderGroup{}
 		proto.Unmarshal(placeholderGroupBytes, &placeholderGroup)
-		_, err = runner.ProcessSearch(&placeholderGroup)
+		_, err = runner.ProcessSearch(context.Background(), &placeholderGroup)
 		s.Error(err)
 	}
 
 	// Normal inputs
+	{
+		f := &schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldId:   101,
+			IsDynamic: false,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: strings.Split(strings.Repeat("Element,", 100), ",")[:99],
+						},
+					},
+				},
+			},
+		}
+
+		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(f)
+		s.NoError(err)
+		placeholderGroup := commonpb.PlaceholderGroup{}
+		proto.Unmarshal(placeholderGroupBytes, &placeholderGroup)
+		_, err = runner.ProcessSearch(context.Background(), &placeholderGroup)
+		s.NoError(err)
+	}
+}
+
+func (s *TextEmbeddingFunctionSuite) TestProcessInsertInt8() {
+	ts := CreateCohereEmbeddingServer[int8]()
+	defer ts.Close()
+
+	s.schema = &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_Int8Vector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+			},
+		},
+	}
+	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: Provider, Value: cohereProvider},
+			{Key: modelNameParamKey, Value: TestModel},
+			{Key: dimParamKey, Value: "4"},
+			{Key: apiKeyParamKey, Value: "mock"},
+			{Key: embeddingURLParamKey, Value: ts.URL},
+		},
+	})
+	s.NoError(err)
+
+	{
+		data := createData([]string{"sentence"})
+		ret, err2 := runner.ProcessInsert(context.Background(), data)
+		s.NoError(err2)
+		s.Equal(1, len(ret))
+		s.Equal(int64(4), ret[0].GetVectors().Dim)
+		int8Bytes := ret[0].GetVectors().GetInt8Vector()
+		int8Vec := make([]int8, 0, len(int8Bytes))
+		for _, item := range int8Bytes {
+			int8Vec = append(int8Vec, int8(item))
+		}
+
+		s.Equal([]int8{0, 1, 2, 3}, int8Vec)
+	}
+}
+
+func (s *TextEmbeddingFunctionSuite) TestUnsupportedVec() {
+	s.schema = &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_BFloat16Vector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+			},
+		},
+	}
+	_, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: Provider, Value: cohereProvider},
+			{Key: modelNameParamKey, Value: TestModel},
+			{Key: dimParamKey, Value: "4"},
+			{Key: apiKeyParamKey, Value: "mock"},
+			{Key: embeddingURLParamKey, Value: "mock"},
+		},
+	})
+	s.Error(err)
+}
+
+func (s *TextEmbeddingFunctionSuite) TestProcessSearchInt8() {
+	ts := CreateCohereEmbeddingServer[int8]()
+	defer ts.Close()
+
+	s.schema = &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_Int8Vector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+			},
+		},
+	}
+	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: Provider, Value: cohereProvider},
+			{Key: modelNameParamKey, Value: TestModel},
+			{Key: dimParamKey, Value: "4"},
+			{Key: apiKeyParamKey, Value: "mock"},
+			{Key: embeddingURLParamKey, Value: ts.URL},
+		},
+	})
+	s.NoError(err)
+
+	// Normal inputs
+	{
+		f := &schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldId:   101,
+			IsDynamic: false,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: strings.Split(strings.Repeat("Element,", 100), ",")[:99],
+						},
+					},
+				},
+			},
+		}
+
+		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(f)
+		s.NoError(err)
+		placeholderGroup := commonpb.PlaceholderGroup{}
+		proto.Unmarshal(placeholderGroupBytes, &placeholderGroup)
+		_, err = runner.ProcessSearch(context.Background(), &placeholderGroup)
+		s.NoError(err)
+	}
+
+	// empty text
 	{
 		f := &schemapb.FieldData{
 			Type:      schemapb.DataType_VarChar,
@@ -606,12 +837,12 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearch() {
 		s.NoError(err)
 		placeholderGroup := commonpb.PlaceholderGroup{}
 		proto.Unmarshal(placeholderGroupBytes, &placeholderGroup)
-		_, err = runner.ProcessSearch(&placeholderGroup)
-		s.NoError(err)
+		_, err = runner.ProcessSearch(context.Background(), &placeholderGroup)
+		s.Error(err)
 	}
 }
 
-func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsert() {
+func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertFloat32() {
 	ts := CreateOpenAIEmbeddingServer()
 	defer ts.Close()
 	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
@@ -651,5 +882,56 @@ func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsert() {
 		input := []storage.FieldData{data.Data[102]}
 		_, err := runner.ProcessBulkInsert(input)
 		s.Error(err)
+	}
+
+	// empty texts
+	{
+		input := []storage.FieldData{data.Data[101]}
+		err := input[0].AppendRow("")
+		s.NoError(err)
+		_, err = runner.ProcessBulkInsert(input)
+		s.Error(err)
+	}
+}
+
+func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertInt8() {
+	ts := CreateCohereEmbeddingServer[int8]()
+	defer ts.Close()
+	s.schema = &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{
+				FieldID: 102, Name: "vector", DataType: schemapb.DataType_Int8Vector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4"},
+				},
+			},
+		},
+	}
+	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
+		Name:             "test",
+		Type:             schemapb.FunctionType_TextEmbedding,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		InputFieldIds:    []int64{101},
+		OutputFieldIds:   []int64{102},
+		Params: []*commonpb.KeyValuePair{
+			{Key: Provider, Value: cohereProvider},
+			{Key: modelNameParamKey, Value: TestModel},
+			{Key: dimParamKey, Value: "4"},
+			{Key: apiKeyParamKey, Value: "mock"},
+			{Key: embeddingURLParamKey, Value: ts.URL},
+		},
+	})
+	s.NoError(err)
+
+	data, err := testutil.CreateInsertData(s.schema, 100)
+	s.NoError(err)
+	{
+		input := []storage.FieldData{data.Data[101]}
+		_, err := runner.ProcessBulkInsert(input)
+		s.NoError(err)
 	}
 }

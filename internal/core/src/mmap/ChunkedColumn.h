@@ -54,9 +54,7 @@ class ChunkedColumnBase : public ColumnBase {
     ChunkedColumnBase() = default;
     // memory mode ctor
     explicit ChunkedColumnBase(const FieldMeta& field_meta) {
-        if (field_meta.is_nullable()) {
-            nullable_ = true;
-        }
+        nullable_ = field_meta.is_nullable();
     }
 
     virtual ~ChunkedColumnBase() = default;
@@ -150,9 +148,17 @@ class ChunkedColumnBase : public ColumnBase {
     }
 
     virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    StringViews(int64_t chunk_id) const {
+    StringViews(int64_t chunk_id,
+                std::optional<std::pair<int64_t, int64_t>> offset_len) const {
         PanicInfo(ErrorCode::Unsupported,
                   "StringViews only supported for VariableColumn");
+    }
+
+    virtual std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    ArrayViews(int64_t chunk_id,
+               std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "ArrayViews only supported for ArrayChunkedColumn");
     }
 
     virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
@@ -176,6 +182,11 @@ class ChunkedColumnBase : public ColumnBase {
             std::distance(num_rows_until_chunk_.begin(), iter) - 1;
         size_t offset_in_chunk = offset - num_rows_until_chunk_[chunk_idx];
         return {chunk_idx, offset_in_chunk};
+    }
+
+    std::shared_ptr<Chunk>
+    GetChunk(int64_t chunk_id) const {
+        return chunks_[chunk_id];
     }
 
     int64_t
@@ -240,7 +251,9 @@ class ChunkedColumn : public ChunkedColumnBase {
         : ChunkedColumnBase(field_meta) {
     }
 
-    explicit ChunkedColumn(const std::vector<std::shared_ptr<Chunk>>& chunks) {
+    explicit ChunkedColumn(const FieldMeta& field_meta,
+                           const std::vector<std::shared_ptr<Chunk>>& chunks)
+        : ChunkedColumnBase(field_meta) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }
@@ -250,7 +263,7 @@ class ChunkedColumn : public ChunkedColumnBase {
 
     SpanBase
     Span(int64_t chunk_id) const override {
-        return std::dynamic_pointer_cast<FixedWidthChunk>(chunks_[chunk_id])
+        return std::static_pointer_cast<FixedWidthChunk>(chunks_[chunk_id])
             ->Span();
     }
 };
@@ -264,7 +277,9 @@ class ChunkedSparseFloatColumn : public ChunkedColumnBase {
     }
 
     explicit ChunkedSparseFloatColumn(
-        const std::vector<std::shared_ptr<Chunk>>& chunks) {
+        const FieldMeta& field_meta,
+        const std::vector<std::shared_ptr<Chunk>>& chunks)
+        : ChunkedColumnBase(field_meta) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }
@@ -279,7 +294,7 @@ class ChunkedSparseFloatColumn : public ChunkedColumnBase {
         chunks_.push_back(chunk);
         dim_ = std::max(
             dim_,
-            std::dynamic_pointer_cast<SparseFloatVectorChunk>(chunk)->Dim());
+            std::static_pointer_cast<SparseFloatVectorChunk>(chunk)->Dim());
     }
 
     SpanBase
@@ -309,7 +324,9 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     }
 
     explicit ChunkedVariableColumn(
-        const std::vector<std::shared_ptr<Chunk>>& chunks) {
+        const FieldMeta& field_meta,
+        const std::vector<std::shared_ptr<Chunk>>& chunks)
+        : ChunkedColumnBase(field_meta) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }
@@ -324,20 +341,17 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     }
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    StringViews(int64_t chunk_id) const override {
-        return std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
-            ->StringViews();
-    }
-
-    std::shared_ptr<Chunk>
-    GetChunk(int64_t chunk_id) const {
-        return chunks_[chunk_id];
+    StringViews(int64_t chunk_id,
+                std::optional<std::pair<int64_t, int64_t>> offset_len =
+                    std::nullopt) const override {
+        return std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
+            ->StringViews(offset_len);
     }
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
     ViewsByOffsets(int64_t chunk_id,
                    const FixedVector<int32_t>& offsets) const override {
-        return std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
+        return std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
             ->ViewsByOffsets(offsets);
     }
 
@@ -349,7 +363,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         std::vector<BufferView::Element> elements;
         elements.push_back(
             {chunks_[chunk_id]->Data(),
-             std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
+             std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
                  ->Offsets(),
              static_cast<int>(start_offset),
              static_cast<int>(start_offset + length)});
@@ -365,12 +379,11 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         }
 
         auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
-        auto data = chunks_[chunk_id]->Data();
-        auto offsets = std::dynamic_pointer_cast<StringChunk>(chunks_[chunk_id])
-                           ->Offsets();
-        auto len = offsets[offset_in_chunk + 1] - offsets[offset_in_chunk];
-
-        return ViewType(data + offsets[offset_in_chunk], len);
+        std::string_view str_view =
+            std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
+                ->
+                operator[](offset_in_chunk);
+        return ViewType(str_view.data(), str_view.size());
     }
 
     std::string_view
@@ -378,7 +391,6 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         return std::string_view((*this)[i]);
     }
 };
-
 class ChunkedArrayColumn : public ChunkedColumnBase {
  public:
     // memory mode ctor
@@ -387,7 +399,9 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
     }
 
     explicit ChunkedArrayColumn(
-        const std::vector<std::shared_ptr<Chunk>>& chunks) {
+        const FieldMeta& field_meta,
+        const std::vector<std::shared_ptr<Chunk>>& chunks)
+        : ChunkedColumnBase(field_meta) {
         for (auto& chunk : chunks) {
             AddChunk(chunk);
         }
@@ -397,22 +411,31 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
 
     SpanBase
     Span(int64_t chunk_id) const override {
-        return std::dynamic_pointer_cast<ArrayChunk>(chunks_[chunk_id])->Span();
+        PanicInfo(ErrorCode::NotImplemented,
+                  "span() interface is not implemented for arr chunk column");
     }
 
     ArrayView
     operator[](const int i) const {
         auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
-        return std::dynamic_pointer_cast<ArrayChunk>(chunks_[chunk_id])
+        return std::static_pointer_cast<ArrayChunk>(chunks_[chunk_id])
             ->View(offset_in_chunk);
     }
 
     ScalarArray
     RawAt(const int i) const {
         auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
-        return std::dynamic_pointer_cast<ArrayChunk>(chunks_[chunk_id])
+        return std::static_pointer_cast<ArrayChunk>(chunks_[chunk_id])
             ->View(offset_in_chunk)
             .output_data();
+    }
+
+    std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    ArrayViews(int64_t chunk_id,
+               std::optional<std::pair<int64_t, int64_t>> offset_len =
+                   std::nullopt) const override {
+        return std::static_pointer_cast<ArrayChunk>(chunks_[chunk_id])
+            ->Views(offset_len);
     }
 };
 }  // namespace milvus

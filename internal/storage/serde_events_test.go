@@ -27,28 +27,30 @@ import (
 	"testing"
 	"time"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/arrow/memory"
-	"github.com/apache/arrow/go/v12/parquet/file"
-	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet/file"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func TestBinlogDeserializeReader(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
-		reader, err := NewBinlogDeserializeReader(nil, func() ([]*Blob, error) {
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), func() ([]*Blob, error) {
 			return nil, io.EOF
 		})
 		assert.NoError(t, err)
 		defer reader.Close()
-		err = reader.Next()
+		_, err = reader.NextValue()
 		assert.Equal(t, io.EOF, err)
 	})
 
@@ -61,14 +63,13 @@ func TestBinlogDeserializeReader(t *testing.T) {
 		defer reader.Close()
 
 		for i := 1; i <= size; i++ {
-			err = reader.Next()
+			value, err := reader.NextValue()
 			assert.NoError(t, err)
 
-			value := reader.Value()
-			assertTestData(t, i, value)
+			assertTestData(t, i, *value)
 		}
 
-		err = reader.Next()
+		_, err = reader.NextValue()
 		assert.Equal(t, io.EOF, err)
 	})
 
@@ -81,14 +82,13 @@ func TestBinlogDeserializeReader(t *testing.T) {
 		defer reader.Close()
 
 		for i := 1; i <= size; i++ {
-			err = reader.Next()
+			value, err := reader.NextValue()
 			assert.NoError(t, err)
 
-			value := reader.Value()
-			assertTestAddedFieldData(t, i, value)
+			assertTestAddedFieldData(t, i, *value)
 		}
 
-		err = reader.Next()
+		_, err = reader.NextValue()
 		assert.Equal(t, io.EOF, err)
 	})
 }
@@ -97,9 +97,13 @@ func TestBinlogStreamWriter(t *testing.T) {
 	t.Run("test write", func(t *testing.T) {
 		size := 3
 
-		field := arrow.Field{Name: "bool", Type: arrow.FixedWidthTypes.Boolean}
+		field := &schemapb.FieldSchema{
+			FieldID:  1,
+			DataType: schemapb.DataType_Bool,
+		}
+
 		var w bytes.Buffer
-		rw, err := newSingleFieldRecordWriter(1, field, &w)
+		rw, err := newSingleFieldRecordWriter(field, &w)
 		assert.NoError(t, err)
 
 		builder := array.NewBooleanBuilder(memory.DefaultAllocator)
@@ -108,7 +112,7 @@ func TestBinlogStreamWriter(t *testing.T) {
 		defer arr.Release()
 		ar := array.NewRecord(
 			arrow.NewSchema(
-				[]arrow.Field{field},
+				[]arrow.Field{{Name: "bool", Type: arrow.FixedWidthTypes.Boolean}},
 				nil,
 			),
 			[]arrow.Array{arr},
@@ -138,13 +142,55 @@ func TestBinlogStreamWriter(t *testing.T) {
 }
 
 func TestBinlogSerializeWriter(t *testing.T) {
+	t.Run("test write value", func(t *testing.T) {
+		size := 100
+		blobs, err := generateTestData(size)
+		assert.NoError(t, err)
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
+		assert.NoError(t, err)
+		defer reader.Close()
+
+		schema := generateTestSchema()
+		alloc := allocator.NewLocalAllocator(1, 92) // 90 for 18 fields * 5 chunks, 1 for 1 stats file
+		chunkSize := uint64(64)                     // 64B
+		rw, err := newCompositeBinlogRecordWriter(0, 0, 0, schema,
+			func(b []*Blob) error {
+				log.Debug("write blobs", zap.Int("files", len(b)))
+				return nil
+			},
+			alloc, chunkSize, "root", 10000)
+		assert.NoError(t, err)
+		writer := NewBinlogValueWriter(rw, 20)
+		assert.NoError(t, err)
+
+		for i := 1; i <= size; i++ {
+			value, err := reader.NextValue()
+			assert.NoError(t, err)
+
+			assertTestData(t, i, *value)
+			err = writer.WriteValue(*value)
+			assert.NoError(t, err)
+		}
+
+		_, err = reader.NextValue()
+		assert.Equal(t, io.EOF, err)
+		err = writer.Close()
+		assert.NoError(t, err)
+
+		logs, _, _ := writer.GetLogs()
+		assert.Equal(t, 18, len(logs))
+		assert.Equal(t, 5, len(logs[0].Binlogs))
+	})
+}
+
+func TestBinlogValueWriter(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
-		reader, err := NewBinlogDeserializeReader(nil, func() ([]*Blob, error) {
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), func() ([]*Blob, error) {
 			return nil, io.EOF
 		})
 		assert.NoError(t, err)
 		defer reader.Close()
-		err = reader.Next()
+		_, err = reader.NextValue()
 		assert.Equal(t, io.EOF, err)
 	})
 
@@ -163,12 +209,11 @@ func TestBinlogSerializeWriter(t *testing.T) {
 		assert.NoError(t, err)
 
 		for i := 1; i <= size; i++ {
-			err = reader.Next()
+			value, err := reader.NextValue()
 			assert.NoError(t, err)
 
-			value := reader.Value()
-			assertTestData(t, i, value)
-			err := writer.Write(value)
+			assertTestData(t, i, *value)
+			err = writer.WriteValue(*value)
 			assert.NoError(t, err)
 		}
 
@@ -177,11 +222,11 @@ func TestBinlogSerializeWriter(t *testing.T) {
 			assert.Equal(t, !f.IsPrimaryKey, props.DictionaryEnabled())
 		}
 
-		err = reader.Next()
+		_, err = reader.NextValue()
 		assert.Equal(t, io.EOF, err)
 		err = writer.Close()
 		assert.NoError(t, err)
-		assert.True(t, writer.WrittenMemorySize() >= 429)
+		assert.True(t, writer.GetWrittenUncompressed() >= 429)
 
 		// Read from the written data
 		newblobs := make([]*Blob, len(writers))
@@ -204,12 +249,89 @@ func TestBinlogSerializeWriter(t *testing.T) {
 		assert.NoError(t, err)
 		defer reader.Close()
 		for i := 1; i <= size; i++ {
-			err = reader.Next()
+			value, err := reader.NextValue()
 			assert.NoError(t, err, i)
 
-			value := reader.Value()
-			assertTestData(t, i, value)
+			assertTestData(t, i, *value)
 		}
+	})
+}
+
+func TestSize(t *testing.T) {
+	t.Run("test array of int", func(t *testing.T) {
+		size := 100
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     18,
+				Name:        "array",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int32,
+			},
+		}}
+
+		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 7)
+		assert.NoError(t, err)
+
+		for i := 0; i < size; i++ {
+			e := int32(i)
+			d := []int32{e, e, e, e, e, e, e, e}
+			value := &Value{
+				Value: map[FieldID]any{
+					18: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{Data: d},
+						},
+					},
+				},
+			}
+			err := writer.WriteValue(value)
+			assert.NoError(t, err)
+		}
+
+		err = writer.Close()
+		assert.NoError(t, err)
+		memSize := writer.GetWrittenUncompressed()
+		assert.Greater(t, memSize, uint64(8*4*size)) // written memory size should greater than data size
+		t.Log("writtern memory size", memSize)
+	})
+
+	t.Run("test array of varchar", func(t *testing.T) {
+		size := 100
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     18,
+				Name:        "array",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_String,
+			},
+		}}
+
+		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 7)
+		assert.NoError(t, err)
+
+		for i := 0; i < size; i++ {
+			e := fmt.Sprintf("%4d", i)
+			d := []string{e, e, e, e, e, e, e, e}
+			value := &Value{
+				Value: map[FieldID]any{
+					18: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: d},
+						},
+					},
+				},
+			}
+			err := writer.WriteValue(value)
+			assert.NoError(t, err)
+		}
+
+		err = writer.Close()
+		assert.NoError(t, err)
+		memSize := writer.GetWrittenUncompressed()
+		assert.Greater(t, memSize, uint64(8*4*size)) // written memory size should greater than data size
+		t.Log("writtern memory size", memSize)
 	})
 }
 
@@ -276,7 +398,7 @@ func BenchmarkSerializeWriter(b *testing.B) {
 				writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, s)
 				assert.NoError(b, err)
 				for _, v := range values {
-					_ = writer.Write(v)
+					_ = writer.WriteValue(v)
 					assert.NoError(b, err)
 				}
 				writer.Close()
@@ -309,7 +431,7 @@ func TestNull(t *testing.T) {
 			IsDeleted: false,
 			Value:     m,
 		}
-		writer.Write(value)
+		writer.WriteValue(value)
 		err = writer.Close()
 		assert.NoError(t, err)
 
@@ -326,11 +448,10 @@ func TestNull(t *testing.T) {
 		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
 		assert.NoError(t, err)
 		defer reader.Close()
-		err = reader.Next()
+		v, err := reader.NextValue()
 		assert.NoError(t, err)
 
-		readValue := reader.Value()
-		assert.Equal(t, value, readValue)
+		assert.Equal(t, value, *v)
 	})
 }
 
@@ -359,7 +480,7 @@ func TestDeltalogDeserializeReader(t *testing.T) {
 		reader, err := newDeltalogDeserializeReader(nil)
 		assert.NoError(t, err)
 		defer reader.Close()
-		err = reader.Next()
+		_, err = reader.NextValue()
 		assert.Equal(t, io.EOF, err)
 	})
 
@@ -372,14 +493,13 @@ func TestDeltalogDeserializeReader(t *testing.T) {
 		defer reader.Close()
 
 		for i := 0; i < size; i++ {
-			err = reader.Next()
+			value, err := reader.NextValue()
 			assert.NoError(t, err)
 
-			value := reader.Value()
-			assertTestDeltalogData(t, i, value)
+			assertTestDeltalogData(t, i, *value)
 		}
 
-		err = reader.Next()
+		_, err = reader.NextValue()
 		assert.Equal(t, io.EOF, err)
 	})
 }
@@ -389,7 +509,7 @@ func TestDeltalogSerializeWriter(t *testing.T) {
 		reader, err := newDeltalogDeserializeReader(nil)
 		assert.NoError(t, err)
 		defer reader.Close()
-		err = reader.Next()
+		_, err = reader.NextValue()
 		assert.Equal(t, io.EOF, err)
 	})
 
@@ -407,16 +527,15 @@ func TestDeltalogSerializeWriter(t *testing.T) {
 		assert.NoError(t, err)
 
 		for i := 0; i < size; i++ {
-			err = reader.Next()
+			value, err := reader.NextValue()
 			assert.NoError(t, err)
 
-			value := reader.Value()
-			assertTestDeltalogData(t, i, value)
-			err := writer.Write(value)
+			assertTestDeltalogData(t, i, *value)
+			err = writer.WriteValue(*value)
 			assert.NoError(t, err)
 		}
 
-		err = reader.Next()
+		_, err = reader.NextValue()
 		assert.Equal(t, io.EOF, err)
 		err = writer.Close()
 		assert.NoError(t, err)
@@ -430,11 +549,10 @@ func TestDeltalogSerializeWriter(t *testing.T) {
 		assert.NoError(t, err)
 		defer reader.Close()
 		for i := 0; i < size; i++ {
-			err = reader.Next()
+			value, err := reader.NextValue()
 			assert.NoError(t, err, i)
 
-			value := reader.Value()
-			assertTestDeltalogData(t, i, value)
+			assertTestDeltalogData(t, i, *value)
 		}
 	})
 }
@@ -487,13 +605,12 @@ func TestDeltalogPkTsSeparateFormat(t *testing.T) {
 			assert.NoError(t, err)
 			defer reader.Close()
 			for i := 0; i < size; i++ {
-				err = reader.Next()
+				value, err := reader.NextValue()
 				assert.NoError(t, err)
 
-				value := reader.Value()
-				tc.assertPk(t, i, value)
+				tc.assertPk(t, i, *value)
 			}
-			err = reader.Next()
+			_, err = reader.NextValue()
 			assert.Equal(t, io.EOF, err)
 		})
 	}
@@ -532,7 +649,7 @@ func BenchmarkDeltalogFormatWriter(b *testing.B) {
 			var value *DeleteLog
 			for j := 0; j < size; j++ {
 				value = NewDeleteLog(NewInt64PrimaryKey(int64(j)), uint64(j+1))
-				writer.Write(value)
+				writer.WriteValue(value)
 			}
 			writer.Close()
 			eventWriter.Finalize()
@@ -564,7 +681,7 @@ func writeDeltalogNewFormat(size int, pkType schemapb.DataType, batchSize int) (
 		case schemapb.DataType_VarChar:
 			value = NewDeleteLog(NewVarCharPrimaryKey(strconv.Itoa(i)), uint64(i+1))
 		}
-		if err = writer.Write(value); err != nil {
+		if err = writer.WriteValue(value); err != nil {
 			return nil, err
 		}
 	}
@@ -585,11 +702,115 @@ func readDeltaLog(size int, blob *Blob) error {
 	}
 	defer reader.Close()
 	for j := 0; j < size; j++ {
-		err = reader.Next()
-		_ = reader.Value()
+		_, err = reader.NextValue()
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func TestMakeBlobsReader(t *testing.T) {
+	type args struct {
+		blobs []string
+	}
+	tests := []struct {
+		name string
+		args args
+		want [][]string
+	}{
+		{
+			name: "test empty",
+			args: args{
+				blobs: nil,
+			},
+			want: nil,
+		},
+		{
+			name: "test aligned",
+			args: args{
+				blobs: []string{
+					"x/1/1/1/1/1",
+					"x/1/1/1/2/2",
+					"x/1/1/1/3/3",
+					"x/1/1/1/1/4",
+					"x/1/1/1/2/5",
+					"x/1/1/1/3/6",
+					"x/1/1/1/1/7",
+					"x/1/1/1/2/8",
+					"x/1/1/1/3/9",
+				},
+			},
+			want: [][]string{
+				{"x/1/1/1/1/1", "x/1/1/1/2/2", "x/1/1/1/3/3"},
+				{"x/1/1/1/1/4", "x/1/1/1/2/5", "x/1/1/1/3/6"},
+				{"x/1/1/1/1/7", "x/1/1/1/2/8", "x/1/1/1/3/9"},
+			},
+		},
+		{
+			name: "test added field",
+			args: args{
+				blobs: []string{
+					"x/1/1/1/1/1",
+					"x/1/1/1/2/2",
+					"x/1/1/1/1/3",
+					"x/1/1/1/2/4",
+					"x/1/1/1/1/5",
+					"x/1/1/1/2/6",
+					"x/1/1/1/3/7",
+				},
+			},
+
+			want: [][]string{
+				{"x/1/1/1/1/1", "x/1/1/1/2/2"},
+				{"x/1/1/1/1/3", "x/1/1/1/2/4"},
+				{"x/1/1/1/1/5", "x/1/1/1/2/6", "x/1/1/1/3/7"},
+			},
+		},
+		{
+			name: "test if there is a hole",
+			args: args{
+				blobs: []string{
+					"x/1/1/1/1/1",
+					"x/1/1/1/2/2",
+					"x/1/1/1/3/3",
+					"x/1/1/1/1/4",
+					"x/1/1/1/2/5",
+					"x/1/1/1/1/6",
+					"x/1/1/1/2/7",
+					"x/1/1/1/3/8",
+				},
+			},
+
+			want: [][]string{
+				{"x/1/1/1/1/1", "x/1/1/1/2/2", "x/1/1/1/3/3"},
+				{"x/1/1/1/1/4", "x/1/1/1/2/5"},
+				{"x/1/1/1/1/6", "x/1/1/1/2/7", "x/1/1/1/3/8"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			blobs := lo.Map(tt.args.blobs, func(item string, index int) *Blob {
+				return &Blob{
+					Key: item,
+				}
+			})
+			reader := MakeBlobsReader(blobs)
+			got := make([][]string, 0)
+			for {
+				bs, err := reader()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					assert.Fail(t, err.Error())
+				}
+				got = append(got, lo.Map(bs, func(item *Blob, index int) string {
+					return item.Key
+				}))
+			}
+			assert.ElementsMatch(t, tt.want, got)
+		})
+	}
 }

@@ -4,7 +4,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
 
@@ -360,7 +360,7 @@ type FieldsFullTextSearch struct{}
 
 func (cf FieldsFullTextSearch) GenFields(option GenFieldsOption) []*entity.Field {
 	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
-	textField := entity.NewField().WithName(common.DefaultTextFieldName).WithDataType(entity.FieldTypeVarChar).WithMaxLength(option.MaxLength).WithIsPartitionKey(option.IsPartitionKey).WithEnableAnalyzer(true).WithAnalyzerParams(option.AnalyzerParams)
+	textField := entity.NewField().WithName(common.DefaultTextFieldName).WithDataType(entity.FieldTypeVarChar).WithMaxLength(option.MaxLength).WithIsPartitionKey(option.IsPartitionKey).WithEnableAnalyzer(true).WithAnalyzerParams(option.AnalyzerParams).WithEnableMatch(true)
 	sparseVecField := entity.NewField().WithName(common.DefaultTextSparseVecFieldName).WithDataType(entity.FieldTypeSparseVector)
 	if option.AutoID {
 		pkField.WithIsAutoID(option.AutoID)

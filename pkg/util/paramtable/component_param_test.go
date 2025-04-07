@@ -63,7 +63,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(DefaultGracefulStopTimeout))
 		assert.Equal(t, params.QueryNodeCfg.GracefulStopTimeout.GetAsInt64(), Params.GracefulStopTimeout.GetAsInt64())
-		assert.Equal(t, params.IndexNodeCfg.GracefulStopTimeout.GetAsInt64(), Params.GracefulStopTimeout.GetAsInt64())
+		assert.Equal(t, params.DataNodeCfg.GracefulStopTimeout.GetAsInt64(), Params.GracefulStopTimeout.GetAsInt64())
 		t.Logf("default grafeful stop timeout = %d", Params.GracefulStopTimeout.GetAsInt())
 		params.Save(Params.GracefulStopTimeout.Key, "50")
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
@@ -347,6 +347,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 1000, Params.SegmentCheckInterval.GetAsInt())
 		assert.Equal(t, 1000, Params.ChannelCheckInterval.GetAsInt())
+		assert.Equal(t, 300, Params.BalanceCheckInterval.GetAsInt())
 		params.Save(Params.BalanceCheckInterval.Key, "3000")
 		assert.Equal(t, 3000, Params.BalanceCheckInterval.GetAsInt())
 		assert.Equal(t, 10000, Params.IndexCheckInterval.GetAsInt())
@@ -517,6 +518,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, float64(100), Params.CompactionGCIntervalInSeconds.GetAsDuration(time.Second).Seconds())
 		params.Save("dataCoord.compaction.dropTolerance", "100")
 		assert.Equal(t, float64(100), Params.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds())
+		assert.Equal(t, int64(100), Params.CompactionPreAllocateIDExpansionFactor.GetAsInt64())
 
 		params.Save("dataCoord.compaction.clustering.enable", "true")
 		assert.Equal(t, true, Params.ClusteringCompactionEnable.GetAsBool())
@@ -540,6 +542,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4, Params.L0DeleteCompactionSlotUsage.GetAsInt())
 		params.Save("datacoord.scheduler.taskSlowThreshold", "1000")
 		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
+
+		params.Save("datacoord.statsTask.enable", "true")
+		assert.True(t, Params.EnableStatsTask.GetAsBool())
+		params.Save("datacoord.taskCheckInterval", "500")
+		assert.Equal(t, 500*time.Second, Params.TaskCheckInterval.GetAsDuration(time.Second))
+		params.Save("datacoord.statsTaskTriggerCount", "3")
+		assert.Equal(t, 3, Params.StatsTaskTriggerCount.GetAsInt())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -604,19 +613,16 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
 	})
 
-	t.Run("test indexNodeConfig", func(t *testing.T) {
-		Params := &params.IndexNodeCfg
-		params.Save(Params.GracefulStopTimeout.Key, "50")
-		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
-
-		params.Save("indexnode.gracefulStopTimeout", "100")
-		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
-	})
-
 	t.Run("test streamingConfig", func(t *testing.T) {
 		assert.Equal(t, 1*time.Minute, params.StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse())
 		assert.Equal(t, 50*time.Millisecond, params.StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse())
 		assert.Equal(t, 2.0, params.StreamingCfg.WALBalancerBackoffMultiplier.GetAsFloat())
+		assert.Equal(t, "vchannelFair", params.StreamingCfg.WALBalancerPolicyName.GetValue())
+		assert.Equal(t, 0.4, params.StreamingCfg.WALBalancerPolicyVChannelFairPChannelWeight.GetAsFloat())
+		assert.Equal(t, 0.3, params.StreamingCfg.WALBalancerPolicyVChannelFairVChannelWeight.GetAsFloat())
+		assert.Equal(t, 0.01, params.StreamingCfg.WALBalancerPolicyVChannelFairAntiAffinityWeight.GetAsFloat())
+		assert.Equal(t, 0.01, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceTolerance.GetAsFloat())
+		assert.Equal(t, 3, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceMaxStep.GetAsInt())
 		assert.Equal(t, 1.0, params.StreamingCfg.WALBroadcasterConcurrencyRatio.GetAsFloat())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
 		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse())
@@ -628,10 +634,22 @@ func TestComponentParam(t *testing.T) {
 		params.Save(params.StreamingCfg.TxnDefaultKeepaliveTimeout.Key, "3500ms")
 		params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "10s")
 		params.Save(params.StreamingCfg.WALWriteAheadBufferCapacity.Key, "128k")
+		params.Save(params.StreamingCfg.WALBalancerPolicyName.Key, "pchannelFair")
+		params.Save(params.StreamingCfg.WALBalancerPolicyVChannelFairPChannelWeight.Key, "0.5")
+		params.Save(params.StreamingCfg.WALBalancerPolicyVChannelFairVChannelWeight.Key, "0.4")
+		params.Save(params.StreamingCfg.WALBalancerPolicyVChannelFairAntiAffinityWeight.Key, "0.02")
+		params.Save(params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceTolerance.Key, "0.02")
+		params.Save(params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceMaxStep.Key, "4")
 		assert.Equal(t, 50*time.Second, params.StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse())
 		assert.Equal(t, 50*time.Second, params.StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse())
 		assert.Equal(t, 3.5, params.StreamingCfg.WALBalancerBackoffMultiplier.GetAsFloat())
 		assert.Equal(t, 1.5, params.StreamingCfg.WALBroadcasterConcurrencyRatio.GetAsFloat())
+		assert.Equal(t, "pchannelFair", params.StreamingCfg.WALBalancerPolicyName.GetValue())
+		assert.Equal(t, 0.5, params.StreamingCfg.WALBalancerPolicyVChannelFairPChannelWeight.GetAsFloat())
+		assert.Equal(t, 0.4, params.StreamingCfg.WALBalancerPolicyVChannelFairVChannelWeight.GetAsFloat())
+		assert.Equal(t, 0.02, params.StreamingCfg.WALBalancerPolicyVChannelFairAntiAffinityWeight.GetAsFloat())
+		assert.Equal(t, 0.02, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceTolerance.GetAsFloat())
+		assert.Equal(t, 4, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceMaxStep.GetAsInt())
 		assert.Equal(t, 3500*time.Millisecond, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse())
 		assert.Equal(t, int64(128*1024), params.StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
@@ -670,9 +688,6 @@ func TestForbiddenItem(t *testing.T) {
 func TestCachedParam(t *testing.T) {
 	Init()
 	params := Get()
-
-	assert.True(t, params.IndexNodeCfg.EnableDisk.GetAsBool())
-	assert.True(t, params.IndexNodeCfg.EnableDisk.GetAsBool())
 
 	assert.Equal(t, 256*1024*1024, params.QueryCoordGrpcServerCfg.ServerMaxRecvSize.GetAsInt())
 	assert.Equal(t, 256*1024*1024, params.QueryCoordGrpcServerCfg.ServerMaxRecvSize.GetAsInt())

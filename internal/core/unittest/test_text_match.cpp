@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <optional>
 #include <string>
 
 #include "common/Schema.h"
@@ -33,7 +34,11 @@ GenTestSchema(std::map<std::string, std::string> params = {},
               bool nullable = false) {
     auto schema = std::make_shared<Schema>();
     {
-        FieldMeta f(FieldName("pk"), FieldId(100), DataType::INT64, false);
+        FieldMeta f(FieldName("pk"),
+                    FieldId(100),
+                    DataType::INT64,
+                    false,
+                    std::nullopt);
         schema->AddField(std::move(f));
         schema->set_primary_field_id(FieldId(100));
     }
@@ -45,7 +50,8 @@ GenTestSchema(std::map<std::string, std::string> params = {},
                     nullable,
                     true,
                     true,
-                    params);
+                    params,
+                    std::nullopt);
         schema->AddField(std::move(f));
     }
     {
@@ -54,7 +60,8 @@ GenTestSchema(std::map<std::string, std::string> params = {},
                     DataType::VECTOR_FLOAT,
                     16,
                     knowhere::metric::L2,
-                    false);
+                    false,
+                    std::nullopt);
         schema->AddField(std::move(f));
     }
     return schema;
@@ -943,9 +950,13 @@ TEST(TextMatch, SealedJieBaNullable) {
 TEST(TextMatch, GrowingLoadData) {
     int64_t N = 7;
     auto schema = GenTestSchema({}, true);
-    schema->AddField(FieldName("RowID"), FieldId(0), DataType::INT64, false);
     schema->AddField(
-        FieldName("Timestamp"), FieldId(1), DataType::INT64, false);
+        FieldName("RowID"), FieldId(0), DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     FieldId(1),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
     std::vector<std::string> raw_str = {"football, basketball, pingpang",
                                         "swimming, football",
                                         "golf",
@@ -998,4 +1009,64 @@ TEST(TextMatch, GrowingLoadData) {
     ASSERT_FALSE(final[4]);
     ASSERT_TRUE(final[5]);
     ASSERT_FALSE(final[6]);
+}
+
+TEST(TextMatch, ConcurrentReadWriteWithNull) {
+    auto schema = GenTestSchema({}, true);
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int64_t N = 1000;
+    uint64_t seed = 19190504;
+    auto raw_data = DataGen(schema, N, seed);
+    auto str_col_valid =
+        raw_data.raw_->mutable_fields_data()->at(1).mutable_valid_data();
+    auto str_col = raw_data.raw_->mutable_fields_data()
+                       ->at(1)
+                       .mutable_scalars()
+                       ->mutable_string_data()
+                       ->mutable_data();
+    for (int64_t i = 0; i < N - 1; i++) {
+        str_col->at(i) = "";
+    }
+    str_col->at(N - 1) = "football";
+    for (int64_t i = 0; i < N - 1; i++) {
+        str_col_valid->at(i) = false;
+    }
+
+    std::thread writer([&seg, &raw_data, N]() {
+        seg->PreInsert(N);
+        seg->Insert(0,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    });
+
+    std::thread reader([&seg, N]() {
+        auto start = std::chrono::high_resolution_clock::now();
+        ;
+        const std::chrono::seconds timeout_duration{2};
+        while (true) {
+            if (start - std::chrono::high_resolution_clock::now() >
+                timeout_duration) {
+                ASSERT_TRUE(false)
+                    << "Failed to get valid results within timeout";
+                break;
+            }
+            BitsetType final;
+            auto expr =
+                GetMatchExpr(GenTestSchema(), "football", OpType::TextMatch);
+            final = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+            if (final.size() != N || !final[N - 1]) {
+                continue;
+            }
+            for (int64_t i = 0; i < N - 1; i++) {
+                ASSERT_FALSE(final[i]);
+            }
+            ASSERT_TRUE(final[N - 1]);
+            break;
+        }
+    });
+
+    writer.join();
+    reader.join();
 }
