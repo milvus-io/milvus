@@ -241,9 +241,7 @@ func (node *DataNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
 		node.registerMetricsRequest()
-		log.Ctx(node.ctx).Info("DataNode server initializing",
-			zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()),
-		)
+		log.Ctx(node.ctx).Info("DataNode server initializing")
 		if err := node.initSession(); err != nil {
 			log.Error("DataNode server init session failed", zap.Error(err))
 			initError = err
@@ -267,8 +265,7 @@ func (node *DataNode) Init() error {
 		node.allocator = alloc
 
 		node.factory.Init(Params)
-		log.Info("DataNode server init succeeded",
-			zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName.GetValue()))
+		log.Info("DataNode server init succeeded")
 
 		chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
 		if err != nil {

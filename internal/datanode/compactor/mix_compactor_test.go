@@ -86,6 +86,12 @@ func (s *MixCompactionTaskSuite) setupTest() {
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
 		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
 		MaxSize:                64 * 1024 * 1024,
+		Params: []*commonpb.KeyValuePair{
+			{Key: paramtable.Get().CommonCfg.EnableStorageV2.Key, Value: paramtable.Get().CommonCfg.EnableStorageV2.GetValue()},
+			{Key: paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, Value: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetValue()},
+			{Key: paramtable.Get().DataNodeCfg.UseMergeSort.Key, Value: paramtable.Get().DataNodeCfg.UseMergeSort.GetValue()},
+			{Key: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.Key, Value: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetValue()},
+		},
 	}
 
 	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan)
@@ -113,6 +119,12 @@ func (s *MixCompactionTaskSuite) SetupBM25() {
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
 		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
 		MaxSize:                64 * 1024 * 1024,
+		Params: []*commonpb.KeyValuePair{
+			{Key: paramtable.Get().CommonCfg.EnableStorageV2.Key, Value: paramtable.Get().CommonCfg.EnableStorageV2.GetValue()},
+			{Key: paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, Value: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetValue()},
+			{Key: paramtable.Get().DataNodeCfg.UseMergeSort.Key, Value: paramtable.Get().DataNodeCfg.UseMergeSort.GetValue()},
+			{Key: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.Key, Value: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetValue()},
+		},
 	}
 
 	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan)
@@ -325,6 +337,7 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
 	s.prepareCompactSortedSegment()
 	paramtable.Get().Save("dataNode.compaction.useMergeSort", "true")
 	defer paramtable.Get().Reset("dataNode.compaction.useMergeSort")
+	refreshPlanParams(s.task.plan)
 
 	result, err := s.task.Compact()
 	s.NoError(err)
@@ -404,6 +417,7 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegmentLackBinlog() {
 	s.prepareCompactSortedSegmentLackBinlog()
 	paramtable.Get().Save("dataNode.compaction.useMergeSort", "true")
 	defer paramtable.Get().Reset("dataNode.compaction.useMergeSort")
+	refreshPlanParams(s.task.plan)
 
 	result, err := s.task.Compact()
 	s.NoError(err)

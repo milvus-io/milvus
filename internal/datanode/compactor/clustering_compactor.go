@@ -326,7 +326,10 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
+		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.GetParams(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
+		if err != nil {
+			return err
+		}
 
 		buffer := newClusterBuffer(id, writer, fieldStats)
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
@@ -342,7 +345,10 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
+		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.GetParams(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
+		if err != nil {
+			return err
+		}
 
 		nullBuffer = newClusterBuffer(len(buckets), writer, fieldStats)
 		t.clusterBuffers = append(t.clusterBuffers, nullBuffer)
@@ -395,7 +401,10 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		fieldStats.SetVectorCentroids(centroidValues...)
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
+		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.GetParams(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
+		if err != nil {
+			return err
+		}
 
 		buffer := newClusterBuffer(id, writer, fieldStats)
 		t.clusterBuffers = append(t.clusterBuffers, buffer)

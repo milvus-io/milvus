@@ -293,6 +293,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		TotalRows:        taskProto.GetTotalRows(),
 		Schema:           taskProto.GetSchema(),
 		SlotUsage:        t.GetSlotUsage(),
+		Params:           GetCompactionExtraParams(),
 	}
 
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))

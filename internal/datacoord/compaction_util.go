@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -43,4 +44,25 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 	n := binlogNum * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt()
 	begin, end, err := allocator.AllocN(int64(n))
 	return &datapb.IDRange{Begin: begin, End: end}, err
+}
+
+func GetCompactionExtraParams() []*commonpb.KeyValuePair {
+	return []*commonpb.KeyValuePair{
+		{
+			Key:   paramtable.Get().CommonCfg.EnableStorageV2.Key,
+			Value: paramtable.Get().CommonCfg.EnableStorageV2.GetValue(),
+		},
+		{
+			Key:   paramtable.Get().DataNodeCfg.BinLogMaxSize.Key,
+			Value: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetValue(),
+		},
+		{
+			Key:   paramtable.Get().DataNodeCfg.UseMergeSort.Key,
+			Value: paramtable.Get().DataNodeCfg.UseMergeSort.GetValue(),
+		},
+		{
+			Key:   paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.Key,
+			Value: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetValue(),
+		},
+	}
 }

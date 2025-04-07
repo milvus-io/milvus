@@ -631,6 +631,12 @@ func Test_compactionTrigger_force(t *testing.T) {
 					PreAllocatedLogIDs:     &datapb.IDRange{Begin: 100, End: 200},
 					MaxSize:                1342177280,
 					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
+					Params: []*commonpb.KeyValuePair{
+						{Key: paramtable.Get().CommonCfg.EnableStorageV2.Key, Value: paramtable.Get().CommonCfg.EnableStorageV2.GetValue()},
+						{Key: paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, Value: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetValue()},
+						{Key: paramtable.Get().DataNodeCfg.UseMergeSort.Key, Value: paramtable.Get().DataNodeCfg.UseMergeSort.GetValue()},
+						{Key: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.Key, Value: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetValue()},
+					},
 				},
 			},
 		},

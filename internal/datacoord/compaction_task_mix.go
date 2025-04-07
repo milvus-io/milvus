@@ -320,6 +320,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		PreAllocatedSegmentIDs: taskProto.GetPreAllocatedSegmentIDs(),
 		SlotUsage:              t.GetSlotUsage(),
 		MaxSize:                taskProto.GetMaxSize(),
+		Params:                 GetCompactionExtraParams(),
 	}
 
 	segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
