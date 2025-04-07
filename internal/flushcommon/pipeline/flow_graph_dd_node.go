@@ -28,7 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/datanode/compaction"
+	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -69,7 +69,7 @@ type ddNode struct {
 	vChannelName string
 
 	dropMode           atomic.Value
-	compactionExecutor compaction.Executor
+	compactionExecutor compactor.Executor
 	msgHandler         util.MsgHandler
 
 	// for recovery
@@ -221,7 +221,12 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				continue
 			}
 
-			log.Debug("DDNode receive delete messages", zap.String("channel", ddn.vChannelName), zap.Int64("numRows", dmsg.NumRows))
+			log.Debug("DDNode receive delete messages",
+				zap.String("channel", ddn.vChannelName),
+				zap.Int64("numRows", dmsg.NumRows),
+				zap.Uint64("startPosTs", msMsg.StartPositions()[0].GetTimestamp()),
+				zap.Uint64("endPosTs", msMsg.EndPositions()[0].GetTimestamp()),
+			)
 			util.GetRateCollector().Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
@@ -346,7 +351,7 @@ func (ddn *ddNode) Close() {
 }
 
 func newDDNode(ctx context.Context, collID typeutil.UniqueID, vChannelName string, droppedSegmentIDs []typeutil.UniqueID,
-	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compaction.Executor, handler util.MsgHandler,
+	sealedSegments []*datapb.SegmentInfo, growingSegments []*datapb.SegmentInfo, executor compactor.Executor, handler util.MsgHandler,
 ) *ddNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())

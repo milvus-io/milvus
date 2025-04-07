@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type CompactionTriggerType int8
@@ -475,7 +476,8 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	}
 
 	resultSegmentNum := (totalRows/preferSegmentRows + 1) * 2
-	start, end, err := m.allocator.AllocN(resultSegmentNum)
+	n := resultSegmentNum * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
+	start, end, err := m.allocator.AllocN(n)
 	if err != nil {
 		log.Warn("pre-allocate result segments failed", zap.String("view", view.String()), zap.Error(err))
 		return
@@ -504,6 +506,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 			Begin: start,
 			End:   end,
 		},
+		MaxSize: expectedSegmentSize,
 	}
 	err = m.compactionHandler.enqueueCompaction(task)
 	if err != nil {
@@ -524,7 +527,8 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 	log := log.Ctx(ctx).With(zap.String("view", view.String()))
 	// TODO[GOOSE], 11 = 1 planID + 10 segmentID, this is a hack need to be removed.
 	// Any plan that output segment number greater than 10 will be marked as invalid plan for now.
-	startID, endID, err := m.allocator.AllocN(11)
+	n := 11 * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
+	startID, endID, err := m.allocator.AllocN(n)
 	if err != nil {
 		log.Warn("fFailed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
 		return

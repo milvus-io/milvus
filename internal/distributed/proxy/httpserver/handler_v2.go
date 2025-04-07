@@ -202,6 +202,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(ResourceGroupCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &ResourceGroupReq{} }, wrapperTraceLog(h.describeResourceGroup))))
 	router.POST(ResourceGroupCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &EmptyReq{} }, wrapperTraceLog(h.listResourceGroups))))
 	router.POST(ResourceGroupCategory+TransferReplicaAction, timeoutMiddleware(wrapperPost(func() any { return &TransferReplicaReq{} }, wrapperTraceLog(h.transferReplica))))
+
+	// segment group
+	router.POST(SegmentCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetSegmentsInfoReq{} }, wrapperTraceLog(h.getSegmentsInfo))))
 }
 
 type (
@@ -210,23 +213,23 @@ type (
 )
 
 func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
-	return func(c *gin.Context) {
+	return func(gCtx *gin.Context) {
 		req := newReq()
-		if err := c.ShouldBindBodyWith(req, binding.JSON); err != nil {
+		if err := gCtx.ShouldBindBodyWith(req, binding.JSON); err != nil {
 			log.Warn("high level restful api, read parameters from request body fail", zap.Error(err),
-				zap.Any("url", c.Request.URL.Path))
+				zap.Any("url", gCtx.Request.URL.Path))
 			if _, ok := err.(validator.ValidationErrors); ok {
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
 					HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", error: " + err.Error(),
 				})
 			} else if err == io.EOF {
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", the request body should be nil, however {} is valid",
 				})
 			} else {
-				HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 				})
@@ -239,42 +242,31 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 				dbName = getter.GetDbName()
 			}
 			if dbName == "" {
-				dbName = c.Request.Header.Get(HTTPHeaderDBName)
+				dbName = gCtx.Request.Header.Get(HTTPHeaderDBName)
 				if dbName == "" {
 					dbName = DefaultDbName
 				}
 			}
 		}
-		username, _ := c.Get(ContextUsername)
-		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(getCtx(c), c.Request.URL.Path)
+		innerCtx := gCtx.Request.Context()
+		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(innerCtx, gCtx.Request.URL.Path)
 		defer span.End()
+		username, _ := gCtx.Get(ContextUsername)
 		ctx = proxy.NewContextWithMetadata(ctx, username.(string), dbName)
 		traceID := span.SpanContext().TraceID().String()
 		ctx = log.WithTraceID(ctx, traceID)
-		c.Keys["traceID"] = traceID
+		gCtx.Keys["traceID"] = traceID
 		log.Ctx(ctx).Debug("high level restful api, read parameters from request body, then start to handle.",
-			zap.Any("url", c.Request.URL.Path))
-		v2(ctx, c, req, dbName)
+			zap.Any("url", gCtx.Request.URL.Path))
+		v2(ctx, gCtx, req, dbName)
 	}
-}
-
-const (
-	v2CtxKey = `milvus_restful_v2_ctxkey`
-)
-
-func getCtx(ctx *gin.Context) context.Context {
-	v, ok := ctx.Get(v2CtxKey)
-	if !ok {
-		return ctx
-	}
-	return v.(context.Context)
 }
 
 // restfulSizeMiddleware is the middleware fetchs metrics stats from gin struct.
 func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		h := metrics.WrapRestfulContext(ctx, ctx.Request.ContentLength)
-		ctx.Set(v2CtxKey, h)
+		ctx.Request = ctx.Request.WithContext(h)
 		handler(ctx)
 		metrics.RecordRestfulMetrics(h, int64(ctx.Writer.Size()), observeOutbound)
 	}
@@ -338,13 +330,13 @@ func wrapperProxy(ctx context.Context, c *gin.Context, req any, checkAuth bool, 
 	return wrapperProxyWithLimit(ctx, c, req, checkAuth, ignoreErr, fullMethod, false, nil, handler)
 }
 
-func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAuth bool, ignoreErr bool, fullMethod string, checkLimit bool, pxy types.ProxyComponent, handler func(reqCtx context.Context, req any) (any, error)) (interface{}, error) {
+func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, checkAuth bool, ignoreErr bool, fullMethod string, checkLimit bool, pxy types.ProxyComponent, handler func(reqCtx context.Context, req any) (any, error)) (interface{}, error) {
 	if baseGetter, ok := req.(BaseGetter); ok {
 		span := trace.SpanFromContext(ctx)
 		span.AddEvent(baseGetter.GetBase().GetMsgType().String())
 	}
 	if checkAuth {
-		err := checkAuthorizationV2(ctx, c, ignoreErr, req)
+		err := checkAuthorizationV2(ctx, ginCtx, ignoreErr, req)
 		if err != nil {
 			return nil, err
 		}
@@ -353,8 +345,8 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 		_, err := CheckLimiter(ctx, req, pxy)
 		if err != nil {
 			log.Warn("high level restful api, fail to check limiter", zap.Error(err), zap.String("method", fullMethod))
-			hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, c.FullPath())
-			HTTPAbortReturn(c, http.StatusOK, gin.H{
+			hookutil.GetExtension().ReportRefused(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, ginCtx.FullPath())
+			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
 				HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
 			})
@@ -362,12 +354,12 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 		}
 	}
 	log.Ctx(ctx).Debug("high level restful api, try to do a grpc call")
-	username, ok := c.Get(ContextUsername)
+	username, ok := ginCtx.Get(ContextUsername)
 	if !ok {
 		username = ""
 	}
 
-	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, c.Keys), req, username.(string), fullMethod, handler)
+	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx.Keys), req, username.(string), fullMethod, handler)
 	if err == nil {
 		status, ok := requestutil.GetStatusFromResponse(response)
 		if ok {
@@ -378,7 +370,7 @@ func wrapperProxyWithLimit(ctx context.Context, c *gin.Context, req any, checkAu
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err))
 		if !ignoreErr {
-			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		}
 	}
 	return response, err
@@ -933,7 +925,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	var validDataMap map[string][]bool
-	err, httpReq.Data, validDataMap = checkAndSetData(string(body.([]byte)), collSchema)
+	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Error(err), zap.String("body", string(body.([]byte))))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1007,7 +999,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	var validDataMap map[string][]bool
-	err, httpReq.Data, validDataMap = checkAndSetData(string(body.([]byte)), collSchema)
+	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1568,6 +1560,13 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Value: fmt.Sprintf("%v", httpReq.Params["partitionKeyIsolation"]),
 		})
 	}
+	if _, ok := httpReq.Params[common.MmapEnabledKey]; ok {
+		req.Properties = append(req.Properties, &commonpb.KeyValuePair{
+			Key:   common.MmapEnabledKey,
+			Value: fmt.Sprintf("%v", httpReq.Params[common.MmapEnabledKey]),
+		})
+	}
+
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateCollection(reqCtx, req.(*milvuspb.CreateCollectionRequest))
 	})
@@ -2622,4 +2621,51 @@ func (h *HandlersV2) GetCollectionSchema(ctx context.Context, c *gin.Context, db
 	}
 	response, _ := descResp.(*milvuspb.DescribeCollectionResponse)
 	return response.Schema, nil
+}
+
+func (h *HandlersV2) getSegmentsInfo(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*GetSegmentsInfoReq)
+	req := &internalpb.GetSegmentsInfoRequest{
+		DbName:       httpReq.GetDbName(),
+		CollectionID: httpReq.GetCollectionID(),
+		SegmentIDs:   httpReq.GetSegmentIDs(),
+	}
+
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/GetSegmentsInfo", func(reqCtx context.Context, req any) (any, error) {
+		return h.proxy.GetSegmentsInfo(reqCtx, req.(*internalpb.GetSegmentsInfoRequest))
+	})
+
+	getLogs := func(binlogs []*internalpb.FieldBinlog) []interface{} {
+		logIDs := make([]interface{}, 0, len(binlogs))
+		for _, binlog := range binlogs {
+			details := make(map[string]interface{})
+			details["fieldID"] = binlog.GetFieldID()
+			details["logIDs"] = binlog.GetLogIDs()
+			logIDs = append(logIDs, details)
+		}
+		return logIDs
+	}
+	if err == nil {
+		response := resp.(*internalpb.GetSegmentsInfoResponse)
+		returnData := make(map[string]interface{})
+		infos := make([]map[string]interface{}, 0)
+		for _, segInfo := range response.GetSegmentInfos() {
+			info := make(map[string]interface{})
+			info["segmentID"] = segInfo.GetSegmentID()
+			info["collectionID"] = segInfo.GetCollectionID()
+			info["partitionID"] = segInfo.GetPartitionID()
+			info["vChannel"] = segInfo.GetVChannel()
+			info["numRows"] = segInfo.GetNumRows()
+			info["state"] = segInfo.GetState()
+			info["level"] = segInfo.GetLevel()
+			info["isSorted"] = segInfo.GetIsSorted()
+			info["insertLogs"] = getLogs(segInfo.GetInsertLogs())
+			info["deltaLogs"] = getLogs(segInfo.GetDeltaLogs())
+			info["statsLogs"] = getLogs(segInfo.GetStatsLogs())
+			infos = append(infos, info)
+		}
+		returnData["segmentInfos"] = infos
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
+	}
+	return resp, err
 }

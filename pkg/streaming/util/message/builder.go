@@ -1,6 +1,7 @@
 package message
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/cockroachdb/errors"
@@ -99,10 +100,11 @@ func newMutableMessageBuilder[H proto.Message, B proto.Message](v Version) *muta
 
 // mutableMesasgeBuilder is the builder for message.
 type mutableMesasgeBuilder[H proto.Message, B proto.Message] struct {
-	header      H
-	body        B
-	properties  propertiesImpl
-	allVChannel bool
+	header       H
+	body         B
+	properties   propertiesImpl
+	cipherConfig *CipherConfig
+	allVChannel  bool
 }
 
 // WithMessageHeader creates a new builder with determined message type.
@@ -175,6 +177,12 @@ func (b *mutableMesasgeBuilder[H, B]) WithProperties(kvs map[string]string) *mut
 	return b
 }
 
+// WithCipher creates a new builder with cipher property.
+func (b *mutableMesasgeBuilder[H, B]) WithCipher(cipherConfig *CipherConfig) *mutableMesasgeBuilder[H, B] {
+	b.cipherConfig = cipherConfig
+	return b
+}
+
 // BuildMutable builds a mutable message.
 // Panic if not set payload and message type.
 // should only used at client side.
@@ -188,6 +196,16 @@ func (b *mutableMesasgeBuilder[H, B]) BuildMutable() (MutableMessage, error) {
 		return nil, err
 	}
 	return msg, nil
+}
+
+// MustBuildMutable builds a mutable message.
+// Panics if build failed.
+func (b *mutableMesasgeBuilder[H, B]) MustBuildMutable() MutableMessage {
+	msg, err := b.BuildMutable()
+	if err != nil {
+		panic(err)
+	}
+	return msg
 }
 
 // BuildBroadcast builds a broad mutable message.
@@ -225,6 +243,31 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 	payload, err := proto.Marshal(b.body)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to marshal body")
+	}
+	if b.cipherConfig != nil {
+		messageType := mustGetMessageTypeFromHeader(b.header)
+		if !messageType.CanEnableCipher() {
+			panic(fmt.Sprintf("the message type cannot enable cipher, %s", messageType))
+		}
+
+		cipher := mustGetCipher()
+		encryptor, safeKey, err := cipher.GetEncryptor(b.cipherConfig.EzID)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get encryptor")
+		}
+		payloadBytes := len(payload)
+		if payload, err = encryptor.Encrypt(payload); err != nil {
+			return nil, errors.Wrap(err, "failed to encrypt payload")
+		}
+		ch, err := EncodeProto(&messagespb.CipherHeader{
+			EzId:         b.cipherConfig.EzID,
+			SafeKey:      safeKey,
+			PayloadBytes: int64(payloadBytes),
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to encode cipher header")
+		}
+		b.properties.Set(messageCipherHeader, ch)
 	}
 	return &messageImpl{
 		payload:    payload,

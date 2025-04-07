@@ -385,6 +385,42 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 	})
 }
 
+func TestMetaCache_InitCache(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ctx := context.Background()
+		rootCoord := mocks.NewMockRootCoordClient(t)
+		queryCoord := mocks.NewMockQueryCoordClient(t)
+		queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil).Once()
+		mgr := newShardClientMgr()
+		err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
+		assert.NoError(t, err)
+	})
+
+	t.Run("failed to list policy", func(t *testing.T) {
+		ctx := context.Background()
+		rootCoord := mocks.NewMockRootCoordClient(t)
+		queryCoord := mocks.NewMockQueryCoordClient(t)
+		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(
+			&internalpb.ListPolicyResponse{Status: merr.Status(errors.New("mock list policy error"))},
+			nil).Once()
+		mgr := newShardClientMgr()
+		err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
+		assert.Error(t, err)
+	})
+
+	t.Run("rpc error", func(t *testing.T) {
+		ctx := context.Background()
+		rootCoord := mocks.NewMockRootCoordClient(t)
+		queryCoord := mocks.NewMockQueryCoordClient(t)
+		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(
+			nil, errors.New("mock list policy rpc errorr")).Once()
+		mgr := newShardClientMgr()
+		err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
+		assert.Error(t, err)
+	})
+}
+
 func TestMetaCache_GetCollectionName(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
@@ -1186,7 +1222,7 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 			},
 			loadFields:       nil,
 			skipDynamicField: false,
-			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 1, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4},
+			expectResult:     []int64{},
 			expectErr:        false,
 		},
 		{

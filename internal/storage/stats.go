@@ -204,7 +204,7 @@ func (stats *PrimaryKeyStats) UpdateMinMax(pk PrimaryKey) {
 
 func NewPrimaryKeyStats(fieldID, pkType, rowNum int64) (*PrimaryKeyStats, error) {
 	if rowNum <= 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("zero or negative row num", rowNum)
+		return nil, merr.WrapErrParameterInvalidMsg("zero or negative row num %d", rowNum)
 	}
 
 	bfType := paramtable.Get().CommonCfg.BloomFilterType.GetValue()

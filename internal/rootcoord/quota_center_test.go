@@ -462,6 +462,7 @@ func TestQuotaCenter(t *testing.T) {
 		qc := mocks.NewMockQueryCoordClient(t)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
+		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return([]*model.Database{}, nil).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
 		quotaCenter.clearMetrics()
 		err = quotaCenter.calculateRates()
@@ -1563,6 +1564,11 @@ func TestGetRateType(t *testing.T) {
 		a := getRateTypes(internalpb.RateScope_Cluster, ddl)
 		assert.Equal(t, 5, a.Len())
 	})
+
+	t.Run("ddl cluster scope", func(t *testing.T) {
+		a := getRateTypes(internalpb.RateScope_Cluster, allOps)
+		assert.Equal(t, 12, a.Len())
+	})
 }
 
 func TestResetAllCurrentRates(t *testing.T) {
@@ -1792,4 +1798,147 @@ func TestTORequestLimiter(t *testing.T) {
 	assert.Equal(t, milvuspb.QuotaState_DenyToRead, proxyLimit.States[0])
 	assert.Equal(t, 1, len(proxyLimit.Codes))
 	assert.Equal(t, commonpb.ErrorCode_ForceDeny, proxyLimit.Codes[0])
+}
+
+func TestDatabaseForceDenyDDL(t *testing.T) {
+	getQuotaCenter := func() (*QuotaCenter, *mockrootcoord.IMetaTable) {
+		ctx := context.Background()
+		qc := mocks.NewMockQueryCoordClient(t)
+		meta := mockrootcoord.NewIMetaTable(t)
+		pcm := proxyutil.NewMockProxyClientManager(t)
+		dc := mocks.NewMockDataCoordClient(t)
+		core, _ := NewCore(ctx, nil)
+		core.tsoAllocator = newMockTsoAllocator()
+
+		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
+		return quotaCenter, meta
+	}
+
+	t.Run("fail to list database", func(t *testing.T) {
+		quotaCenter, meta := getQuotaCenter()
+		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
+		quotaCenter.calculateDBDDLRates()
+	})
+
+	t.Run("force deny ddl for database", func(t *testing.T) {
+		quotaCenter, meta := getQuotaCenter()
+		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return([]*model.Database{
+			{
+				ID: 1, Name: "db1", Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DatabaseForceDenyDDLKey,
+						Value: "true",
+					},
+				},
+			},
+			{
+				ID: 2, Name: "db2", Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   "aaa",
+						Value: "true",
+					},
+				},
+			},
+			{
+				ID: 3, Name: "db3", Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DatabaseForceDenyDDLKey,
+						Value: "100",
+					},
+				},
+			},
+		}, nil).Once()
+		quotaCenter.calculateDBDDLRates()
+
+		limiters := quotaCenter.rateLimiter.GetDatabaseLimiters(1)
+		assert.Equal(t, 1, limiters.GetQuotaStates().Len())
+		assert.True(t, limiters.GetQuotaStates().Contain(milvuspb.QuotaState_DenyToDDL))
+
+		{
+			limiter, ok := limiters.GetLimiters().Get(internalpb.RateType_DDLCollection)
+			assert.Equal(t, true, ok)
+			assert.EqualValues(t, 0.0, limiter.Limit())
+		}
+		{
+			limiter, ok := limiters.GetLimiters().Get(internalpb.RateType_DDLPartition)
+			assert.Equal(t, true, ok)
+			assert.EqualValues(t, 0.0, limiter.Limit())
+		}
+		{
+			limiter, ok := limiters.GetLimiters().Get(internalpb.RateType_DDLIndex)
+			assert.Equal(t, true, ok)
+			assert.EqualValues(t, 0.0, limiter.Limit())
+		}
+		{
+			limiter, ok := limiters.GetLimiters().Get(internalpb.RateType_DDLCompaction)
+			assert.Equal(t, true, ok)
+			assert.EqualValues(t, 0.0, limiter.Limit())
+		}
+		{
+			limiter, ok := limiters.GetLimiters().Get(internalpb.RateType_DDLFlush)
+			assert.Equal(t, true, ok)
+			assert.EqualValues(t, 0.0, limiter.Limit())
+		}
+	})
+
+	t.Run("force deny detail ddl for database", func(t *testing.T) {
+		quotaCenter, meta := getQuotaCenter()
+		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return([]*model.Database{
+			{
+				ID: 1, Name: "foo123", Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DatabaseForceDenyCollectionDDLKey,
+						Value: "true",
+					},
+					{
+						Key:   common.DatabaseForceDenyPartitionDDLKey,
+						Value: "true",
+					},
+					{
+						Key:   common.DatabaseForceDenyFlushDDLKey,
+						Value: "true",
+					},
+					{
+						Key:   common.DatabaseForceDenyCompactionDDLKey,
+						Value: "true",
+					},
+					{
+						Key:   common.DatabaseForceDenyIndexDDLKey,
+						Value: "true",
+					},
+				},
+			},
+		}, nil).Once()
+		quotaCenter.calculateDBDDLRates()
+
+		limiters := quotaCenter.rateLimiter.GetDatabaseLimiters(1)
+		assert.Equal(t, 1, limiters.GetQuotaStates().Len())
+		assert.True(t, limiters.GetQuotaStates().Contain(milvuspb.QuotaState_DenyToDDL))
+
+		{
+			limiter, ok := limiters.GetLimiters().Get(internalpb.RateType_DDLCollection)
+			assert.Equal(t, true, ok)
+			assert.EqualValues(t, 0.0, limiter.Limit())
+		}
+		{
+			limiter, ok := limiters.GetLimiters().Get(internalpb.RateType_DDLPartition)
+			assert.Equal(t, true, ok)
+			assert.EqualValues(t, 0.0, limiter.Limit())
+		}
+		{
+			limiter, ok := limiters.GetLimiters().Get(internalpb.RateType_DDLIndex)
+			assert.Equal(t, true, ok)
+			assert.EqualValues(t, 0.0, limiter.Limit())
+		}
+		{
+			limiter, ok := limiters.GetLimiters().Get(internalpb.RateType_DDLCompaction)
+			assert.Equal(t, true, ok)
+			assert.EqualValues(t, 0.0, limiter.Limit())
+		}
+		{
+			limiter, ok := limiters.GetLimiters().Get(internalpb.RateType_DDLFlush)
+			assert.Equal(t, true, ok)
+			assert.EqualValues(t, 0.0, limiter.Limit())
+		}
+	})
 }

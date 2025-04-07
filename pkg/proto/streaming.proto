@@ -13,6 +13,12 @@ import "google/protobuf/any.proto";
 // Common
 //
 
+// PChannelAccessMode is the access mode of a pchannel.
+enum PChannelAccessMode {
+    PCHANNEL_ACCESS_READWRITE = 0;  // read and write by default.
+    PCHANNEL_ACCESS_READONLY = 1;  // read only.
+}
+
 // PChannelInfo is the information of a pchannel info, should only keep the
 // basic info of a pchannel. It's used in many rpc and meta, so keep it simple.
 message PChannelInfo {
@@ -20,6 +26,7 @@ message PChannelInfo {
     int64 term  = 2;  // A monotonic increasing term, every time the channel is
                       // recovered or moved to another streamingnode, the term
                       // will increase by meta server.
+    PChannelAccessMode access_mode = 3;  // access mode of the channel.
 }
 
 // PChannelAssignmentLog is the log of meta information of a pchannel, should
@@ -28,6 +35,7 @@ message PChannelAssignmentLog {
     int64 term = 1;  // term when server assigned.
     StreamingNodeInfo node =
         2;  // streaming node that the channel is assigned to.
+    PChannelAccessMode access_mode = 3;  // access mode of the channel.
 }
 
 // PChannelMetaState
@@ -96,9 +104,6 @@ service StreamingCoordBroadcastService {
 
     // Ack acknowledge broadcast message is consumed.
     rpc Ack(BroadcastAckRequest) returns (BroadcastAckResponse) {}
-
-    // Watch watch the broadcast events.
-    rpc Watch(stream BroadcastWatchRequest) returns (stream BroadcastWatchResponse) {}
 }
 
 // BroadcastRequest is the request of the Broadcast RPC.
@@ -118,34 +123,6 @@ message BroadcastAckRequest {
 }
 
 message BroadcastAckResponse {
-}
-
-message BroadcastWatchRequest {
-    oneof command {
-        BroadcastCreateEventWatchRequest create_event_watch = 1;
-        CloseBroadcastWatchRequest close = 2;
-    }
-}
-
-message BroadcastCreateEventWatchRequest {
-    messages.BroadcastEvent event = 1;
-}
-
-message CloseBroadcastWatchRequest {
-}
-
-message BroadcastWatchResponse {
-    oneof response {
-        BroadcastEventWatchResponse event_done = 1;
-        CloseBroadcastWatchResponse close = 2;
-    }
-}
-
-message BroadcastEventWatchResponse {
-    messages.BroadcastEvent event = 1;
-}
-
-message CloseBroadcastWatchResponse {
 }
 
 //
@@ -525,6 +502,7 @@ message SegmentAssignmentMeta {
     string vchannel              = 4;
     SegmentAssignmentState state = 5;
     SegmentAssignmentStat stat   = 6;
+    int64 storage_version        = 7;
 }
 
 // SegmentAssignmentState is the state of segment assignment.

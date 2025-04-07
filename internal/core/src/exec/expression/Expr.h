@@ -64,7 +64,7 @@ class Expr {
     }
 
     std::string
-    get_name() {
+    name() {
         return name_;
     }
 
@@ -88,9 +88,29 @@ class Expr {
         return true;
     }
 
+    virtual std::string
+    ToString() const {
+        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+    }
+
+    virtual bool
+    IsSource() const {
+        return false;
+    }
+
+    virtual std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const {
+        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+    }
+
+    std::vector<std::shared_ptr<Expr>>&
+    GetInputsRef() {
+        return inputs_;
+    }
+
  protected:
     DataType type_;
-    const std::vector<std::shared_ptr<Expr>> inputs_;
+    std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
     // NOTE: unused
     std::shared_ptr<VectorFunction> vector_func_;
@@ -114,13 +134,16 @@ class SegmentExpr : public Expr {
                 const segcore::SegmentInternalInterface* segment,
                 const FieldId field_id,
                 const std::vector<std::string> nested_path,
+                const DataType value_type,
                 int64_t active_count,
-                int64_t batch_size)
+                int64_t batch_size,
+                bool allow_any_json_cast_type = false)
         : Expr(DataType::BOOL, std::move(input), name),
           segment_(segment),
           field_id_(field_id),
           nested_path_(nested_path),
-
+          value_type_(value_type),
+          allow_any_json_cast_type_(allow_any_json_cast_type),
           active_count_(active_count),
           batch_size_(batch_size) {
         size_per_chunk_ = segment_->size_per_chunk();
@@ -146,7 +169,11 @@ class SegmentExpr : public Expr {
 
         if (field_meta.get_data_type() == DataType::JSON) {
             auto pointer = milvus::Json::pointer(nested_path_);
-            if (is_index_mode_ = segment_->HasIndex(field_id_, pointer)) {
+            if (is_index_mode_ =
+                    segment_->HasIndex(field_id_,
+                                       pointer,
+                                       value_type_,
+                                       allow_any_json_cast_type_)) {
                 num_index_chunk_ = 1;
             }
         } else {
@@ -163,6 +190,11 @@ class SegmentExpr : public Expr {
                 num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
             }
         }
+    }
+
+    virtual bool
+    IsSource() const override {
+        return true;
     }
 
     void
@@ -661,7 +693,8 @@ class SegmentExpr : public Expr {
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 bool is_seal = false;
                 if constexpr (std::is_same_v<T, std::string_view> ||
-                              std::is_same_v<T, Json>) {
+                              std::is_same_v<T, Json> ||
+                              std::is_same_v<T, ArrayView>) {
                     if (segment_->type() == SegmentType::Sealed) {
                         // first is the raw data, second is valid_data
                         // use valid_data to see if raw data is null
@@ -903,17 +936,34 @@ class SegmentExpr : public Expr {
 
             size = std::min(size, batch_size_ - processed_size);
 
-            auto chunk = segment_->chunk_data<T>(field_id_, i);
-            const bool* valid_data = chunk.valid_data();
-            if (valid_data == nullptr) {
-                return valid_result;
-            }
-            valid_data += data_pos;
-            for (int j = 0; j < size; j++) {
-                if (!valid_data[j]) {
-                    valid_result[j + processed_size] = false;
+            bool access_sealed_variable_column = false;
+            if constexpr (std::is_same_v<T, std::string_view> ||
+                          std::is_same_v<T, Json> ||
+                          std::is_same_v<T, ArrayView>) {
+                if (segment_->type() == SegmentType::Sealed) {
+                    auto [data_vec, valid_data] = segment_->get_batch_views<T>(
+                        field_id_, i, data_pos, size);
+                    ApplyValidData(valid_data.data(),
+                                   valid_result + processed_size,
+                                   valid_result + processed_size,
+                                   size);
+                    access_sealed_variable_column = true;
                 }
             }
+
+            if (!access_sealed_variable_column) {
+                auto chunk = segment_->chunk_data<T>(field_id_, i);
+                const bool* valid_data = chunk.valid_data();
+                if (valid_data == nullptr) {
+                    return valid_result;
+                }
+                valid_data += data_pos;
+                ApplyValidData(valid_data,
+                               valid_result + processed_size,
+                               valid_result + processed_size,
+                               size);
+            }
+
             processed_size += size;
             if (processed_size >= batch_size_) {
                 current_data_chunk_ = i;
@@ -1095,7 +1145,8 @@ class SegmentExpr : public Expr {
 
     std::vector<std::string> nested_path_;
     DataType field_type_;
-
+    DataType value_type_;
+    bool allow_any_json_cast_type_{false};
     bool is_index_mode_{false};
     bool is_data_mode_{false};
     // sometimes need to skip index and using raw data
@@ -1122,6 +1173,9 @@ class SegmentExpr : public Expr {
     // Cache for text match.
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};
 };
+
+bool
+IsLikeExpr(std::shared_ptr<Expr> expr);
 
 void
 OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs);

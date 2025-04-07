@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -233,13 +232,24 @@ func (s *Server) parseAndVerifyNestedPath(identifier string, schema *schemapb.Co
 	}
 
 	nestedPath := identifierExpr.GetColumnExpr().GetInfo().GetNestedPath()
+	// escape the nested path to avoid the path being interpreted as a JSON Pointer
+	nestedPath = lo.Map(nestedPath, func(path string, _ int) string {
+		s := strings.ReplaceAll(path, "~", "~0")
+		s = strings.ReplaceAll(s, "/", "~1")
+		return s
+	})
+	if len(nestedPath) == 0 {
+		// if nested path is empty, it means the json path is the field name.
+		// Dont return "/" here, it not a valid json path for simdjson.
+		return "", nil
+	}
 	return "/" + strings.Join(nestedPath, "/"), nil
 }
 
 // CreateIndex create an index on collection.
 // Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
 // will get all flushed segments from DataCoord and record tasks with these segments. The background process
-// indexBuilder will find this task and assign it to IndexNode for execution.
+// indexBuilder will find this task and assign it to DataNode for execution.
 func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -326,13 +336,6 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		indexID, err = s.allocator.AllocID(ctx)
 		if err != nil {
 			log.Warn("failed to alloc indexID", zap.Error(err))
-			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
-			return merr.Status(err), nil
-		}
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(GetIndexType(req.IndexParams)) && !s.indexNodeManager.ClientSupportDisk() {
-			errMsg := "all IndexNodes do not support disk indexes, please verify"
-			log.Warn(errMsg)
-			err = merr.WrapErrIndexNotSupported(GetIndexType(req.IndexParams))
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}

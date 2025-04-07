@@ -1617,7 +1617,6 @@ func TestProxy_ImportV2(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	b := mock_streaming.NewMockBroadcast(t)
 	wal.EXPECT().Broadcast().Return(b).Maybe()
-	b.EXPECT().BlockUntilResourceKeyAckOnce(mock.Anything, mock.Anything).Return(nil).Maybe()
 	b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Maybe()
 	streaming.SetWALForTest(wal)
 	defer streaming.RecoverWALForTest()
@@ -1649,7 +1648,6 @@ func TestProxy_ImportV2(t *testing.T) {
 		err = node.sched.Start()
 		assert.NoError(t, err)
 		chMgr := NewMockChannelsMgr(t)
-		chMgr.EXPECT().getChannels(mock.Anything).Return([]string{"p1"}, nil)
 		node.chMgr = chMgr
 
 		// no such collection
@@ -1686,7 +1684,6 @@ func TestProxy_ImportV2(t *testing.T) {
 		// set partition name and with partition key
 		chMgr = NewMockChannelsMgr(t)
 		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"ch0"}, nil)
-		chMgr.EXPECT().getChannels(mock.Anything).Return([]string{"p1"}, nil)
 		node.chMgr = chMgr
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa", PartitionName: "bbb"})
 		assert.NoError(t, err)
@@ -2233,7 +2230,7 @@ func TestAlterCollectionReplicateProperty(t *testing.T) {
 func TestRunAnalyzer(t *testing.T) {
 	p := &Proxy{}
 	// run analyzer with default params
-	resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequset{
+	resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
 		Placeholder: [][]byte{[]byte("test doc")},
 	})
 	require.NoError(t, err)
@@ -2241,10 +2238,108 @@ func TestRunAnalyzer(t *testing.T) {
 	assert.Equal(t, len(resp.GetResults()[0].GetTokens()), 2)
 
 	// run analyzer with invalid params
-	resp, err = p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequset{
+	resp, err = p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
 		Placeholder:    [][]byte{[]byte("test doc")},
 		AnalyzerParams: "invalid json",
 	})
 	require.NoError(t, err)
 	require.Error(t, merr.Error(resp.GetStatus()))
+}
+
+func Test_GetSegmentsInfo(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		mockDataCoord := mocks.NewMockDataCoordClient(t)
+		mockDataCoord.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *datapb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*datapb.GetSegmentInfoResponse, error) {
+			segmentInfos := make([]*datapb.SegmentInfo, 0)
+			for _, segID := range request.SegmentIDs {
+				segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+					ID:            segID,
+					CollectionID:  1,
+					PartitionID:   2,
+					InsertChannel: "ch-1",
+					NumOfRows:     1024,
+					State:         commonpb.SegmentState_Flushed,
+					MaxRowNum:     65535,
+					Binlogs: []*datapb.FieldBinlog{
+						{
+							FieldID: 0,
+							Binlogs: []*datapb.Binlog{
+								{
+									LogID: 1,
+								},
+								{
+									LogID: 5,
+								},
+							},
+						},
+						{
+							FieldID: 1,
+							Binlogs: []*datapb.Binlog{
+								{
+									LogID: 2,
+								},
+								{
+									LogID: 6,
+								},
+							},
+						},
+						{
+							FieldID: 100,
+							Binlogs: []*datapb.Binlog{
+								{
+									LogID: 3,
+								},
+								{
+									LogID: 7,
+								},
+							},
+						},
+						{
+							FieldID: 101,
+							Binlogs: []*datapb.Binlog{
+								{
+									LogID: 4,
+								},
+								{
+									LogID: 8,
+								},
+							},
+						},
+					},
+					Statslogs: nil,
+					Deltalogs: nil,
+					Level:     datapb.SegmentLevel_L1,
+					IsSorted:  true,
+				})
+			}
+
+			return &datapb.GetSegmentInfoResponse{
+				Status: merr.Success(),
+				Infos:  segmentInfos,
+			}, nil
+		})
+
+		ctx := context.Background()
+		p := &Proxy{
+			ctx:       ctx,
+			dataCoord: mockDataCoord,
+		}
+		p.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := p.GetSegmentsInfo(ctx, &internalpb.GetSegmentsInfoRequest{
+			CollectionID: 1,
+			SegmentIDs:   []int64{4, 5, 6},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
+		assert.Equal(t, 3, len(resp.GetSegmentInfos()))
+		assert.Equal(t, 4, len(resp.GetSegmentInfos()[0].GetInsertLogs()))
+		assert.Equal(t, int64(1), resp.GetSegmentInfos()[0].GetCollectionID())
+		assert.Equal(t, int64(2), resp.GetSegmentInfos()[0].GetPartitionID())
+		assert.Equal(t, "ch-1", resp.GetSegmentInfos()[0].GetVChannel())
+		assert.ElementsMatch(t, []int64{1, 5}, resp.GetSegmentInfos()[0].GetInsertLogs()[0].GetLogIDs())
+		assert.ElementsMatch(t, []int64{2, 6}, resp.GetSegmentInfos()[0].GetInsertLogs()[1].GetLogIDs())
+		assert.ElementsMatch(t, []int64{3, 7}, resp.GetSegmentInfos()[0].GetInsertLogs()[2].GetLogIDs())
+		assert.ElementsMatch(t, []int64{4, 8}, resp.GetSegmentInfos()[0].GetInsertLogs()[3].GetLogIDs())
+	})
 }

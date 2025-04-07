@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
@@ -25,7 +26,7 @@ var (
 func newSwithableScanner(
 	scannerName string,
 	logger *log.MLogger,
-	innerWAL walimpls.WALImpls,
+	innerWAL walimpls.ROWALImpls,
 	writeAheadBuffer wab.ROWriteAheadBuffer,
 	deliverPolicy options.DeliverPolicy,
 	msgChan chan<- message.ImmutableMessage,
@@ -45,9 +46,6 @@ func newSwithableScanner(
 
 // switchableScanner is a scanner that can switch between Catchup and Tailing mode
 type switchableScanner interface {
-	// Mode is Catchup or Tailing
-	Mode() string
-
 	// Execute make a scanner work at background.
 	// When the scanner want to change the mode, it will return a new scanner with the new mode.
 	// When error is returned, the scanner is canceled and unrecoverable forever.
@@ -57,7 +55,7 @@ type switchableScanner interface {
 type switchableScannerImpl struct {
 	scannerName      string
 	logger           *log.MLogger
-	innerWAL         walimpls.WALImpls
+	innerWAL         walimpls.ROWALImpls
 	msgChan          chan<- message.ImmutableMessage
 	writeAheadBuffer wab.ROWriteAheadBuffer
 }
@@ -77,10 +75,6 @@ type catchupScanner struct {
 	deliverPolicy                       options.DeliverPolicy
 	exclusiveStartTimeTick              uint64 // scanner should filter out the message that less than or equal to this time tick.
 	lastConfirmedMessageIDForOldVersion message.MessageID
-}
-
-func (s *catchupScanner) Mode() string {
-	return "Catchup"
 }
 
 func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
@@ -150,7 +144,8 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 			if err := s.HandleMessage(ctx, msg); err != nil {
 				return nil, err
 			}
-			if msg.MessageType() != message.MessageTypeTimeTick {
+			if msg.MessageType() != message.MessageTypeTimeTick || s.writeAheadBuffer == nil {
+				// If there's no write ahead buffer, we cannot switch into tailing mode, so skip the checking.
 				continue
 			}
 			// Here's a timetick message from the scanner, make tailing read if we catch up the writeahead buffer.
@@ -213,10 +208,6 @@ type tailingScanner struct {
 	lastConsumedMessage message.ImmutableMessage
 }
 
-func (s *tailingScanner) Mode() string {
-	return "Tailing"
-}
-
 func (s *tailingScanner) Do(ctx context.Context) (switchableScanner, error) {
 	for {
 		msg, err := s.reader.Next(ctx)
@@ -237,9 +228,29 @@ func (s *tailingScanner) Do(ctx context.Context) (switchableScanner, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := s.HandleMessage(ctx, msg); err != nil {
+		if err := s.HandleMessage(ctx, tailingImmutableMesasge{msg}); err != nil {
 			return nil, err
 		}
 		s.lastConsumedMessage = msg
 	}
+}
+
+// getScannerModel returns the scanner model.
+func getScannerModel(scanner switchableScanner) string {
+	if _, ok := scanner.(*tailingScanner); ok {
+		return metrics.WALScannerModelTailing
+	}
+	return metrics.WALScannerModelCatchup
+}
+
+type tailingImmutableMesasge struct {
+	message.ImmutableMessage
+}
+
+// isTailingScanImmutableMessage check whether the message is a tailing message.
+func isTailingScanImmutableMessage(msg message.ImmutableMessage) (message.ImmutableMessage, bool) {
+	if msg, ok := msg.(tailingImmutableMesasge); ok {
+		return msg.ImmutableMessage, true
+	}
+	return msg, false
 }

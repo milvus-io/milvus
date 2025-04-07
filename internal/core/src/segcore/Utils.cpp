@@ -901,7 +901,7 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
             futures;
         futures.reserve(remote_files.size());
         for (const auto& file : remote_files) {
-            auto future = pool.Submit([&]() {
+            auto future = pool.Submit([rcm, file]() {
                 auto fileSize = rcm->Size(file);
                 auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
                 rcm->Read(file, buf.get(), fileSize);
@@ -936,7 +936,7 @@ LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
         std::vector<std::future<FieldDataPtr>> futures;
         futures.reserve(remote_files.size());
         for (const auto& file : remote_files) {
-            auto future = pool.Submit([&]() {
+            auto future = pool.Submit([rcm, file]() {
                 auto fileSize = rcm->Size(file);
                 auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
                 rcm->Read(file, buf.get(), fileSize);

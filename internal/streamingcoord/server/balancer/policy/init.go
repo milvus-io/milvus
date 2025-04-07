@@ -1,7 +1,10 @@
-package policy
+package vchannelfair
 
-import "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+import (
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/policy/vchannelfair"
+)
 
 func init() {
-	balancer.RegisterPolicy(&pchannelCountFairPolicy{})
+	balancer.RegisterPolicy(&vchannelfair.PolicyBuilder{})
 }

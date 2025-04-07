@@ -29,6 +29,7 @@
 #include "simdjson/common_defs.h"
 #include "sys/mman.h"
 #include "common/Types.h"
+
 namespace milvus {
 constexpr uint64_t MMAP_STRING_PADDING = 1;
 constexpr uint64_t MMAP_ARRAY_PADDING = 1;
@@ -87,7 +88,6 @@ class Chunk {
     FixedVector<bool>
         valid_;  // parse null bitmap to valid_ to be compatible with SpanBase
 };
-
 // for fixed size data, includes fixed size array
 class FixedWidthChunk : public Chunk {
  public:
@@ -99,12 +99,14 @@ class FixedWidthChunk : public Chunk {
                     bool nullable)
         : Chunk(row_nums, data, size, nullable),
           dim_(dim),
-          element_size_(element_size){};
+          element_size_(element_size) {
+        auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
+        data_start_ = data_ + null_bitmap_bytes_num;
+    };
 
     milvus::SpanBase
     Span() const {
-        auto null_bitmap_bytes_num = (row_nums_ + 7) / 8;
-        return milvus::SpanBase(data_ + null_bitmap_bytes_num,
+        return milvus::SpanBase(data_start_,
                                 nullable_ ? valid_.data() : nullptr,
                                 row_nums_,
                                 element_size_ * dim_);
@@ -112,28 +114,48 @@ class FixedWidthChunk : public Chunk {
 
     const char*
     ValueAt(int64_t idx) const override {
-        auto null_bitmap_bytes_num = (row_nums_ + 7) / 8;
-        return data_ + null_bitmap_bytes_num + idx * element_size_ * dim_;
+        return data_start_ + idx * element_size_ * dim_;
     }
 
     const char*
     Data() const override {
-        auto null_bitmap_bytes_num = (row_nums_ + 7) / 8;
-        return data_ + null_bitmap_bytes_num;
+        return data_start_;
     }
 
  private:
     int dim_;
     int element_size_;
+    const char* data_start_;
 };
+// A StringChunk is a class that represents a collection of strings stored in a contiguous memory block.
+// It is initialized with the number of rows, a pointer to the data, the size of the data, and a boolean
+// indicating whether the data can contain null values. The data is accessed using offsets, which are
+// stored after an optional null bitmap. Each string is represented by a range in the data block, defined
+// by these offsets.
+//
+// Example of a valid StringChunk:
+//
+// Suppose we have a data block containing the strings "apple", "banana", and "cherry", and we want to
+// create a StringChunk for these strings. The data block might look like this:
+//
+// [null_bitmap][offsets][string_data]
+// [00000000] [17, 22, 28, 34]  ["apple", "banana", "cherry"]
+//
+// Here, the null_bitmap is empty (indicating no nulls), the offsets array indicates the start of each
+// string in the data block, and the string_data contains the actual string content.
+//
+// StringChunk exampleChunk(3, dataPointer, dataSize, false);
+//
+// In this example, 'exampleChunk' is a StringChunk with 3 rows, a pointer to the data stored in 'dataPointer',
+// a total data size of 'dataSize', and it does not support nullability.
 
 class StringChunk : public Chunk {
  public:
     StringChunk() = default;
     StringChunk(int32_t row_nums, char* data, uint64_t size, bool nullable)
         : Chunk(row_nums, data, size, nullable) {
-        auto null_bitmap_bytes_num = (row_nums + 7) / 8;
-        offsets_ = reinterpret_cast<uint64_t*>(data + null_bitmap_bytes_num);
+        auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
+        offsets_ = reinterpret_cast<uint32_t*>(data + null_bitmap_bytes_num);
     }
 
     std::string_view
@@ -146,7 +168,7 @@ class StringChunk : public Chunk {
     }
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    StringViews();
+    StringViews(std::optional<std::pair<int64_t, int64_t>> offset_len);
 
     int
     binary_search_string(std::string_view target) {
@@ -181,16 +203,41 @@ class StringChunk : public Chunk {
         return (*this)[idx].data();
     }
 
-    uint64_t*
+    uint32_t*
     Offsets() {
         return offsets_;
     }
 
  protected:
-    uint64_t* offsets_;
+    uint32_t* offsets_;
 };
 
 using JSONChunk = StringChunk;
+
+// An ArrayChunk is a class that represents a collection of arrays stored in a contiguous memory block.
+// It is initialized with the number of rows, a pointer to the data, the size of the data, the element type,
+// and a boolean indicating whether the data can contain null values. The data is accessed using offsets and lengths,
+// which are stored after an optional null bitmap. Each array is represented by a range in the data block.
+//
+// Example of a valid ArrayChunk:
+//
+// Suppose we have a data block containing arrays of integers [1, 2, 3], [4, 5], and [6, 7, 8, 9], and we want to
+// create an ArrayChunk for these arrays. The data block might look like this:
+//
+// [null_bitmap][offsets_lens][array_data]
+// [00000000] [24, 3, 36, 2, 44, 4, 60] [1, 2, 3, 4, 5, 6, 7, 8, 9]
+//
+// For string arrays, the structure is more complex as each string element needs its own offset:
+// [null_bitmap][offsets_lens][array1_offsets][array1_data][array2_offsets][array2_data][array3_offsets][array3_data]
+// [00000000] [24, 3, 48, 2, 64, 4, 96] [0, 5, 11, 16] ["hello", "world", "!"] [0, 3, 6] ["foo", "bar"] [0, 6, 12, 18, 24] ["apple", "orange", "banana", "grape"]
+//
+// Here, the null_bitmap is empty (indicating no nulls), the offsets_lens array contains pairs of (offset, length)
+// for each array, and the array_data contains the actual array elements.
+//
+// ArrayChunk exampleChunk(3, dataPointer, dataSize, DataType::INT32, false);
+//
+// In this example, 'exampleChunk' is an ArrayChunk with 3 rows, a pointer to the data stored in 'dataPointer',
+// a total data size of 'dataSize', element type INT32, and it does not support nullability.
 
 class ArrayChunk : public Chunk {
  public:
@@ -200,22 +247,72 @@ class ArrayChunk : public Chunk {
                milvus::DataType element_type,
                bool nullable)
         : Chunk(row_nums, data, size, nullable), element_type_(element_type) {
-        auto null_bitmap_bytes_num = (row_nums + 7) / 8;
+        auto null_bitmap_bytes_num = 0;
+        if (nullable) {
+            null_bitmap_bytes_num = (row_nums + 7) / 8;
+        }
         offsets_lens_ =
-            reinterpret_cast<uint64_t*>(data + null_bitmap_bytes_num);
-        ConstructViews();
+            reinterpret_cast<uint32_t*>(data + null_bitmap_bytes_num);
     }
-
-    SpanBase
-    Span() const;
 
     ArrayView
-    View(int64_t idx) const {
-        return views_[idx];
+    View(int idx) const {
+        int idx_off = 2 * idx;
+        auto offset = offsets_lens_[idx_off];
+        auto len = offsets_lens_[idx_off + 1];
+        auto next_offset = offsets_lens_[idx_off + 2];
+        auto data_ptr = data_ + offset;
+        uint32_t offsets_bytes_len = 0;
+        uint32_t* offsets_ptr = nullptr;
+        if (IsStringDataType(element_type_)) {
+            offsets_bytes_len = len * sizeof(uint32_t);
+            offsets_ptr = reinterpret_cast<uint32_t*>(data_ptr);
+        }
+
+        return ArrayView(data_ptr + offsets_bytes_len,
+                         len,
+                         next_offset - offset - offsets_bytes_len,
+                         element_type_,
+                         offsets_ptr);
     }
 
-    void
-    ConstructViews();
+    std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    Views(std::optional<std::pair<int64_t, int64_t>> offset_len =
+              std::nullopt) const {
+        auto start_offset = 0;
+        auto len = row_nums_;
+        if (offset_len.has_value()) {
+            start_offset = offset_len->first;
+            len = offset_len->second;
+            AssertInfo(start_offset >= 0 && start_offset < row_nums_,
+                       "Retrieve array views with out-of-bound offset:{}, "
+                       "len:{}, wrong",
+                       start_offset,
+                       len);
+            AssertInfo(len > 0 && len <= row_nums_,
+                       "Retrieve array views with out-of-bound offset:{}, "
+                       "len:{}, wrong",
+                       start_offset,
+                       len);
+            AssertInfo(start_offset + len <= row_nums_,
+                       "Retrieve array views with out-of-bound offset:{}, "
+                       "len:{}, wrong",
+                       start_offset,
+                       len);
+        }
+        std::vector<ArrayView> views;
+        views.reserve(len);
+        auto end_offset = start_offset + len;
+        for (auto i = start_offset; i < end_offset; i++) {
+            views.emplace_back(View(i));
+        }
+        if (nullable_) {
+            FixedVector<bool> res_valid(valid_.begin() + start_offset,
+                                        valid_.begin() + end_offset);
+            return {std::move(views), std::move(res_valid)};
+        }
+        return {std::move(views), {}};
+    }
 
     const char*
     ValueAt(int64_t idx) const override {
@@ -225,8 +322,7 @@ class ArrayChunk : public Chunk {
 
  private:
     milvus::DataType element_type_;
-    uint64_t* offsets_lens_;
-    std::vector<ArrayView> views_;
+    uint32_t* offsets_lens_;
 };
 
 class SparseFloatVectorChunk : public Chunk {

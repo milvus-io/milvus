@@ -19,7 +19,6 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"math"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
@@ -43,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -148,84 +146,6 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 	return check(maxColNumPerDB)
 }
 
-func checkFieldSchema(schema *schemapb.CollectionSchema) error {
-	for _, fieldSchema := range schema.Fields {
-		if fieldSchema.GetNullable() && typeutil.IsVectorType(fieldSchema.GetDataType()) {
-			msg := fmt.Sprintf("vector type not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
-			return merr.WrapErrParameterInvalidMsg(msg)
-		}
-		if fieldSchema.GetNullable() && fieldSchema.IsPrimaryKey {
-			msg := fmt.Sprintf("primary field not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
-			return merr.WrapErrParameterInvalidMsg(msg)
-		}
-		if fieldSchema.GetDefaultValue() != nil {
-			if fieldSchema.IsPrimaryKey {
-				msg := fmt.Sprintf("primary field not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
-				return merr.WrapErrParameterInvalidMsg(msg)
-			}
-			dtype := fieldSchema.GetDataType()
-			if dtype == schemapb.DataType_Array || dtype == schemapb.DataType_JSON || typeutil.IsVectorType(dtype) {
-				msg := fmt.Sprintf("type not support default_value, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
-				return merr.WrapErrParameterInvalidMsg(msg)
-			}
-			errTypeMismatch := func(fieldName, fieldType, defaultValueType string) error {
-				msg := fmt.Sprintf("type (%s) of field (%s) is not equal to the type(%s) of default_value", fieldType, fieldName, defaultValueType)
-				return merr.WrapErrParameterInvalidMsg(msg)
-			}
-			switch fieldSchema.GetDefaultValue().Data.(type) {
-			case *schemapb.ValueField_BoolData:
-				if dtype != schemapb.DataType_Bool {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Bool")
-				}
-			case *schemapb.ValueField_IntData:
-				if dtype != schemapb.DataType_Int32 && dtype != schemapb.DataType_Int16 && dtype != schemapb.DataType_Int8 {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Int")
-				}
-				defaultValue := fieldSchema.GetDefaultValue().GetIntData()
-				if dtype == schemapb.DataType_Int16 {
-					if defaultValue > math.MaxInt16 || defaultValue < math.MinInt16 {
-						return merr.WrapErrParameterInvalidRange(math.MinInt16, math.MaxInt16, defaultValue, "default value out of range")
-					}
-				}
-				if dtype == schemapb.DataType_Int8 {
-					if defaultValue > math.MaxInt8 || defaultValue < math.MinInt8 {
-						return merr.WrapErrParameterInvalidRange(math.MinInt8, math.MaxInt8, defaultValue, "default value out of range")
-					}
-				}
-			case *schemapb.ValueField_LongData:
-				if dtype != schemapb.DataType_Int64 {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Int64")
-				}
-			case *schemapb.ValueField_FloatData:
-				if dtype != schemapb.DataType_Float {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Float")
-				}
-			case *schemapb.ValueField_DoubleData:
-				if dtype != schemapb.DataType_Double {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Double")
-				}
-			case *schemapb.ValueField_StringData:
-				if dtype != schemapb.DataType_VarChar {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_VarChar")
-				}
-				maxLength, err := parameterutil.GetMaxLength(fieldSchema)
-				if err != nil {
-					return err
-				}
-				defaultValueLength := len(fieldSchema.GetDefaultValue().GetStringData())
-				if int64(defaultValueLength) > maxLength {
-					msg := fmt.Sprintf("the length (%d) of string exceeds max length (%d)", defaultValueLength, maxLength)
-					return merr.WrapErrParameterInvalid("valid length string", "string length exceeds max length", msg)
-				}
-			default:
-				panic("default value unsupport data type")
-			}
-		}
-	}
-
-	return nil
-}
-
 func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) bool {
 	for _, f := range schema.GetFields() {
 		if funcutil.SliceContain(systemFields, f.GetName()) {
@@ -233,15 +153,6 @@ func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) b
 		}
 	}
 	return false
-}
-
-func validateFieldDataType(schema *schemapb.CollectionSchema) error {
-	for _, field := range schema.GetFields() {
-		if _, ok := schemapb.DataType_name[int32(field.GetDataType())]; !ok || field.GetDataType() == schemapb.DataType_None {
-			return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", field.GetDataType()))
-		}
-	}
-	return nil
 }
 
 func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schemapb.CollectionSchema) error {
@@ -252,7 +163,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return merr.WrapErrParameterInvalid("collection name matches schema name", "don't match", msg)
 	}
 
-	if err := checkFieldSchema(schema); err != nil {
+	if err := checkFieldSchema(schema.GetFields()); err != nil {
 		return err
 	}
 
@@ -264,7 +175,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		msg := fmt.Sprintf("schema contains system field: %s, %s, %s", RowIDFieldName, TimeStampFieldName, MetaFieldName)
 		return merr.WrapErrParameterInvalid("schema don't contains system field", "contains", msg)
 	}
-	return validateFieldDataType(schema)
+	return validateFieldDataType(schema.GetFields())
 }
 
 func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.CollectionSchema) error {
@@ -598,6 +509,14 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		UpdateTimestamp:      ts,
 	}
 
+	// Check if the collection name duplicates an alias.
+	_, err = t.core.meta.DescribeAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
+	if err == nil {
+		err2 := fmt.Errorf("collection name [%s] conflicts with an existing alias, please choose a unique name", t.Req.GetCollectionName())
+		log.Ctx(ctx).Warn("create collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err2))
+		return err2
+	}
+
 	// We cannot check the idempotency inside meta table when adding collection, since we'll execute duplicate steps
 	// if add collection successfully due to idempotency check. Some steps may be risky to be duplicate executed if they
 	// are not promised idempotent.
@@ -613,6 +532,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		log.Ctx(ctx).Warn("add duplicate collection", zap.String("collection", t.Req.GetCollectionName()), zap.Uint64("ts", ts))
 		return nil
 	}
+	log.Ctx(ctx).Info("check collection existence", zap.String("collection", t.Req.GetCollectionName()), zap.Error(err))
 
 	// TODO: The create collection is not idempotent for other component, such as wal.
 	// we need to make the create collection operation must success after some persistent operation, refactor it in future.

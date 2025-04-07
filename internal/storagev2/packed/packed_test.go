@@ -15,14 +15,16 @@
 package packed
 
 import (
+	"io"
 	"testing"
 
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/array"
-	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/exp/rand"
 
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -77,7 +79,7 @@ func (suite *PackedTestSuite) TestPackedOneFile() {
 	batches := 100
 
 	paths := []string{"/tmp/100"}
-	columnGroups := [][]int{{0, 1, 2}}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}}}
 	bufferSize := int64(10 * 1024 * 1024) // 10MB
 	multiPartUploadSize := int64(0)
 	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups)
@@ -129,7 +131,7 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	rec := b.NewRecord()
 	defer rec.Release()
 	paths := []string{"/tmp/100", "/tmp/101"}
-	columnGroups := [][]int{{2}, {0, 1}}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{2}}, {Columns: []int{0, 1}}}
 	bufferSize := int64(10 * 1024 * 1024) // 10MB
 	multiPartUploadSize := int64(0)
 	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups)
@@ -147,8 +149,10 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	var rr arrow.Record
 	for {
 		rr, err = reader.ReadNext()
-		suite.NoError(err)
-		if rr == nil {
+		if err == nil {
+			suite.NotNil(rr)
+		}
+		if err == io.EOF {
 			// end of file
 			break
 		}

@@ -67,7 +67,7 @@ func createVertexAIProvider(url string, schema *schemapb.FieldSchema) (textEmbed
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: textEmbedding005},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: locationParamKey, Value: "mock_local"},
 			{Key: projectIDParamKey, Value: "mock_id"},
 			{Key: taskTypeParamKey, Value: vertexAICodeRetrival},
@@ -76,7 +76,7 @@ func createVertexAIProvider(url string, schema *schemapb.FieldSchema) (textEmbed
 		},
 	}
 	mockClient := vertexai.NewVertexAIEmbedding(url, []byte{1, 2, 3}, "mock scope", "mock token")
-	return NewVertexAIEmbeddingProvider(schema, functionSchema, mockClient)
+	return NewVertexAIEmbeddingProvider(schema, functionSchema, mockClient, map[string]string{})
 }
 
 func (s *VertexAITextEmbeddingProviderSuite) TestEmbedding() {
@@ -87,16 +87,17 @@ func (s *VertexAITextEmbeddingProviderSuite) TestEmbedding() {
 	s.NoError(err)
 	{
 		data := []string{"sentence"}
-		ret, err2 := provder.CallEmbedding(data, InsertMode)
+		r, err2 := provder.CallEmbedding(data, InsertMode)
+		ret := r.([][]float32)
 		s.NoError(err2)
 		s.Equal(1, len(ret))
 		s.Equal(4, len(ret[0]))
-		s.Equal([]float32{0.0, 0.1, 0.2, 0.3}, ret[0])
+		s.Equal([]float32{0.0, 1.0, 2.0, 3.0}, ret[0])
 	}
 	{
 		data := []string{"sentence 1", "sentence 2", "sentence 3"}
 		ret, _ := provder.CallEmbedding(data, SearchMode)
-		s.Equal([][]float32{{0.0, 0.1, 0.2, 0.3}, {1.0, 1.1, 1.2, 1.3}, {2.0, 2.1, 2.2, 2.3}}, ret)
+		s.Equal([][]float32{{0.0, 1.0, 2.0, 3.0}, {1.0, 2.0, 3.0, 4.0}, {2.0, 3.0, 4.0, 5.0}}, ret)
 	}
 }
 
@@ -173,25 +174,10 @@ func (s *VertexAITextEmbeddingProviderSuite) TestEmbeddingNubmerNotMatch() {
 	s.Error(err2)
 }
 
-func (s *VertexAITextEmbeddingProviderSuite) TestCheckVertexAITask() {
-	err := checkTask(textMultilingualEmbedding002, "UnkownTask")
-	s.Error(err)
-
-	// textMultilingualEmbedding002 not support vertexAICodeRetrival task
-	err = checkTask(textMultilingualEmbedding002, vertexAICodeRetrival)
-	s.Error(err)
-
-	err = checkTask(textEmbedding005, vertexAICodeRetrival)
-	s.NoError(err)
-
-	err = checkTask(textMultilingualEmbedding002, vertexAISTS)
-	s.NoError(err)
-}
-
 func (s *VertexAITextEmbeddingProviderSuite) TestGetVertexAIJsonKey() {
 	os.Setenv(vertexServiceAccountJSONEnv, "ErrorPath")
 	defer os.Unsetenv(vertexServiceAccountJSONEnv)
-	_, err := getVertexAIJsonKey()
+	_, err := getVertexAIJsonKey("")
 	s.Error(err)
 }
 
@@ -204,7 +190,7 @@ func (s *VertexAITextEmbeddingProviderSuite) TestGetTaskType() {
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: textEmbedding005},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: projectIDParamKey, Value: "mock_id"},
 			{Key: dimParamKey, Value: "4"},
 		},
@@ -212,7 +198,7 @@ func (s *VertexAITextEmbeddingProviderSuite) TestGetTaskType() {
 	mockClient := vertexai.NewVertexAIEmbedding("mock_url", []byte{1, 2, 3}, "mock scope", "mock token")
 
 	{
-		provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient)
+		provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, map[string]string{})
 		s.NoError(err)
 		s.Equal(provider.getTaskType(InsertMode), "RETRIEVAL_DOCUMENT")
 		s.Equal(provider.getTaskType(SearchMode), "RETRIEVAL_QUERY")
@@ -220,7 +206,7 @@ func (s *VertexAITextEmbeddingProviderSuite) TestGetTaskType() {
 
 	{
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: taskTypeParamKey, Value: vertexAICodeRetrival})
-		provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient)
+		provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, map[string]string{})
 		s.NoError(err)
 		s.Equal(provider.getTaskType(InsertMode), "RETRIEVAL_DOCUMENT")
 		s.Equal(provider.getTaskType(SearchMode), "CODE_RETRIEVAL_QUERY")
@@ -228,24 +214,17 @@ func (s *VertexAITextEmbeddingProviderSuite) TestGetTaskType() {
 
 	{
 		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: taskTypeParamKey, Value: vertexAISTS}
-		provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient)
+		provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, map[string]string{})
 		s.NoError(err)
 		s.Equal(provider.getTaskType(InsertMode), "SEMANTIC_SIMILARITY")
 		s.Equal(provider.getTaskType(SearchMode), "SEMANTIC_SIMILARITY")
-	}
-
-	// invalid task
-	{
-		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: taskTypeParamKey, Value: "UnkownTask"}
-		_, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient)
-		s.Error(err)
 	}
 }
 
 func (s *VertexAITextEmbeddingProviderSuite) TestCreateVertexAIEmbeddingClient() {
 	os.Setenv(vertexServiceAccountJSONEnv, "ErrorPath")
 	defer os.Unsetenv(vertexServiceAccountJSONEnv)
-	_, err := createVertexAIEmbeddingClient("https://mock_url.com")
+	_, err := createVertexAIEmbeddingClient("https://mock_url.com", "")
 	s.Error(err)
 }
 
@@ -258,19 +237,14 @@ func (s *VertexAITextEmbeddingProviderSuite) TestNewVertexAIEmbeddingProvider() 
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: textEmbedding005},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: projectIDParamKey, Value: "mock_id"},
 			{Key: dimParamKey, Value: "4"},
 		},
 	}
 	mockClient := vertexai.NewVertexAIEmbedding("mock_url", []byte{1, 2, 3}, "mock scope", "mock token")
-	provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient)
+	provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, map[string]string{})
 	s.NoError(err)
 	s.True(provider.MaxBatch() > 0)
 	s.Equal(provider.FieldDim(), int64(4))
-
-	// check model name
-	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: "UnkownModel"}
-	_, err = NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient)
-	s.Error(err)
 }

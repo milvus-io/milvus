@@ -132,7 +132,7 @@ var (
 			Name:      "task_latency",
 			Help:      "latency of all kind of task in query coord scheduler scheduler",
 			Buckets:   longTaskBuckets,
-		}, []string{collectionIDLabelName, taskTypeLabel, channelNameLabelName})
+		}, []string{collectionIDLabelName, TaskTypeLabel, channelNameLabelName})
 
 	QueryCoordResourceGroupInfo = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

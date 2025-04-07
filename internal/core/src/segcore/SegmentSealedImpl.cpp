@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -321,6 +322,27 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         auto parallel_degree = static_cast<uint64_t>(
             DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
         field_data_info.channel->set_capacity(parallel_degree * 2);
+
+        int total = 0;
+        for (int num : info.entries_nums) {
+            total += num;
+        }
+        if (total != info.row_count) {
+            AssertInfo(total <= info.row_count,
+                       "binlog number should less than row_count");
+            auto lack_num = info.row_count - total;
+            auto field_meta = get_schema()[field_id];
+            AssertInfo(field_meta.is_nullable(),
+                       "nullable must be true when lack rows");
+            auto field_data = storage::CreateFieldData(
+                static_cast<DataType>(field_meta.get_data_type()),
+                true,
+                1,
+                lack_num);
+            field_data->FillFieldData(field_meta.default_value(), lack_num);
+            field_data_info.channel->push(field_data);
+        }
+        // field_data_info.channel.push();
         auto& pool =
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
         pool.Submit(
@@ -769,7 +791,11 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
 }
 
 std::pair<std::vector<std::string_view>, FixedVector<bool>>
-SegmentSealedImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
+SegmentSealedImpl::chunk_string_view_impl(
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len =
+        std::nullopt) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
@@ -778,7 +804,24 @@ SegmentSealedImpl::chunk_view_impl(FieldId field_id, int64_t chunk_id) const {
         return field_data->StringViews();
     }
     PanicInfo(ErrorCode::UnexpectedError,
-              "chunk_view_impl only used for variable column field ");
+              "chunk_string_view_impl only used for variable column field ");
+}
+
+std::pair<std::vector<ArrayView>, FixedVector<bool>>
+SegmentSealedImpl::chunk_array_view_impl(
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len =
+        std::nullopt) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto it = fields_.find(field_id); it != fields_.end()) {
+        auto& field_data = it->second;
+        return field_data->ArrayViews();
+    }
+    PanicInfo(ErrorCode::UnexpectedError,
+              "chunk_array_view_impl only used for array column field ");
 }
 
 std::pair<std::vector<std::string_view>, FixedVector<bool>>
@@ -1012,8 +1055,8 @@ std::tuple<
                                                               MmapChunkDescriptorPtr&
                                                                   descriptor) {
     // For mmap mode, field_meta is unused, so just construct a fake field meta.
-    auto fm =
-        FieldMeta(FieldName(""), FieldId(0), milvus::DataType::NONE, false);
+    auto fm = FieldMeta(
+        FieldName(""), FieldId(0), milvus::DataType::NONE, false, std::nullopt);
     // TODO: add Load() interface for chunk cache when support retrieve_enable, make Read() raise error if cache miss
     auto column = cc->Read(data_path, descriptor, fm, true);
     cc->Prefetch(data_path);
@@ -1195,19 +1238,22 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     auto& request_fields = plan->extra_info_opt_.value().involved_fields_;
     auto field_ready_bitset =
         field_data_ready_bitset_ | index_ready_bitset_ | binlog_index_bitset_;
-    AssertInfo(request_fields.size() == field_ready_bitset.size(),
-               "Request fields size not equal to field ready bitset size when "
+
+    AssertInfo(request_fields.size() >= field_ready_bitset.size(),
+               "Request fields size less than field ready bitset size when "
                "check search");
     auto absent_fields = request_fields - field_ready_bitset;
-
     if (absent_fields.any()) {
         // absent_fields.find_first() returns std::optional<>
         auto field_id =
             FieldId(absent_fields.find_first().value() + START_USER_FIELDID);
         auto& field_meta = schema_->operator[](field_id);
-        PanicInfo(
-            FieldNotLoaded,
-            "User Field(" + field_meta.get_name().get() + ") is not loaded");
+        // request field may has added field
+        if (!field_meta.is_nullable()) {
+            PanicInfo(FieldNotLoaded,
+                      "User Field(" + field_meta.get_name().get() +
+                          ") is not loaded");
+        }
     }
 }
 
@@ -2033,6 +2079,8 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
         index = std::make_unique<index::TextMatchIndex>(
             cfg.GetMmapPath(),
             unique_id.c_str(),
+            // todo: make it configurable
+            index::TANTIVY_INDEX_LATEST_VERSION,
             "milvus_tokenizer",
             field_meta.get_analyzer_params().c_str());
     }

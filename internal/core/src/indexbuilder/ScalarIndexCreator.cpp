@@ -12,6 +12,7 @@
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "common/Consts.h"
 #include "common/FieldDataInterface.h"
+#include "common/JsonCastType.h"
 #include "common/Types.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
@@ -40,11 +41,16 @@ ScalarIndexCreator::ScalarIndexCreator(
             config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
 
+    index_info.tantivy_index_version =
+        milvus::index::GetValueFromConfig<int32_t>(
+            config, milvus::index::TANTIVY_INDEX_VERSION)
+            .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
+
     index_info.field_type = dtype_;
     index_info.index_type = index_type();
     if (dtype == DataType::JSON) {
-        index_info.json_cast_type = static_cast<DataType>(
-            std::stoi(config.at(JSON_CAST_TYPE).get<std::string>()));
+        index_info.json_cast_type =
+            ConvertToJsonCastType(config.at(JSON_CAST_TYPE).get<std::string>());
         index_info.json_path = config.at(JSON_PATH).get<std::string>();
     }
     index_ = index::IndexFactory::GetInstance().CreateIndex(

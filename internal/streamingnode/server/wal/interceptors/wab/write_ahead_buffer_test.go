@@ -17,7 +17,7 @@ import (
 
 func TestWriteAheadBufferWithOnlyTrivialTimeTick(t *testing.T) {
 	ctx := context.Background()
-	wb := NewWirteAheadBuffer(log.With(), 5*1024*1024, 30*time.Second, createTimeTickMessage(0))
+	wb := NewWirteAheadBuffer("pchannel", log.With(), 5*1024*1024, 30*time.Second, createTimeTickMessage(0))
 
 	// Test timeout
 	ctx, cancel := context.WithTimeout(ctx, 1*time.Millisecond)
@@ -62,7 +62,7 @@ func TestWriteAheadBufferWithOnlyTrivialTimeTick(t *testing.T) {
 
 	nextTimeTick := uint64(100)
 	for {
-		nextTimeTick += uint64(rand.Int31n(1000))
+		nextTimeTick += uint64(rand.Int31n(1000) + 1)
 		wb.Append(nil, createTimeTickMessage(nextTimeTick))
 		if nextTimeTick > expectedLastTimeTick {
 			break
@@ -81,7 +81,7 @@ func TestWriteAheadBufferWithOnlyTrivialTimeTick(t *testing.T) {
 func TestWriteAheadBuffer(t *testing.T) {
 	// Concurrent add message into bufffer and make syncup.
 	// The reader should never lost any message if no eviction happen.
-	wb := NewWirteAheadBuffer(log.With(), 5*1024*1024, 30*time.Second, createTimeTickMessage(1))
+	wb := NewWirteAheadBuffer("pchannel", log.With(), 5*1024*1024, 30*time.Second, createTimeTickMessage(1))
 	expectedLastTimeTick := uint64(10000)
 	ch := make(chan struct{})
 	totalCnt := 0
@@ -183,7 +183,7 @@ func TestWriteAheadBuffer(t *testing.T) {
 }
 
 func TestWriteAheadBufferEviction(t *testing.T) {
-	wb := NewWirteAheadBuffer(log.With(), 5*1024*1024, 50*time.Millisecond, createTimeTickMessage(0))
+	wb := NewWirteAheadBuffer("pchannel", log.With(), 5*1024*1024, 50*time.Millisecond, createTimeTickMessage(0))
 
 	msgs := make([]message.ImmutableMessage, 0)
 	for i := 1; i < 100; i++ {

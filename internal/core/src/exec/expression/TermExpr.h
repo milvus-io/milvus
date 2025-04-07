@@ -63,6 +63,9 @@ class PhyTermFilterExpr : public SegmentExpr {
                       segment,
                       expr->column_.field_id_,
                       expr->column_.nested_path_,
+                      expr->vals_.size() == 0
+                          ? DataType::NONE
+                          : FromValCase(expr->vals_[0].val_case()),
                       active_count,
                       batch_size),
           expr_(expr),
@@ -71,6 +74,21 @@ class PhyTermFilterExpr : public SegmentExpr {
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    bool
+    IsSource() const override {
+        return true;
+    }
+
+    std::string
+    ToString() const {
+        return fmt::format("{}", expr_->ToString());
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return expr_->column_;
+    }
 
  private:
     void
@@ -85,39 +103,39 @@ class PhyTermFilterExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecVisitorImpl(OffsetVector* input = nullptr);
+    ExecVisitorImpl(EvalCtx& context);
 
     template <typename T>
     VectorPtr
-    ExecVisitorImplForIndex(OffsetVector* input = nullptr);
+    ExecVisitorImplForIndex();
 
     template <typename T>
     VectorPtr
-    ExecVisitorImplForData(OffsetVector* input = nullptr);
+    ExecVisitorImplForData(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr
-    ExecVisitorImplTemplateJson(OffsetVector* input = nullptr);
+    ExecVisitorImplTemplateJson(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr
-    ExecTermJsonVariableInField(OffsetVector* input = nullptr);
+    ExecTermJsonVariableInField(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr
-    ExecTermJsonFieldInVariable(OffsetVector* input = nullptr);
+    ExecTermJsonFieldInVariable(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr
-    ExecVisitorImplTemplateArray(OffsetVector* input = nullptr);
+    ExecVisitorImplTemplateArray(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr
-    ExecTermArrayVariableInField(OffsetVector* input = nullptr);
+    ExecTermArrayVariableInField(EvalCtx& context);
 
     template <typename ValueType>
     VectorPtr
-    ExecTermArrayFieldInVariable(OffsetVector* input = nullptr);
+    ExecTermArrayFieldInVariable(EvalCtx& context);
 
  private:
     std::shared_ptr<const milvus::expr::TermFilterExpr> expr_;

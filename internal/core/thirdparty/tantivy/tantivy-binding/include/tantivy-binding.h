@@ -71,6 +71,14 @@ struct RustResult {
   const char *error;
 };
 
+struct TantivyToken {
+  const char *token;
+  int64_t start_offset;
+  int64_t end_offset;
+  int64_t position;
+  int64_t position_length;
+};
+
 extern "C" {
 
 void free_rust_array(RustArray array);
@@ -170,12 +178,14 @@ RustResult tantivy_register_tokenizer(void *ptr,
 RustResult tantivy_create_index(const char *field_name,
                                 TantivyDataType data_type,
                                 const char *path,
+                                uint32_t tantivy_index_version,
                                 uintptr_t num_threads,
                                 uintptr_t overall_memory_budget_in_bytes);
 
 RustResult tantivy_create_index_with_single_segment(const char *field_name,
                                                     TantivyDataType data_type,
-                                                    const char *path);
+                                                    const char *path,
+                                                    uint32_t tantivy_index_version);
 
 void tantivy_free_index_writer(void *ptr);
 
@@ -331,6 +341,7 @@ RustResult tantivy_index_add_array_keywords_by_single_segment_writer(void *ptr,
 
 RustResult tantivy_create_text_writer(const char *field_name,
                                       const char *path,
+                                      uint32_t tantivy_index_version,
                                       const char *tokenizer_name,
                                       const char *analyzer_params,
                                       uintptr_t num_threads,
@@ -347,11 +358,13 @@ bool tantivy_token_stream_advance(void *token_stream);
 
 const char *tantivy_token_stream_get_token(void *token_stream);
 
-RustResult tantivy_create_tokenizer(const char *analyzer_params);
+TantivyToken tantivy_token_stream_get_detailed_token(void *token_stream);
 
-void *tantivy_clone_tokenizer(void *ptr);
+RustResult tantivy_create_analyzer(const char *analyzer_params);
 
-void tantivy_free_tokenizer(void *tokenizer);
+void *tantivy_clone_analyzer(void *ptr);
+
+void tantivy_free_analyzer(void *tokenizer);
 
 bool tantivy_index_exist(const char *path);
 

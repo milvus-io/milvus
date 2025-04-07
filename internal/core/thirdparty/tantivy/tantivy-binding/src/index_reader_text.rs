@@ -5,7 +5,7 @@ use tantivy::{
 };
 
 use crate::error::Result;
-use crate::{index_reader::IndexReaderWrapper, tokenizer::standard_analyzer};
+use crate::{analyzer::standard_analyzer, index_reader::IndexReaderWrapper};
 
 impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,
@@ -62,31 +62,29 @@ impl IndexReaderWrapper {
 
 #[cfg(test)]
 mod tests {
+    use tantivy::query::TermQuery;
     use tempfile::TempDir;
 
-    use crate::{index_writer::IndexWriterWrapper, tokenizer::create_tokenizer};
+    use crate::{index_writer::IndexWriterWrapper, TantivyIndexVersion};
     #[test]
     fn test_jeba() {
         let params = "{\"tokenizer\": \"jieba\"}".to_string();
-        let tokenizer = create_tokenizer(&params).unwrap();
         let dir = TempDir::new().unwrap();
 
         let mut writer = IndexWriterWrapper::create_text_writer(
-            "text".to_string(),
-            dir.path().to_str().unwrap().to_string(),
-            "jieba".to_string(),
-            tokenizer,
+            "text",
+            dir.path().to_str().unwrap(),
+            "jieba",
+            &params,
             1,
             50_000_000,
             false,
-        );
+            TantivyIndexVersion::default_version(),
+        )
+        .unwrap();
 
-        writer
-            .add_strings(["网球和滑雪"].into_iter().map(|str| Ok(str)), 0)
-            .unwrap();
-        writer
-            .add_strings(["网球以及滑雪"].into_iter().map(|str| Ok(str)), 1)
-            .unwrap();
+        writer.add_batch_data("网球和滑雪", Some(0)).unwrap();
+        writer.add_batch_data("网球以及滑雪", Some(1)).unwrap();
 
         writer.commit().unwrap();
 
@@ -99,5 +97,38 @@ mod tests {
         let reader = writer.create_reader().unwrap();
         let res = reader.phrase_match_query("网球滑雪", slop).unwrap();
         assert_eq!(res, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_read() {
+        let dir = TempDir::new().unwrap();
+        let mut writer = IndexWriterWrapper::create_text_writer(
+            "text",
+            dir.path().to_str().unwrap(),
+            "default",
+            "",
+            1,
+            50_000_000,
+            false,
+            TantivyIndexVersion::default_version(),
+        )
+        .unwrap();
+
+        for i in 0..10000 {
+            writer.add_batch_data("hello world", Some(i)).unwrap();
+        }
+        writer.commit().unwrap();
+
+        let reader = writer.create_reader().unwrap();
+
+        let query = TermQuery::new(
+            tantivy::Term::from_field_text(reader.field.clone(), "hello"),
+            tantivy::schema::IndexRecordOption::Basic,
+        );
+
+        let res = reader.search(&query).unwrap();
+        assert_eq!(res, (0..10000).collect::<Vec<u32>>());
+        let res = reader.search_i64(&query).unwrap();
+        assert_eq!(res, (0..10000).collect::<Vec<i64>>());
     }
 }

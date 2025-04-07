@@ -299,7 +299,7 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 			}
 			str, err := decodeUtf32(raw, c.order)
 			if c.field.DataType == schemapb.DataType_VarChar {
-				if err = common.CheckVarcharLength(str, maxLength); err != nil {
+				if err = common.CheckVarcharLength(str, maxLength, c.field); err != nil {
 					return nil, err
 				}
 			}
@@ -318,7 +318,11 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 			if n > 0 {
 				buf = buf[:n]
 			}
-			data = append(data, string(buf))
+			str := string(buf)
+			if err = common.CheckValidUTF8(str, c.field); err != nil {
+				return nil, err
+			}
+			data = append(data, str)
 		}
 	}
 	return data, nil

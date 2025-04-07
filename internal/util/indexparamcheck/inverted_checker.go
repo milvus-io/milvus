@@ -3,6 +3,8 @@ package indexparamcheck
 import (
 	"fmt"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -14,15 +16,19 @@ type INVERTEDChecker struct {
 	scalarIndexChecker
 }
 
+var validJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR"}
+
 func (c *INVERTEDChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
 	// check json index params
 	isJSONIndex := typeutil.IsJSONType(dataType)
 	if isJSONIndex {
-		if _, exist := params[common.JSONCastTypeKey]; !exist {
+		castType, exist := params[common.JSONCastTypeKey]
+		if !exist {
 			return merr.WrapErrParameterMissing(common.JSONCastTypeKey, "json index must specify cast type")
 		}
-		if _, exist := params[common.JSONPathKey]; !exist {
-			return merr.WrapErrParameterMissing(common.JSONPathKey, "json index must specify json path")
+
+		if !lo.Contains(validJSONCastTypes, castType) {
+			return merr.WrapErrParameterInvalidMsg("json_cast_type %v is not supported", castType)
 		}
 	}
 	return c.scalarIndexChecker.CheckTrain(dataType, params)

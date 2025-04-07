@@ -20,7 +20,7 @@ package function
 
 import (
 	"fmt"
-	"os"
+	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -34,15 +34,15 @@ type VoyageAIEmbeddingProvider struct {
 	client        *voyageai.VoyageAIEmbedding
 	modelName     string
 	embedDimParam int64
+	truncate      bool
+	embdType      embeddingType
+	outputType    string
 
 	maxBatch   int
 	timeoutSec int64
 }
 
 func createVoyageAIEmbeddingClient(apiKey string, url string) (*voyageai.VoyageAIEmbedding, error) {
-	if apiKey == "" {
-		apiKey = os.Getenv(voyageAIAKEnvStr)
-	}
 	if apiKey == "" {
 		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", voyageAIAKEnvStr)
 	}
@@ -55,13 +55,15 @@ func createVoyageAIEmbeddingClient(apiKey string, url string) (*voyageai.VoyageA
 	return c, nil
 }
 
-func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema) (*VoyageAIEmbeddingProvider, error) {
+func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*VoyageAIEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	var apiKey, url, modelName string
+	apiKey, url := parseAKAndURL(functionSchema.Params, params, voyageAIAKEnvStr)
+	var modelName string
 	dim := int64(0)
+	truncate := false
 
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
@@ -73,37 +75,39 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 			if err != nil {
 				return nil, err
 			}
-		case apiKeyParamKey:
-			apiKey = param.Value
-		case embeddingURLParamKey:
-			url = param.Value
+		case truncationParamKey:
+			if truncate, err = strconv.ParseBool(param.Value); err != nil {
+				return nil, fmt.Errorf("[%s param's value: %s] is invalid, only supports: [true/false]", truncationParamKey, param.Value)
+			}
 		default:
 		}
 	}
 
-	if modelName != voyage3Large && modelName != voyage3 && modelName != voyage3Lite && modelName != voyageCode3 && modelName != voyageFinance2 && modelName != voyageLaw2 && modelName != voyageCode2 {
-		return nil, fmt.Errorf("Unsupported model: %s, only support [%s, %s, %s, %s, %s, %s, %s]",
-			modelName, voyage3Large, voyage3, voyage3Lite, voyageCode3, voyageFinance2, voyageLaw2, voyageCode2)
-	}
-
-	if dim != 0 {
-		if modelName != voyage3Large && modelName != voyageCode3 {
-			return nil, fmt.Errorf("VoyageAI text embedding model: [%s] doesn't supports dim parameter, only [%s, %s] support it.", modelName, voyage3, voyageCode3)
-		}
-		if dim != 1024 && dim != 256 && dim != 512 && dim != 2048 {
-			return nil, fmt.Errorf("VoyageAI text embedding model's dim only supports 2048, 1024 (default), 512, and 256.")
-		}
-	}
 	c, err := createVoyageAIEmbeddingClient(apiKey, url)
 	if err != nil {
 		return nil, err
 	}
 
+	embdType := getEmbdType(fieldSchema.DataType)
+	if embdType == unsupportEmbd {
+		return nil, fmt.Errorf("Unsupport output type: %s", fieldSchema.DataType)
+	}
+
+	outputType := func() string {
+		if embdType == float32Embd {
+			return "float"
+		}
+		return "int8"
+	}()
+
 	provider := VoyageAIEmbeddingProvider{
 		client:        c,
 		fieldDim:      fieldDim,
 		modelName:     modelName,
+		truncate:      truncate,
 		embedDimParam: dim,
+		embdType:      embdType,
+		outputType:    outputType,
 		maxBatch:      128,
 		timeoutSec:    30,
 	}
@@ -118,7 +122,7 @@ func (provider *VoyageAIEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *VoyageAIEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) ([][]float32, error) {
+func (provider *VoyageAIEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	var textType string
 	if mode == InsertMode {
@@ -127,26 +131,46 @@ func (provider *VoyageAIEmbeddingProvider) CallEmbedding(texts []string, mode Te
 		textType = "query"
 	}
 
-	data := make([][]float32, 0, numRows)
+	embRet := newEmbdResult(numRows, provider.embdType)
 	for i := 0; i < numRows; i += provider.maxBatch {
 		end := i + provider.maxBatch
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, "float", provider.timeoutSec)
+		r, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.truncate, provider.timeoutSec)
 		if err != nil {
 			return nil, err
 		}
-		if end-i != len(resp.Data) {
-			return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
-		}
-		for _, item := range resp.Data {
-			if len(item.Embedding) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
-					provider.fieldDim, len(item.Embedding))
+		if provider.embdType == float32Embd {
+			resp := r.(*voyageai.EmbeddingResponse[float32])
+			if end-i != len(resp.Data) {
+				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
 			}
-			data = append(data, item.Embedding)
+
+			for _, item := range resp.Data {
+				if len(item.Embedding) != int(provider.fieldDim) {
+					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+						provider.fieldDim, len(item.Embedding))
+				}
+				embRet.append(item.Embedding)
+			}
+		} else {
+			resp := r.(*voyageai.EmbeddingResponse[int8])
+			if end-i != len(resp.Data) {
+				return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
+			}
+
+			for _, item := range resp.Data {
+				if len(item.Embedding) != int(provider.fieldDim) {
+					return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+						provider.fieldDim, len(item.Embedding))
+				}
+				embRet.append(item.Embedding)
+			}
 		}
 	}
-	return data, nil
+	if embRet.eType == float32Embd {
+		return embRet.floatEmbds, nil
+	}
+	return embRet.int8Embds, nil
 }

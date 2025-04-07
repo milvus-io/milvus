@@ -10,13 +10,58 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+#include <cstdint>
 #include "common/FieldDataInterface.h"
 #include "index/InvertedIndexTantivy.h"
+#include "index/ScalarIndex.h"
 #include "storage/FileManager.h"
 #include "boost/filesystem.hpp"
 #include "tantivy-binding.h"
 
 namespace milvus::index {
+class JsonInvertedIndexParseErrorRecorder {
+ public:
+    struct ErrorInstance {
+        std::string json_str;
+        std::string pointer;
+    };
+    struct ErrorStats {
+        int64_t count;
+        ErrorInstance first_instance;
+    };
+    void
+    Record(const std::string_view& json_str,
+           const std::string& pointer,
+           const simdjson::error_code& error_code) {
+        error_map_[error_code].count++;
+        if (error_map_[error_code].count == 1) {
+            error_map_[error_code].first_instance = {std::string(json_str),
+                                                     pointer};
+        }
+    }
+
+    void
+    PrintErrStats() {
+        if (error_map_.empty()) {
+            LOG_INFO("No error found");
+            return;
+        }
+        for (const auto& [error_code, stats] : error_map_) {
+            LOG_INFO("Error code: {}, count: {}, first instance: {}",
+                     error_message(error_code),
+                     stats.count,
+                     stats.first_instance.json_str);
+        }
+    }
+
+    std::unordered_map<simdjson::error_code, ErrorStats>&
+    GetErrorMap() {
+        return error_map_;
+    }
+
+ private:
+    std::unordered_map<simdjson::error_code, ErrorStats> error_map_;
+};
 
 template <typename T>
 class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
@@ -24,7 +69,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     JsonInvertedIndex(const proto::schema::DataType cast_type,
                       const std::string& nested_path,
                       const storage::FileManagerContext& ctx)
-        : nested_path_(nested_path) {
+        : nested_path_(nested_path), cast_type_(cast_type) {
         this->schema_ = ctx.fieldDataMeta.field_schema;
         this->mem_file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(ctx);
@@ -44,7 +89,10 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         std::string field_name = std::to_string(
             this->disk_file_manager_->GetFieldDataMeta().field_id);
         this->wrapper_ = std::make_shared<index::TantivyIndexWrapper>(
-            field_name.c_str(), this->d_type_, this->path_.c_str());
+            field_name.c_str(),
+            this->d_type_,
+            this->path_.c_str(),
+            TANTIVY_INDEX_LATEST_VERSION /* json index is not supported in old version */);
     }
 
     void
@@ -61,7 +109,20 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         this->wrapper_->create_reader();
     }
 
+    enum DataType
+    JsonCastType() const override {
+        return static_cast<enum DataType>(cast_type_);
+    }
+
+    JsonInvertedIndexParseErrorRecorder&
+    GetErrorRecorder() {
+        return error_recorder_;
+    }
+
  private:
     std::string nested_path_;
+    proto::schema::DataType cast_type_;
+    JsonInvertedIndexParseErrorRecorder error_recorder_;
 };
+
 }  // namespace milvus::index

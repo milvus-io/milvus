@@ -16,8 +16,6 @@
 
 package column
 
-import "github.com/cockroachdb/errors"
-
 var (
 	// scalars
 	NewNullableColumnBool      NullableColumnCreateFunc[bool, *ColumnBool]        = NewNullableColumnCreator(NewColumnBool).New
@@ -54,14 +52,10 @@ type NullableColumnCreator[col interface {
 }
 
 func (c NullableColumnCreator[col, T]) New(name string, values []T, validData []bool) (col, error) {
-	var result col
-	if len(values) != len(validData) {
-		return result, errors.New("values & validData slice has different length")
-	}
-	result = c.base(name, values)
+	result := c.base(name, values)
 	result.withValidData(validData)
 
-	return result, nil
+	return result, result.ValidateNullable()
 }
 
 func NewNullableColumnCreator[col interface {

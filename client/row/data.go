@@ -88,49 +88,41 @@ func AnyToColumns(rows []interface{}, schemas ...*entity.Schema) ([]column.Colum
 		if field.PrimaryKey && field.AutoID {
 			continue
 		}
+
+		var col column.Column
 		switch field.DataType {
 		case entity.FieldTypeBool:
 			data := make([]bool, 0, rowsLen)
-			col := column.NewColumnBool(field.Name, data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnBool(field.Name, data)
 		case entity.FieldTypeInt8:
 			data := make([]int8, 0, rowsLen)
-			col := column.NewColumnInt8(field.Name, data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnInt8(field.Name, data)
 		case entity.FieldTypeInt16:
 			data := make([]int16, 0, rowsLen)
-			col := column.NewColumnInt16(field.Name, data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnInt16(field.Name, data)
 		case entity.FieldTypeInt32:
 			data := make([]int32, 0, rowsLen)
-			col := column.NewColumnInt32(field.Name, data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnInt32(field.Name, data)
 		case entity.FieldTypeInt64:
 			data := make([]int64, 0, rowsLen)
-			col := column.NewColumnInt64(field.Name, data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnInt64(field.Name, data)
 		case entity.FieldTypeFloat:
 			data := make([]float32, 0, rowsLen)
-			col := column.NewColumnFloat(field.Name, data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnFloat(field.Name, data)
 		case entity.FieldTypeDouble:
 			data := make([]float64, 0, rowsLen)
-			col := column.NewColumnDouble(field.Name, data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnDouble(field.Name, data)
 		case entity.FieldTypeString, entity.FieldTypeVarChar:
 			data := make([]string, 0, rowsLen)
-			col := column.NewColumnVarChar(field.Name, data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnVarChar(field.Name, data)
 		case entity.FieldTypeJSON:
 			data := make([][]byte, 0, rowsLen)
-			col := column.NewColumnJSONBytes(field.Name, data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnJSONBytes(field.Name, data)
 		case entity.FieldTypeArray:
 			col := NewArrayColumn(field)
 			if col == nil {
 				return nil, errors.Newf("unsupported element type %s for Array", field.ElementType.String())
 			}
-			nameColumns[field.Name] = col
 		case entity.FieldTypeFloatVector:
 			data := make([][]float32, 0, rowsLen)
 			dimStr, has := field.TypeParams[entity.TypeParamDim]
@@ -141,45 +133,45 @@ func AnyToColumns(rows []interface{}, schemas ...*entity.Schema) ([]column.Colum
 			if err != nil {
 				return []column.Column{}, fmt.Errorf("vector field with bad format dim: %s", err.Error())
 			}
-			col := column.NewColumnFloatVector(field.Name, int(dim), data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnFloatVector(field.Name, int(dim), data)
 		case entity.FieldTypeBinaryVector:
 			data := make([][]byte, 0, rowsLen)
 			dim, err := field.GetDim()
 			if err != nil {
 				return []column.Column{}, err
 			}
-			col := column.NewColumnBinaryVector(field.Name, int(dim), data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnBinaryVector(field.Name, int(dim), data)
 		case entity.FieldTypeFloat16Vector:
 			data := make([][]byte, 0, rowsLen)
 			dim, err := field.GetDim()
 			if err != nil {
 				return []column.Column{}, err
 			}
-			col := column.NewColumnFloat16Vector(field.Name, int(dim), data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnFloat16Vector(field.Name, int(dim), data)
 		case entity.FieldTypeBFloat16Vector:
 			data := make([][]byte, 0, rowsLen)
 			dim, err := field.GetDim()
 			if err != nil {
 				return []column.Column{}, err
 			}
-			col := column.NewColumnBFloat16Vector(field.Name, int(dim), data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnBFloat16Vector(field.Name, int(dim), data)
 		case entity.FieldTypeSparseVector:
 			data := make([]entity.SparseEmbedding, 0, rowsLen)
-			col := column.NewColumnSparseVectors(field.Name, data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnSparseVectors(field.Name, data)
 		case entity.FieldTypeInt8Vector:
 			data := make([][]int8, 0, rowsLen)
 			dim, err := field.GetDim()
 			if err != nil {
 				return []column.Column{}, err
 			}
-			col := column.NewColumnInt8Vector(field.Name, int(dim), data)
-			nameColumns[field.Name] = col
+			col = column.NewColumnInt8Vector(field.Name, int(dim), data)
 		}
+
+		if field.Nullable {
+			col.SetNullable(true)
+		}
+
+		nameColumns[field.Name] = col
 	}
 
 	if isDynamic {

@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type CreateIndexTask struct {
@@ -175,6 +175,22 @@ func (c *Client) DropIndex(ctx context.Context, opt DropIndexOption, callOptions
 
 	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.DropIndex(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}
+
+func (c *Client) AlterIndexProperties(ctx context.Context, opt AlterIndexPropertiesOption, callOptions ...grpc.CallOption) error {
+	req := opt.Request()
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterIndex(ctx, req, callOptions...)
+		return merr.CheckRPCCall(resp, err)
+	})
+}
+
+func (c *Client) DropIndexProperties(ctx context.Context, opt DropIndexPropertiesOption, callOptions ...grpc.CallOption) error {
+	req := opt.Request()
+	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AlterIndex(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
 }

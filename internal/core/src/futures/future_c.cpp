@@ -16,6 +16,7 @@
 #include "Future.h"
 #include "Executor.h"
 #include "log/Log.h"
+#include "monitor/prometheus_client.h"
 
 extern "C" void
 future_cancel(CFuture* future) {
@@ -55,6 +56,7 @@ future_destroy(CFuture* future) {
 extern "C" void
 executor_set_thread_num(int thread_num) {
     milvus::futures::getGlobalCPUExecutor()->setNumThreads(thread_num);
+    milvus::monitor::internal_cgo_pool_size_all.Set(thread_num);
     LOG_INFO("future executor setup cpu executor with thread num: {}",
              thread_num);
 }

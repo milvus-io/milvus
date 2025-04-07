@@ -9,6 +9,7 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -27,7 +28,7 @@ type BinlogIOSuite struct {
 
 func (s *BinlogIOSuite) SetupTest() {
 	paramtable.Init()
-	s.cm = storage.NewLocalChunkManager(storage.RootPath(binlogIOTestDir))
+	s.cm = storage.NewLocalChunkManager(objectstorage.RootPath(binlogIOTestDir))
 
 	s.b = NewBinlogIO(s.cm)
 }

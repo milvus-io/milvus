@@ -14,6 +14,14 @@ func IsStreamingServiceEnabled() bool {
 	return os.Getenv(MilvusStreamingServiceEnabled) == "1"
 }
 
+// SetStreamingServiceEnabled set the env that indicates whether the streaming service is enabled.
+func SetStreamingServiceEnabled() {
+	err := os.Setenv(MilvusStreamingServiceEnabled, "1")
+	if err != nil {
+		panic(err)
+	}
+}
+
 // MustEnableStreamingService panics if the streaming service is not enabled.
 func MustEnableStreamingService() {
 	if !IsStreamingServiceEnabled() {

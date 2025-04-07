@@ -17,7 +17,6 @@
 package vertexai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -134,10 +133,6 @@ func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int6
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
-	if err != nil {
-		return nil, err
-	}
 	var token string
 	if c.token != "" {
 		token = c.token
@@ -148,9 +143,11 @@ func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int6
 		}
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
-	body, err := utils.RetrySend(req, 3)
+	headers := map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("Bearer %s", token),
+	}
+	body, err := utils.RetrySend(ctx, data, http.MethodPost, c.url, headers, 3, 1)
 	if err != nil {
 		return nil, err
 	}

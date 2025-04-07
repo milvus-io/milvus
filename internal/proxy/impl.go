@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
@@ -56,7 +55,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
@@ -595,7 +593,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		zap.String("consistency_level", request.ConsistencyLevel.String()),
 	)
 
-	log.Debug(rpcReceived(method))
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
 		log.Warn(
@@ -846,7 +844,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		zap.Bool("refreshMode", request.Refresh),
 	)
 
-	log.Debug("LoadCollection received")
+	log.Info("LoadCollection received")
 
 	if err := node.sched.ddQueue.Enqueue(lct); err != nil {
 		log.Warn("LoadCollection failed to enqueue",
@@ -1028,6 +1026,80 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		metrics.SuccessLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return dct.result, nil
+}
+
+// AddCollectionField add a field to collection
+func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionField")
+	defer sp.End()
+
+	dresp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: request.DbName, CollectionName: request.CollectionName})
+
+	if err := merr.CheckRPCCall(dresp, err); err != nil {
+		return merr.Status(err), nil
+	}
+	task := &addCollectionFieldTask{
+		ctx:                       ctx,
+		Condition:                 NewTaskCondition(ctx),
+		AddCollectionFieldRequest: request,
+		rootCoord:                 node.rootCoord,
+		oldSchema:                 dresp.GetSchema(),
+	}
+
+	method := "AddCollectionField"
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+		metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	log.Info(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	if err := task.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", task.BeginTs()),
+			zap.Uint64("EndTs", task.EndTs()))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+		metrics.SuccessLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
 }
 
 // GetStatistics get the statistics, such as `num_rows`.
@@ -3129,13 +3201,10 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	defer func() {
 		span := tr.ElapseSpan()
-		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+		if span >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span))
-			metrics.ProxySlowQueryCount.WithLabelValues(
-				strconv.FormatInt(paramtable.GetNodeID(), 10),
-				metrics.SearchLabel,
-			).Inc()
+			// WebUI slow query shall use slow log as well.
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3144,6 +3213,12 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			if node.slowQueries != nil {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithSearchRequest(request, user, span, traceID))
 			}
+		}
+		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+			metrics.ProxySlowQueryCount.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				metrics.SearchLabel,
+			).Inc()
 		}
 	}()
 
@@ -3362,12 +3437,9 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	defer func() {
 		span := tr.ElapseSpan()
-		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+		if span >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()), zap.Duration("duration", span))
-			metrics.ProxySlowQueryCount.WithLabelValues(
-				strconv.FormatInt(paramtable.GetNodeID(), 10),
-				metrics.HybridSearchLabel,
-			).Inc()
+			// WebUI slow query shall use slow log as well.
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3376,6 +3448,12 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			if node.slowQueries != nil {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithSearchRequest(newSearchReq, user, span, traceID))
 			}
+		}
+		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+			metrics.ProxySlowQueryCount.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				metrics.HybridSearchLabel,
+			).Inc()
 		}
 	}()
 
@@ -3647,7 +3725,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 	defer func() {
 		span := tr.ElapseSpan()
-		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+		if span >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(
 				rpcSlow(method),
 				zap.String("expr", request.Expr),
@@ -3655,10 +3733,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 				zap.Uint64("travel_timestamp", request.TravelTimestamp),
 				zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				zap.Duration("duration", span))
-			metrics.ProxySlowQueryCount.WithLabelValues(
-				strconv.FormatInt(paramtable.GetNodeID(), 10),
-				metrics.QueryLabel,
-			).Inc()
+			// WebUI slow query shall use slow log as well.
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3668,6 +3743,12 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			if node.slowQueries != nil {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithQueryRequest(request, user, span, traceID))
 			}
+		}
+		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
+			metrics.ProxySlowQueryCount.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				metrics.QueryLabel,
+			).Inc()
 		}
 	}()
 
@@ -4323,6 +4404,92 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		metrics.SuccessLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	resp.Infos = persistentInfos
+	return resp, nil
+}
+
+func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetSegmentsInfo")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+	log.Debug("GetSegmentsInfo",
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", req.DbName),
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+
+	resp := &internalpb.GetSegmentsInfoResponse{
+		Status: merr.Success(),
+	}
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	method := "GetSegmentsInfo"
+	tr := timerecord.NewTimeRecorder(method)
+	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	collection := fmt.Sprint(req.GetCollectionID())
+	defer func() {
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel, req.GetDbName(), collection).Inc()
+		if resp.GetStatus().GetCode() != 0 {
+			log.Warn("import failed", zap.String("err", resp.GetStatus().GetReason()))
+			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel, req.GetDbName(), collection).Inc()
+		} else {
+			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel, req.GetDbName(), collection).Inc()
+		}
+		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	}()
+
+	infoResp, err := node.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+		SegmentIDs:       req.GetSegmentIDs(),
+		IncludeUnHealthy: true,
+	})
+	if err != nil {
+		log.Warn("GetSegmentInfo fail",
+			zap.Error(err))
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	err = merr.Error(infoResp.GetStatus())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	log.Debug("GetPersistentSegmentInfo",
+		zap.Int("len(infos)", len(infoResp.Infos)),
+		zap.Any("status", infoResp.Status))
+	getLogIDs := func(binlogs []*datapb.FieldBinlog) []*internalpb.FieldBinlog {
+		logIDs := make([]*internalpb.FieldBinlog, 0, len(binlogs))
+		for _, fb := range binlogs {
+			fieldLogIDs := make([]int64, 0, len(fb.GetBinlogs()))
+			for _, b := range fb.GetBinlogs() {
+				fieldLogIDs = append(fieldLogIDs, b.GetLogID())
+			}
+			logIDs = append(logIDs, &internalpb.FieldBinlog{
+				FieldID: fb.GetFieldID(),
+				LogIDs:  fieldLogIDs,
+			})
+		}
+		return logIDs
+	}
+	segmentInfos := make([]*internalpb.SegmentInfo, 0, len(req.GetSegmentIDs()))
+	for _, info := range infoResp.GetInfos() {
+		segmentInfos = append(segmentInfos, &internalpb.SegmentInfo{
+			SegmentID:    info.GetID(),
+			CollectionID: info.GetCollectionID(),
+			PartitionID:  info.GetPartitionID(),
+			VChannel:     info.GetInsertChannel(),
+			NumRows:      info.GetNumOfRows(),
+			State:        info.GetState(),
+			Level:        commonpb.SegmentLevel(info.GetLevel()),
+			IsSorted:     info.GetIsSorted(),
+			InsertLogs:   getLogIDs(info.GetBinlogs()),
+			DeltaLogs:    getLogIDs(info.GetDeltalogs()),
+			StatsLogs:    getLogIDs(info.GetStatslogs()),
+		})
+	}
+
+	resp.SegmentInfos = segmentInfos
 	return resp, nil
 }
 
@@ -5494,7 +5661,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	}
 	req.Grantor.User = &milvuspb.UserEntity{Name: curUser}
 	request := &milvuspb.OperatePrivilegeRequest{
-		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_OperatePrivilege},
+		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_OperatePrivilegeV2},
 		Entity: &milvuspb.GrantEntity{
 			Role:       req.Role,
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
@@ -6573,21 +6740,6 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return resp, nil
 	}
 
-	// Import is asynchronous consumed from the wal, so we need to wait for the wal to release the resource key.
-	// The job can be seen by the user after the resource key is acked once at any vchannel.
-	jobID, err := strconv.ParseInt(resp.GetJobID(), 10, 64)
-	if err != nil {
-		return &internalpb.ImportResponse{
-			Status: merr.Status(merr.WrapErrServiceInternal("invalid job ID")),
-		}, nil
-	}
-	resourceKey := message.NewImportJobIDResourceKey(jobID)
-	if err := streaming.WAL().Broadcast().BlockUntilResourceKeyAckOnce(ctx, resourceKey); err != nil {
-		log.Warn("failed to wait for resource key ack", zap.Error(err))
-		return &internalpb.ImportResponse{
-			Status: merr.Status(merr.WrapErrServiceInternal("failed to wait for resource key ack")),
-		}, nil
-	}
 	metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return resp, nil
@@ -6849,7 +7001,7 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	return result, nil
 }
 
-func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequset) (*milvuspb.RunAnalyzerResponse, error) {
+func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	// TODO: use collection analyzer when collection name and field name not none
 	tokenizer, err := ctokenizer.NewTokenizer(req.GetAnalyzerParams())
 	if err != nil {
@@ -6863,13 +7015,23 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 	for i, text := range req.GetPlaceholder() {
 		stream := tokenizer.NewTokenStream(string(text))
 		defer stream.Destroy()
-		tokens := []string{}
-		for stream.Advance() {
-			token := stream.Token()
-			tokens = append(tokens, token)
-		}
+
 		results[i] = &milvuspb.AnalyzerResult{
-			Tokens: tokens,
+			Tokens: make([]*milvuspb.AnalyzerToken, 0),
+		}
+
+		for stream.Advance() {
+			var token *milvuspb.AnalyzerToken
+			if req.GetWithDetail() {
+				token = stream.DetailedToken()
+			} else {
+				token = &milvuspb.AnalyzerToken{Token: stream.Token()}
+			}
+
+			if req.GetWithHash() {
+				token.Hash = typeutil.HashString2LessUint32(token.GetToken())
+			}
+			results[i].Tokens = append(results[i].Tokens, token)
 		}
 	}
 

@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -103,8 +104,18 @@ func (t *l0CompactionTask) processPipelining() bool {
 
 	err = t.sessions.Compaction(context.TODO(), t.GetTaskProto().GetNodeID(), plan)
 	if err != nil {
-		log.Warn("l0CompactionTask failed to notify compaction tasks to DataNode", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Error(err))
-		t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
+		originNodeID := t.GetTaskProto().GetNodeID()
+		log.Warn("l0CompactionTask failed to notify compaction tasks to DataNode",
+			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+			zap.Int64("nodeID", originNodeID),
+			zap.Error(err))
+		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
+		if err != nil {
+			log.Warn("l0CompactionTask failed to updateAndSaveTaskMeta", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Error(err))
+			return false
+		}
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
 		return false
 	}
 
@@ -223,7 +234,7 @@ func (t *l0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compac
 	return taskClone
 }
 
-func (t *l0CompactionTask) selectSealedSegment() ([]int64, []*datapb.CompactionSegmentBinlogs) {
+func (t *l0CompactionTask) selectSealedSegment() ([]*SegmentInfo, []*datapb.CompactionSegmentBinlogs) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	// Select sealed L1 segments for LevelZero compaction that meets the condition:
 	// dmlPos < triggerInfo.pos
@@ -248,17 +259,13 @@ func (t *l0CompactionTask) selectSealedSegment() ([]int64, []*datapb.CompactionS
 		}
 	})
 
-	sealedSegmentIDs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) int64 {
-		return info.GetID()
-	})
-
-	return sealedSegmentIDs, sealedSegBinlogs
+	return sealedSegments, sealedSegBinlogs
 }
 
 func (t *l0CompactionTask) CheckCompactionContainsSegment(segmentID int64) bool {
 	sealedSegmentIDs, _ := t.selectSealedSegment()
-	for _, sealedSegmentID := range sealedSegmentIDs {
-		if sealedSegmentID == segmentID {
+	for _, sealedSegment := range sealedSegmentIDs {
+		if sealedSegment.GetID() == segmentID {
 			return true
 		}
 	}
@@ -266,16 +273,15 @@ func (t *l0CompactionTask) CheckCompactionContainsSegment(segmentID int64) bool 
 }
 
 func (t *l0CompactionTask) PreparePlan() bool {
-	sealedSegmentIDs, _ := t.selectSealedSegment()
+	sealedSegments, _ := t.selectSealedSegment()
+	sealedSegmentIDs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) int64 {
+		return info.GetID()
+	})
 	exist, hasStating := t.meta.CheckSegmentsStating(context.TODO(), sealedSegmentIDs)
 	return exist && !hasStating
 }
 
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
-	beginLogID, _, err := t.allocator.AllocN(1)
-	if err != nil {
-		return nil, err
-	}
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	plan := &datapb.CompactionPlan{
 		PlanID:           taskProto.GetPlanID(),
@@ -286,11 +292,11 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		CollectionTtl:    taskProto.GetCollectionTtl(),
 		TotalRows:        taskProto.GetTotalRows(),
 		Schema:           taskProto.GetSchema(),
-		BeginLogID:       beginLogID,
 		SlotUsage:        t.GetSlotUsage(),
 	}
 
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
+	segments := make([]*SegmentInfo, 0)
 	for _, segID := range taskProto.GetInputSegments() {
 		segInfo := t.meta.GetHealthySegment(context.TODO(), segID)
 		if segInfo == nil {
@@ -305,19 +311,30 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 			Deltalogs:     segInfo.GetDeltalogs(),
 			IsSorted:      segInfo.GetIsSorted(),
 		})
+		segments = append(segments, segInfo)
 	}
 
-	sealedSegmentIDs, sealedSegBinlogs := t.selectSealedSegment()
-	if len(sealedSegmentIDs) == 0 {
+	sealedSegments, sealedSegBinlogs := t.selectSealedSegment()
+	if len(sealedSegments) == 0 {
 		// TODO fast finish l0 segment, just drop l0 segment
 		log.Info("l0Compaction available non-L0 Segments is empty ")
 		return nil, errors.Errorf("Selected zero L1/L2 segments for the position=%v", taskProto.GetPos())
 	}
 
+	segments = append(segments, sealedSegments...)
+	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments)
+	if err != nil {
+		return nil, err
+	}
+	plan.PreAllocatedLogIDs = logIDRange
+	// BeginLogID is deprecated, but still assign it for compatibility.
+	plan.BeginLogID = logIDRange.Begin
+
 	plan.SegmentBinlogs = append(plan.SegmentBinlogs, sealedSegBinlogs...)
 	log.Info("l0CompactionTask refreshed level zero compaction plan",
 		zap.Any("target position", taskProto.GetPos()),
-		zap.Any("target segments count", len(sealedSegBinlogs)))
+		zap.Any("target segments count", len(sealedSegBinlogs)),
+		zap.Any("PreAllocatedLogIDs", logIDRange))
 	return plan, nil
 }
 

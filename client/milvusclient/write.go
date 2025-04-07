@@ -18,12 +18,13 @@ package milvusclient
 
 import (
 	"context"
+	"math"
 
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type InsertResult struct {
@@ -33,32 +34,34 @@ type InsertResult struct {
 
 func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ...grpc.CallOption) (InsertResult, error) {
 	result := InsertResult{}
-	collection, err := c.getCollection(ctx, option.CollectionName())
-	if err != nil {
-		return result, err
-	}
-	req, err := option.InsertRequest(collection)
-	if err != nil {
-		return result, err
-	}
-
-	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
-		resp, err := milvusService.Insert(ctx, req, callOptions...)
-
-		err = merr.CheckRPCCall(resp, err)
+	err := c.retryIfSchemaError(ctx, option.CollectionName(), func(ctx context.Context) (uint64, error) {
+		collection, err := c.getCollection(ctx, option.CollectionName())
 		if err != nil {
-			return err
+			return math.MaxUint64, err
+		}
+		req, err := option.InsertRequest(collection)
+		if err != nil {
+			return collection.UpdateTimestamp, err
 		}
 
-		result.InsertCount = resp.GetInsertCnt()
-		result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
-		if err != nil {
-			return err
-		}
+		return collection.UpdateTimestamp, c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+			resp, err := milvusService.Insert(ctx, req, callOptions...)
 
-		// write back pks if needed
-		// pks values shall be written back to struct if receiver field exists
-		return option.WriteBackPKs(collection.Schema, result.IDs)
+			err = merr.CheckRPCCall(resp, err)
+			if err != nil {
+				return err
+			}
+
+			result.InsertCount = resp.GetInsertCnt()
+			result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
+			if err != nil {
+				return err
+			}
+
+			// write back pks if needed
+			// pks values shall be written back to struct if receiver field exists
+			return option.WriteBackPKs(collection.Schema, result.IDs)
+		})
 	})
 	return result, err
 }
@@ -89,25 +92,27 @@ type UpsertResult struct {
 
 func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ...grpc.CallOption) (UpsertResult, error) {
 	result := UpsertResult{}
-	collection, err := c.getCollection(ctx, option.CollectionName())
-	if err != nil {
-		return result, err
-	}
-	req, err := option.UpsertRequest(collection)
-	if err != nil {
-		return result, err
-	}
-	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
-		resp, err := milvusService.Upsert(ctx, req, callOptions...)
-		if err = merr.CheckRPCCall(resp, err); err != nil {
-			return err
-		}
-		result.UpsertCount = resp.GetUpsertCnt()
-		result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
+	err := c.retryIfSchemaError(ctx, option.CollectionName(), func(ctx context.Context) (uint64, error) {
+		collection, err := c.getCollection(ctx, option.CollectionName())
 		if err != nil {
-			return err
+			return math.MaxUint64, err
 		}
-		return nil
+		req, err := option.UpsertRequest(collection)
+		if err != nil {
+			return collection.UpdateTimestamp, err
+		}
+		return collection.UpdateTimestamp, c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+			resp, err := milvusService.Upsert(ctx, req, callOptions...)
+			if err = merr.CheckRPCCall(resp, err); err != nil {
+				return err
+			}
+			result.UpsertCount = resp.GetUpsertCnt()
+			result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
 	})
 	return result, err
 }

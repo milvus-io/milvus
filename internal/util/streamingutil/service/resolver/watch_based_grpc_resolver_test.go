@@ -9,7 +9,6 @@ import (
 	"google.golang.org/grpc/resolver"
 
 	"github.com/milvus-io/milvus/internal/mocks/google.golang.org/grpc/mock_resolver"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -22,7 +21,7 @@ func TestWatchBasedGRPCResolver(t *testing.T) {
 	cc := mock_resolver.NewMockClientConn(t)
 	cc.EXPECT().UpdateState(mock.Anything).Return(nil)
 
-	r := newWatchBasedGRPCResolver(cc, log.With())
+	r := newWatchBasedGRPCResolver(cc)
 	assert.NoError(t, r.Update(VersionedState{State: resolver.State{Addresses: []resolver.Address{{Addr: "addr"}}}}))
 
 	cc.EXPECT().UpdateState(mock.Anything).Unset()

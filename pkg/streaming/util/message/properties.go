@@ -13,6 +13,7 @@ const (
 	messageBroadcastHeader                  = "_bh"  // message broadcast header.
 	messageHeader                           = "_h"   // specialized message header.
 	messageTxnContext                       = "_tx"  // transaction context.
+	messageCipherHeader                     = "_ch"  // message cipher header.
 )
 
 var (
@@ -80,4 +81,15 @@ func (prop propertiesImpl) EstimateSize() int {
 		size += len(k) + len(v)
 	}
 	return size
+}
+
+// CheckIfMessageFromStreaming checks if the message is from streaming.
+func CheckIfMessageFromStreaming(props map[string]string) bool {
+	if props == nil {
+		return false
+	}
+	if props[messageVersion] != "" {
+		return true
+	}
+	return false
 }

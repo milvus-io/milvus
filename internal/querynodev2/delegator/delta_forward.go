@@ -99,13 +99,18 @@ func (sd *shardDelegator) addL0ForGrowing(ctx context.Context, segment segments.
 }
 
 func (sd *shardDelegator) addL0GrowingBF(ctx context.Context, segment segments.Segment) error {
-	deletedPks, deletedTss := sd.GetLevel0Deletions(segment.Partition(), pkoracle.NewCandidateKey(segment.ID(), segment.Partition(), segments.SegmentTypeGrowing))
-	if deletedPks == nil || deletedPks.Len() == 0 {
-		return nil
+	bufferedForwarder := NewBufferedForwarder(paramtable.Get().QueryNodeCfg.ForwardBatchSize.GetAsInt64(),
+		func(pks storage.PrimaryKeys, tss []uint64) error {
+			return segment.Delete(ctx, pks, tss)
+		})
+
+	if err := sd.rangeHitL0Deletions(segment.Partition(), segment, func(pk storage.PrimaryKey, ts uint64) error {
+		return bufferedForwarder.Buffer(pk, ts)
+	}); err != nil {
+		return err
 	}
 
-	log.Info("forwarding L0 delete records...", zap.Int64("segmentID", segment.ID()), zap.Int("deletionCount", deletedPks.Len()))
-	return segment.Delete(ctx, deletedPks, deletedTss)
+	return bufferedForwarder.Flush()
 }
 
 func (sd *shardDelegator) addL0ForGrowingLoad(ctx context.Context, segment segments.Segment) error {
@@ -130,30 +135,10 @@ func (sd *shardDelegator) forwardL0ByBF(ctx context.Context,
 		deleteScope = querypb.DataScope_Streaming
 	}
 
-	deletedPks, deletedTss := sd.GetLevel0Deletions(candidate.Partition(), candidate)
-	if deletedPks != nil && deletedPks.Len() > 0 {
-		log.Info("forward L0 delete to worker...",
-			zap.Int("deleteRowNum", deletedPks.Len()),
-		)
-		pks, err := storage.ParsePrimaryKeysBatch2IDs(deletedPks)
-		if err != nil {
-			return err
-		}
-		err = worker.Delete(ctx, &querypb.DeleteRequest{
-			Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(targetNodeID)),
-			CollectionId: info.GetCollectionID(),
-			PartitionId:  info.GetPartitionID(),
-			SegmentId:    info.GetSegmentID(),
-			PrimaryKeys:  pks,
-			Timestamps:   deletedTss,
-			Scope:        deleteScope,
-		})
-		if err != nil {
-			log.Warn("failed to apply delete when LoadSegment", zap.Error(err))
-			return err
-		}
-	}
-	return nil
+	bufferedForwarder := NewBufferedForwarder(paramtable.Get().QueryNodeCfg.ForwardBatchSize.GetAsInt64(),
+		deleteViaWorker(ctx, worker, targetNodeID, info, deleteScope))
+
+	return sd.StreamForwardLevel0Deletions(bufferedForwarder, candidate.Partition(), candidate)
 }
 
 func (sd *shardDelegator) forwardL0RemoteLoad(ctx context.Context,
@@ -183,9 +168,7 @@ func (sd *shardDelegator) forwardL0RemoteLoad(ctx context.Context,
 }
 
 func (sd *shardDelegator) getLevel0Deltalogs(partitionID int64) []*datapb.FieldBinlog {
-	level0Segments := sd.segmentManager.GetBy(
-		segments.WithLevel(datapb.SegmentLevel_L0),
-		segments.WithChannel(sd.vchannelName))
+	level0Segments := sd.deleteBuffer.ListL0()
 
 	var deltalogs []*datapb.FieldBinlog
 

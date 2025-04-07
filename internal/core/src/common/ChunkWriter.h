@@ -22,7 +22,6 @@
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 namespace milvus {
-
 class ChunkWriterBase {
  public:
     explicit ChunkWriterBase(bool nullable) : nullable_(nullable) {
@@ -41,6 +40,22 @@ class ChunkWriterBase {
     std::pair<char*, size_t>
     get_data() {
         return target_->get();
+    }
+
+    void
+    write_null_bit_maps(
+        const std::vector<std::pair<const uint8_t*, int64_t>>& null_bitmaps) {
+        if (nullable_) {
+            for (auto [data, size] : null_bitmaps) {
+                if (data != nullptr) {
+                    target_->write(data, size);
+                } else {
+                    // have to append always-true bitmap due to arrow optimize this
+                    std::vector<uint8_t> null_bitmap(size, 0xff);
+                    target_->write(null_bitmap.data(), size);
+                }
+            }
+        }
     }
 
  protected:
@@ -70,9 +85,12 @@ class ChunkWriter final : public ChunkWriterBase {
         for (auto& batch : batch_vec) {
             row_nums += batch->num_rows();
             auto data = batch->column(0);
-            auto array = std::dynamic_pointer_cast<ArrowType>(data);
-            auto null_bitmap_n = (data->length() + 7) / 8;
-            size += null_bitmap_n + array->length() * dim_ * sizeof(T);
+            auto array = std::static_pointer_cast<ArrowType>(data);
+            if (nullable_) {
+                auto null_bitmap_n = (data->length() + 7) / 8;
+                size += null_bitmap_n;
+            }
+            size += array->length() * dim_ * sizeof(T);
         }
 
         row_nums_ = row_nums;
@@ -81,23 +99,27 @@ class ChunkWriter final : public ChunkWriterBase {
         } else {
             target_ = std::make_shared<MemChunkTarget>(size);
         }
-
-        // chunk layout: nullbitmap, data1, data2, ..., datan
-        for (auto& batch : batch_vec) {
-            auto data = batch->column(0);
-            auto null_bitmap = data->null_bitmap_data();
-            auto null_bitmap_n = (data->length() + 7) / 8;
-            if (null_bitmap) {
-                target_->write(null_bitmap, null_bitmap_n);
-            } else {
-                std::vector<uint8_t> null_bitmap(null_bitmap_n, 0xff);
-                target_->write(null_bitmap.data(), null_bitmap_n);
+        // Chunk layout:
+        // 1. Null bitmap (if nullable_=true): Indicates which values are null
+        // 2. Data values: Contiguous storage of data elements in the order:
+        //    data1, data2, ..., dataN where each data element has size dim_*sizeof(T)
+        if (nullable_) {
+            for (auto& batch : batch_vec) {
+                auto data = batch->column(0);
+                auto null_bitmap = data->null_bitmap_data();
+                auto null_bitmap_n = (data->length() + 7) / 8;
+                if (null_bitmap) {
+                    target_->write(null_bitmap, null_bitmap_n);
+                } else {
+                    std::vector<uint8_t> null_bitmap(null_bitmap_n, 0xff);
+                    target_->write(null_bitmap.data(), null_bitmap_n);
+                }
             }
         }
 
         for (auto& batch : batch_vec) {
             auto data = batch->column(0);
-            auto array = std::dynamic_pointer_cast<ArrowType>(data);
+            auto array = std::static_pointer_cast<ArrowType>(data);
             auto data_ptr = array->raw_values();
             target_->write(data_ptr, array->length() * dim_ * sizeof(T));
         }
@@ -135,16 +157,19 @@ ChunkWriter<arrow::BooleanArray, bool>::write(
     } else {
         target_ = std::make_shared<MemChunkTarget>(size);
     }
-    // chunk layout: nullbitmap, data1, data2, ..., datan
-    for (auto& batch : batch_vec) {
-        auto data = batch->column(0);
-        auto null_bitmap = data->null_bitmap_data();
-        auto null_bitmap_n = (data->length() + 7) / 8;
-        if (null_bitmap) {
-            target_->write(null_bitmap, null_bitmap_n);
-        } else {
-            std::vector<uint8_t> null_bitmap(null_bitmap_n, 0xff);
-            target_->write(null_bitmap.data(), null_bitmap_n);
+
+    if (nullable_) {
+        // chunk layout: nullbitmap, data1, data2, ..., datan
+        for (auto& batch : batch_vec) {
+            auto data = batch->column(0);
+            auto null_bitmap = data->null_bitmap_data();
+            auto null_bitmap_n = (data->length() + 7) / 8;
+            if (null_bitmap) {
+                target_->write(null_bitmap, null_bitmap_n);
+            } else {
+                std::vector<uint8_t> null_bitmap(null_bitmap_n, 0xff);
+                target_->write(null_bitmap.data(), null_bitmap_n);
+            }
         }
     }
 

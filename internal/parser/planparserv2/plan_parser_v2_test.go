@@ -10,6 +10,7 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -204,25 +205,44 @@ func TestExpr_Like(t *testing.T) {
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	assert.NoError(t, err)
 
-	exprStrs := []string{
-		`VarCharField like "prefix%"`,
-		`VarCharField like "equal"`,
-		`JSONField["A"] like "name*"`,
-		`$meta["A"] like "name*"`,
-	}
-	for _, exprStr := range exprStrs {
-		assertValidExpr(t, helper, exprStr)
-	}
+	expr := `A like "8\\_0%"`
+	plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	fmt.Println(plan)
+	assert.Equal(t, planpb.OpType_PrefixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "8_0", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 
-	// TODO: enable these after regex-match is supported.
-	//unsupported := []string{
-	//	`VarCharField like "not_%_supported"`,
-	//	`JSONField["A"] like "not_%_supported"`,
-	//	`$meta["A"] like "not_%_supported"`,
-	//}
-	//for _, exprStr := range unsupported {
-	//	assertInvalidExpr(t, helper, exprStr)
-	//}
+	expr = `A like "8_\\_0%"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	fmt.Println(plan)
+	assert.Equal(t, planpb.OpType_Match, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, `8_\_0%`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	expr = `A like "8\\%-0%"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	fmt.Println(plan)
+	assert.Equal(t, planpb.OpType_PrefixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, `8%-0`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 }
 
 func TestExpr_TextMatch(t *testing.T) {
@@ -929,6 +949,8 @@ func Test_JSONExpr(t *testing.T) {
 		`100 == $meta["A"] + 6`,
 		`exists $meta["A"]`,
 		`exists $meta["A"]["B"]["C"] `,
+		`exists $meta["A"] || exists JSONField["A"]`,
+		`exists $meta["A"] && exists JSONField["A"]`,
 		`A["B"][0] > 100`,
 		`$meta[0] > 100`,
 		`A["\"\"B\"\""] > 10`,
@@ -1683,4 +1705,41 @@ func TestNestedPathWithChinese(t *testing.T) {
 	assert.Equal(t, "A", paths[0])
 	assert.Equal(t, "年份", paths[1])
 	assert.Equal(t, "月份", paths[2])
+}
+
+func Test_JSONPathNullExpr(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	exprPairs := [][]string{
+		{`A["a"] is null`, `not exists A["a"]`},
+		{`A["a"] is not null`, `exists A["a"]`},
+		{`dyn_field is null`, `not exists dyn_field`},
+		{`dyn_field is not null`, `exists dyn_field`},
+	}
+
+	for _, expr := range exprPairs {
+		plan, err := CreateSearchPlan(schema, expr[0], "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, plan)
+
+		plan2, err := CreateSearchPlan(schema, expr[1], "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, plan2)
+
+		planStr, err := proto.Marshal(plan)
+		assert.NoError(t, err)
+		plan2Str, err := proto.Marshal(plan2)
+		assert.NoError(t, err)
+		assert.Equal(t, planStr, plan2Str)
+	}
 }

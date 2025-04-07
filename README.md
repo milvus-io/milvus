@@ -21,7 +21,7 @@ Want to use Milvus with zero setup? Try out [Zilliz Cloud ☁️](https://cloud.
 For questions about how to use Milvus, join the community on [Discord](https://discord.gg/33mfvwep3J) to get help. For reporting problems, file bugs and feature requests in GitHub [Issues](https://github.com/milvus-io/milvus/issues) or ask in [Discussions](https://github.com/milvus-io/milvus/discussions).
 
 The Milvus open-source project is
-under [LF AI & Data Foundation](https://lfaidata.foundation/projects/milvus/), distributed with [Apache 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) License.
+under [LF AI & Data Foundation](https://lfaidata.foundation/projects/milvus/), distributed with [Apache 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) License, with Zilliz as its major contributor.
 
 ## Quickstart
 
@@ -51,7 +51,7 @@ With the client, you can create collection:
 ```python
 client.create_collection(
     collection_name="demo_collection",
-    dimension=768,  # The vectors we will use in this demo has 768 dimensions
+    dimension=768,  # The vectors we will use in this demo have 768 dimensions
 )
 ```
 
@@ -81,7 +81,7 @@ Milvus is designed to handle vector search at scale. It stores vectors, which ar
 
 
 **Support for Various Vector Index Types and Hardware Acceleration**  
-  * Milvus separates the system and core vector search engine, allowing it to support all major vector index types that are optimized for different scenarios, including HNSW, IVF, FLAT (brute-force), SCANN, and DiskANN, with [quantization-based](https://milvus.io/docs/index.md?tab=floating#IVFPQ) variations and [mmap](https://milvus.io/docs/mmap.md). Milvus optimizes vector search for advanced features such as [metadata filtering](https://milvus.io/docs/scalar_index.md#Scalar-Index) and [range search](https://milvus.io/docs/single-vector-search.md#Range-search). Additionally, Milvus implements hardware acceleration to enhance vector search performance and supports GPU indexing, such as NVIDIA's [CAGRA](https://github.com/rapidsai/raft).
+  * Milvus separates the system and core vector search engine, allowing it to support all major vector index types that are optimized for different scenarios, including HNSW, IVF, FLAT (brute-force), SCANN, and DiskANN, with [quantization-based](https://milvus.io/docs/index.md?tab=floating#IVFPQ) variations and [mmap](https://milvus.io/docs/mmap.md). Milvus optimizes vector search for advanced features such as [metadata filtering](https://milvus.io/docs/scalar_index.md#Scalar-Index) and [range search](https://milvus.io/docs/single-vector-search.md#Range-search). Additionally, Milvus implements hardware acceleration to enhance vector search performance and supports GPU indexing, such as NVIDIA's [CAGRA](https://github.com/rapidsai/cuvs).
 
 
 **Flexible Multi-tenancy and Hot/Cold Storage**
@@ -246,7 +246,7 @@ Reference to cite when you use Milvus in a research paper:
 }
 ```
 <!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-431-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-433-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Abhijnan-Bajpai"><img src="https://avatars.githubusercontent.com/u/57059194?v=4" width="30px" /></a>
@@ -516,6 +516,7 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/locustbaby"><img src="https://avatars.githubusercontent.com/u/21237232?v=4" width="30px" /></a>
 <a href="https://github.com/loguo"><img src="https://avatars.githubusercontent.com/u/15364733?v=4" width="30px" /></a>
 <a href="https://github.com/longjiquan"><img src="https://avatars.githubusercontent.com/u/31589260?v=4" width="30px" /></a>
+<a href="https://github.com/lowener"><img src="https://avatars.githubusercontent.com/u/9810050?v=4" width="30px" /></a>
 <a href="https://github.com/lsgrep"><img src="https://avatars.githubusercontent.com/u/3893940?v=4" width="30px" /></a>
 <a href="https://github.com/lwglgy"><img src="https://avatars.githubusercontent.com/u/26682620?v=4" width="30px" /></a>
 <a href="https://github.com/maclandrol"><img src="https://avatars.githubusercontent.com/u/5290110?v=4" width="30px" /></a>
@@ -526,6 +527,7 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/matchyc"><img src="https://avatars.githubusercontent.com/u/57976772?v=4" width="30px" /></a>
 <a href="https://github.com/matrixji"><img src="https://avatars.githubusercontent.com/u/183388?v=4" width="30px" /></a>
 <a href="https://github.com/mausch"><img src="https://avatars.githubusercontent.com/u/95194?v=4" width="30px" /></a>
+<a href="https://github.com/mihailyanchev"><img src="https://avatars.githubusercontent.com/u/34907806?v=4" width="30px" /></a>
 <a href="https://github.com/miia12"><img src="https://avatars.githubusercontent.com/u/22544815?v=4" width="30px" /></a>
 <a href="https://github.com/mileyzjq"><img src="https://avatars.githubusercontent.com/u/37039827?v=4" width="30px" /></a>
 <a href="https://github.com/milvus-ci-robot"><img src="https://avatars.githubusercontent.com/u/87847967?v=4" width="30px" /></a>

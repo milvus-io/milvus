@@ -28,11 +28,18 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
       last_commit_time_(stdclock::now()) {
     d_type_ = TantivyDataType::Text;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        unique_id, true, "", tokenizer_name, analyzer_params);
+        unique_id,
+        true,
+        "",
+        TANTIVY_INDEX_LATEST_VERSION /* Growing segment has no reason to use old version index*/
+        ,
+        tokenizer_name,
+        analyzer_params);
 }
 
 TextMatchIndex::TextMatchIndex(const std::string& path,
                                const char* unique_id,
+                               uint32_t tantivy_index_version,
                                const char* tokenizer_name,
                                const char* analyzer_params)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
@@ -42,11 +49,16 @@ TextMatchIndex::TextMatchIndex(const std::string& path,
     boost::filesystem::path sub_path = unique_id;
     path_ = (prefix / sub_path).string();
     boost::filesystem::create_directories(path_);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        unique_id, false, path_.c_str(), tokenizer_name, analyzer_params);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(unique_id,
+                                                     false,
+                                                     path_.c_str(),
+                                                     tantivy_index_version,
+                                                     tokenizer_name,
+                                                     analyzer_params);
 }
 
 TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
+                               uint32_t tantivy_index_version,
                                const char* tokenizer_name,
                                const char* analyzer_params)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
@@ -65,6 +77,7 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
     wrapper_ = std::make_shared<TantivyIndexWrapper>(field_name.c_str(),
                                                      false,
                                                      path_.c_str(),
+                                                     tantivy_index_version,
                                                      tokenizer_name,
                                                      analyzer_params);
 }
@@ -147,8 +160,9 @@ TextMatchIndex::Load(const Config& config) {
             binary_set.Append(key, buf, size);
         }
         auto index_valid_data = binary_set.GetByName("index_null_offset");
-        null_offset.resize((size_t)index_valid_data->size / sizeof(size_t));
-        memcpy(null_offset.data(),
+        folly::SharedMutex::WriteHolder lock(mutex_);
+        null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
+        memcpy(null_offset_.data(),
                index_valid_data->data.get(),
                (size_t)index_valid_data->size);
     }
@@ -177,7 +191,10 @@ TextMatchIndex::AddText(const std::string& text,
 
 void
 TextMatchIndex::AddNull(int64_t offset) {
-    null_offset.push_back(offset);
+    {
+        folly::SharedMutex::WriteHolder lock(mutex_);
+        null_offset_.push_back(offset);
+    }
     // still need to add null to make offset is correct
     std::string empty = "";
     wrapper_->add_array_data(&empty, 0, offset);
@@ -192,7 +209,8 @@ TextMatchIndex::AddTexts(size_t n,
         for (int i = 0; i < n; i++) {
             auto offset = i + offset_begin;
             if (!valids[i]) {
-                null_offset.push_back(offset);
+                folly::SharedMutex::WriteHolder lock(mutex_);
+                null_offset_.push_back(offset);
             }
         }
     }
@@ -212,12 +230,16 @@ TextMatchIndex::BuildIndexFromFieldData(
         for (const auto& data : field_datas) {
             total += data->get_null_count();
         }
-        null_offset.reserve(total);
+        {
+            folly::SharedMutex::WriteHolder lock(mutex_);
+            null_offset_.reserve(total);
+        }
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
-                    null_offset.push_back(i);
+                    folly::SharedMutex::WriteHolder lock(mutex_);
+                    null_offset_.push_back(i);
                 }
                 wrapper_->add_data(
                     static_cast<const std::string*>(data->RawValue(i)),

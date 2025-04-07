@@ -64,14 +64,14 @@ func createBedrockProvider(schema *schemapb.FieldSchema, providerName string, di
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: BedRockTitanTextEmbeddingsV2},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: dimParamKey, Value: "4"},
 		},
 	}
 	switch providerName {
 	case bedrockProvider:
-		return NewBedrockEmbeddingProvider(schema, functionSchema, &MockBedrockClient{dim: dim})
+		return NewBedrockEmbeddingProvider(schema, functionSchema, &MockBedrockClient{dim: dim}, map[string]string{})
 	default:
 		return nil, fmt.Errorf("Unknow provider")
 	}
@@ -83,16 +83,17 @@ func (s *BedrockTextEmbeddingProviderSuite) TestEmbedding() {
 		s.NoError(err)
 		{
 			data := []string{"sentence"}
-			ret, err2 := provder.CallEmbedding(data, InsertMode)
+			r, err2 := provder.CallEmbedding(data, InsertMode)
+			ret := r.([][]float32)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
 			s.Equal(4, len(ret[0]))
-			s.Equal([]float32{0.0, 0.1, 0.2, 0.3}, ret[0])
+			s.Equal([]float32{0.0, 1.0, 2.0, 3.0}, ret[0])
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
 			ret, _ := provder.CallEmbedding(data, SearchMode)
-			s.Equal([][]float32{{0.0, 0.1, 0.2, 0.3}, {0.0, 0.1, 0.2, 0.3}, {0.0, 0.1, 0.2, 0.3}}, ret)
+			s.Equal([][]float32{{0.0, 1.0, 2.0, 3.0}, {0.0, 1.0, 2.0, 3.0}, {0.0, 1.0, 2.0, 3.0}}, ret)
 		}
 	}
 }
@@ -142,7 +143,7 @@ func (s *BedrockTextEmbeddingProviderSuite) TestNewBedrockEmbeddingProvider() {
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: BedRockTitanTextEmbeddingsV2},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: awsAKIdParamKey, Value: "mock"},
 			{Key: awsSAKParamKey, Value: "mock"},
 			{Key: regionParamKey, Value: "mock"},
@@ -150,28 +151,25 @@ func (s *BedrockTextEmbeddingProviderSuite) TestNewBedrockEmbeddingProvider() {
 			{Key: normalizeParamKey, Value: "false"},
 		},
 	}
-	provider, err := NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil)
+	provider, err := NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{})
 	s.NoError(err)
 	s.True(provider.MaxBatch() > 0)
 	s.Equal(provider.FieldDim(), int64(4))
 
+	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{awsAKIdParamKey: "mock", awsSAKParamKey: "mock"})
+	s.NoError(err)
+
 	functionSchema.Params[5] = &commonpb.KeyValuePair{Key: normalizeParamKey, Value: "true"}
-	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil)
+	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{})
 	s.NoError(err)
 
 	functionSchema.Params[5] = &commonpb.KeyValuePair{Key: normalizeParamKey, Value: "invalid"}
-	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil)
-	s.Error(err)
-
-	// invalid model name
-	functionSchema.Params[5] = &commonpb.KeyValuePair{Key: normalizeParamKey, Value: "true"}
-	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: "UnkownModel"}
-	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil)
+	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{})
 	s.Error(err)
 
 	// invalid dim
-	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: BedRockTitanTextEmbeddingsV2}
+	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: TestModel}
 	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalid"}
-	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil)
+	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{})
 	s.Error(err)
 }

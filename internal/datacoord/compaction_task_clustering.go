@@ -106,7 +106,6 @@ func (t *clusteringCompactionTask) Process() bool {
 	if currentState != lastState {
 		ts := time.Now().Unix()
 		lastStateDuration := ts - t.GetTaskProto().GetLastStateStartTime()
-		log.Info("clustering compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState), zap.Int64("elapse seconds", lastStateDuration))
 		metrics.DataCoordCompactionLatency.
 			WithLabelValues(fmt.Sprint(typeutil.IsVectorType(t.GetTaskProto().GetClusteringKeyField().DataType)), t.GetTaskProto().Channel, datapb.CompactionType_ClusteringCompaction.String(), lastState).
 			Observe(float64(lastStateDuration * 1000))
@@ -186,11 +185,11 @@ func (t *clusteringCompactionTask) CheckCompactionContainsSegment(segmentID int6
 }
 
 func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
-	beginLogID, _, err := t.allocator.AllocN(1)
+	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
+	logIDRange, err := PreAllocateBinlogIDs(t.allocator, t.meta.GetSegmentInfos(taskProto.GetInputSegments()))
 	if err != nil {
 		return nil, err
 	}
-	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	plan := &datapb.CompactionPlan{
 		PlanID:                 taskProto.GetPlanID(),
 		StartTime:              taskProto.GetStartTime(),
@@ -205,9 +204,11 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		PreferSegmentRows:      taskProto.GetPreferSegmentRows(),
 		AnalyzeResultPath:      path.Join(t.meta.(*meta).chunkManager.RootPath(), common.AnalyzeStatsPath, metautil.JoinIDPath(taskProto.AnalyzeTaskID, taskProto.AnalyzeVersion)),
 		AnalyzeSegmentIds:      taskProto.GetInputSegments(),
-		BeginLogID:             beginLogID,
+		BeginLogID:             logIDRange.Begin, // BeginLogID is deprecated, but still assign it for compatibility.
 		PreAllocatedSegmentIDs: taskProto.GetPreAllocatedSegmentIDs(),
+		PreAllocatedLogIDs:     logIDRange,
 		SlotUsage:              t.GetSlotUsage(),
+		MaxSize:                taskProto.GetMaxSize(),
 	}
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 
@@ -228,7 +229,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			IsSorted:            segInfo.GetIsSorted(),
 		})
 	}
-	log.Info("Compaction handler build clustering compaction plan")
+	log.Info("Compaction handler build clustering compaction plan", zap.Any("PreAllocatedLogIDs", logIDRange))
 	return plan, nil
 }
 
@@ -365,7 +366,7 @@ func (t *clusteringCompactionTask) processStats() error {
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing), setResultSegments(resultSegments))
 }
 
-// this is just a temporary solution. A more long-term solution should be for the indexnode
+// this is just a temporary solution. A more long-term solution should be for the datanode
 // to regenerate the clustering information corresponding to each segment and merge them at the vshard level.
 func (t *clusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments map[int64][]int64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -700,12 +701,18 @@ func (t *clusteringCompactionTask) doCompact() error {
 	}
 	err = t.sessions.Compaction(context.Background(), t.GetTaskProto().GetNodeID(), t.GetPlan())
 	if err != nil {
-		if errors.Is(err, merr.ErrDataNodeSlotExhausted) {
-			log.Warn("fail to notify compaction tasks to DataNode because the node slots exhausted")
-			return t.updateAndSaveTaskMeta(setNodeID(NullNodeID))
+		originNodeID := t.GetTaskProto().GetNodeID()
+		log.Warn("Failed to notify compaction tasks to DataNode",
+			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+			zap.Int64("nodeID", originNodeID),
+			zap.Error(err))
+		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
+		if err != nil {
+			log.Warn("updateAndSaveTaskMeta fail", zap.Int64("planID", t.GetTaskProto().GetPlanID()), zap.Error(err))
+			return err
 		}
-		log.Warn("Failed to notify compaction tasks to DataNode", zap.Error(err))
-		return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
+		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
 	}
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
 }

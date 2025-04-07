@@ -32,7 +32,9 @@ import (
 type target struct {
 	vchannel string
 	ch       chan *MsgPack
+	subPos   SubPos
 	pos      *Pos
+	isLagged bool
 
 	closeMu         sync.Mutex
 	closeOnce       sync.Once
@@ -44,12 +46,14 @@ type target struct {
 	cancelCh lifetime.SafeChan
 }
 
-func newTarget(vchannel string, pos *Pos, replicateConfig *msgstream.ReplicateConfig) *target {
+func newTarget(streamConfig *StreamConfig) *target {
+	replicateConfig := streamConfig.ReplicateConfig
 	maxTolerantLag := paramtable.Get().MQCfg.MaxTolerantLag.GetAsDuration(time.Second)
 	t := &target{
-		vchannel:        vchannel,
+		vchannel:        streamConfig.VChannel,
 		ch:              make(chan *MsgPack, paramtable.Get().MQCfg.TargetBufSize.GetAsInt()),
-		pos:             pos,
+		subPos:          streamConfig.SubPos,
+		pos:             streamConfig.Pos,
 		cancelCh:        lifetime.NewSafeChan(),
 		maxLag:          maxTolerantLag,
 		timer:           time.NewTimer(maxTolerantLag),
@@ -58,7 +62,7 @@ func newTarget(vchannel string, pos *Pos, replicateConfig *msgstream.ReplicateCo
 	t.closed = false
 	if replicateConfig != nil {
 		log.Info("have replicate config",
-			zap.String("vchannel", vchannel),
+			zap.String("vchannel", streamConfig.VChannel),
 			zap.String("replicateID", replicateConfig.ReplicateID))
 	}
 	return t
@@ -72,6 +76,7 @@ func (t *target) close() {
 		t.closed = true
 		t.timer.Stop()
 		close(t.ch)
+		log.Info("close target chan", zap.String("vchannel", t.vchannel))
 	})
 }
 
@@ -94,7 +99,8 @@ func (t *target) send(pack *MsgPack) error {
 		log.Info("target closed", zap.String("vchannel", t.vchannel))
 		return nil
 	case <-t.timer.C:
-		return fmt.Errorf("send target timeout, vchannel=%s, timeout=%s", t.vchannel, t.maxLag)
+		t.isLagged = true
+		return fmt.Errorf("send target timeout, vchannel=%s, timeout=%s, beginTs=%d, endTs=%d", t.vchannel, t.maxLag, pack.BeginTs, pack.EndTs)
 	case t.ch <- pack:
 		return nil
 	}

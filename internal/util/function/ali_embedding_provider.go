@@ -20,7 +20,6 @@ package function
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -42,9 +41,6 @@ type AliEmbeddingProvider struct {
 
 func createAliEmbeddingClient(apiKey string, url string) (*ali.AliDashScopeEmbedding, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv(dashscopeAKEnvStr)
-	}
-	if apiKey == "" {
 		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", dashscopeAKEnvStr)
 	}
 
@@ -55,12 +51,13 @@ func createAliEmbeddingClient(apiKey string, url string) (*ali.AliDashScopeEmbed
 	return c, nil
 }
 
-func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema) (*AliEmbeddingProvider, error) {
+func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*AliEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	var apiKey, url, modelName string
+	apiKey, url := parseAKAndURL(functionSchema.Params, params, dashscopeAKEnvStr)
+	var modelName string
 	var dim int64
 
 	for _, param := range functionSchema.Params {
@@ -72,17 +69,8 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 			if err != nil {
 				return nil, err
 			}
-		case apiKeyParamKey:
-			apiKey = param.Value
-		case embeddingURLParamKey:
-			url = param.Value
 		default:
 		}
-	}
-
-	if modelName != TextEmbeddingV1 && modelName != TextEmbeddingV2 && modelName != TextEmbeddingV3 {
-		return nil, fmt.Errorf("Unsupported model: %s, only support [%s, %s, %s]",
-			modelName, TextEmbeddingV1, TextEmbeddingV2, TextEmbeddingV3)
 	}
 
 	c, err := createAliEmbeddingClient(apiKey, url)
@@ -91,7 +79,7 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 	}
 
 	maxBatch := 25
-	if modelName == TextEmbeddingV3 {
+	if modelName == "text-embedding-v3" {
 		maxBatch = 6
 	}
 
@@ -116,7 +104,7 @@ func (provider *AliEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *AliEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) ([][]float32, error) {
+func (provider *AliEmbeddingProvider) CallEmbedding(texts []string, mode TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	var textType string
 	if mode == SearchMode {

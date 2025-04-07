@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
-	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -31,8 +30,6 @@ import (
 type flusherComponents struct {
 	wal               wal.WAL
 	broker            broker.Broker
-	syncMgr           syncmgr.SyncManager
-	wbMgr             writebuffer.BufferManager
 	cpUpdater         *util.ChannelCheckpointUpdater
 	chunkManager      storage.ChunkManager
 	dataServices      map[string]*dataSyncServiceWrapper
@@ -67,12 +64,12 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 		&util.PipelineParams{
 			Ctx:                context.Background(),
 			Broker:             impl.broker,
-			SyncMgr:            impl.syncMgr,
+			SyncMgr:            resource.Resource().SyncManager(),
 			ChunkManager:       impl.chunkManager,
-			WriteBufferManager: impl.wbMgr,
+			WriteBufferManager: resource.Resource().WriteBufferManager(),
 			CheckpointUpdater:  impl.cpUpdater,
 			Allocator:          idalloc.NewMAllocator(resource.Resource().IDAllocator()),
-			MsgHandler:         newMsgHandler(impl.wbMgr),
+			MsgHandler:         newMsgHandler(resource.Resource().WriteBufferManager()),
 		},
 		msgChan,
 		&datapb.VchannelInfo{
@@ -156,9 +153,7 @@ func (impl *flusherComponents) Close() {
 		ds.Close()
 		impl.logger.Info("data sync service closed for flusher closing", zap.String("vchannel", vchannel))
 	}
-	impl.wbMgr.Stop()
 	impl.cpUpdater.Close()
-	impl.syncMgr.Close()
 	impl.checkpointManager.Close()
 }
 
@@ -190,6 +185,43 @@ func (impl *flusherComponents) recover(ctx context.Context, recoverInfos map[str
 
 // buildDataSyncServiceWithRetry builds the data sync service with retry.
 func (impl *flusherComponents) buildDataSyncServiceWithRetry(ctx context.Context, recoverInfo *datapb.GetChannelRecoveryInfoResponse) (*dataSyncServiceWrapper, error) {
+	// Flush all the growing segment that is not created by streaming.
+	segmentIDs := make([]int64, 0, len(recoverInfo.GetInfo().UnflushedSegments))
+	for _, segment := range recoverInfo.GetInfo().UnflushedSegments {
+		if !segment.IsCreatedByStreaming {
+			segmentIDs = append(segmentIDs, segment.ID)
+		}
+	}
+	if len(segmentIDs) > 0 {
+		msg := message.NewFlushMessageBuilderV2().
+			WithVChannel(recoverInfo.GetInfo().GetChannelName()).
+			WithHeader(&message.FlushMessageHeader{}).
+			WithBody(&message.FlushMessageBody{
+				CollectionId: recoverInfo.GetInfo().GetCollectionID(),
+				SegmentId:    segmentIDs,
+			}).MustBuildMutable()
+		if err := retry.Do(ctx, func() error {
+			appendResult, err := impl.wal.Append(ctx, msg)
+			if err != nil {
+				impl.logger.Warn(
+					"fail to append flush message for segments that not created by streaming service into wal",
+					zap.String("vchannel", recoverInfo.GetInfo().GetChannelName()),
+					zap.Error(err))
+				return err
+			}
+			impl.logger.Info(
+				"append flush message for segments that not created by streaming service into wal",
+				zap.String("vchannel", recoverInfo.GetInfo().GetChannelName()),
+				zap.Int64s("segmentIDs", segmentIDs),
+				zap.Stringer("msgID", appendResult.MessageID),
+				zap.Uint64("timeTick", appendResult.TimeTick),
+			)
+			return nil
+		}, retry.AttemptAlways()); err != nil {
+			return nil, err
+		}
+	}
+
 	var ds *dataSyncServiceWrapper
 	err := retry.Do(ctx, func() error {
 		var err error
@@ -210,12 +242,12 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 		&util.PipelineParams{
 			Ctx:                context.Background(),
 			Broker:             impl.broker,
-			SyncMgr:            impl.syncMgr,
+			SyncMgr:            resource.Resource().SyncManager(),
 			ChunkManager:       impl.chunkManager,
-			WriteBufferManager: impl.wbMgr,
+			WriteBufferManager: resource.Resource().WriteBufferManager(),
 			CheckpointUpdater:  impl.cpUpdater,
 			Allocator:          idalloc.NewMAllocator(resource.Resource().IDAllocator()),
-			MsgHandler:         newMsgHandler(impl.wbMgr),
+			MsgHandler:         newMsgHandler(resource.Resource().WriteBufferManager()),
 		},
 		&datapb.ChannelWatchInfo{Vchan: recoverInfo.GetInfo(), Schema: recoverInfo.GetSchema()},
 		input,

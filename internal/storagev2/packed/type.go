@@ -24,8 +24,8 @@ package packed
 import "C"
 
 import (
-	"github.com/apache/arrow/go/v12/arrow"
-	"github.com/apache/arrow/go/v12/arrow/cdata"
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/cdata"
 )
 
 type PackedWriter struct {

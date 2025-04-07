@@ -28,7 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/datanode/compaction"
+	"github.com/milvus-io/milvus/internal/compaction"
+	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
@@ -60,7 +61,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 // GetComponentStates will return current state of DataNode
 func (node *DataNode) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	nodeID := common.NotRegisteredID
-	state := node.stateCode.Load().(commonpb.StateCode)
+	state := node.GetStateCode()
 	log.Ctx(ctx).Debug("DataNode current state", zap.String("State", state.String()))
 	if node.GetSession() != nil && node.session.Registered() {
 		nodeID = node.GetSession().ServerID
@@ -70,7 +71,7 @@ func (node *DataNode) GetComponentStates(ctx context.Context, req *milvuspb.GetC
 			// NodeID:    Params.NodeID, // will race with DataNode.Register()
 			NodeID:    nodeID,
 			Role:      node.Role,
-			StateCode: node.stateCode.Load().(commonpb.StateCode),
+			StateCode: state,
 		},
 		SubcomponentStates: make([]*milvuspb.ComponentInfo, 0),
 		Status:             merr.Success(),
@@ -201,17 +202,21 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid beginLogID")), nil
 	}
 
+	if req.GetPreAllocatedLogIDs().GetBegin() == 0 || req.GetPreAllocatedLogIDs().GetEnd() == 0 {
+		return merr.Status(merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid beginID %d or invalid endID %d", req.GetPreAllocatedLogIDs().GetBegin(), req.GetPreAllocatedLogIDs().GetEnd()))), nil
+	}
+
 	/*
 		spanCtx := trace.SpanContextFromContext(ctx)
 
 		taskCtx := trace.ContextWithSpanContext(node.ctx, spanCtx)*/
 	taskCtx := tracer.Propagate(ctx, node.ctx)
 
-	var task compaction.Compactor
+	var task compactor.Compactor
 	binlogIO := io.NewBinlogIO(node.chunkManager)
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
-		task = compaction.NewLevelZeroCompactionTask(
+		task = compactor.NewLevelZeroCompactionTask(
 			taskCtx,
 			binlogIO,
 			node.chunkManager,
@@ -221,7 +226,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
-		task = compaction.NewMixCompactionTask(
+		task = compactor.NewMixCompactionTask(
 			taskCtx,
 			binlogIO,
 			req,
@@ -230,7 +235,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
-		task = compaction.NewClusteringCompactionTask(
+		task = compactor.NewClusteringCompactionTask(
 			taskCtx,
 			binlogIO,
 			req,

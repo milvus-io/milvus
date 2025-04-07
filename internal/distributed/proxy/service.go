@@ -139,6 +139,7 @@ func authenticate(c *gin.Context) {
 		user, err := proxy.VerifyAPIKey(rawToken)
 		if err == nil {
 			c.Set(httpserver.ContextUsername, user)
+			c.Set(httpserver.ContextToken, rawToken)
 			return
 		}
 		log.Ctx(context.TODO()).Warn("fail to verify apikey", zap.Error(err))
@@ -688,6 +689,11 @@ func (s *Server) DescribeCollection(ctx context.Context, request *milvuspb.Descr
 	return s.proxy.DescribeCollection(ctx, request)
 }
 
+// AddCollectionField add a field to collection
+func (s *Server) AddCollectionField(ctx context.Context, request *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
+	return s.proxy.AddCollectionField(ctx, request)
+}
+
 // GetCollectionStatistics notifies Proxy to get a collection's Statistics
 func (s *Server) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
 	return s.proxy.GetCollectionStatistics(ctx, request)
@@ -1158,6 +1164,10 @@ func (s *Server) DescribeDatabase(ctx context.Context, req *milvuspb.DescribeDat
 	return s.proxy.DescribeDatabase(ctx, req)
 }
 
-func (s *Server) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequset) (*milvuspb.RunAnalyzerResponse, error) {
+func (s *Server) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	return s.proxy.RunAnalyzer(ctx, req)
+}
+
+func (s *Server) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error) {
+	return s.proxy.GetSegmentsInfo(ctx, req)
 }

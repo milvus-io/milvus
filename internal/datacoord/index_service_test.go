@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"testing"
 	"time"
 
@@ -45,8 +44,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestServerId(t *testing.T) {
@@ -89,21 +89,21 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	mock0Allocator := newMockAllocator(t)
 
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, &collectionInfo{
+		ID:             collID,
+		Partitions:     nil,
+		StartPositions: nil,
+		Properties:     nil,
+		CreatedAt:      0,
+	})
+
 	indexMeta := newSegmentIndexMeta(catalog)
 	s := &Server{
 		meta: &meta{
-			catalog: catalog,
-			collections: map[UniqueID]*collectionInfo{
-				collID: {
-					ID: collID,
-
-					Partitions:     nil,
-					StartPositions: nil,
-					Properties:     nil,
-					CreatedAt:      0,
-				},
-			},
-			indexMeta: indexMeta,
+			catalog:     catalog,
+			collections: collections,
+			indexMeta:   indexMeta,
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -166,6 +166,21 @@ func TestServer_CreateIndex(t *testing.T) {
 					IsDynamic:      false,
 					IsPartitionKey: false,
 				},
+				{
+					FieldID:        fieldID + 1,
+					Name:           "json",
+					IsPrimaryKey:   false,
+					Description:    "",
+					DataType:       schemapb.DataType_JSON,
+					TypeParams:     nil,
+					IndexParams:    nil,
+					AutoID:         false,
+					State:          0,
+					ElementType:    0,
+					DefaultValue:   nil,
+					IsDynamic:      false,
+					IsPartitionKey: false,
+				},
 			},
 			EnableDynamicField: false,
 		},
@@ -175,6 +190,41 @@ func TestServer_CreateIndex(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		resp, err := s.CreateIndex(ctx, req)
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	})
+
+	t.Run("test json path", func(t *testing.T) {
+		req := &indexpb.CreateIndexRequest{
+			CollectionID:    collID,
+			FieldID:         fieldID + 1,
+			IndexName:       "",
+			TypeParams:      typeParams,
+			IndexParams:     indexParams,
+			Timestamp:       100,
+			IsAutoIndex:     false,
+			UserIndexParams: indexParams,
+		}
+		req.IndexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.JSONPathKey,
+				Value: "json",
+			},
+			{
+				Key:   common.JSONCastTypeKey,
+				Value: "double",
+			},
+			{
+				Key:   common.IndexTypeKey,
+				Value: "INVERTED",
+			},
+		}
+		resp, err := s.CreateIndex(ctx, req)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
+		assert.Equal(t, 1, len(indexes))
+		jsonPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, indexes[0].IndexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, "", jsonPath)
 	})
 
 	t.Run("success with index exist", func(t *testing.T) {
@@ -208,7 +258,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		assert.Error(t, merr.CheckRPCCall(resp, err))
 	})
 
-	t.Run("not support disk index", func(t *testing.T) {
+	t.Run("disk index", func(t *testing.T) {
 		s.allocator = mock0Allocator
 		s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
 		req.IndexParams = []*commonpb.KeyValuePair{
@@ -217,9 +267,9 @@ func TestServer_CreateIndex(t *testing.T) {
 				Value: "DISKANN",
 			},
 		}
-		s.indexNodeManager = session.NewNodeManager(ctx, defaultIndexNodeCreatorFunc)
+		s.indexNodeManager = session.NewNodeManager(ctx, defaultDataNodeCreatorFunc)
 		resp, err := s.CreateIndex(ctx, req)
-		assert.Error(t, merr.CheckRPCCall(resp, err))
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("disk index with mmap", func(t *testing.T) {
@@ -235,14 +285,10 @@ func TestServer_CreateIndex(t *testing.T) {
 				Value: "true",
 			},
 		}
-		nodeManager := session.NewNodeManager(ctx, defaultIndexNodeCreatorFunc)
+		nodeManager := session.NewNodeManager(ctx, defaultDataNodeCreatorFunc)
 		s.indexNodeManager = nodeManager
-		mockNode := mocks.NewMockIndexNodeClient(t)
+		mockNode := mocks.NewMockDataNodeClient(t)
 		nodeManager.SetClient(1001, mockNode)
-		mockNode.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&workerpb.GetJobStatsResponse{
-			Status:     merr.Success(),
-			EnableDisk: true,
-		}, nil)
 
 		resp, err := s.CreateIndex(ctx, req)
 		assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -398,159 +444,159 @@ func TestServer_AlterIndex(t *testing.T) {
 				},
 			},
 		},
-		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-			segID: {
-				indexID: {
-					SegmentID:           segID,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             10000,
-					IndexID:             indexID,
-					BuildID:             buildID,
-					NodeID:              0,
-					IndexVersion:        1,
-					IndexState:          commonpb.IndexState_Finished,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      createTS,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 0,
-					WriteHandoff:        false,
-				},
-				indexID + 1: {
-					SegmentID:           segID,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             10000,
-					IndexID:             indexID + 1,
-					BuildID:             buildID + 1,
-					NodeID:              0,
-					IndexVersion:        1,
-					IndexState:          commonpb.IndexState_Finished,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      createTS,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 0,
-					WriteHandoff:        false,
-				},
-				indexID + 3: {
-					SegmentID:           segID,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             10000,
-					IndexID:             indexID + 3,
-					BuildID:             buildID + 3,
-					NodeID:              0,
-					IndexVersion:        1,
-					IndexState:          commonpb.IndexState_InProgress,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      createTS,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 0,
-					WriteHandoff:        false,
-				},
-				indexID + 4: {
-					SegmentID:           segID,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             10000,
-					IndexID:             indexID + 4,
-					BuildID:             buildID + 4,
-					NodeID:              0,
-					IndexVersion:        1,
-					IndexState:          commonpb.IndexState_Failed,
-					FailReason:          "mock failed",
-					IsDeleted:           false,
-					CreatedUTCTime:      createTS,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 0,
-					WriteHandoff:        false,
-				},
-				indexID + 5: {
-					SegmentID:           segID,
-					CollectionID:        collID,
-					PartitionID:         partID,
-					NumRows:             10000,
-					IndexID:             indexID + 5,
-					BuildID:             buildID + 5,
-					NodeID:              0,
-					IndexVersion:        1,
-					IndexState:          commonpb.IndexState_Unissued,
-					FailReason:          "",
-					IsDeleted:           false,
-					CreatedUTCTime:      createTS,
-					IndexFileKeys:       nil,
-					IndexSerializedSize: 0,
-					WriteHandoff:        false,
-				},
-			},
-			segID - 1: {
-				indexID: {
-					SegmentID:      segID - 1,
-					CollectionID:   collID,
-					PartitionID:    partID,
-					NumRows:        10000,
-					IndexID:        indexID,
-					BuildID:        buildID,
-					NodeID:         0,
-					IndexVersion:   1,
-					IndexState:     commonpb.IndexState_Finished,
-					CreatedUTCTime: createTS,
-				},
-				indexID + 1: {
-					SegmentID:      segID,
-					CollectionID:   collID,
-					PartitionID:    partID,
-					NumRows:        10000,
-					IndexID:        indexID + 1,
-					BuildID:        buildID + 1,
-					NodeID:         0,
-					IndexVersion:   1,
-					IndexState:     commonpb.IndexState_Finished,
-					CreatedUTCTime: createTS,
-				},
-				indexID + 3: {
-					SegmentID:      segID,
-					CollectionID:   collID,
-					PartitionID:    partID,
-					NumRows:        10000,
-					IndexID:        indexID + 3,
-					BuildID:        buildID + 3,
-					NodeID:         0,
-					IndexVersion:   1,
-					IndexState:     commonpb.IndexState_InProgress,
-					CreatedUTCTime: createTS,
-				},
-				indexID + 4: {
-					SegmentID:      segID,
-					CollectionID:   collID,
-					PartitionID:    partID,
-					NumRows:        10000,
-					IndexID:        indexID + 4,
-					BuildID:        buildID + 4,
-					NodeID:         0,
-					IndexVersion:   1,
-					IndexState:     commonpb.IndexState_Failed,
-					FailReason:     "mock failed",
-					CreatedUTCTime: createTS,
-				},
-				indexID + 5: {
-					SegmentID:      segID,
-					CollectionID:   collID,
-					PartitionID:    partID,
-					NumRows:        10000,
-					IndexID:        indexID + 5,
-					BuildID:        buildID + 5,
-					NodeID:         0,
-					IndexVersion:   1,
-					IndexState:     commonpb.IndexState_Finished,
-					CreatedUTCTime: createTS,
-				},
-			},
-		},
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 	}
+	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx1.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1.Insert(indexID+1, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 1,
+		BuildID:             buildID + 1,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1.Insert(indexID+3, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 3,
+		BuildID:             buildID + 3,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_InProgress,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1.Insert(indexID+4, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 4,
+		BuildID:             buildID + 4,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Failed,
+		FailReason:          "mock failed",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1.Insert(indexID+5, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 5,
+		BuildID:             buildID + 5,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Unissued,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	indexMeta.segmentIndexes.Insert(segID, segIdx1)
+
+	segIdx2 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx2.Insert(indexID, &model.SegmentIndex{
+		SegmentID:      segID - 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        10000,
+		IndexID:        indexID,
+		BuildID:        buildID,
+		NodeID:         0,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Finished,
+		CreatedUTCTime: createTS,
+	})
+	segIdx2.Insert(indexID+1, &model.SegmentIndex{
+		SegmentID:      segID - 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        10000,
+		IndexID:        indexID + 1,
+		BuildID:        buildID + 1,
+		NodeID:         0,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Finished,
+		CreatedUTCTime: createTS,
+	})
+	segIdx2.Insert(indexID+3, &model.SegmentIndex{
+		SegmentID:      segID - 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        10000,
+		IndexID:        indexID + 3,
+		BuildID:        buildID + 3,
+		NodeID:         0,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_InProgress,
+		CreatedUTCTime: createTS,
+	})
+	segIdx2.Insert(indexID+4, &model.SegmentIndex{
+		SegmentID:      segID - 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        10000,
+		IndexID:        indexID + 4,
+		BuildID:        buildID + 4,
+		NodeID:         0,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Failed,
+		FailReason:     "mock failed",
+		CreatedUTCTime: createTS,
+	})
+	segIdx2.Insert(indexID+5, &model.SegmentIndex{
+		SegmentID:      segID - 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        10000,
+		IndexID:        indexID + 5,
+		BuildID:        buildID + 5,
+		NodeID:         0,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Finished,
+		CreatedUTCTime: createTS,
+	})
+	indexMeta.segmentIndexes.Insert(segID-1, segIdx2)
 
 	mockHandler := NewNMockHandler(t)
 
@@ -777,7 +823,6 @@ func TestServer_GetIndexState(t *testing.T) {
 					Timestamp: createTS - 1,
 				},
 			},
-			currRows:        0,
 			allocations:     nil,
 			lastFlushTime:   time.Time{},
 			isCompacting:    false,
@@ -805,7 +850,7 @@ func TestServer_GetIndexState(t *testing.T) {
 					},
 				},
 			},
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		},
 
 		segments: NewSegmentsInfo(),
@@ -836,7 +881,6 @@ func TestServer_GetIndexState(t *testing.T) {
 					Timestamp: createTS - 1,
 				},
 			},
-			currRows:        0,
 			allocations:     nil,
 			lastFlushTime:   time.Time{},
 			isCompacting:    false,
@@ -863,31 +907,29 @@ func TestServer_GetIndexState(t *testing.T) {
 					},
 				},
 			},
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-				segID: {
-					indexID: {
-						SegmentID:           segID,
-						CollectionID:        collID,
-						PartitionID:         partID,
-						NumRows:             3000,
-						IndexID:             indexID,
-						BuildID:             buildID,
-						NodeID:              0,
-						IndexVersion:        1,
-						IndexState:          commonpb.IndexState_IndexStateNone,
-						FailReason:          "",
-						IsDeleted:           false,
-						CreatedUTCTime:      0,
-						IndexFileKeys:       nil,
-						IndexSerializedSize: 0,
-						WriteHandoff:        false,
-					},
-				},
-			},
+			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		},
-
 		segments: NewSegmentsInfo(),
 	}
+	segIdx := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             3000,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_IndexStateNone,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	s.meta.indexMeta.segmentIndexes.Insert(segID, segIdx)
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
 	}
@@ -1014,7 +1056,6 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 				PartitionID:   partID,
 				InsertChannel: "ch",
 			},
-			currRows:        0,
 			allocations:     nil,
 			lastFlushTime:   time.Time{},
 			isCompacting:    false,
@@ -1134,7 +1175,6 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 					Timestamp: createTS,
 				},
 			},
-			currRows:        10250,
 			allocations:     nil,
 			lastFlushTime:   time.Time{},
 			isCompacting:    false,
@@ -1181,7 +1221,6 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 					Timestamp: createTS,
 				},
 			},
-			currRows:        10250,
 			allocations:     nil,
 			lastFlushTime:   time.Time{},
 			isCompacting:    false,
@@ -1409,158 +1448,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 						},
 					},
 				},
-				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-					segID: {
-						indexID: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID,
-							BuildID:             buildID,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Finished,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 1: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 1,
-							BuildID:             buildID + 1,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Finished,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 3: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 3,
-							BuildID:             buildID + 3,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_InProgress,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 4: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 4,
-							BuildID:             buildID + 4,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Failed,
-							FailReason:          "mock failed",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 5: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 5,
-							BuildID:             buildID + 5,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Unissued,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-					},
-					segID - 1: {
-						indexID: {
-							SegmentID:      segID - 1,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumRows:        10000,
-							IndexID:        indexID,
-							BuildID:        buildID,
-							NodeID:         0,
-							IndexVersion:   1,
-							IndexState:     commonpb.IndexState_Finished,
-							CreatedUTCTime: createTS,
-						},
-						indexID + 1: {
-							SegmentID:      segID - 1,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumRows:        10000,
-							IndexID:        indexID + 1,
-							BuildID:        buildID + 1,
-							NodeID:         0,
-							IndexVersion:   1,
-							IndexState:     commonpb.IndexState_Finished,
-							CreatedUTCTime: createTS,
-						},
-						indexID + 3: {
-							SegmentID:      segID - 1,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumRows:        10000,
-							IndexID:        indexID + 3,
-							BuildID:        buildID + 3,
-							NodeID:         0,
-							IndexVersion:   1,
-							IndexState:     commonpb.IndexState_InProgress,
-							CreatedUTCTime: createTS,
-						},
-						indexID + 4: {
-							SegmentID:      segID - 1,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumRows:        10000,
-							IndexID:        indexID + 4,
-							BuildID:        buildID + 4,
-							NodeID:         0,
-							IndexVersion:   1,
-							IndexState:     commonpb.IndexState_Failed,
-							FailReason:     "mock failed",
-							CreatedUTCTime: createTS,
-						},
-						indexID + 5: {
-							SegmentID:      segID - 1,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumRows:        10000,
-							IndexID:        indexID + 5,
-							BuildID:        buildID + 5,
-							NodeID:         0,
-							IndexVersion:   1,
-							IndexState:     commonpb.IndexState_Finished,
-							CreatedUTCTime: createTS,
-						},
-					},
-				},
+				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
 			segments: NewSegmentsInfo(),
@@ -1568,6 +1456,158 @@ func TestServer_DescribeIndex(t *testing.T) {
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
+	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx1.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1.Insert(indexID+1, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 1,
+		BuildID:             buildID + 1,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1.Insert(indexID+3, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 3,
+		BuildID:             buildID + 3,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_InProgress,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1.Insert(indexID+4, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 4,
+		BuildID:             buildID + 4,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Failed,
+		FailReason:          "mock failed",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1.Insert(indexID+5, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 5,
+		BuildID:             buildID + 5,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Unissued,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	s.meta.indexMeta.segmentIndexes.Insert(segID, segIdx1)
+
+	segIdx2 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx2.Insert(indexID, &model.SegmentIndex{
+		SegmentID:      segID - 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        10000,
+		IndexID:        indexID,
+		BuildID:        buildID,
+		NodeID:         0,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Finished,
+		CreatedUTCTime: createTS,
+	})
+	segIdx2.Insert(indexID+1, &model.SegmentIndex{
+		SegmentID:      segID - 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        10000,
+		IndexID:        indexID + 1,
+		BuildID:        buildID + 1,
+		NodeID:         0,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Finished,
+		CreatedUTCTime: createTS,
+	})
+	segIdx2.Insert(indexID+3, &model.SegmentIndex{
+		SegmentID:      segID - 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        10000,
+		IndexID:        indexID + 3,
+		BuildID:        buildID + 3,
+		NodeID:         0,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_InProgress,
+		CreatedUTCTime: createTS,
+	})
+	segIdx2.Insert(indexID+4, &model.SegmentIndex{
+		SegmentID:      segID - 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        10000,
+		IndexID:        indexID + 4,
+		BuildID:        buildID + 4,
+		NodeID:         0,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Failed,
+		FailReason:     "mock failed",
+		CreatedUTCTime: createTS,
+	})
+	segIdx2.Insert(indexID+5, &model.SegmentIndex{
+		SegmentID:      segID - 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        10000,
+		IndexID:        indexID + 5,
+		BuildID:        buildID + 5,
+		NodeID:         0,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_Finished,
+		CreatedUTCTime: createTS,
+	})
+	s.meta.indexMeta.segmentIndexes.Insert(segID-1, segIdx2)
+
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
 	}
@@ -1725,7 +1765,7 @@ func TestServer_ListIndexes(t *testing.T) {
 						},
 					},
 				},
-				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
 			segments: NewSegmentsInfo(),
@@ -1914,95 +1954,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 						},
 					},
 				},
-				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-					segID: {
-						indexID: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID,
-							BuildID:             buildID,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Finished,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 1: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 1,
-							BuildID:             buildID + 1,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Finished,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 3: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 3,
-							BuildID:             buildID + 3,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_InProgress,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 4: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 4,
-							BuildID:             buildID + 4,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Failed,
-							FailReason:          "mock failed",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-						indexID + 5: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID + 5,
-							BuildID:             buildID + 5,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Unissued,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-					},
-				},
+				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
 			segments: NewSegmentsInfo(),
@@ -2010,6 +1962,93 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
+	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx1.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1.Insert(indexID+1, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 1,
+		BuildID:             buildID + 1,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1.Insert(indexID+3, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 3,
+		BuildID:             buildID + 3,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_InProgress,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1.Insert(indexID+4, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 4,
+		BuildID:             buildID + 4,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Failed,
+		FailReason:          "mock failed",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIdx1.Insert(indexID+5, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 5,
+		BuildID:             buildID + 5,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Unissued,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	s.meta.indexMeta.segmentIndexes.Insert(segID, segIdx1)
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
 	}
@@ -2161,7 +2200,7 @@ func TestServer_DropIndex(t *testing.T) {
 						},
 					},
 				},
-				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
 			segments: NewSegmentsInfo(),
@@ -2306,27 +2345,7 @@ func TestServer_GetIndexInfos(t *testing.T) {
 						},
 					},
 				},
-				segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-					segID: {
-						indexID: {
-							SegmentID:           segID,
-							CollectionID:        collID,
-							PartitionID:         partID,
-							NumRows:             10000,
-							IndexID:             indexID,
-							BuildID:             buildID,
-							NodeID:              0,
-							IndexVersion:        1,
-							IndexState:          commonpb.IndexState_Finished,
-							FailReason:          "",
-							IsDeleted:           false,
-							CreatedUTCTime:      createTS,
-							IndexFileKeys:       nil,
-							IndexSerializedSize: 0,
-							WriteHandoff:        false,
-						},
-					},
-				},
+				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
 			segments:     NewSegmentsInfo(),
@@ -2335,6 +2354,25 @@ func TestServer_GetIndexInfos(t *testing.T) {
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
+	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx1.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           segID,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      createTS,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	s.meta.indexMeta.segmentIndexes.Insert(segID, segIdx1)
 	s.meta.segments.SetSegment(segID, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             segID,
@@ -2400,7 +2438,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 		segments: NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
-			segmentIndexes:   map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
 					indexID: {
@@ -2443,7 +2481,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 		assert.Equal(t, 1, len(segments))
 		assert.Equal(t, segID, segments[0].ID)
 
-		m.indexMeta.segmentIndexes[segID] = make(map[UniqueID]*model.SegmentIndex)
+		m.indexMeta.segmentIndexes.Insert(segID, typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]())
 		m.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			CollectionID: collID,
 			SegmentID:    segID,
@@ -2620,15 +2658,16 @@ func TestJsonIndex(t *testing.T) {
 		},
 	}, nil)
 
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, &collectionInfo{
+		ID: collID,
+	})
+
 	s := &Server{
 		meta: &meta{
-			catalog: catalog,
-			collections: map[UniqueID]*collectionInfo{
-				collID: {
-					ID: collID,
-				},
-			},
-			indexMeta: indexMeta,
+			catalog:     catalog,
+			collections: collections,
+			indexMeta:   indexMeta,
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -2639,7 +2678,7 @@ func TestJsonIndex(t *testing.T) {
 	req := &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "a",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "varchar"}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
 	}
 	resp, err := s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
@@ -2647,7 +2686,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json[\"c\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "varchar"}, {Key: common.JSONPathKey, Value: "json[\"c\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
@@ -2656,7 +2695,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     1,
 		IndexName:   "",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json2[\"c\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "varchar"}, {Key: common.JSONPathKey, Value: "json2[\"c\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
@@ -2665,7 +2704,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "a",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_String))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "varchar"}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
@@ -2674,7 +2713,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "a",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2683,7 +2722,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "b",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2692,7 +2731,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "a",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"b\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[\"b\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2710,7 +2749,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     1,
 		IndexName:   "c",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "bad_json[\"a\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "bad_json[\"a\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2719,7 +2758,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     2,
 		IndexName:   "",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "dynamic_a_field"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "dynamic_a_field"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
@@ -2728,7 +2767,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "d",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[a][\"b\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[a][\"b\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2737,7 +2776,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "e",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"][\"b"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[\"a\"][\"b"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2746,7 +2785,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "f",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"[\"b]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[\"a\"[\"b]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2755,7 +2794,7 @@ func TestJsonIndex(t *testing.T) {
 	req = &indexpb.CreateIndexRequest{
 		FieldID:     0,
 		IndexName:   "g",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_Int16))}, {Key: common.JSONPathKey, Value: "json[\"a\"][0][\"b\"]"}},
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "double"}, {Key: common.JSONPathKey, Value: "json[\"a\"][0][\"b\"]"}},
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))

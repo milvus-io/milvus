@@ -39,6 +39,7 @@
 #include "test_utils/DataGen.h"
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -68,7 +69,6 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     int chunk_size = 100;
     int total_row_count = chunk_num * chunk_size;
     int bitset_size = (total_row_count + 7) / 8;
-    int chunk_bitset_size = (chunk_size + 7) / 8;
 
     auto column = std::make_shared<ChunkedColumn>();
     auto schema = std::make_shared<Schema>();
@@ -78,11 +78,11 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     for (int i = 0; i < chunk_num; i++) {
         auto dataset = segcore::DataGen(schema, chunk_size);
         auto data = dataset.get_col<float>(fakevec_id);
-        auto buf_size = chunk_bitset_size + 4 * data.size();
+        auto buf_size = 4 * data.size();
 
         char* buf = new char[buf_size];
         defer.AddDefer([buf]() { delete[] buf; });
-        memcpy(buf + chunk_bitset_size, data.data(), 4 * data.size());
+        memcpy(buf, data.data(), 4 * data.size());
 
         auto chunk = std::make_shared<FixedWidthChunk>(
             chunk_size, dim, buf, buf_size, 4, false);
@@ -175,8 +175,11 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
             schema->AddDebugField("string1", DataType::VARCHAR, true);
         auto str2_fid =
             schema->AddDebugField("string2", DataType::VARCHAR, true);
-        schema->AddField(
-            FieldName("ts"), TimestampFieldID, DataType::INT64, true);
+        schema->AddField(FieldName("ts"),
+                         TimestampFieldID,
+                         DataType::INT64,
+                         true,
+                         std::nullopt);
         schema->set_primary_field_id(pk_fid);
         segment = segcore::CreateSealedSegment(
             schema,
@@ -225,6 +228,7 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
             str_data.push_back("test" + std::to_string(i));
         }
         std::sort(str_data.begin(), str_data.end());
+        std::vector<bool> validity(test_data_count, true);
 
         // generate data
         for (int chunk_id = 0; chunk_id < chunk_num;
@@ -233,8 +237,8 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
             std::iota(test_data.begin(), test_data.end(), start_id);
 
             auto builder = std::make_shared<arrow::Int64Builder>();
-            auto status =
-                builder->AppendValues(test_data.begin(), test_data.end());
+            auto status = builder->AppendValues(
+                test_data.begin(), test_data.end(), validity.begin());
             ASSERT_TRUE(status.ok());
             auto res = builder->Finish();
             ASSERT_TRUE(res.ok());

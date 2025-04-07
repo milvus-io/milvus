@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/format.hpp>
+#include <optional>
 #include <gtest/gtest.h>
 
 #include "common/Types.h"
@@ -149,6 +150,88 @@ TEST(Sealed, without_predicate) {
 
     sr = sealed_segment->Search(plan.get(), ph_group.get(), 0);
     EXPECT_EQ(sr->get_total_result_count(), 0);
+}
+
+TEST(Sealed, without_search_ef_less_than_limit) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 16;
+    auto topK = 5;
+    auto metric_type = knowhere::metric::L2;
+    auto fake_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    const char* raw_plan = R"(vector_anns: <
+                                    field_id: 100
+                                    query_info: <
+                                      topk: 100
+                                      round_decimal: 3
+                                      metric_type: "L2"
+                                      search_params: "{\"ef\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+        >)";
+
+    auto N = ROW_COUNT;
+
+    auto dataset = DataGen(schema, N);
+    auto vec_col = dataset.get_col<float>(fake_id);
+    auto query_ptr = vec_col.data() + BIAS * dim;
+
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+    auto num_queries = 5;
+    auto ph_group_raw =
+        CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    Timestamp timestamp = 1000000;
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_FLOAT;
+    create_index_info.metric_type = knowhere::metric::L2;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, milvus::storage::FileManagerContext());
+
+    auto build_conf =
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                       {knowhere::indexparam::M, "16"},
+                       {knowhere::indexparam::EF, "10"}};
+
+    auto database = knowhere::GenDataSet(N, dim, vec_col.data());
+    indexing->BuildWithDataset(database, build_conf);
+
+    LoadIndexInfo load_info;
+    load_info.field_id = fake_id.get();
+    load_info.index = std::move(indexing);
+    load_info.index_params["metric_type"] = "L2";
+
+    // load index for vec field, load raw data for scalar field
+    auto sealed_segment = SealedCreator(schema, dataset);
+    sealed_segment->DropFieldData(fake_id);
+    sealed_segment->LoadIndex(load_info);
+
+    // Test that search fails when ef parameter is less than top-k
+    // HNSW index requires ef to be larger than k for proper search
+    bool exception_thrown = false;
+    try {
+        auto sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
+        FAIL() << "Expected exception for invalid ef parameter";
+    } catch (const std::exception& e) {
+        exception_thrown = true;
+        std::string error_msg = e.what();
+        ASSERT_TRUE(error_msg.find("ef(10) should be larger than k(100)") !=
+                    std::string::npos)
+            << "Unexpected error message: " << error_msg;
+    }
+    ASSERT_TRUE(exception_thrown) << "Expected exception was not thrown";
 }
 
 TEST(Sealed, with_predicate) {
@@ -430,7 +513,7 @@ TEST(Sealed, LoadFieldData) {
 
     auto indexing = GenVecIndexing(
         N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
-
+    //
     auto segment = CreateSealedSegment(schema);
     // std::string dsl = R"({
     //     "bool": {
@@ -915,7 +998,7 @@ TEST(Sealed, LoadScalarIndex) {
 
     LoadFieldDataInfo row_id_info;
     FieldMeta row_id_field_meta(
-        FieldName("RowID"), RowFieldID, DataType::INT64, false);
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
     auto field_data =
         std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(dataset.row_ids_.data(), N);
@@ -924,8 +1007,11 @@ TEST(Sealed, LoadScalarIndex) {
     segment->LoadFieldData(RowFieldID, field_data_info);
 
     LoadFieldDataInfo ts_info;
-    FieldMeta ts_field_meta(
-        FieldName("Timestamp"), TimestampFieldID, DataType::INT64, false);
+    FieldMeta ts_field_meta(FieldName("Timestamp"),
+                            TimestampFieldID,
+                            DataType::INT64,
+                            false,
+                            std::nullopt);
     field_data =
         std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(dataset.timestamps_.data(), N);
@@ -1461,7 +1547,8 @@ TEST(Sealed, GetVectorFromChunkCache) {
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
                                         metric_type,
-                                        false);
+                                        false,
+                                        std::nullopt);
 
     auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();
@@ -1561,7 +1648,8 @@ TEST(Sealed, GetSparseVectorFromChunkCache) {
                                         milvus::DataType::VECTOR_SPARSE_FLOAT,
                                         dim,
                                         metric_type,
-                                        false);
+                                        false,
+                                        std::nullopt);
 
     auto data = dataset.get_col<knowhere::sparse::SparseRow<float>>(fakevec_id);
 
@@ -1669,7 +1757,8 @@ TEST(Sealed, WarmupChunkCache) {
                                         milvus::DataType::VECTOR_FLOAT,
                                         dim,
                                         metric_type,
-                                        false);
+                                        false,
+                                        std::nullopt);
 
     auto rcm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                    .GetRemoteChunkManager();

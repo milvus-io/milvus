@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type ResourceGroupSuite struct {
@@ -267,6 +267,60 @@ func (s *ResourceGroupSuite) TestTransferReplica() {
 		s.mock.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
 		opt := NewTransferReplicaOption(rgName, from, to, 1)
 		err := s.client.TransferReplica(ctx, opt)
+		s.Error(err)
+	})
+}
+
+func (s *ResourceGroupSuite) TestDescribeReplica() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		collName := fmt.Sprintf("rg_%s", s.randString(6))
+		replicas := map[int64]*entity.ReplicaInfo{
+			1: {
+				ReplicaID:         1,
+				ResourceGroupName: "rg_1",
+				Shards: []*entity.Shard{
+					{ChannelName: "dml_1", ShardNodes: []int64{1, 2, 3}, ShardLeader: 2},
+				},
+				Nodes:           []int64{1, 2, 3},
+				NumOutboundNode: map[string]int32{"dml_1": 1},
+			},
+		}
+		s.mock.EXPECT().GetReplicas(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, grr *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
+			return &milvuspb.GetReplicasResponse{
+				Replicas: lo.MapToSlice(replicas, func(_ int64, r *entity.ReplicaInfo) *milvuspb.ReplicaInfo {
+					return &milvuspb.ReplicaInfo{
+						ReplicaID: r.ReplicaID,
+						ShardReplicas: lo.Map(r.Shards, func(shard *entity.Shard, _ int) *milvuspb.ShardReplica {
+							return &milvuspb.ShardReplica{
+								DmChannelName: shard.ChannelName,
+								NodeIds:       shard.ShardNodes,
+								LeaderID:      shard.ShardLeader,
+							}
+						}),
+						ResourceGroupName: r.ResourceGroupName,
+						NodeIds:           r.Nodes,
+						NumOutboundNode:   r.NumOutboundNode,
+					}
+				}),
+			}, nil
+		}).Once()
+		result, err := s.client.DescribeReplica(ctx, NewDescribeReplicaOption(collName))
+		s.NoError(err)
+		for _, replica := range result {
+			expect, ok := replicas[replica.ReplicaID]
+			if s.True(ok) {
+				s.Equal(expect, replica)
+			}
+		}
+	})
+
+	s.Run("failure", func() {
+		collName := fmt.Sprintf("rg_%s", s.randString(6))
+		s.mock.EXPECT().GetReplicas(mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Once()
+		_, err := s.client.DescribeReplica(ctx, NewDescribeReplicaOption(collName))
 		s.Error(err)
 	})
 }

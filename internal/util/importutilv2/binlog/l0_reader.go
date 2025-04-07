@@ -100,7 +100,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 		defer reader.Close()
 
 		for {
-			err := reader.Next()
+			dl, err := reader.NextValue()
 			if err != nil {
 				if err == io.EOF {
 					break
@@ -109,8 +109,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 				return nil, err
 			}
 
-			dl := reader.Value()
-			deleteData.Append(dl.Pk, dl.Ts)
+			deleteData.Append((*dl).Pk, (*dl).Ts)
 		}
 
 		r.readIdx++

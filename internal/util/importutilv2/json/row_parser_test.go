@@ -200,8 +200,8 @@ func TestRowParser_Parse_Invalid(t *testing.T) {
 		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3, 4], "x": 6, "$meta": "{\"x\": 8}", "name": "test"}`, expectErr: "duplicated key is not allowed"},
 		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3, 4], "x": 6, "$meta": "{*&%%&$*(&", "name": "test"}`, expectErr: "not a JSON format string"},
 		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3, 4], "x": 6, "$meta": [], "name": "test"}`, expectErr: "not a JSON object"},
-		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3, 4], "x": 8, "$meta": "{\"y\": 8}", "name": "testName"}`, expectErr: "value length 8 exceeds max_length 4"},
-		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3, 4, 5], "x": 8, "$meta": "{\"z\": 9}", "name": "test"}`, expectErr: "array capacity 5 exceeds max_capacity 4"},
+		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3, 4], "x": 8, "$meta": "{\"y\": 8}", "name": "testName"}`, expectErr: "value length(8) for field name exceeds max_length(4)"},
+		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3, 4, 5], "x": 8, "$meta": "{\"z\": 9}", "name": "test"}`, expectErr: "array capacity(5) for field arrayField exceeds max_capacity(4)"},
 		{name: `{"id": 1, "vector": [], "x": 8, "$meta": "{\"z\": 9}", "name": "test"}`, expectErr: "value of field 'arrayField' is missed"},
 	}
 
@@ -215,6 +215,21 @@ func TestRowParser_Parse_Invalid(t *testing.T) {
 			assert.NoError(t, err)
 
 			_, err = r.Parse(mp)
+			assert.Error(t, err)
+			assert.True(t, strings.Contains(err.Error(), c.expectErr))
+		})
+	}
+
+	cases = []testCase{
+		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3], "name": "\xc3\x28"}`, expectErr: "Syntax error"}, // test invalid uft-8
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var mp map[string]interface{}
+
+			desc := json.NewDecoder(strings.NewReader(c.name))
+			desc.UseNumber()
+			err = desc.Decode(&mp)
 			assert.Error(t, err)
 			assert.True(t, strings.Contains(err.Error(), c.expectErr))
 		})

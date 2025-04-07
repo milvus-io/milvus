@@ -1,3 +1,5 @@
+import numpy as np
+
 """ Initialized parameters """
 port = 19530
 epsilon = 0.000001
@@ -13,6 +15,7 @@ default_top_k = 10
 default_nq = 2
 default_limit = 10
 default_batch_size = 1000
+min_limit = 1
 max_limit = 16384
 max_top_k = 16384
 max_partition_num = 1024
@@ -212,6 +215,14 @@ get_wrong_format_dict = [
     {"host": 0, "port": 19520}
 ]
 
+get_all_kind_data_distribution = [
+    1, np.float64(1.0), np.double(1.0), 9707199254740993.0, 9707199254740992,
+    '1', '123', '321', '213', True, False, [1, 2], [1.0, 2], None, {}, {"a": 1},
+    {'a': 1.0}, {'a': 9707199254740993.0}, {'a': 9707199254740992}, {'a': '1'}, {'a': '123'},
+    {'a': '321'}, {'a': '213'}, {'a': True}, {'a': [1, 2, 3]}, {'a': [1.0, 2, '1']}, {'a': [1.0, 2]},
+    {'a': None}, {'a': {'b': 1}}, {'a': {'b': 1.0}}, {'a': [{'b': 1}, 2.0, np.double(3.0), '4', True, [1, 3.0], None]}
+]
+
 """ Specially defined list """
 L0_index_types = ["IVF_SQ8", "HNSW", "DISKANN"]
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
@@ -251,11 +262,11 @@ default_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_
                                  "params": {"drop_ratio_build": 0.2}}
 default_text_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25",
                                  "params": {"drop_ratio_build": 0.2, "bm25_k1": 1.5, "bm25_b": 0.75,}}
-default_search_params = {"params": default_all_search_params_params[2].copy()}
-default_search_ip_params = {"metric_type": "IP", "params": default_all_search_params_params[2].copy()}
+default_search_params = {"params": {"nlist": 128}}
+default_search_ip_params = {"metric_type": "IP", "params": {"nlist": 128}}
 default_search_binary_params = {"metric_type": "JACCARD", "params": {"nprobe": 32}}
-default_index = {"index_type": "IVF_SQ8", "metric_type": default_L0_metric, "params": default_all_indexes_params[2].copy()}
-default_binary_index = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": default_all_indexes_params[8].copy()}
+default_index = {"index_type": "IVF_SQ8", "metric_type": default_L0_metric, "params": {"nlist": 128}}
+default_binary_index = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
 default_diskann_index = {"index_type": "DISKANN", "metric_type": default_L0_metric, "params": {}}
 default_diskann_search_params = {"params": {"search_list": 30}}
 default_sparse_search_params = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}}
@@ -309,6 +320,7 @@ class CheckTasks:
     check_describe_database_property = "check_describe_database_property"
     check_insert_result = "check_insert_result"
     check_collection_fields_properties = "check_collection_fields_properties"
+    check_describe_index_property = "check_describe_index_property"
 
 
 class BulkLoadStates:

@@ -103,8 +103,8 @@ func (it *indexBuildTask) GetTaskType() string {
 }
 
 func (it *indexBuildTask) CheckTaskHealthy(mt *meta) bool {
-	_, exist := mt.indexMeta.GetIndexJob(it.GetTaskID())
-	return exist
+	job, exist := mt.indexMeta.GetIndexJob(it.GetTaskID())
+	return exist && !job.IsDeleted
 }
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
@@ -160,7 +160,9 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	typeParams := dependency.meta.indexMeta.GetTypeParams(segIndex.CollectionID, segIndex.IndexID)
 
 	fieldID := dependency.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID)
+
 	binlogIDs := getBinLogIDs(segment, fieldID)
+	totalRows := getTotalBinlogRows(segment, fieldID)
 
 	// When new index parameters are added, these parameters need to be updated to ensure they are included during the index-building process.
 	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && Params.KnowhereConfig.Enable.GetAsBool() {
@@ -259,14 +261,17 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		PartitionKeyIsolation:     partitionKeyIsolation,
 	}
 
+	it.req.LackBinlogRows = it.req.NumRows - totalRows
+
 	log.Ctx(ctx).Info("index task pre check successfully", zap.Int64("taskID", it.GetTaskID()),
 		zap.Int64("segID", segment.GetID()),
 		zap.Int32("CurrentIndexVersion", it.req.GetCurrentIndexVersion()),
-		zap.Int32("CurrentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()))
+		zap.Int32("CurrentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
+		zap.Int64("segID", segment.GetID()))
 	return true
 }
 
-func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNodeClient, meta *meta) bool {
+func (it *indexBuildTask) AssignTask(ctx context.Context, client types.DataNodeClient, meta *meta) bool {
 	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
@@ -295,7 +300,7 @@ func (it *indexBuildTask) setResult(info *workerpb.IndexTaskInfo) {
 	it.taskInfo = info
 }
 
-func (it *indexBuildTask) QueryResult(ctx context.Context, node types.IndexNodeClient) {
+func (it *indexBuildTask) QueryResult(ctx context.Context, node types.DataNodeClient) {
 	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := node.QueryJobsV2(ctx, &workerpb.QueryJobsV2Request{
@@ -316,14 +321,17 @@ func (it *indexBuildTask) QueryResult(ctx context.Context, node types.IndexNodeC
 	// indexInfos length is always one.
 	for _, info := range resp.GetIndexJobResults().GetResults() {
 		if info.GetBuildID() == it.GetTaskID() {
-			log.Ctx(ctx).Info("query task index info successfully",
-				zap.Int64("taskID", it.GetTaskID()), zap.String("result state", info.GetState().String()),
-				zap.String("failReason", info.GetFailReason()))
 			if info.GetState() == commonpb.IndexState_Finished || info.GetState() == commonpb.IndexState_Failed ||
 				info.GetState() == commonpb.IndexState_Retry {
+				log.Ctx(ctx).Info("query task index info successfully",
+					zap.Int64("taskID", it.GetTaskID()), zap.String("result state", info.GetState().String()),
+					zap.String("failReason", info.GetFailReason()))
 				// state is retry or finished or failed
 				it.setResult(info)
 			} else if info.GetState() == commonpb.IndexState_IndexStateNone {
+				log.Ctx(ctx).Info("query task index info successfully",
+					zap.Int64("taskID", it.GetTaskID()), zap.String("result state", info.GetState().String()),
+					zap.String("failReason", info.GetFailReason()))
 				it.SetState(indexpb.JobState_JobStateRetry, "index state is none in info response")
 			}
 			// inProgress or unissued, keep InProgress state
@@ -333,7 +341,7 @@ func (it *indexBuildTask) QueryResult(ctx context.Context, node types.IndexNodeC
 	it.SetState(indexpb.JobState_JobStateRetry, "index is not in info response")
 }
 
-func (it *indexBuildTask) DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool {
+func (it *indexBuildTask) DropTaskOnWorker(ctx context.Context, client types.DataNodeClient) bool {
 	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
@@ -356,4 +364,8 @@ func (it *indexBuildTask) DropTaskOnWorker(ctx context.Context, client types.Ind
 
 func (it *indexBuildTask) SetJobInfo(meta *meta) error {
 	return meta.indexMeta.FinishTask(it.taskInfo)
+}
+
+func (it *indexBuildTask) DropTaskMeta(ctx context.Context, meta *meta) error {
+	return meta.indexMeta.RemoveSegmentIndexByID(ctx, it.taskID)
 }

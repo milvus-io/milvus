@@ -432,7 +432,7 @@ def gen_dynamic_field_in_numpy_file(dir, rows, start=0, force=False):
         # non vector columns
         data = []
         if rows > 0:
-            data = [json.dumps({str(i): i, "name": fake.name(), "address": fake.address()}) for i in range(start, rows+start)]
+            data = [json.dumps({str(i): i, "name": fake.name(), "address": fake.address(), "number": i}) for i in range(start, rows+start)]
         arr = np.array(data)
         log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
         np.save(file, arr)
@@ -460,7 +460,7 @@ def gen_json_in_numpy_file(dir, data_field, rows, start=0, force=False):
     if not os.path.exists(file) or force:
         data = []
         if rows > 0:
-            data = [json.dumps({"name": fake.name(), "address": fake.address()}) for i in range(start, rows+start)]
+            data = [json.dumps({"name": fake.name(), "address": fake.address(), "number": i}) for i in range(start, rows+start)]
         arr = np.array(data)
         log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
         np.save(file, arr)
@@ -505,7 +505,7 @@ def gen_vectors(float_vector, rows, dim):
     return vectors
 
 
-def gen_sparse_vectors(rows, sparse_format="dok"):
+def gen_sparse_vectors(rows, sparse_format="dok", empty_percentage=10):
     # default sparse format is dok, dict of keys
     # another option is coo, coordinate List
 
@@ -513,6 +513,11 @@ def gen_sparse_vectors(rows, sparse_format="dok"):
     vectors = [{
         d: rng.random() for d in random.sample(range(1000), random.randint(20, 30))
     } for _ in range(rows)]
+    if empty_percentage > 0:
+        empty_nb = int(rows * empty_percentage / 100)
+        empty_ids = random.sample(range(rows), empty_nb)
+        for i in empty_ids:
+            vectors[i] = {}
     if sparse_format == "coo":
         vectors = [
             {"indices": list(x.keys()), "values": list(x.values())} for x in vectors
@@ -591,7 +596,10 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
         elif data_field == DataField.json_field:
             if not nullable:
                 data = pd.Series([json.dumps({
-                    gen_unique_str(): random.randint(-999999, 9999999)
+                    gen_unique_str(): random.randint(-999999, 9999999),
+                    "name": fake.name(),
+                    "address": fake.address(),
+                    "number": i
                 }) for i in range(start, rows + start)], dtype=np.dtype("str"))
             else:
                 data = pd.Series([json.dumps({
@@ -652,7 +660,7 @@ def gen_file_name(is_row_based, rows, dim, auto_id, str_pk,
         pk = "str_pk_"
     prefix = gen_file_prefix(is_row_based=is_row_based, auto_id=auto_id, prefix=err_type)
 
-    file_name = f"{prefix}_{pk}{vt}{field_suffix}{dim}d_{row_suffix}_{file_num}_{int(time.time())}{file_type}"
+    file_name = f"{prefix}_{pk}{vt}{field_suffix}{dim}d_{row_suffix}_{file_num}_{str(uuid.uuid4())}{file_type}"
     return file_name
 
 
@@ -759,7 +767,8 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
                     d[data_field] = random.choice([True, False])
             elif data_field == DataField.json_field:
                 if not nullable:
-                    d[data_field] = {str(r+start): r+start}
+                    d[data_field] = {str(r+start): r+start, "name": fake.name(),
+                                     "address": fake.address(), "number": r+start}
                 else:
                     d[data_field] = {str(r + start): None}
             elif data_field == DataField.array_bool_field:
@@ -815,7 +824,7 @@ def gen_new_json_files(float_vector, rows, dim, data_fields, file_nums=1, array_
         rows = 5000
     start_uid = 0
     for i in range(file_nums):
-        file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{i}-{int(time.time())}.json"
+        file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{i}-{str(uuid.uuid4())}.json"
         file = f"{data_source_new}/{file_name}"
         Path(file).parent.mkdir(parents=True, exist_ok=True)
         data = gen_dict_data_by_data_field(data_fields=data_fields, rows=rows, start=start_uid,
@@ -835,7 +844,7 @@ def gen_new_json_files(float_vector, rows, dim, data_fields, file_nums=1, array_
             all_data = []
             for _ in range(total_batch):
                 all_data += data
-            file_name = f"data-fields-{len(data_fields)}-rows-{total_rows}-dim-{dim}-file-num-{i}-{int(time.time())}.json"
+            file_name = f"data-fields-{len(data_fields)}-rows-{total_rows}-dim-{dim}-file-num-{i}-{str(uuid.uuid4())}.json"
             with open(f"{data_source_new}/{file_name}", "w") as f:
                 json.dump(all_data, f)
             batch_file_size = os.path.getsize(f"{data_source_new}/{file_name}")
@@ -946,7 +955,7 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
 def gen_dynamic_field_data_in_parquet_file(rows, start=0):
     data = []
     if rows > 0:
-        data = pd.Series([json.dumps({str(i): i, "name": fake.name(), "address": fake.address()}) for i in range(start, rows+start)], dtype=np.dtype("str"))
+        data = pd.Series([json.dumps({str(i): i, "name": fake.name(), "address": fake.address(), "number": i}) for i in range(start, rows+start)], dtype=np.dtype("str"))
     return data
 
 
@@ -982,7 +991,7 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, row_
             all_field_data["$meta"] = gen_dynamic_field_data_in_parquet_file(rows=rows, start=0)
         df = pd.DataFrame(all_field_data)
         log.info(f"df: \n{df}")
-        file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{file_nums}-error-{err_type}-{int(time.time())}.parquet"
+        file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{file_nums}-error-{err_type}-{str(uuid.uuid4())}.parquet"
         if row_group_size is not None:
             df.to_parquet(f"{data_source_new}/{file_name}", engine='pyarrow', row_group_size=row_group_size)
         else:
@@ -995,7 +1004,7 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, row_
             total_batch = int(file_size*1024*1024*1024/batch_file_size)
             total_rows = total_batch * rows
             all_df = pd.concat([df for _ in range(total_batch)], axis=0, ignore_index=True)
-            file_name = f"data-fields-{len(data_fields)}-rows-{total_rows}-dim-{dim}-file-num-{file_nums}-error-{err_type}-{int(time.time())}.parquet"
+            file_name = f"data-fields-{len(data_fields)}-rows-{total_rows}-dim-{dim}-file-num-{file_nums}-error-{err_type}-{str(uuid.uuid4())}.parquet"
             log.info(f"all df: \n {all_df}")
             if row_group_size is not None:
                 all_df.to_parquet(f"{data_source_new}/{file_name}", engine='pyarrow', row_group_size=row_group_size)
@@ -1014,7 +1023,7 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, row_
             if enable_dynamic_field:
                 all_field_data["$meta"] = gen_dynamic_field_data_in_parquet_file(rows=rows, start=0)
             df = pd.DataFrame(all_field_data)
-            file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{i}-error-{err_type}-{int(time.time())}.parquet"
+            file_name = f"data-fields-{len(data_fields)}-rows-{rows}-dim-{dim}-file-num-{i}-error-{err_type}-{str(uuid.uuid4())}.parquet"
             if row_group_size is not None:
                 df.to_parquet(f"{data_source_new}/{file_name}", engine='pyarrow', row_group_size=row_group_size)
             else:

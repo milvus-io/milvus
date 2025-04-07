@@ -24,53 +24,52 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
+	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	typeutil "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
-	return indexnodeclient.NewClient(ctx, addr, nodeID, paramtable.Get().DataCoordCfg.WithCredential.GetAsBool())
+func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+	return datanodeclient.NewClient(ctx, addr, nodeID, paramtable.Get().DataCoordCfg.WithCredential.GetAsBool())
 }
 
 type WorkerManager interface {
 	AddNode(nodeID typeutil.UniqueID, address string) error
 	RemoveNode(nodeID typeutil.UniqueID)
 	StoppingNode(nodeID typeutil.UniqueID)
-	PickClient() (typeutil.UniqueID, types.IndexNodeClient)
-	ClientSupportDisk() bool
-	GetAllClients() map[typeutil.UniqueID]types.IndexNodeClient
-	GetClientByID(nodeID typeutil.UniqueID) (types.IndexNodeClient, bool)
+	PickClient() (typeutil.UniqueID, types.DataNodeClient)
+	QuerySlots() map[int64]int64
+	GetAllClients() map[typeutil.UniqueID]types.DataNodeClient
+	GetClientByID(nodeID typeutil.UniqueID) (types.DataNodeClient, bool)
 }
 
 // IndexNodeManager is used to manage the client of IndexNode.
 type IndexNodeManager struct {
-	nodeClients      map[typeutil.UniqueID]types.IndexNodeClient
+	nodeClients      map[typeutil.UniqueID]types.DataNodeClient
 	stoppingNodes    map[typeutil.UniqueID]struct{}
 	lock             lock.RWMutex
 	ctx              context.Context
-	indexNodeCreator IndexNodeCreatorFunc
+	indexNodeCreator DataNodeCreatorFunc
 }
 
 // NewNodeManager is used to create a new IndexNodeManager.
-func NewNodeManager(ctx context.Context, indexNodeCreator IndexNodeCreatorFunc) *IndexNodeManager {
+func NewNodeManager(ctx context.Context, dataNodeCreator DataNodeCreatorFunc) *IndexNodeManager {
 	return &IndexNodeManager{
-		nodeClients:      make(map[typeutil.UniqueID]types.IndexNodeClient),
+		nodeClients:      make(map[typeutil.UniqueID]types.DataNodeClient),
 		stoppingNodes:    make(map[typeutil.UniqueID]struct{}),
 		lock:             lock.RWMutex{},
 		ctx:              ctx,
-		indexNodeCreator: indexNodeCreator,
+		indexNodeCreator: dataNodeCreator,
 	}
 }
 
 // SetClient sets IndexNode client to node manager.
-func (nm *IndexNodeManager) SetClient(nodeID typeutil.UniqueID, client types.IndexNodeClient) {
+func (nm *IndexNodeManager) SetClient(nodeID typeutil.UniqueID, client types.DataNodeClient) {
 	log := log.Ctx(nm.ctx)
 	log.Debug("set IndexNode client", zap.Int64("nodeID", nodeID))
 	nm.lock.Lock()
@@ -101,7 +100,7 @@ func (nm *IndexNodeManager) StoppingNode(nodeID typeutil.UniqueID) {
 func (nm *IndexNodeManager) AddNode(nodeID typeutil.UniqueID, address string) error {
 	log.Ctx(nm.ctx).Debug("add IndexNode", zap.Int64("nodeID", nodeID), zap.String("node address", address))
 	var (
-		nodeClient types.IndexNodeClient
+		nodeClient types.DataNodeClient
 		err        error
 	)
 
@@ -115,7 +114,43 @@ func (nm *IndexNodeManager) AddNode(nodeID typeutil.UniqueID, address string) er
 	return nil
 }
 
-func (nm *IndexNodeManager) PickClient() (typeutil.UniqueID, types.IndexNodeClient) {
+func (nm *IndexNodeManager) QuerySlots() map[int64]int64 {
+	nm.lock.Lock()
+	defer nm.lock.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), querySlotTimeout)
+	defer cancel()
+
+	nodeSlots := make(map[int64]int64)
+	mu := &sync.Mutex{}
+	wg := &sync.WaitGroup{}
+	for nodeID, client := range nm.nodeClients {
+		if _, ok := nm.stoppingNodes[nodeID]; !ok {
+			wg.Add(1)
+			go func(nodeID int64) {
+				defer wg.Done()
+				resp, err := client.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
+				if err != nil {
+					log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+					return
+				}
+				if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+					log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
+						zap.String("reason", resp.GetStatus().GetReason()))
+					return
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				nodeSlots[nodeID] = resp.GetTaskSlots()
+			}(nodeID)
+		}
+	}
+	wg.Wait()
+	log.Ctx(context.TODO()).Debug("query slot done", zap.Any("nodeSlots", nodeSlots))
+	return nodeSlots
+}
+
+func (nm *IndexNodeManager) PickClient() (typeutil.UniqueID, types.DataNodeClient) {
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
 
@@ -168,62 +203,11 @@ func (nm *IndexNodeManager) PickClient() (typeutil.UniqueID, types.IndexNodeClie
 	return 0, nil
 }
 
-func (nm *IndexNodeManager) ClientSupportDisk() bool {
-	log := log.Ctx(nm.ctx)
-	log.Debug("check if client support disk index")
-	allClients := nm.GetAllClients()
-	if len(allClients) == 0 {
-		log.Warn("there is no IndexNode online")
-		return false
-	}
-
-	// Note: In order to quickly end other goroutines, an error is returned when the client is successfully selected
-	ctx, cancel := context.WithCancel(nm.ctx)
-	var (
-		enableDisk = false
-		nodeMutex  = lock.Mutex{}
-		wg         = sync.WaitGroup{}
-	)
-
-	for nodeID, client := range allClients {
-		nodeID := nodeID
-		client := client
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			resp, err := client.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
-			if err := merr.CheckRPCCall(resp, err); err != nil {
-				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
-				return
-			}
-			log.Debug("get job stats success", zap.Int64("nodeID", nodeID), zap.Bool("enable disk", resp.GetEnableDisk()))
-			if resp.GetEnableDisk() {
-				nodeMutex.Lock()
-				defer nodeMutex.Unlock()
-				cancel()
-				if !enableDisk {
-					enableDisk = true
-				}
-				return
-			}
-		}()
-	}
-	wg.Wait()
-	cancel()
-	if enableDisk {
-		log.Info("IndexNode support disk index")
-		return true
-	}
-
-	log.Error("all IndexNodes do not support disk indexes")
-	return false
-}
-
-func (nm *IndexNodeManager) GetAllClients() map[typeutil.UniqueID]types.IndexNodeClient {
+func (nm *IndexNodeManager) GetAllClients() map[typeutil.UniqueID]types.DataNodeClient {
 	nm.lock.RLock()
 	defer nm.lock.RUnlock()
 
-	allClients := make(map[typeutil.UniqueID]types.IndexNodeClient, len(nm.nodeClients))
+	allClients := make(map[typeutil.UniqueID]types.DataNodeClient, len(nm.nodeClients))
 	for nodeID, client := range nm.nodeClients {
 		if _, ok := nm.stoppingNodes[nodeID]; !ok {
 			allClients[nodeID] = client
@@ -233,7 +217,7 @@ func (nm *IndexNodeManager) GetAllClients() map[typeutil.UniqueID]types.IndexNod
 	return allClients
 }
 
-func (nm *IndexNodeManager) GetClientByID(nodeID typeutil.UniqueID) (types.IndexNodeClient, bool) {
+func (nm *IndexNodeManager) GetClientByID(nodeID typeutil.UniqueID) (types.DataNodeClient, bool) {
 	nm.lock.RLock()
 	defer nm.lock.RUnlock()
 
@@ -249,7 +233,7 @@ type indexNodeGetMetricsResponse struct {
 
 // getMetrics get metrics information of all IndexNode.
 func (nm *IndexNodeManager) getMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) []indexNodeGetMetricsResponse {
-	var clients []types.IndexNodeClient
+	var clients []types.DataNodeClient
 	nm.lock.RLock()
 	for _, node := range nm.nodeClients {
 		clients = append(clients, node)

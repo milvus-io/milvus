@@ -203,13 +203,28 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     ClearData() override;
 
+    bool
+    is_field_exist(FieldId field_id) const override {
+        return schema_->get_fields().find(field_id) !=
+               schema_->get_fields().end();
+    }
+
  protected:
     // blob and row_count
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
+    chunk_string_view_impl(
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
+
+    std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    chunk_array_view_impl(
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
     chunk_view_by_offsets(FieldId field_id,

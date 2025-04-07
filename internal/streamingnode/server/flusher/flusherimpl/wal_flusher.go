@@ -8,9 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
-	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
-	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -32,6 +30,7 @@ func RecoverWALFlusher(param interceptors.InterceptorBuildParam) *WALFlusherImpl
 		logger: resource.Resource().Logger().With(
 			log.FieldComponent("flusher"),
 			zap.String("pchannel", param.WALImpls.Channel().Name)),
+		metrics: newFlusherMetrics(param.WALImpls.Channel()),
 	}
 	go flusher.Execute()
 	return flusher
@@ -42,6 +41,7 @@ type WALFlusherImpl struct {
 	wal               *syncutil.Future[wal.WAL]
 	flusherComponents *flusherComponents
 	logger            *log.MLogger
+	metrics           *flusherMetrics
 }
 
 // Execute starts the wal flusher.
@@ -79,6 +79,9 @@ func (impl *WALFlusherImpl) Execute() (err error) {
 	defer scanner.Close()
 
 	impl.logger.Info("wal flusher start to work")
+	impl.metrics.IntoState(flusherStateInWorking)
+	defer impl.metrics.IntoState(flusherStateOnClosing)
+
 	for {
 		select {
 		case <-impl.notifier.Context().Done():
@@ -88,6 +91,7 @@ func (impl *WALFlusherImpl) Execute() (err error) {
 				impl.logger.Warn("wal flusher is closing for closed scanner channel, which is unexpected at graceful way")
 				return nil
 			}
+			impl.metrics.ObserveMetrics(msg.TimeTick())
 			if err := impl.dispatch(msg); err != nil {
 				// The error is always context canceled.
 				return nil
@@ -100,6 +104,7 @@ func (impl *WALFlusherImpl) Execute() (err error) {
 func (impl *WALFlusherImpl) Close() {
 	impl.notifier.Cancel()
 	impl.notifier.BlockUntilFinish()
+	impl.metrics.Close()
 }
 
 // buildFlusherComponents builds the components of the flusher.
@@ -130,9 +135,6 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	// build all components.
 	broker := broker.NewCoordBroker(dc, paramtable.GetNodeID())
 	chunkManager := resource.Resource().ChunkManager()
-	syncMgr := syncmgr.NewSyncManager(chunkManager)
-	wbMgr := writebuffer.NewManager(syncMgr)
-	wbMgr.Start()
 
 	pm, err := recoverPChannelCheckpointManager(ctx, l.WALName(), l.Channel().Name, checkpoints)
 	if err != nil {
@@ -148,8 +150,6 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	fc := &flusherComponents{
 		wal:               l,
 		broker:            broker,
-		syncMgr:           syncMgr,
-		wbMgr:             wbMgr,
 		cpUpdater:         cpUpdater,
 		chunkManager:      chunkManager,
 		dataServices:      make(map[string]*dataSyncServiceWrapper),

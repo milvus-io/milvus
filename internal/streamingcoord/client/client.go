@@ -44,9 +44,6 @@ type BroadcastService interface {
 	// Ack sends a broadcast ack to the streaming service.
 	Ack(ctx context.Context, req types.BroadcastAckRequest) error
 
-	// BlockUntilEvent blocks until the event happens.
-	BlockUntilEvent(ctx context.Context, ev *message.BroadcastEvent) error
-
 	// Close closes the broadcast service.
 	Close()
 }
@@ -71,7 +68,7 @@ type Client interface {
 func NewClient(etcdCli *clientv3.Client) Client {
 	// StreamingCoord is deployed on DataCoord node.
 	role := sessionutil.GetSessionPrefixByRole(typeutil.RootCoordRole)
-	rb := resolver.NewSessionExclusiveBuilder(etcdCli, role)
+	rb := resolver.NewSessionExclusiveBuilder(etcdCli, role, ">=2.6.0-dev")
 	dialTimeout := paramtable.Get().StreamingCoordGrpcClientCfg.DialTimeout.GetAsDuration(time.Millisecond)
 	dialOptions := getDialOptions(rb)
 	conn := lazygrpc.NewConn(func(ctx context.Context) (*grpc.ClientConn, error) {

@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -49,7 +50,7 @@ func TestOpenerAdaptor(t *testing.T) {
 			wal.EXPECT().Channel().Return(boo.Channel)
 			wal.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
 				func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
-					return nil, nil
+					return walimplstest.NewTestMessageID(1), nil
 				})
 			wal.EXPECT().Close().Run(func() {})
 			return wal, nil

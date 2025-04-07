@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -36,9 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
@@ -71,7 +67,11 @@ func (p *streamPipeline) work() {
 		case <-p.closeCh:
 			log.Ctx(context.TODO()).Debug("stream pipeline input closed")
 			return
-		case msg := <-p.input:
+		case msg, ok := <-p.input:
+			if !ok {
+				log.Ctx(context.TODO()).Debug("stream pipeline input closed")
+				return
+			}
 			p.lastAccessTime.Store(time.Now())
 			log.Ctx(context.TODO()).RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
 			p.pipeline.inputChannel <- msg
@@ -123,22 +123,15 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 	}
 
 	start := time.Now()
-	err = retry.Handle(ctx, func() (bool, error) {
-		p.input, err = p.dispatcher.Register(ctx, &msgdispatcher.StreamConfig{
-			VChannel:        p.vChannel,
-			Pos:             position,
-			SubPos:          common.SubscriptionPositionUnknown,
-			ReplicateConfig: p.replicateConfig,
-		})
-		if err != nil {
-			log.Warn("dispatcher register failed", zap.String("channel", position.ChannelName), zap.Error(err))
-			return errors.Is(err, merr.ErrTooManyConsumers), err
-		}
-		return false, nil
-	}, retry.Sleep(paramtable.Get().MQCfg.RetrySleep.GetAsDuration(time.Second)), // 5 seconds
-		retry.MaxSleepTime(paramtable.Get().MQCfg.RetryTimeout.GetAsDuration(time.Second))) // 5 minutes
+	p.input, err = p.dispatcher.Register(ctx, &msgdispatcher.StreamConfig{
+		VChannel:        p.vChannel,
+		Pos:             position,
+		SubPos:          common.SubscriptionPositionUnknown,
+		ReplicateConfig: p.replicateConfig,
+	})
 	if err != nil {
 		log.Error("dispatcher register failed after retried", zap.String("channel", position.ChannelName), zap.Error(err))
+		p.dispatcher.Deregister(p.vChannel)
 		return WrapErrRegDispather(err)
 	}
 
@@ -169,12 +162,15 @@ func (p *streamPipeline) Start() error {
 
 func (p *streamPipeline) Close() {
 	p.closeOnce.Do(func() {
+		// close datasource first
+		p.dispatcher.Deregister(p.vChannel)
+		// close stream input
 		close(p.closeCh)
 		p.closeWg.Wait()
 		if p.scanner != nil {
 			p.scanner.Close()
 		}
-		p.dispatcher.Deregister(p.vChannel)
+		// close the underline pipeline
 		p.pipeline.Close()
 	})
 }

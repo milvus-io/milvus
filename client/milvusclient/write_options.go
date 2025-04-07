@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/row"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type InsertOption interface {
@@ -257,10 +257,11 @@ func (opt *columnBasedDataOption) InsertRequest(coll *entity.Collection) (*milvu
 		return nil, err
 	}
 	return &milvuspb.InsertRequest{
-		CollectionName: opt.collName,
-		PartitionName:  opt.partitionName,
-		FieldsData:     fieldsData,
-		NumRows:        uint32(rowNum),
+		CollectionName:  opt.collName,
+		PartitionName:   opt.partitionName,
+		FieldsData:      fieldsData,
+		NumRows:         uint32(rowNum),
+		SchemaTimestamp: coll.UpdateTimestamp,
 	}, nil
 }
 
@@ -270,10 +271,11 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 		return nil, err
 	}
 	return &milvuspb.UpsertRequest{
-		CollectionName: opt.collName,
-		PartitionName:  opt.partitionName,
-		FieldsData:     fieldsData,
-		NumRows:        uint32(rowNum),
+		CollectionName:  opt.collName,
+		PartitionName:   opt.partitionName,
+		FieldsData:      fieldsData,
+		NumRows:         uint32(rowNum),
+		SchemaTimestamp: coll.UpdateTimestamp,
 	}, nil
 }
 

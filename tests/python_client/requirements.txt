@@ -15,7 +15,7 @@ pytest-level==0.1.1
 pytest-xdist==2.5.0
 
 pytest-rerunfailures==14.0
-git+https://github.com/Projectplace/pytest-tags
+pytest_tagging==1.6.0
 ndg-httpsclient
 pyopenssl
 pyasn1
@@ -28,8 +28,8 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.6.0rc79
-pymilvus[bulk_writer]==2.6.0rc79
+pymilvus==2.6.0rc91
+pymilvus[bulk_writer]==2.6.0rc91
 
 
 # for customize config test
@@ -54,7 +54,7 @@ numpy==1.26.4
 tenacity==8.1.0
 rich==13.7.0
 # for standby test
-etcd-sdk-python==0.0.4
+etcd-sdk-python==0.0.6
 deepdiff==6.7.1
 
 # for test result analyzer
@@ -77,3 +77,6 @@ locust==2.25.0
 
 # for supporting higher python version
 typing_extensions==4.12.2
+
+# for env configuration
+python-dotenv<=2.0.0

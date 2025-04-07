@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // MetaReloadSuite tests meta reload & meta creation related logic
@@ -655,7 +656,7 @@ func TestMeta_Basic(t *testing.T) {
 		const rowCount1 = 300
 
 		// no segment
-		nums := meta.GetNumRowsOfCollection(collID)
+		nums := meta.GetNumRowsOfCollection(context.Background(), collID)
 		assert.EqualValues(t, 0, nums)
 
 		// add seg1 with 100 rows
@@ -675,7 +676,7 @@ func TestMeta_Basic(t *testing.T) {
 		// check partition/collection statistics
 		nums = meta.GetNumRowsOfPartition(context.TODO(), collID, partID0)
 		assert.EqualValues(t, (rowCount0 + rowCount1), nums)
-		nums = meta.GetNumRowsOfCollection(collID)
+		nums = meta.GetNumRowsOfCollection(context.Background(), collID)
 		assert.EqualValues(t, (rowCount0 + rowCount1), nums)
 	})
 
@@ -742,7 +743,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
 		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
 
-		meta.collections[collID] = collInfo
+		meta.collections.Insert(collID, collInfo)
 		quotaInfo = meta.GetQuotaInfo()
 		assert.Len(t, quotaInfo.CollectionBinlogSize, 1)
 		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
@@ -754,12 +755,11 @@ func TestMeta_Basic(t *testing.T) {
 		ret := meta.SetStoredIndexFileSizeMetric()
 		assert.Equal(t, uint64(0), ret)
 
-		meta.collections = map[UniqueID]*collectionInfo{
-			100: {
-				ID:           100,
-				DatabaseName: "db",
-			},
-		}
+		meta.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		meta.collections.Insert(100, &collectionInfo{
+			ID:           100,
+			DatabaseName: "db",
+		})
 		ret = meta.SetStoredIndexFileSizeMetric()
 		assert.Equal(t, uint64(11), ret)
 	})
@@ -810,7 +810,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		segment1 := NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1, State: commonpb.SegmentState_Growing,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 1, 222)},
 			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
 		})
 		err = meta.AddSegment(context.TODO(), segment1)
@@ -820,11 +820,11 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
+			UpdateStatusOperator(1, commonpb.SegmentState_Growing),
 			AddBinlogsOperator(1,
-				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 1)},
-				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 1)},
-				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: "", LogID: 2}}}},
+				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 333)},
+				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 334)},
+				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogID: 335}}}},
 				[]*datapb.FieldBinlog{},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
@@ -837,9 +837,9 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.EqualValues(t, 1, updated.getDeltaCount())
 
 		expected := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID: 1, State: commonpb.SegmentState_Flushing, NumOfRows: 10,
+			ID: 1, State: commonpb.SegmentState_Growing, NumOfRows: 11,
 			StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}},
-			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0, 1)},
+			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(1, 222, 333)},
 			Statslogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0, 1)},
 			Deltalogs:     []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000}}}},
 		}}
@@ -1202,9 +1202,9 @@ func TestMeta_HasSegments(t *testing.T) {
 			segments: map[UniqueID]*SegmentInfo{
 				1: {
 					SegmentInfo: &datapb.SegmentInfo{
-						ID: 1,
+						ID:        1,
+						NumOfRows: 100,
 					},
-					currRows: 100,
 				},
 			},
 		},
@@ -1347,7 +1347,7 @@ func Test_meta_GcConfirm(t *testing.T) {
 func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 	t.Run("fail to list database", func(t *testing.T) {
 		m := &meta{
-			collections: make(map[UniqueID]*collectionInfo),
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		}
 		mockBroker := broker.NewMockBroker(t)
 		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(nil, errors.New("list database failed, mocked"))
@@ -1357,7 +1357,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 
 	t.Run("fail to show collections", func(t *testing.T) {
 		m := &meta{
-			collections: make(map[UniqueID]*collectionInfo),
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		}
 		mockBroker := broker.NewMockBroker(t)
 
@@ -1371,7 +1371,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 
 	t.Run("fail to describe collection", func(t *testing.T) {
 		m := &meta{
-			collections: make(map[UniqueID]*collectionInfo),
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		}
 		mockBroker := broker.NewMockBroker(t)
 
@@ -1389,7 +1389,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 
 	t.Run("fail to show partitions", func(t *testing.T) {
 		m := &meta{
-			collections: make(map[UniqueID]*collectionInfo),
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		}
 		mockBroker := broker.NewMockBroker(t)
 
@@ -1408,7 +1408,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		m := &meta{
-			collections: make(map[UniqueID]*collectionInfo),
+			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		}
 		mockBroker := broker.NewMockBroker(t)
 

@@ -42,9 +42,6 @@ type OpenAIEmbeddingProvider struct {
 
 func createOpenAIEmbeddingClient(apiKey string, url string) (*openai.OpenAIEmbeddingClient, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv(openaiAKEnvStr)
-	}
-	if apiKey == "" {
 		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", openaiAKEnvStr)
 	}
 
@@ -56,16 +53,16 @@ func createOpenAIEmbeddingClient(apiKey string, url string) (*openai.OpenAIEmbed
 	return c, nil
 }
 
-func createAzureOpenAIEmbeddingClient(apiKey string, url string) (*openai.AzureOpenAIEmbeddingClient, error) {
-	if apiKey == "" {
-		apiKey = os.Getenv(azureOpenaiAKEnvStr)
-	}
+func createAzureOpenAIEmbeddingClient(apiKey string, url string, resourceName string) (*openai.AzureOpenAIEmbeddingClient, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service", azureOpenaiAKEnvStr)
 	}
 
 	if url == "" {
-		if resourceName := os.Getenv(azureOpenaiResourceName); resourceName != "" {
+		if resourceName == "" {
+			resourceName = os.Getenv(azureOpenaiResourceName)
+		}
+		if resourceName != "" {
 			url = fmt.Sprintf("https://%s.openai.azure.com", resourceName)
 		}
 	}
@@ -76,14 +73,14 @@ func createAzureOpenAIEmbeddingClient(apiKey string, url string) (*openai.AzureO
 	return c, nil
 }
 
-func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, isAzure bool) (*OpenAIEmbeddingProvider, error) {
+func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, isAzure bool) (*OpenAIEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	var apiKey, url, modelName, user string
-	var dim int64
 
+	var modelName, user string
+	var dim int64
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
 		case modelNameParamKey:
@@ -95,27 +92,21 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 			}
 		case userParamKey:
 			user = param.Value
-		case apiKeyParamKey:
-			apiKey = param.Value
-		case embeddingURLParamKey:
-			url = param.Value
 		default:
 		}
 	}
 
 	var c openai.OpenAIEmbeddingInterface
 	if !isAzure {
-		if modelName != TextEmbeddingAda002 && modelName != TextEmbedding3Small && modelName != TextEmbedding3Large {
-			return nil, fmt.Errorf("Unsupported model: %s, only support [%s, %s, %s]",
-				modelName, TextEmbeddingAda002, TextEmbedding3Small, TextEmbedding3Large)
-		}
-
+		apiKey, url := parseAKAndURL(functionSchema.Params, params, openaiAKEnvStr)
 		c, err = createOpenAIEmbeddingClient(apiKey, url)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		c, err = createAzureOpenAIEmbeddingClient(apiKey, url)
+		apiKey, url := parseAKAndURL(functionSchema.Params, params, azureOpenaiAKEnvStr)
+		resourceName := params["resource_name"]
+		c, err = createAzureOpenAIEmbeddingClient(apiKey, url, resourceName)
 		if err != nil {
 			return nil, err
 		}
@@ -133,12 +124,12 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 	return &provider, nil
 }
 
-func NewOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema) (*OpenAIEmbeddingProvider, error) {
-	return newOpenAIEmbeddingProvider(fieldSchema, functionSchema, false)
+func NewOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*OpenAIEmbeddingProvider, error) {
+	return newOpenAIEmbeddingProvider(fieldSchema, functionSchema, params, false)
 }
 
-func NewAzureOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema) (*OpenAIEmbeddingProvider, error) {
-	return newOpenAIEmbeddingProvider(fieldSchema, functionSchema, true)
+func NewAzureOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*OpenAIEmbeddingProvider, error) {
+	return newOpenAIEmbeddingProvider(fieldSchema, functionSchema, params, true)
 }
 
 func (provider *OpenAIEmbeddingProvider) MaxBatch() int {
@@ -149,7 +140,7 @@ func (provider *OpenAIEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *OpenAIEmbeddingProvider) CallEmbedding(texts []string, _ TextEmbeddingMode) ([][]float32, error) {
+func (provider *OpenAIEmbeddingProvider) CallEmbedding(texts []string, _ TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	data := make([][]float32, 0, numRows)
 	for i := 0; i < numRows; i += provider.maxBatch {

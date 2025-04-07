@@ -70,6 +70,7 @@ type ComponentParam struct {
 	AutoIndexConfig AutoIndexConfig
 	GpuConfig       gpuConfig
 	TraceCfg        traceConfig
+	HolmesCfg       holmesConfig
 
 	RootCoordCfg   rootCoordConfig
 	ProxyCfg       proxyConfig
@@ -77,13 +78,13 @@ type ComponentParam struct {
 	QueryNodeCfg   queryNodeConfig
 	DataCoordCfg   dataCoordConfig
 	DataNodeCfg    dataNodeConfig
-	IndexNodeCfg   indexNodeConfig
 	KnowhereConfig knowhereConfig
 	HTTPCfg        httpConfig
 	LogCfg         logConfig
 	RoleCfg        roleConfig
 	RbacConfig     rbacConfig
 	StreamingCfg   streamingConfig
+	FunctionCfg    functionConfig
 
 	InternalTLSCfg InternalTLSConfig
 
@@ -93,7 +94,6 @@ type ComponentParam struct {
 	QueryNodeGrpcServerCfg     GrpcServerConfig
 	DataCoordGrpcServerCfg     GrpcServerConfig
 	DataNodeGrpcServerCfg      GrpcServerConfig
-	IndexNodeGrpcServerCfg     GrpcServerConfig
 	StreamingNodeGrpcServerCfg GrpcServerConfig
 
 	RootCoordGrpcClientCfg      GrpcClientConfig
@@ -102,7 +102,6 @@ type ComponentParam struct {
 	QueryNodeGrpcClientCfg      GrpcClientConfig
 	DataCoordGrpcClientCfg      GrpcClientConfig
 	DataNodeGrpcClientCfg       GrpcClientConfig
-	IndexNodeGrpcClientCfg      GrpcClientConfig
 	StreamingCoordGrpcClientCfg GrpcClientConfig
 	StreamingNodeGrpcClientCfg  GrpcClientConfig
 	IntegrationTestCfg          integrationTestConfig
@@ -125,6 +124,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QuotaConfig.init(bt)
 	p.AutoIndexConfig.init(bt)
 	p.TraceCfg.init(bt)
+	p.HolmesCfg.init(bt)
 
 	p.RootCoordCfg.init(bt)
 	p.ProxyCfg.init(bt)
@@ -132,7 +132,6 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QueryNodeCfg.init(bt)
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
-	p.IndexNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
@@ -140,6 +139,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.RbacConfig.init(bt)
 	p.GpuConfig.init(bt)
 	p.KnowhereConfig.init(bt)
+	p.FunctionCfg.init(bt)
 
 	p.InternalTLSCfg.Init(bt)
 
@@ -150,7 +150,6 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QueryNodeGrpcServerCfg.Init("queryNode", bt)
 	p.DataCoordGrpcServerCfg.Init("dataCoord", bt)
 	p.DataNodeGrpcServerCfg.Init("dataNode", bt)
-	p.IndexNodeGrpcServerCfg.Init("indexNode", bt)
 	p.StreamingNodeGrpcServerCfg.Init("streamingNode", bt)
 
 	p.RootCoordGrpcClientCfg.Init("rootCoord", bt)
@@ -159,7 +158,6 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QueryNodeGrpcClientCfg.Init("queryNode", bt)
 	p.DataCoordGrpcClientCfg.Init("dataCoord", bt)
 	p.DataNodeGrpcClientCfg.Init("dataNode", bt)
-	p.IndexNodeGrpcClientCfg.Init("indexNode", bt)
 	p.StreamingCoordGrpcClientCfg.Init("streamingCoord", bt)
 	p.StreamingNodeGrpcClientCfg.Init("streamingNode", bt)
 
@@ -296,6 +294,8 @@ type commonConfig struct {
 	LocalRPCEnabled ParamItem `refreshable:"false"`
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
+
+	EnabledOptimizeExpr ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -998,6 +998,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.SyncTaskPoolReleaseTimeoutSeconds.Init(base.mgr)
+
+	p.EnabledOptimizeExpr = ParamItem{
+		Key:          "common.enabledOptimizeExpr",
+		Version:      "2.5.6",
+		DefaultValue: "true",
+		Doc:          "Indicates whether to enable optimize expr",
+		Export:       true,
+	}
+	p.EnabledOptimizeExpr.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -1109,6 +1118,102 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Doc:          "segcore initialization timeout in seconds, preventing otlp grpc hangs forever",
 	}
 	t.InitTimeoutSeconds.Init(base.mgr)
+}
+
+type holmesConfig struct {
+	Enable          ParamItem `refreshable:"false"`
+	DumpPath        ParamItem `refreshable:"false"`
+	UseCGroup       ParamItem `refreshable:"false"`
+	CollectInterval ParamItem `refreshable:"false"`
+
+	EnableDumpProfile ParamItem `refreshable:"false"`
+	ProfileMinCPU     ParamItem `refreshable:"false"`
+	ProfileDiffCPU    ParamItem `refreshable:"false"`
+	ProfileAbsCPU     ParamItem `refreshable:"false"`
+	ProfileCooldown   ParamItem `refreshable:"false"`
+}
+
+func (t *holmesConfig) init(base *BaseTable) {
+	t.Enable = ParamItem{
+		Key:          "holmes.enable",
+		Version:      "2.5.6",
+		DefaultValue: "false",
+		Doc:          "enable holmes or not",
+		Export:       true,
+	}
+	t.Enable.Init(base.mgr)
+
+	t.DumpPath = ParamItem{
+		Key:          "holmes.dumpPath",
+		Version:      "2.5.6",
+		DefaultValue: "/tmp",
+		Doc:          "holmes dump path",
+		Export:       true,
+	}
+	t.DumpPath.Init(base.mgr)
+
+	t.UseCGroup = ParamItem{
+		Key:          "holmes.useCGroup",
+		Version:      "2.5.6",
+		DefaultValue: "true",
+		Doc:          "use cgroup or not",
+		Export:       true,
+	}
+	t.UseCGroup.Init(base.mgr)
+
+	t.CollectInterval = ParamItem{
+		Key:          "holmes.collectInterval",
+		Version:      "2.5.6",
+		DefaultValue: "10",
+		Doc:          "holmes collect interval in seconds",
+		Export:       true,
+	}
+	t.CollectInterval.Init(base.mgr)
+
+	t.EnableDumpProfile = ParamItem{
+		Key:          "holmes.profile.enable",
+		Version:      "2.5.6",
+		DefaultValue: "false",
+		Doc:          "enable dump profile or not",
+		Export:       true,
+	}
+	t.EnableDumpProfile.Init(base.mgr)
+
+	t.ProfileMinCPU = ParamItem{
+		Key:          "holmes.profile.minCPU",
+		Version:      "2.5.6",
+		DefaultValue: "50",
+		Doc:          "profile min cpu",
+		Export:       true,
+	}
+	t.ProfileMinCPU.Init(base.mgr)
+
+	t.ProfileDiffCPU = ParamItem{
+		Key:          "holmes.profile.diffCPU",
+		Version:      "2.5.6",
+		DefaultValue: "50",
+		Doc:          "profile diff cpu",
+		Export:       true,
+	}
+	t.ProfileDiffCPU.Init(base.mgr)
+
+	t.ProfileAbsCPU = ParamItem{
+		Key:          "holmes.profile.absCPU",
+		Version:      "2.5.6",
+		DefaultValue: "90",
+		Doc:          "profile abs cpu",
+		Export:       true,
+	}
+	t.ProfileAbsCPU.Init(base.mgr)
+
+	t.ProfileCooldown = ParamItem{
+		Key:          "holmes.profile.cooldown",
+		Version:      "2.5.6",
+		DefaultValue: "60",
+		Doc:          "profile cooldown",
+		Export:       true,
+	}
+	t.ProfileCooldown.Init(base.mgr)
 }
 
 type logConfig struct {
@@ -1369,6 +1474,7 @@ type proxyConfig struct {
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
+	SlowLogSpanInSeconds   ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 }
 
@@ -1492,7 +1598,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.MaxTaskNum = ParamItem{
 		Key:          "proxy.maxTaskNum",
 		Version:      "2.2.0",
-		DefaultValue: "10000",
+		DefaultValue: "1024",
 		Doc:          "The maximum number of tasks in the task queue of the proxy.",
 		Export:       true,
 	}
@@ -1823,6 +1929,16 @@ please adjust in embedded Milvus: false`,
 	}
 	p.SlowQuerySpanInSeconds.Init(base.mgr)
 
+	p.SlowLogSpanInSeconds = ParamItem{
+		Key:          "proxy.slowLogSpanInSeconds",
+		Version:      "2.5.8",
+		Doc:          "query whose executed time exceeds the `slowLogSpanInSeconds` will have slow log, in seconds.",
+		DefaultValue: "1",
+		FallbackKeys: []string{"proxy.slowQuerySpanInSeconds"},
+		Export:       false,
+	}
+	p.SlowLogSpanInSeconds.Init(base.mgr)
+
 	p.QueryNodePoolingSize = ParamItem{
 		Key:          "proxy.queryNodePooling.size",
 		Version:      "2.4.7",
@@ -1853,6 +1969,7 @@ type queryCoordConfig struct {
 	AutoBalance                         ParamItem `refreshable:"true"`
 	AutoBalanceChannel                  ParamItem `refreshable:"true"`
 	Balancer                            ParamItem `refreshable:"true"`
+	BalanceTriggerOrder                 ParamItem `refreshable:"true"`
 	GlobalRowCountFactor                ParamItem `refreshable:"true"`
 	ScoreUnbalanceTolerationFactor      ParamItem `refreshable:"true"`
 	ReverseUnbalanceTolerationFactor    ParamItem `refreshable:"true"`
@@ -1989,6 +2106,16 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.Balancer.Init(base.mgr)
+
+	p.BalanceTriggerOrder = ParamItem{
+		Key:          "queryCoord.balanceTriggerOrder",
+		Version:      "2.5.8",
+		DefaultValue: "ByRowCount",
+		PanicIfEmpty: false,
+		Doc:          "sorting order for collection balancing, options: ByRowCount, ByCollectionID",
+		Export:       false,
+	}
+	p.BalanceTriggerOrder.Init(base.mgr)
 
 	p.GlobalRowCountFactor = ParamItem{
 		Key:          "queryCoord.globalRowCountFactor",
@@ -2181,7 +2308,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.BalanceCheckInterval = ParamItem{
 		Key:          "queryCoord.checkBalanceInterval",
 		Version:      "2.3.0",
-		DefaultValue: "3000",
+		DefaultValue: "300",
 		PanicIfEmpty: true,
 		Export:       true,
 	}
@@ -2577,6 +2704,7 @@ type queryNodeConfig struct {
 	// delta forward
 	LevelZeroForwardPolicy      ParamItem `refreshable:"true"`
 	StreamingDeltaForwardPolicy ParamItem `refreshable:"true"`
+	ForwardBatchSize            ParamItem `refreshable:"true"`
 
 	// loader
 	IoPoolSize             ParamItem `refreshable:"false"`
@@ -2602,8 +2730,8 @@ type queryNodeConfig struct {
 	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
-	EnableSegmentPrune                      ParamItem `refreshable:"false"`
-	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
+	EnableSegmentPrune                      ParamItem `refreshable:"true"`
+	DefaultSegmentFilterRatio               ParamItem `refreshable:"true"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
 	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`
@@ -3185,6 +3313,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.StreamingDeltaForwardPolicy.Init(base.mgr)
 
+	p.ForwardBatchSize = ParamItem{
+		Key:          "queryNode.forwardBatchSize",
+		Version:      "2.5.7",
+		Doc:          "the batch size delegator uses for forwarding stream delete in loading procedure",
+		DefaultValue: "4194304", // 4MB
+		Export:       true,
+	}
+	p.ForwardBatchSize.Init(base.mgr)
+
 	p.IoPoolSize = ParamItem{
 		Key:          "queryNode.ioPoolSize",
 		Version:      "2.3.0",
@@ -3384,13 +3521,16 @@ type dataCoordConfig struct {
 	GrowingSegmentsMemSizeInMB     ParamItem `refreshable:"true"`
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
+	BlockingL0EntryNum             ParamItem `refreshable:"true"`
+	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
 
 	// compaction
-	EnableCompaction            ParamItem `refreshable:"false"`
-	EnableAutoCompaction        ParamItem `refreshable:"true"`
-	IndexBasedCompaction        ParamItem `refreshable:"true"`
-	CompactionTaskPrioritizer   ParamItem `refreshable:"true"`
-	CompactionTaskQueueCapacity ParamItem `refreshable:"false"`
+	EnableCompaction                       ParamItem `refreshable:"false"`
+	EnableAutoCompaction                   ParamItem `refreshable:"true"`
+	IndexBasedCompaction                   ParamItem `refreshable:"true"`
+	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
+	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
+	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
 	CompactionRPCTimeout             ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
@@ -3482,8 +3622,9 @@ type dataCoordConfig struct {
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 
-	EnableStatsTask   ParamItem `refreshable:"true"`
-	TaskCheckInterval ParamItem `refreshable:"true"`
+	EnableStatsTask       ParamItem `refreshable:"true"`
+	TaskCheckInterval     ParamItem `refreshable:"true"`
+	StatsTaskTriggerCount ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
@@ -3646,6 +3787,26 @@ exceeds this threshold, the largest growing segment will be sealed.`,
 	}
 	p.GrowingSegmentsMemSizeInMB.Init(base.mgr)
 
+	p.BlockingL0EntryNum = ParamItem{
+		Key:          "dataCoord.sealPolicy.channel.blockingL0EntryNum",
+		Version:      "2.5.7",
+		DefaultValue: "5000000",
+		Doc: `If the total entry number of l0 logs of each shard 
+exceeds this threshold, the earliest growing segments will be sealed.`,
+		Export: true,
+	}
+	p.BlockingL0EntryNum.Init(base.mgr)
+
+	p.BlockingL0SizeInMB = ParamItem{
+		Key:          "dataCoord.sealPolicy.channel.blockingL0SizeInMB",
+		Version:      "2.5.7",
+		DefaultValue: "64",
+		Doc: `The size threshold in MB, if the total entry number of l0 logs of each shard 
+exceeds this threshold, the earliest growing segments will be sealed.`,
+		Export: true,
+	}
+	p.BlockingL0SizeInMB.Init(base.mgr)
+
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",
 		Version:      "2.0.0",
@@ -3694,6 +3855,14 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Export:       true,
 	}
 	p.CompactionTaskQueueCapacity.Init(base.mgr)
+
+	p.CompactionPreAllocateIDExpansionFactor = ParamItem{
+		Key:          "dataCoord.compaction.preAllocateIDExpansionFactor",
+		Version:      "2.5.8",
+		DefaultValue: "100",
+		Doc:          `The expansion factor for pre-allocating IDs during compaction.`,
+	}
+	p.CompactionPreAllocateIDExpansionFactor.Init(base.mgr)
 
 	p.CompactionRPCTimeout = ParamItem{
 		Key:          "dataCoord.compaction.rpcTimeout",
@@ -4379,6 +4548,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.RequestTimeoutSeconds.Init(base.mgr)
+
+	p.StatsTaskTriggerCount = ParamItem{
+		Key:          "dataCoord.statsTaskTriggerCount",
+		Version:      "2.5.5",
+		Doc:          "stats task count per trigger",
+		DefaultValue: "100",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.StatsTaskTriggerCount.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -4454,6 +4633,12 @@ type dataNodeConfig struct {
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
 	DeltalogFormat ParamItem `refreshable:"false"`
+
+	// index services config
+	BuildParallel          ParamItem `refreshable:"false"`
+	EnableDisk             ParamItem `refreshable:"false"`
+	DiskCapacityLimit      ParamItem `refreshable:"true"`
+	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -4846,21 +5031,7 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.DeltalogFormat.Init(base.mgr)
-}
 
-// /////////////////////////////////////////////////////////////////////////////
-// --- indexnode ---
-type indexNodeConfig struct {
-	BuildParallel ParamItem `refreshable:"false"`
-	// enable disk
-	EnableDisk             ParamItem `refreshable:"false"`
-	DiskCapacityLimit      ParamItem `refreshable:"true"`
-	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
-
-	GracefulStopTimeout ParamItem `refreshable:"true"`
-}
-
-func (p *indexNodeConfig) init(base *BaseTable) {
 	p.BuildParallel = ParamItem{
 		Key:          "indexNode.scheduler.buildParallel",
 		Version:      "2.0.0",
@@ -4868,60 +5039,6 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.BuildParallel.Init(base.mgr)
-
-	p.EnableDisk = ParamItem{
-		Key:          "indexNode.enableDisk",
-		Version:      "2.2.0",
-		DefaultValue: "false",
-		PanicIfEmpty: true,
-		Doc:          "enable index node build disk vector index",
-		Export:       true,
-	}
-	p.EnableDisk.Init(base.mgr)
-
-	p.DiskCapacityLimit = ParamItem{
-		Key:     "LOCAL_STORAGE_SIZE",
-		Version: "2.2.0",
-		Formatter: func(v string) string {
-			if len(v) == 0 {
-				// use local storage path to check correct device
-				localStoragePath := base.Get("localStorage.path")
-				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
-					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
-						log.Fatal("failed to mkdir", zap.String("localStoragePath", localStoragePath), zap.Error(err))
-					}
-				}
-				diskUsage, err := disk.Usage(localStoragePath)
-				if err != nil {
-					log.Fatal("failed to get disk usage", zap.String("localStoragePath", localStoragePath), zap.Error(err))
-				}
-				return strconv.FormatUint(diskUsage.Total, 10)
-			}
-			diskSize := getAsInt64(v)
-			return strconv.FormatInt(diskSize*1024*1024*1024, 10)
-		},
-	}
-	p.DiskCapacityLimit.Init(base.mgr)
-
-	p.MaxDiskUsagePercentage = ParamItem{
-		Key:          "indexNode.maxDiskUsagePercentage",
-		Version:      "2.2.0",
-		DefaultValue: "95",
-		PanicIfEmpty: true,
-		Formatter: func(v string) string {
-			return fmt.Sprintf("%f", getAsFloat(v)/100)
-		},
-		Export: true,
-	}
-	p.MaxDiskUsagePercentage.Init(base.mgr)
-
-	p.GracefulStopTimeout = ParamItem{
-		Key:          "indexNode.gracefulStopTimeout",
-		Version:      "2.2.1",
-		FallbackKeys: []string{"common.gracefulStopTimeout"},
-		Doc:          "seconds. force stop node without graceful stop",
-	}
-	p.GracefulStopTimeout.Init(base.mgr)
 }
 
 type streamingConfig struct {
@@ -4929,6 +5046,14 @@ type streamingConfig struct {
 	WALBalancerTriggerInterval        ParamItem `refreshable:"true"`
 	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
 	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
+
+	// balancer Policy
+	WALBalancerPolicyName                           ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairPChannelWeight     ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairVChannelWeight     ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairAntiAffinityWeight ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairRebalanceTolerance ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairRebalanceMaxStep   ParamItem `refreshable:"true"`
 
 	// broadcaster
 	WALBroadcasterConcurrencyRatio ParamItem `refreshable:"false"`
@@ -4945,7 +5070,7 @@ func (p *streamingConfig) init(base *BaseTable) {
 	// balancer
 	p.WALBalancerTriggerInterval = ParamItem{
 		Key:     "streaming.walBalancer.triggerInterval",
-		Version: "2.5.0",
+		Version: "2.6.0",
 		Doc: `The interval of balance task trigger at background, 1 min by default. 
 It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
 		DefaultValue: "1m",
@@ -4954,7 +5079,7 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	p.WALBalancerTriggerInterval.Init(base.mgr)
 	p.WALBalancerBackoffInitialInterval = ParamItem{
 		Key:     "streaming.walBalancer.backoffInitialInterval",
-		Version: "2.5.0",
+		Version: "2.6.0",
 		Doc: `The initial interval of balance task trigger backoff, 50 ms by default. 
 It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
 		DefaultValue: "50ms",
@@ -4963,12 +5088,73 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	p.WALBalancerBackoffInitialInterval.Init(base.mgr)
 	p.WALBalancerBackoffMultiplier = ParamItem{
 		Key:          "streaming.walBalancer.backoffMultiplier",
-		Version:      "2.5.0",
+		Version:      "2.6.0",
 		Doc:          "The multiplier of balance task trigger backoff, 2 by default",
 		DefaultValue: "2",
 		Export:       true,
 	}
 	p.WALBalancerBackoffMultiplier.Init(base.mgr)
+
+	p.WALBalancerPolicyName = ParamItem{
+		Key:          "streaming.walBalancer.balancePolicy.name",
+		Version:      "2.6.0",
+		Doc:          "The multiplier of balance task trigger backoff, 2 by default",
+		DefaultValue: "vchannelFair",
+		Export:       true,
+	}
+	p.WALBalancerPolicyName.Init(base.mgr)
+
+	p.WALBalancerPolicyVChannelFairPChannelWeight = ParamItem{
+		Key:     "streaming.walBalancer.balancePolicy.vchannelFair.pchannelWeight",
+		Version: "2.6.0",
+		Doc: `The weight of pchannel count in vchannelFair balance policy, 
+the pchannel count will more evenly distributed if the weight is greater, 0.4 by default`,
+		DefaultValue: "0.4",
+		Export:       true,
+	}
+	p.WALBalancerPolicyVChannelFairPChannelWeight.Init(base.mgr)
+
+	p.WALBalancerPolicyVChannelFairVChannelWeight = ParamItem{
+		Key:     "streaming.walBalancer.balancePolicy.vchannelFair.vchannelWeight",
+		Version: "2.6.0",
+		Doc: `The weight of vchannel count in vchannelFair balance policy, 
+the vchannel count will more evenly distributed if the weight is greater, 0.3 by default`,
+		DefaultValue: "0.3",
+		Export:       true,
+	}
+	p.WALBalancerPolicyVChannelFairVChannelWeight.Init(base.mgr)
+
+	p.WALBalancerPolicyVChannelFairAntiAffinityWeight = ParamItem{
+		Key:     "streaming.walBalancer.balancePolicy.vchannelFair.antiAffinityWeight",
+		Version: "2.6.0",
+		Doc: `The weight of affinity in vchannelFair balance policy, 
+the fewer VChannels belonging to the same Collection between two PChannels, the higher the affinity,
+the vchannel of one collection will more evenly distributed if the weight is greater, 0.01 by default`,
+		DefaultValue: "0.01",
+		Export:       true,
+	}
+	p.WALBalancerPolicyVChannelFairAntiAffinityWeight.Init(base.mgr)
+
+	p.WALBalancerPolicyVChannelFairRebalanceTolerance = ParamItem{
+		Key:     "streaming.walBalancer.balancePolicy.vchannelFair.rebalanceTolerance",
+		Version: "2.6.0",
+		Doc: `The tolerance of vchannelFair balance policy, if the score of two balance result is less than the tolerance,
+the balance result will be ignored, the lower tolerance, the sensitive rebalance, 0.01 by default`,
+		DefaultValue: "0.01",
+		Export:       true,
+	}
+	p.WALBalancerPolicyVChannelFairRebalanceTolerance.Init(base.mgr)
+
+	p.WALBalancerPolicyVChannelFairRebalanceMaxStep = ParamItem{
+		Key:     "streaming.walBalancer.balancePolicy.vchannelFair.rebalanceMaxStep",
+		Version: "2.6.0",
+		Doc: `Indicates how many pchannels will be considered as a batch for rebalancing,
+the larger step, more aggressive and accurate rebalance, 
+it also determine the depth of depth first search method that is used to find the best balance result, 3 by default`,
+		DefaultValue: "3",
+		Export:       true,
+	}
+	p.WALBalancerPolicyVChannelFairRebalanceMaxStep.Init(base.mgr)
 
 	p.WALBroadcasterConcurrencyRatio = ParamItem{
 		Key:          "streaming.walBroadcaster.concurrencyRatio",

@@ -33,11 +33,7 @@ func TestResolverWithDiscoverer(t *testing.T) {
 			}
 		}
 	})
-	d.EXPECT().NewVersionedState().Return(discoverer.VersionedState{
-		Version: typeutil.VersionInt64(-1),
-	})
-
-	r := newResolverWithDiscoverer("test", d, time.Second)
+	r := newResolverWithDiscoverer(d, time.Second, log.With())
 
 	var resultOfGRPCResolver resolver.State
 	mockClientConn := mock_resolver.NewMockClientConn(t)
@@ -45,8 +41,8 @@ func TestResolverWithDiscoverer(t *testing.T) {
 		resultOfGRPCResolver = args
 		return nil
 	})
-	w := newWatchBasedGRPCResolver(mockClientConn, log.With())
-	w2 := newWatchBasedGRPCResolver(nil, log.With())
+	w := newWatchBasedGRPCResolver(mockClientConn)
+	w2 := newWatchBasedGRPCResolver(nil)
 	w2.Close()
 
 	// Test Register a grpc resolver watcher.
@@ -55,32 +51,23 @@ func TestResolverWithDiscoverer(t *testing.T) {
 	err = r.RegisterNewWatcher(w2) // A closed resolver should be removed automatically by resolver.
 	assert.NoError(t, err)
 
-	state := r.GetLatestState()
-	assert.Equal(t, typeutil.VersionInt64(-1), state.Version)
-	time.Sleep(500 * time.Millisecond)
-
-	state = r.GetLatestState()
-	assert.Equal(t, typeutil.VersionInt64(-1), state.Version)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	state, err := r.GetLatestState(ctx)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
 
 	// should be non block after context canceled
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 	err = r.Watch(ctx, func(s VersionedState) error {
 		state = s
+		t.Errorf("should not be called")
 		return nil
 	})
-	assert.Equal(t, typeutil.VersionInt64(-1), state.Version)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.True(t, errors.Is(err, ErrCanceled))
 
-	// should be non block after state operation failure.
 	testErr := errors.New("test error")
-	err = r.Watch(context.Background(), func(s VersionedState) error {
-		return testErr
-	})
-	assert.ErrorIs(t, err, testErr)
-	assert.True(t, errors.Is(err, ErrInterrupted))
-
 	outCh := make(chan VersionedState, 1)
 	go func() {
 		var state VersionedState
@@ -153,6 +140,13 @@ func TestResolverWithDiscoverer(t *testing.T) {
 	// after close, new register is not allowed.
 	err = r.RegisterNewWatcher(nil)
 	assert.True(t, errors.Is(err, ErrCanceled))
+
+	// should be non block after state operation failure.
+	err = r.Watch(context.Background(), func(s VersionedState) error {
+		return testErr
+	})
+	assert.ErrorIs(t, err, testErr)
+	assert.True(t, errors.Is(err, ErrInterrupted))
 }
 
 func shouldbeBlock(t *testing.T, ch <-chan VersionedState) {

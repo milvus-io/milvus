@@ -132,3 +132,43 @@ TEST_P(RandomSampleTest, SampleWithUnaryFiler) {
     // We can accept size one difference due to the float point calculation in sampling.
     assert(expected_size - 1 <= data_size && data_size <= expected_size + 1);
 }
+
+TEST(RandomSampleTest, SampleWithEmptyInput) {
+    double sample_factor = 0.1;
+
+    auto schema = std::make_shared<Schema>();
+    auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
+    schema->set_primary_field_id(fid_64);
+    fid_64 = schema->AddDebugField("integer", DataType::INT64);
+
+    const int64_t N = 3000;
+    auto dataset = DataGen(schema, N);
+    auto segment = CreateSealedSegment(schema);
+
+    SealedLoadFieldData(dataset, *segment);
+
+    milvus::proto::plan::GenericValue val;
+    val.set_int64_val(0);
+    // Less than 0 will not match any data
+    auto expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+        milvus::expr::ColumnInfo(
+            fid_64, DataType::INT64, std::vector<std::string>()),
+        OpType::LessThan,
+        val,
+        std::vector<proto::plan::GenericValue>{});
+    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->plannodes_ =
+        milvus::test::CreateRetrievePlanForRandomSample(sample_factor, expr);
+    std::vector<FieldId> target_offsets{fid_64};
+    plan->field_ids_ = target_offsets;
+
+    auto retrieve_results = RetrieveWithDefaultOutputSizeAndLargeTimestamp(
+        segment.get(), plan.get());
+    Assert(retrieve_results->fields_data_size() == target_offsets.size());
+    auto field = retrieve_results->fields_data(0);
+    auto field_data = field.scalars().long_data();
+    int data_size = field.scalars().long_data().data_size();
+
+    assert(data_size == 0);
+}

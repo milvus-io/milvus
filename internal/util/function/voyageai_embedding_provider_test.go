@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -69,7 +68,7 @@ func createVoyageAIProvider(url string, schema *schemapb.FieldSchema, providerNa
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: voyage3Large},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: embeddingURLParamKey, Value: url},
 			{Key: dimParamKey, Value: "1024"},
@@ -77,93 +76,204 @@ func createVoyageAIProvider(url string, schema *schemapb.FieldSchema, providerNa
 	}
 	switch providerName {
 	case voyageAIProvider:
-		return NewVoyageAIEmbeddingProvider(schema, functionSchema)
+		return NewVoyageAIEmbeddingProvider(schema, functionSchema, map[string]string{})
 	default:
 		return nil, fmt.Errorf("Unknow provider")
 	}
 }
 
 func (s *VoyageAITextEmbeddingProviderSuite) TestEmbedding() {
-	ts := CreateVoyageAIEmbeddingServer()
-
+	ts := CreateVoyageAIEmbeddingServer[float32]()
 	defer ts.Close()
-	for _, provderName := range s.providers {
-		provder, err := createVoyageAIProvider(ts.URL, s.schema.Fields[2], provderName)
+
+	for _, providerName := range s.providers {
+		provider, err := createVoyageAIProvider(ts.URL, s.schema.Fields[2], providerName)
+		s.Equal(float32Embd, provider.(*VoyageAIEmbeddingProvider).embdType)
+		s.Equal("float", provider.(*VoyageAIEmbeddingProvider).outputType)
 		s.NoError(err)
 		{
 			data := []string{"sentence"}
-			ret, err2 := provder.CallEmbedding(data, InsertMode)
+			r, err2 := provider.CallEmbedding(data, InsertMode)
+			ret := r.([][]float32)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
 			s.Equal(1024, len(ret[0]))
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
-			_, err := provder.CallEmbedding(data, SearchMode)
+			_, err := provider.CallEmbedding(data, SearchMode)
+			s.NoError(err)
+		}
+	}
+}
+
+func (s *VoyageAITextEmbeddingProviderSuite) TestEmbeddingIn8() {
+	ts := CreateVoyageAIEmbeddingServer[int8]()
+	defer ts.Close()
+	int8VecField := &schemapb.FieldSchema{
+		FieldID: 102, Name: "vector", DataType: schemapb.DataType_Int8Vector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "1024"},
+		},
+	}
+	for _, providerName := range s.providers {
+		provider, err := createVoyageAIProvider(ts.URL, int8VecField, providerName)
+		s.NoError(err)
+		s.Equal(int8Embd, provider.(*VoyageAIEmbeddingProvider).embdType)
+		s.Equal("int8", provider.(*VoyageAIEmbeddingProvider).outputType)
+		{
+			data := []string{"sentence"}
+			r, err2 := provider.CallEmbedding(data, InsertMode)
+			ret := r.([][]int8)
+			s.NoError(err2)
+			s.Equal(1, len(ret))
+			s.Equal(1024, len(ret[0]))
+		}
+		{
+			data := []string{"sentence 1", "sentence 2", "sentence 3"}
+			_, err := provider.CallEmbedding(data, SearchMode)
 			s.NoError(err)
 		}
 	}
 }
 
 func (s *VoyageAITextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var res voyageai.EmbeddingResponse
-		res.Data = append(res.Data, voyageai.EmbeddingData{
-			Object:    "list",
-			Embedding: []float32{1.0, 1.0, 1.0, 1.0},
-			Index:     0,
-		})
+	{
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var res voyageai.EmbeddingResponse[float32]
+			res.Data = append(res.Data, voyageai.EmbeddingData[float32]{
+				Object:    "list",
+				Embedding: []float32{1.0, 1.0, 1.0, 1.0},
+				Index:     0,
+			})
 
-		res.Data = append(res.Data, voyageai.EmbeddingData{
-			Object:    "list",
-			Embedding: []float32{1.0, 1.0},
-			Index:     1,
-		})
-		res.Usage = voyageai.Usage{
-			TotalTokens: 100,
+			res.Data = append(res.Data, voyageai.EmbeddingData[float32]{
+				Object:    "list",
+				Embedding: []float32{1.0, 1.0},
+				Index:     1,
+			})
+			res.Usage = voyageai.Usage{
+				TotalTokens: 100,
+			}
+			w.WriteHeader(http.StatusOK)
+			data, _ := json.Marshal(res)
+			w.Write(data)
+		}))
+
+		defer ts.Close()
+		for _, providerName := range s.providers {
+			provider, err := createVoyageAIProvider(ts.URL, s.schema.Fields[2], providerName)
+			s.NoError(err)
+
+			// embedding dim not match
+			data := []string{"sentence", "sentence"}
+			_, err2 := provider.CallEmbedding(data, InsertMode)
+			s.Error(err2)
 		}
-		w.WriteHeader(http.StatusOK)
-		data, _ := json.Marshal(res)
-		w.Write(data)
-	}))
+	}
 
-	defer ts.Close()
-	for _, providerName := range s.providers {
-		provder, err := createVoyageAIProvider(ts.URL, s.schema.Fields[2], providerName)
+	{
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var res voyageai.EmbeddingResponse[int8]
+			res.Data = append(res.Data, voyageai.EmbeddingData[int8]{
+				Object:    "list",
+				Embedding: []int8{1, 1, 1, 1},
+				Index:     0,
+			})
+
+			res.Data = append(res.Data, voyageai.EmbeddingData[int8]{
+				Object:    "list",
+				Embedding: []int8{1, 1},
+				Index:     1,
+			})
+			res.Usage = voyageai.Usage{
+				TotalTokens: 100,
+			}
+			w.WriteHeader(http.StatusOK)
+			data, _ := json.Marshal(res)
+			w.Write(data)
+		}))
+
+		defer ts.Close()
+
+		schemaField := &schemapb.FieldSchema{
+			FieldID: 102, Name: "vector", DataType: schemapb.DataType_Int8Vector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "1024"},
+			},
+		}
+
+		provider, err := createVoyageAIProvider(ts.URL, schemaField, "voyageai")
 		s.NoError(err)
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence"}
-		_, err2 := provder.CallEmbedding(data, InsertMode)
+		_, err2 := provider.CallEmbedding(data, InsertMode)
 		s.Error(err2)
 	}
 }
 
 func (s *VoyageAITextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var res voyageai.EmbeddingResponse
-		res.Data = append(res.Data, voyageai.EmbeddingData{
-			Object:    "list",
-			Embedding: []float32{1.0, 1.0, 1.0, 1.0},
-			Index:     0,
-		})
-		res.Usage = voyageai.Usage{
-			TotalTokens: 100,
+	{
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var res voyageai.EmbeddingResponse[float32]
+			res.Data = append(res.Data, voyageai.EmbeddingData[float32]{
+				Object:    "list",
+				Embedding: []float32{1.0, 1.0, 1.0, 1.0},
+				Index:     0,
+			})
+			res.Usage = voyageai.Usage{
+				TotalTokens: 100,
+			}
+			w.WriteHeader(http.StatusOK)
+			data, _ := json.Marshal(res)
+			w.Write(data)
+		}))
+
+		defer ts.Close()
+		for _, providerName := range s.providers {
+			provider, err := createVoyageAIProvider(ts.URL, s.schema.Fields[2], providerName)
+
+			s.NoError(err)
+
+			// embedding dim not match
+			data := []string{"sentence", "sentence2"}
+			_, err2 := provider.CallEmbedding(data, InsertMode)
+			s.Error(err2)
 		}
-		w.WriteHeader(http.StatusOK)
-		data, _ := json.Marshal(res)
-		w.Write(data)
-	}))
+	}
 
-	defer ts.Close()
-	for _, provderName := range s.providers {
-		provder, err := createVoyageAIProvider(ts.URL, s.schema.Fields[2], provderName)
+	{
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var res voyageai.EmbeddingResponse[int8]
+			res.Data = append(res.Data, voyageai.EmbeddingData[int8]{
+				Object:    "list",
+				Embedding: []int8{1.0, 1.0, 1.0, 1.0},
+				Index:     0,
+			})
+			res.Usage = voyageai.Usage{
+				TotalTokens: 100,
+			}
+			w.WriteHeader(http.StatusOK)
+			data, _ := json.Marshal(res)
+			w.Write(data)
+		}))
 
+		defer ts.Close()
+
+		schemaField := &schemapb.FieldSchema{
+			FieldID: 102, Name: "vector", DataType: schemapb.DataType_Int8Vector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "1024"},
+			},
+		}
+
+		provider, err := createVoyageAIProvider(ts.URL, schemaField, "voyageai")
 		s.NoError(err)
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence2"}
-		_, err2 := provder.CallEmbedding(data, InsertMode)
+		_, err2 := provider.CallEmbedding(data, InsertMode)
 		s.Error(err2)
 	}
 }
@@ -171,11 +281,6 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 func (s *VoyageAITextEmbeddingProviderSuite) TestCreateVoyageAIEmbeddingClient() {
 	_, err := createVoyageAIEmbeddingClient("", "")
 	s.Error(err)
-
-	os.Setenv(voyageAIAKEnvStr, "mockKey")
-	defer os.Unsetenv(voyageAIAKEnvStr)
-	_, err = createVoyageAIEmbeddingClient("", "")
-	s.NoError(err)
 }
 
 func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() {
@@ -187,35 +292,37 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() 
 		InputFieldIds:    []int64{101},
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
-			{Key: modelNameParamKey, Value: voyage3Large},
+			{Key: modelNameParamKey, Value: TestModel},
 			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: embeddingURLParamKey, Value: "mock"},
 			{Key: dimParamKey, Value: "1024"},
+			{Key: truncationParamKey, Value: "true"},
 		},
 	}
-	provider, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+	provider, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(1024))
 	s.True(provider.MaxBatch() > 0)
 
-	// Invalid model
+	// Invalid truncation
 	{
-		functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: "UnkownModel"}
-		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: truncationParamKey, Value: "Invalid"}
+		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 		s.Error(err)
+		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: truncationParamKey, Value: "false"}
 	}
 
 	// Invalid dim
 	{
 		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "9"}
-		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 		s.Error(err)
 	}
 
 	// Invalid dim type
 	{
 		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalied"}
-		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema)
+		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
 		s.Error(err)
 	}
 }

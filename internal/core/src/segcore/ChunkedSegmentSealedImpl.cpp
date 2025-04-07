@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -201,46 +202,6 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
     scalar_indexings_[field_id] =
         std::move(const_cast<LoadIndexInfo&>(info).index);
-    // reverse pk from scalar index and set pks to offset
-    if (schema_->get_primary_field_id() == field_id) {
-        AssertInfo(field_id.get() != -1, "Primary key is -1");
-        switch (field_meta.get_data_type()) {
-            case DataType::INT64: {
-                auto int64_index = dynamic_cast<index::ScalarIndex<int64_t>*>(
-                    scalar_indexings_[field_id].get());
-                if (!is_sorted_by_pk_ && insert_record_.empty_pks() &&
-                    int64_index->HasRawData()) {
-                    for (int i = 0; i < row_count; ++i) {
-                        auto raw = int64_index->Reverse_Lookup(i);
-                        AssertInfo(raw.has_value(), "pk not found");
-                        insert_record_.insert_pk(raw.value(), i);
-                    }
-                    insert_record_.seal_pks();
-                }
-                break;
-            }
-            case DataType::VARCHAR: {
-                auto string_index =
-                    dynamic_cast<index::ScalarIndex<std::string>*>(
-                        scalar_indexings_[field_id].get());
-                if (!is_sorted_by_pk_ && insert_record_.empty_pks() &&
-                    string_index->HasRawData()) {
-                    for (int i = 0; i < row_count; ++i) {
-                        auto raw = string_index->Reverse_Lookup(i);
-                        AssertInfo(raw.has_value(), "pk not found");
-                        insert_record_.insert_pk(raw.value(), i);
-                    }
-                    insert_record_.seal_pks();
-                }
-                break;
-            }
-            default: {
-                PanicInfo(DataTypeInvalid,
-                          fmt::format("unsupported primary key type {}",
-                                      field_meta.get_data_type()));
-            }
-        }
-    }
 
     set_bit(index_ready_bitset_, field_id, true);
     update_row_count(row_count);
@@ -317,8 +278,11 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         if (system_field_type == SystemFieldType::Timestamp) {
             std::vector<Timestamp> timestamps(num_rows);
             int64_t offset = 0;
-            FieldMeta field_meta(
-                FieldName(""), FieldId(0), DataType::INT64, false);
+            FieldMeta field_meta(FieldName(""),
+                                 FieldId(0),
+                                 DataType::INT64,
+                                 false,
+                                 std::nullopt);
             std::shared_ptr<milvus::ArrowDataWrapper> r;
             while (data.arrow_reader_channel->pop(r)) {
                 auto chunk = std::dynamic_pointer_cast<FixedWidthChunk>(
@@ -415,28 +379,9 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         std::make_shared<ChunkedArrayColumn>(field_meta);
                     std::shared_ptr<milvus::ArrowDataWrapper> r;
                     while (data.arrow_reader_channel->pop(r)) {
-                        // for (auto i = 0; i < field_data->get_num_rows(); i++) {
-                        //     auto rawValue = field_data->RawValue(i);
-                        //     auto array =
-                        //         static_cast<const milvus::Array*>(rawValue);
-                        //     if (field_data->IsNullable()) {
-                        //         var_column->Append(*array,
-                        //                            field_data->is_valid(i));
-                        //     } else {
-                        //         var_column->Append(*array);
-                        //     }
-
-                        //     // we stores the offset for each array element, so there is a additional uint64_t for each array element
-                        //     field_data_size =
-                        //         array->byte_size() + sizeof(uint64_t);
-                        //     stats_.mem_size +=
-                        //         array->byte_size() + sizeof(uint64_t);
-                        // }
-
                         auto chunk = create_chunk(field_meta, 1, r->reader);
                         var_column->AddChunk(chunk);
                     }
-                    // var_column->Seal();
                     column = std::move(var_column);
                     break;
                 }
@@ -590,7 +535,7 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
                 //     DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
                 auto var_column =
                     std::make_shared<ChunkedVariableColumn<std::string>>(
-                        chunks);
+                        field_meta, chunks);
                 // var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;
@@ -598,21 +543,22 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
             case milvus::DataType::JSON: {
                 auto var_column =
                     std::make_shared<ChunkedVariableColumn<milvus::Json>>(
-                        chunks);
+                        field_meta, chunks);
                 // var_column->Seal(std::move(indices));
                 column = std::move(var_column);
                 break;
             }
             case milvus::DataType::ARRAY: {
-                auto arr_column = std::make_shared<ChunkedArrayColumn>(chunks);
+                auto arr_column =
+                    std::make_shared<ChunkedArrayColumn>(field_meta, chunks);
                 // arr_column->Seal(std::move(indices),
                 //                  std::move(element_indices));
                 column = std::move(arr_column);
                 break;
             }
             case milvus::DataType::VECTOR_SPARSE_FLOAT: {
-                auto sparse_column =
-                    std::make_shared<ChunkedSparseFloatColumn>(chunks);
+                auto sparse_column = std::make_shared<ChunkedSparseFloatColumn>(
+                    field_meta, chunks);
                 // sparse_column->Seal(std::move(indices));
                 column = std::move(sparse_column);
                 break;
@@ -623,7 +569,7 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
             }
         }
     } else {
-        column = std::make_shared<ChunkedColumn>(chunks);
+        column = std::make_shared<ChunkedColumn>(field_meta, chunks);
     }
 
     // column->SetValidData(std::move(valid_data));
@@ -791,24 +737,42 @@ ChunkedSegmentSealedImpl::chunk_data_impl(FieldId field_id,
         return field_data->Span(chunk_id);
     }
     auto field_data = insert_record_.get_data_base(field_id);
-    AssertInfo(field_data->num_chunk() == 1,
-               "num chunk not equal to 1 for sealed segment");
     // system field
     return field_data->get_span_base(0);
 }
 
-std::pair<std::vector<std::string_view>, FixedVector<bool>>
-ChunkedSegmentSealedImpl::chunk_view_impl(FieldId field_id,
-                                          int64_t chunk_id) const {
+std::pair<std::vector<ArrayView>, FixedVector<bool>>
+ChunkedSegmentSealedImpl::chunk_array_view_impl(
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len =
+        std::nullopt) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         auto& field_data = it->second;
-        return field_data->StringViews(chunk_id);
+        return field_data->ArrayViews(chunk_id, offset_len);
     }
     PanicInfo(ErrorCode::UnexpectedError,
-              "chunk_view_impl only used for variable column field ");
+              "chunk_array_view_impl only used for chunk column field ");
+}
+
+std::pair<std::vector<std::string_view>, FixedVector<bool>>
+ChunkedSegmentSealedImpl::chunk_string_view_impl(
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len =
+        std::nullopt) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto it = fields_.find(field_id); it != fields_.end()) {
+        auto& field_data = it->second;
+        return field_data->StringViews(chunk_id, offset_len);
+    }
+    PanicInfo(ErrorCode::UnexpectedError,
+              "chunk_string_view_impl only used for variable column field ");
 }
 
 std::pair<std::vector<std::string_view>, FixedVector<bool>>
@@ -1156,9 +1120,12 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
         auto field_id =
             FieldId(absent_fields.find_first().value() + START_USER_FIELDID);
         auto& field_meta = schema_->operator[](field_id);
-        PanicInfo(
-            FieldNotLoaded,
-            "User Field(" + field_meta.get_name().get() + ") is not loaded");
+        // request field may has added field
+        if (!field_meta.is_nullable()) {
+            PanicInfo(FieldNotLoaded,
+                      "User Field(" + field_meta.get_name().get() +
+                          ") is not loaded");
+        }
     }
 }
 
@@ -1509,6 +1476,8 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
         index = std::make_unique<index::TextMatchIndex>(
             cfg.GetMmapPath(),
             unique_id.c_str(),
+            // todo: make it configurable
+            index::TANTIVY_INDEX_LATEST_VERSION,
             "milvus_tokenizer",
             field_meta.get_analyzer_params().c_str());
     }
