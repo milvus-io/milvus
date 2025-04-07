@@ -23,7 +23,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -219,34 +218,12 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 
 	indexType := it.newIndexParams[common.IndexTypeKey]
 	var fieldDataSize uint64
+	var err error
 	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-		// check index node support disk index
-		if !Params.IndexNodeCfg.EnableDisk.GetAsBool() {
-			log.Warn("IndexNode don't support build disk index",
-				zap.String("index type", it.newIndexParams[common.IndexTypeKey]),
-				zap.Bool("enable disk", Params.IndexNodeCfg.EnableDisk.GetAsBool()))
-			return errors.New("index node don't support build disk index")
-		}
-
-		// check load size and size of field data
-		localUsedSize, err := indexcgowrapper.GetLocalUsedSize(paramtable.Get().LocalStorageCfg.Path.GetValue())
-		if err != nil {
-			log.Warn("IndexNode get local used size failed")
-			return err
-		}
 		fieldDataSize, err = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
 		if err != nil {
 			log.Warn("IndexNode get local used size failed")
 			return err
-		}
-		usedLocalSizeWhenBuild := int64(float64(fieldDataSize)*diskUsageRatio) + localUsedSize
-		maxUsedLocalSize := int64(Params.IndexNodeCfg.DiskCapacityLimit.GetAsFloat() * Params.IndexNodeCfg.MaxDiskUsagePercentage.GetAsFloat())
-
-		if usedLocalSizeWhenBuild > maxUsedLocalSize {
-			log.Warn("IndexNode don't has enough disk size to build disk ann index",
-				zap.Int64("usedLocalSizeWhenBuild", usedLocalSizeWhenBuild),
-				zap.Int64("maxUsedLocalSize", maxUsedLocalSize))
-			return errors.New("index node don't has enough disk size to build disk ann index")
 		}
 
 		err = indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize))
@@ -313,8 +290,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		PartitionKeyIsolation:     it.req.GetPartitionKeyIsolation(),
 	}
 
-	log.Info("debug create index", zap.Any("buildIndexParams", buildIndexParams))
-	var err error
+	log.Info("create index", zap.Any("buildIndexParams", buildIndexParams))
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
 	if err != nil {
 		if it.index != nil && it.index.CleanLocalData() != nil {
