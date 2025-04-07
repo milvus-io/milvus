@@ -70,6 +70,7 @@ func InitSegcore() {
 			threadPoolSize = 1
 		}
 		cKnowhereThreadPoolSize = C.uint32_t(threadPoolSize)
+		C.SetDefaultNumThreadsForIndexNode(C.uint64_t(1))
 	}
 	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereThreadPoolSize)
 

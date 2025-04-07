@@ -19,7 +19,7 @@ using Map = std::map<std::string, std::string>;
 static constexpr const char* DEFAULT_TOKENIZER_NAME = "milvus_tokenizer";
 static const char* DEFAULT_analyzer_params = "{}";
 static constexpr uintptr_t DEFAULT_NUM_THREADS_FOR_QUERY_NODE = 1;
-static constexpr uintptr_t DEFAULT_NUM_THREADS_FOR_INDEX_NODE = 4;
+static uintptr_t DEFAULT_NUM_THREADS_FOR_INDEX_NODE = 4;
 static constexpr uintptr_t DEFAULT_MEMORY_BUDGET_PER_THREAD = 15 * 1024 * 1024;
 
 template <typename T>

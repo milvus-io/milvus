@@ -52,6 +52,9 @@ SetDefaultExecEvalExprBatchSize(int64_t val);
 void
 SetDefaultOptimizeExprEnable(bool val);
 
+void
+SetDefaultNumThreadsForIndexNode(const uint64_t threads);
+
 struct BufferView {
     struct Element {
         const char* data_;

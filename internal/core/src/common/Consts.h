@@ -82,3 +82,5 @@ const std::string JSON_CAST_TYPE = "json_cast_type";
 const std::string JSON_PATH = "json_path";
 const bool DEFAULT_OPTIMIZE_EXPR_ENABLED = true;
 const int64_t DEFAULT_CONVERT_OR_TO_IN_NUMERIC_LIMIT = 150;
+
+const bool DEFAULT_IS_STANDALONE = false;
