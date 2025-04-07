@@ -16548,6 +16548,7 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
     auto json_valid_data = json_field->ValidData();
     json_valid_data[0] = 0xFF;
     json_valid_data[1] = 0xFE;
+    json_valid_data[2] = 0x7F;
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
