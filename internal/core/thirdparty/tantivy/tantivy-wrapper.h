@@ -174,8 +174,8 @@ struct TantivyIndexWrapper {
     void
     create_reader() {
         if (writer_ != nullptr) {
-            auto res = RustResultWrapper(
-                tantivy_create_reader_from_writer(writer_, milvus::index::SetBitset));
+            auto res = RustResultWrapper(tantivy_create_reader_from_writer(
+                writer_, milvus::index::SetBitset));
             AssertInfo(res.result_->success,
                        "failed to create reader from writer: {}",
                        res.result_->error);

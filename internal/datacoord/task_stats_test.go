@@ -229,7 +229,8 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
 
 			checkPass := st.PreCheck(context.Background(), &taskScheduler{
-				meta: s.mt,
+				meta:                      s.mt,
+				indexEngineVersionManager: newIndexEngineVersionManager(),
 			})
 
 			s.False(checkPass)
@@ -240,7 +241,8 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			s.mt.segments.segments[s.segID].IsSorted = true
 
 			checkPass := st.PreCheck(context.Background(), &taskScheduler{
-				meta: s.mt,
+				meta:                      s.mt,
+				indexEngineVersionManager: newIndexEngineVersionManager(),
 			})
 
 			s.False(checkPass)
@@ -252,8 +254,9 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			handler := NewNMockHandler(s.T())
 			handler.EXPECT().GetCollection(context.Background(), collID).Return(nil, errors.New("mock error")).Once()
 			checkPass := st.PreCheck(context.Background(), &taskScheduler{
-				meta:    s.mt,
-				handler: handler,
+				meta:                      s.mt,
+				handler:                   handler,
+				indexEngineVersionManager: newIndexEngineVersionManager(),
 			})
 
 			s.False(checkPass)
@@ -289,8 +292,9 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			}, nil).Once()
 
 			checkPass := st.PreCheck(context.Background(), &taskScheduler{
-				meta:    s.mt,
-				handler: handler,
+				meta:                      s.mt,
+				handler:                   handler,
+				indexEngineVersionManager: newIndexEngineVersionManager(),
 			})
 
 			s.False(checkPass)
@@ -329,9 +333,10 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			}, nil)
 
 			checkPass := st.PreCheck(context.Background(), &taskScheduler{
-				meta:      s.mt,
-				handler:   handler,
-				allocator: alloc,
+				meta:                      s.mt,
+				handler:                   handler,
+				allocator:                 alloc,
+				indexEngineVersionManager: newIndexEngineVersionManager(),
 			})
 
 			s.False(checkPass)
@@ -370,9 +375,10 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			}, nil)
 
 			checkPass := st.PreCheck(context.Background(), &taskScheduler{
-				meta:      s.mt,
-				handler:   handler,
-				allocator: alloc,
+				meta:                      s.mt,
+				handler:                   handler,
+				allocator:                 alloc,
+				indexEngineVersionManager: newIndexEngineVersionManager(),
 			})
 
 			s.True(checkPass)

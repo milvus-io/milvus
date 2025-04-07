@@ -138,6 +138,7 @@ message CreateStatsRequest {
   bool enable_json_key_stats_in_sort = 23;
   int64 task_slot = 24;
   int64 storage_version = 25;
+  int32 current_scalar_index_version = 26;
 }
 
 message CreateJobV2Request {
