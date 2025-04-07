@@ -415,8 +415,7 @@ pub extern "C" fn tantivy_index_add_strings(
     let arr = unsafe { slice::from_raw_parts(array, len) };
     unsafe { &mut (*real) }
         .add_string_by_batch(arr, Some(offset))
-        .map(|_| RustResult::from_ptr(ptr))
-        .unwrap_or_else(|e| RustResult::from_error(e.to_string()))
+        .into()
 }
 
 #[no_mangle]
@@ -429,8 +428,7 @@ pub extern "C" fn tantivy_index_add_strings_by_single_segment_writer(
     let arr = unsafe { slice::from_raw_parts(array, len) };
     unsafe { &mut (*real) }
         .add_string_by_batch(arr, None)
-        .map(|_| RustResult::from_ptr(ptr))
-        .unwrap_or_else(|e| RustResult::from_error(e.to_string()))
+        .into()
 }
 
 // --------------------------------------------- array ------------------------------------------
