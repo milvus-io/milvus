@@ -137,7 +137,7 @@ func (_c *MockWriteBuffer_CreateNewGrowingSegment_Call) Return() *MockWriteBuffe
 	return _c
 }
 
-func (_c *MockWriteBuffer_CreateNewGrowingSegment_Call) RunAndReturn(run func(int64, int64, *msgpb.MsgPosition, int64)) *MockWriteBuffer_CreateNewGrowingSegment_Call {
+func (_c *MockWriteBuffer_CreateNewGrowingSegment_Call) RunAndReturn(run func(int64, int64, *msgpb.MsgPosition)) *MockWriteBuffer_CreateNewGrowingSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }
