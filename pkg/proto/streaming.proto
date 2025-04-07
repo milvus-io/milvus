@@ -244,7 +244,7 @@ enum StreamingCode {
     STREAMING_CODE_TRANSACTION_EXPIRED    = 9;  // transaction expired
     STREAMING_CODE_INVALID_TRANSACTION_STATE = 10;  // invalid transaction state
     STREAMING_CODE_UNRECOVERABLE          = 11;  // unrecoverable error
-    STREAMING_CODE_RESOURCE_ACQUIRED      = 12; // resource is acquired by other operation
+    STREAMING_CODE_FLOWCONTROL_DENIED    = 12; // the request is denied by flow control.
     STREAMING_CODE_UNKNOWN                   = 999;  // unknown error
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/flowcontrol"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -108,6 +109,15 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	}
 	defer w.lifetime.Done()
 
+	// ask flow control module to check if the message can be sent.
+	if err := flowcontrol.RequestBytes(ctx, msg); err != nil {
+		return nil, err
+	}
+	return w.append(ctx, msg)
+}
+
+// append writes a record to the log.
+func (w *walAdaptorImpl) append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
 	// Check if interceptor is ready.
 	select {
 	case <-ctx.Done():
@@ -169,11 +179,17 @@ func (w *walAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMes
 		return
 	}
 
+	// ask flow control module to check if the message can be sent.
+	if err := flowcontrol.RequestBytes(ctx, msg); err != nil {
+		cb(nil, err)
+		return
+	}
+
 	// Submit async append to a background execution pool.
 	_ = w.appendExecutionPool.Submit(func() (struct{}, error) {
 		defer w.lifetime.Done()
 
-		msgID, err := w.Append(ctx, msg)
+		msgID, err := w.append(ctx, msg)
 		cb(msgID, err)
 		return struct{}{}, nil
 	})

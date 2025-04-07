@@ -55,9 +55,9 @@ func (e *StreamingError) IsTxnUnavilable() bool {
 		e.Code == streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE
 }
 
-// IsResourceAcquired returns true if the resource is acquired.
-func (e *StreamingError) IsResourceAcquired() bool {
-	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED
+// IsFlowControlDenied returns true if the error is caused by flow control denied.
+func (e *StreamingError) IsFlowControlDenied() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_FLOWCONTROL_DENIED
 }
 
 // NewOnShutdownError creates a new StreamingError with code STREAMING_CODE_ON_SHUTDOWN.
@@ -121,9 +121,9 @@ func NewUnrecoverableError(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, format, args...)
 }
 
-// NewResourceAcquired creates a new StreamingError with code STREAMING_CODE_RESOURCE_ACQUIRED.
-func NewResourceAcquired(format string, args ...interface{}) *StreamingError {
-	return New(streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED, format, args...)
+// NewFlowControlDenied creates a new StreamingError with code StreamingCode_STREAMING_CODE_FLOWCONTROL_DENIED.
+func NewFlowControlDenied(format string, args ...interface{}) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_FLOWCONTROL_DENIED, format, args...)
 }
 
 // New creates a new StreamingError with the given code and cause.

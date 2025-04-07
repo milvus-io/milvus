@@ -5208,9 +5208,16 @@ type streamingConfig struct {
 	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
 
 	// memory usage control
-	NodeMemoryUsageThreshold            ParamItem `refreshable:"true"`
-	NodeGrowingSegmentBytesHwmThreshold ParamItem `refreshable:"true"`
-	NodeGrowingSegmentBytesLwmThreshold ParamItem `refreshable:"true"`
+	FlowControlThrottlingHwmMemoryThreshold ParamItem `refreshable:"true"`
+	FlowControlDenyMemoryThreshold          ParamItem `refreshable:"true"`
+	FlowControlThrottlingLwmMemoryThreshold ParamItem `refreshable:"true"`
+	FlowControlDefaultWriteRate             ParamItem `refreshable:"true"`
+	FlowControlThrottlingWriteRate          ParamItem `refreshable:"true"`
+
+	// growing segment memory usage control
+	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
+	FlushGrowingSegmentHwmBytesThreshold ParamItem `refreshable:"true"`
+	FlushGrowingSegmentLwmBytesThreshold ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -5339,38 +5346,88 @@ it also determine the depth of depth first search method that is used to find th
 	}
 	p.WALWriteAheadBufferKeepalive.Init(base.mgr)
 
-	p.NodeMemoryUsageThreshold = ParamItem{
-		Key:     "streaming.node.memoryUsageThreshold",
+	p.FlowControlThrottlingHwmMemoryThreshold = ParamItem{
+		Key:     "streaming.flowControl.throttlingHwmMemoryThreshold",
 		Version: "2.6.0",
-		Doc: `The threshold of memory usage for one streaming node,
-If the memory usage is higher than this threshold, the node will try to trigger some action to decrease the memory usage,
-e.g. growing segment flush. the value should be in the range of (0, 1), 0.8 by default`,
+		Doc: `The threshold of memory usage for throttling append,
+If the memory usage is higher than this threshold, the node will throttle append requests
+until the memory usage is less than the lwm threshold given by throttlingLwmMemoryThreshold. 0.85 by default`,
+		DefaultValue: "0.85",
+		Export:       true,
+	}
+	p.FlowControlThrottlingHwmMemoryThreshold.Init(base.mgr)
+
+	p.FlowControlDenyMemoryThreshold = ParamItem{
+		Key:     "streaming.flowControl.denyMemoryThreshold",
+		Version: "2.6.0",
+		Doc: `The threshold of memory usage for deny append,
+If the memory usage is higher than this threshold, the node will deny the append requests
+until the memory usage is less than the lwm threshold given by throttlingLwmMemoryThreshold. 0.95 by default`,
+		DefaultValue: "0.95",
+		Export:       true,
+	}
+	p.FlowControlDenyMemoryThreshold.Init(base.mgr)
+
+	p.FlowControlThrottlingLwmMemoryThreshold = ParamItem{
+		Key:     "streaming.flowControl.throttlingLwmMemoryThreshold",
+		Version: "2.6.0",
+		Doc: `The recover threshold of memory usage for throttling or deny append,
+Once the memory usage is less than this threshold, the node will stop throttling or denying append requests. 0.8 by default`,
 		DefaultValue: "0.8",
 		Export:       true,
 	}
-	p.NodeMemoryUsageThreshold.Init(base.mgr)
+	p.FlowControlThrottlingLwmMemoryThreshold.Init(base.mgr)
 
-	p.NodeGrowingSegmentBytesHwmThreshold = ParamItem{
-		Key:     "streaming.node.growingSegmentBytesHwmThreshold",
+	p.FlowControlThrottlingWriteRate = ParamItem{
+		Key:          "streaming.flowControl.throttlingWriteRate",
+		Version:      "2.6.0",
+		Doc:          `The throttling write rate of append requests every seconds, 2m by default`,
+		DefaultValue: "2m",
+		Export:       true,
+	}
+	p.FlowControlThrottlingWriteRate.Init(base.mgr)
+
+	p.FlowControlDefaultWriteRate = ParamItem{
+		Key:          "streaming.flowControl.defaultWriteRate",
+		Version:      "2.6.0",
+		Doc:          `The default write rate of append requests every seconds, unlimited if less than zero, -1 by default`,
+		DefaultValue: "-1",
+		Export:       true,
+	}
+	p.FlowControlDefaultWriteRate.Init(base.mgr)
+
+	p.FlushMemoryThreshold = ParamItem{
+		Key:     "streaming.flush.memoryThreshold",
+		Version: "2.6.0",
+		Doc: `The threshold of memory usage for one streaming node,
+If the memory usage is higher than this threshold, the node will try to trigger some action to decrease the memory usage,
+e.g. growing segment flush. the value should be in the range of (0, 1), 0.65 by default`,
+		DefaultValue: "0.65",
+		Export:       true,
+	}
+	p.FlushMemoryThreshold.Init(base.mgr)
+
+	p.FlushGrowingSegmentHwmBytesThreshold = ParamItem{
+		Key:     "streaming.flush.growingSegmentHwmBytesThreshold",
 		Version: "2.6.0",
 		Doc: `The upper watermark of total growing segment bytes for one streaming node,
 If the total bytes of growing segment is greater than this threshold,
-a growing segment flush process will be triggered to decrease total bytes of growing segment.`,
-		DefaultValue: "0.2",
+a growing segment flush process will be triggered to decrease total bytes of growing segment, 0.4 by default`,
+		DefaultValue: "0.4",
 		Export:       true,
 	}
-	p.NodeGrowingSegmentBytesHwmThreshold.Init(base.mgr)
+	p.FlushGrowingSegmentHwmBytesThreshold.Init(base.mgr)
 
-	p.NodeGrowingSegmentBytesLwmThreshold = ParamItem{
-		Key:     "streaming.node.growingSegmentBytesLwmThreshold",
+	p.FlushGrowingSegmentLwmBytesThreshold = ParamItem{
+		Key:     "streaming.flush.growingSegmentLwmBytesThreshold",
 		Version: "2.6.0",
 		Doc: `The lower watermark of total growing segment bytes for one streaming node,
 growing segment flush process will try to flush some growing segment into sealed 
-until the total bytes of growing segment is less than this threshold.`,
-		DefaultValue: "0.1",
+until the total bytes of growing segment is less than this threshold, 0.2 by default`,
+		DefaultValue: "0.2",
 		Export:       true,
 	}
-	p.NodeGrowingSegmentBytesLwmThreshold.Init(base.mgr)
+	p.FlushGrowingSegmentLwmBytesThreshold.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

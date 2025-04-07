@@ -23,6 +23,7 @@ var errWALManagerClosed = status.NewOnShutdownError("wal manager is closed")
 
 // OpenManager create a wal manager.
 func OpenManager() (Manager, error) {
+	// initialize the flow control manager.
 	walName := util.MustSelectWALName()
 	resource.Resource().Logger().Info("open wal manager", zap.String("walName", walName))
 	opener, err := registry.MustGetBuilder(walName,

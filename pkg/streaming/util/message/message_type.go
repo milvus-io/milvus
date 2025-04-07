@@ -62,15 +62,15 @@ func (t MessageType) Valid() bool {
 	return t != MessageTypeUnknown && ok
 }
 
-// CanEnableCipher checks if the MessageType can enable cipher.
-func (t MessageType) CanEnableCipher() bool {
-	_, ok := cipherMessageType[t]
-	return ok
-}
-
 // IsSysmtem checks if the MessageType is a system type.
 func (t MessageType) IsSystem() bool {
 	_, ok := systemMessageType[t]
+	return ok
+}
+
+// IsData checks if the MessageType is a data type.
+func (t MessageType) IsData() bool {
+	_, ok := dataMessageType[t]
 	return ok
 }
 

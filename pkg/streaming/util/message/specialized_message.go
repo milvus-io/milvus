@@ -73,7 +73,7 @@ var systemMessageType = map[MessageType]struct{}{
 	MessageTypeTxn:         {},
 }
 
-var cipherMessageType = map[MessageType]struct{}{
+var dataMessageType = map[MessageType]struct{}{
 	MessageTypeInsert: {},
 	MessageTypeDelete: {},
 }

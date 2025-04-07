@@ -246,8 +246,8 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 	}
 	if b.cipherConfig != nil {
 		messageType := mustGetMessageTypeFromHeader(b.header)
-		if !messageType.CanEnableCipher() {
-			panic(fmt.Sprintf("the message type cannot enable cipher, %s", messageType))
+		if !messageType.IsData() {
+			panic(fmt.Sprintf("only data message type can enable cipher, %s", messageType))
 		}
 
 		cipher := mustGetCipher()

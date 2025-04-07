@@ -21,26 +21,27 @@ const (
 	WALStatusCancel                         = "cancel"
 	WALStatusError                          = "error"
 
-	BroadcasterTaskStateLabelName     = "state"
-	ResourceKeyDomainLabelName        = "domain"
-	WALAccessModelLabelName           = "access_model"
-	WALScannerModelLabelName          = "scanner_model"
-	TimeTickSyncTypeLabelName         = "type"
-	TimeTickAckTypeLabelName          = "type"
-	WALInterceptorLabelName           = "interceptor_name"
-	WALTxnStateLabelName              = "state"
-	WALFlusherStateLabelName          = "state"
-	WALStateLabelName                 = "state"
-	WALChannelLabelName               = channelNameLabelName
-	WALSegmentSealPolicyNameLabelName = "policy"
-	WALSegmentAllocStateLabelName     = "state"
-	WALMessageTypeLabelName           = "message_type"
-	WALChannelTermLabelName           = "term"
-	WALNameLabelName                  = "wal_name"
-	WALTxnTypeLabelName               = "txn_type"
-	StatusLabelName                   = statusLabelName
-	StreamingNodeLabelName            = "streaming_node"
-	NodeIDLabelName                   = nodeIDLabelName
+	BroadcasterTaskStateLabelName          = "state"
+	ResourceKeyDomainLabelName             = "domain"
+	WALAccessModelLabelName                = "access_model"
+	WALScannerModelLabelName               = "scanner_model"
+	TimeTickSyncTypeLabelName              = "type"
+	TimeTickAckTypeLabelName               = "type"
+	WALInterceptorLabelName                = "interceptor_name"
+	WALTxnStateLabelName                   = "state"
+	WALFlusherStateLabelName               = "state"
+	WALStateLabelName                      = "state"
+	WALChannelLabelName                    = channelNameLabelName
+	WALSegmentSealPolicyNameLabelName      = "policy"
+	WALSegmentAllocStateLabelName          = "state"
+	WALMessageTypeLabelName                = "message_type"
+	WALChannelTermLabelName                = "term"
+	WALNameLabelName                       = "wal_name"
+	WALTxnTypeLabelName                    = "txn_type"
+	StatusLabelName                        = statusLabelName
+	StreamingNodeLabelName                 = "streaming_node"
+	StreamingNodeFlowcontrolStateLabelName = "state"
+	NodeIDLabelName                        = nodeIDLabelName
 )
 
 var (
@@ -171,6 +172,22 @@ var (
 		Help:    "Bytes of consumed message",
 		Buckets: messageBytesBuckets,
 	}, WALChannelLabelName)
+
+	StreamingNodeFlowcontrolState = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
+		Name: "flowcontrol_state",
+		Help: "Flow control state of current streaming node",
+	}, StreamingNodeFlowcontrolStateLabelName)
+
+	StreamingNodeFlowcontrolDurationSeconds = newStreamingNodeHistogramVec(prometheus.HistogramOpts{
+		Name:    "flowcontrol_duration_seconds",
+		Help:    "Duration of flow control",
+		Buckets: secondsBuckets,
+	})
+
+	StreamingNodeFlowcontrolTotal = newStreamingNodeCounterVec(prometheus.CounterOpts{
+		Name: "flowcontrol_request_total",
+		Help: "Total of flow control",
+	}, statusLabelName)
 
 	// WAL WAL metrics
 	WALInfo = newWALGaugeVec(prometheus.GaugeOpts{
@@ -432,6 +449,9 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodeConsumerTotal)
 	registry.MustRegister(StreamingNodeConsumeInflightTotal)
 	registry.MustRegister(StreamingNodeConsumeBytes)
+	registry.MustRegister(StreamingNodeFlowcontrolState)
+	registry.MustRegister(StreamingNodeFlowcontrolDurationSeconds)
+	registry.MustRegister(StreamingNodeFlowcontrolTotal)
 
 	registerWAL(registry)
 }
@@ -522,6 +542,13 @@ func newStreamingNodeGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prome
 	opts.Subsystem = typeutil.StreamingNodeRole
 	labels := mergeLabel(extra...)
 	return prometheus.NewGaugeVec(opts, labels)
+}
+
+func newStreamingNodeCounterVec(opts prometheus.CounterOpts, extra ...string) *prometheus.CounterVec {
+	opts.Namespace = milvusNamespace
+	opts.Subsystem = typeutil.StreamingNodeRole
+	labels := mergeLabel(extra...)
+	return prometheus.NewCounterVec(opts, labels)
 }
 
 func newStreamingNodeHistogramVec(opts prometheus.HistogramOpts, extra ...string) *prometheus.HistogramVec {

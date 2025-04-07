@@ -12,9 +12,9 @@ import (
 // newStatsConfig creates a new config for the stats manager.
 func newStatsConfig() statsConfig {
 	params := paramtable.Get()
-	memoryTheshold := params.StreamingCfg.NodeMemoryUsageThreshold.GetAsFloat()
-	hwmThreshold := params.StreamingCfg.NodeGrowingSegmentBytesHwmThreshold.GetAsFloat()
-	lwmThreshold := params.StreamingCfg.NodeGrowingSegmentBytesLwmThreshold.GetAsFloat()
+	memoryTheshold := params.StreamingCfg.FlushMemoryThreshold.GetAsFloat()
+	hwmThreshold := params.StreamingCfg.FlushGrowingSegmentHwmBytesThreshold.GetAsFloat()
+	lwmThreshold := params.StreamingCfg.FlushGrowingSegmentLwmBytesThreshold.GetAsFloat()
 	memory := float64(hardware.GetMemoryCount())
 
 	segmentMaxBinlogFileNum := paramtable.Get().DataCoordCfg.SegmentMaxBinlogFileNumber.GetAsInt()

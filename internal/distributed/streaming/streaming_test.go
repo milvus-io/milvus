@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
@@ -63,7 +62,6 @@ func TestStreamingBroadcast(t *testing.T) {
 	// repeated broadcast with same resource key should be rejected
 	resp2, err := streaming.WAL().Broadcast().Append(context.Background(), msg)
 	assert.Error(t, err)
-	assert.True(t, status.AsStreamingError(err).IsResourceAcquired())
 	assert.Nil(t, resp2)
 }
 

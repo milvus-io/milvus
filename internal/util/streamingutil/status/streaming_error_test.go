@@ -57,9 +57,9 @@ func TestStreamingError(t *testing.T) {
 	pbErr = streamingErr.AsPBError()
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, pbErr.Code)
 
-	streamingErr = NewResourceAcquired("test, %d", 1)
-	assert.Contains(t, streamingErr.Error(), "code: STREAMING_CODE_RESOURCE_ACQUIRED, cause: test, 1")
+	streamingErr = NewFlowControlDenied("test, %d", 1)
+	assert.Contains(t, streamingErr.Error(), "code: STREAMING_CODE_FLOWCONTROL_DENIED, cause: test, 1")
 	assert.False(t, streamingErr.IsWrongStreamingNode())
 	pbErr = streamingErr.AsPBError()
-	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED, pbErr.Code)
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_FLOWCONTROL_DENIED, pbErr.Code)
 }
