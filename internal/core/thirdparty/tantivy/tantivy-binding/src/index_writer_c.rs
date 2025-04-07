@@ -404,27 +404,31 @@ pub extern "C" fn tantivy_index_add_bools_by_single_segment_writer(
     }
 }
 
-// TODO: this is not a very efficient way, since we must call this function many times, which
-// will bring a lot of overhead caused by the rust binding.
 #[no_mangle]
-pub extern "C" fn tantivy_index_add_string(
+pub extern "C" fn tantivy_index_add_strings(
     ptr: *mut c_void,
-    s: *const c_char,
+    array: *const *const c_char,
+    len: usize,
     offset: i64,
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
-    let s = cstr_to_str!(s);
-    unsafe { (*real).add::<&str>(s, Some(offset)).into() }
+    let arr = unsafe { slice::from_raw_parts(array, len) };
+    unsafe { &mut (*real) }
+        .add_string_by_batch(arr, Some(offset))
+        .into()
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_index_add_string_by_single_segment_writer(
+pub extern "C" fn tantivy_index_add_strings_by_single_segment_writer(
     ptr: *mut c_void,
-    s: *const c_char,
+    array: *const *const c_char,
+    len: usize,
 ) -> RustResult {
     let real = ptr as *mut IndexWriterWrapper;
-    let s = cstr_to_str!(s);
-    unsafe { (*real).add::<&str>(s, None).into() }
+    let arr = unsafe { slice::from_raw_parts(array, len) };
+    unsafe { &mut (*real) }
+        .add_string_by_batch(arr, None)
+        .into()
 }
 
 // --------------------------------------------- array ------------------------------------------

@@ -5,17 +5,20 @@ use either::Either;
 use futures::executor::block_on;
 use libc::c_char;
 use log::info;
+use tantivy::indexer::UserOperation;
 use tantivy::schema::{
     Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, FAST, INDEXED,
 };
-use tantivy::{Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument};
+use tantivy::{doc, Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument};
 
 use crate::data_type::TantivyDataType;
 
-use crate::error::Result;
+use crate::error::{Result, TantivyBindingError};
 use crate::index_reader::IndexReaderWrapper;
 use crate::index_writer::TantivyValue;
 use crate::log::init_log;
+
+const BATCH_SIZE: usize = 4096;
 
 #[inline]
 fn schema_builder_add_field(
@@ -189,6 +192,63 @@ impl IndexWriterWrapperImpl {
         self.add_document(document, offset)
     }
 
+    pub fn add_string_by_batch(
+        &mut self,
+        data: &[*const c_char],
+        offset: Option<i64>,
+    ) -> Result<()> {
+        match &self.index_writer {
+            Either::Left(_) => self.add_strings(data, offset.unwrap()),
+            Either::Right(_) => self.add_strings_by_single_segment(data),
+        }
+    }
+
+    fn add_strings(&mut self, data: &[*const c_char], offset: i64) -> Result<()> {
+        let writer = self.index_writer.as_ref().left().unwrap();
+        let id_field = self.id_field.unwrap();
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+        data.iter()
+            .enumerate()
+            .try_for_each(|(idx, key)| -> Result<()> {
+                let key = unsafe { CStr::from_ptr(*key) }
+                    .to_str()
+                    .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+                let key_offset = offset + idx as i64;
+                batch.push(UserOperation::Add(doc!(
+                    id_field => key_offset,
+                    self.field => key,
+                )));
+                if batch.len() >= BATCH_SIZE {
+                    writer.run(std::mem::replace(
+                        &mut batch,
+                        Vec::with_capacity(BATCH_SIZE),
+                    ))?;
+                }
+
+                Ok(())
+            })?;
+
+        if !batch.is_empty() {
+            writer.run(std::mem::replace(
+                &mut batch,
+                Vec::with_capacity(BATCH_SIZE),
+            ))?;
+        }
+
+        Ok(())
+    }
+
+    fn add_strings_by_single_segment(&mut self, data: &[*const c_char]) -> Result<()> {
+        let writer = self.index_writer.as_mut().right().unwrap();
+        for key in data {
+            let key = unsafe { CStr::from_ptr(*key) }
+                .to_str()
+                .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+            writer.add_document(doc!(self.field => key))?;
+        }
+        Ok(())
+    }
+
     pub fn manual_merge(&mut self) -> Result<()> {
         let index_writer = self.index_writer.as_mut().left().unwrap();
         let metas = index_writer.index().searchable_segment_metas()?;
@@ -220,5 +280,46 @@ impl IndexWriterWrapperImpl {
     pub(crate) fn commit(&mut self) -> Result<()> {
         self.index_writer.as_mut().left().unwrap().commit()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::CString;
+
+    use tempfile::tempdir;
+
+    use crate::TantivyIndexVersion;
+
+    #[test]
+    pub fn test_add_json_key_stats() {
+        use crate::data_type::TantivyDataType;
+        use crate::index_writer::IndexWriterWrapper;
+
+        let temp_dir = tempdir().unwrap();
+        let mut index_writer = IndexWriterWrapper::new(
+            "test",
+            TantivyDataType::Keyword,
+            temp_dir.path().to_str().unwrap().to_string(),
+            1,
+            15 * 1024 * 1024,
+            TantivyIndexVersion::V7,
+        )
+        .unwrap();
+
+        let keys = (0..10000)
+            .map(|i| format!("key{:05}", i))
+            .collect::<Vec<_>>();
+
+        let c_keys: Vec<CString> = keys.into_iter().map(|k| CString::new(k).unwrap()).collect();
+        let key_ptrs: Vec<*const libc::c_char> = c_keys.iter().map(|cs| cs.as_ptr()).collect();
+
+        index_writer
+            .add_string_by_batch(&key_ptrs, Some(0))
+            .unwrap();
+        index_writer.commit().unwrap();
+        let reader = index_writer.create_reader().unwrap();
+        let count: u32 = reader.count().unwrap();
+        assert_eq!(count, 10000);
     }
 }

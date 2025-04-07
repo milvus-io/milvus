@@ -112,6 +112,17 @@ impl IndexWriterWrapper {
         }
     }
 
+    pub fn add_string_by_batch(
+        &mut self,
+        data: &[*const c_char],
+        offset: Option<i64>,
+    ) -> Result<()> {
+        match self {
+            IndexWriterWrapper::V5(writer) => writer.add_string_by_batch(data, offset),
+            IndexWriterWrapper::V7(writer) => writer.add_string_by_batch(data, offset),
+        }
+    }
+
     pub fn add_array_keywords(
         &mut self,
         datas: &[*const c_char],
@@ -151,7 +162,7 @@ impl IndexWriterWrapper {
 #[cfg(test)]
 mod tests {
     use std::ops::Bound;
-
+    use tantivy_5::{query, Index, ReloadPolicy};
     use tempfile::TempDir;
 
     use crate::{data_type::TantivyDataType, TantivyIndexVersion};
@@ -181,7 +192,6 @@ mod tests {
             index_wrapper.commit().unwrap();
         }
 
-        use tantivy_5::{collector, query, Index, ReloadPolicy};
         let index = Index::open_in_dir(dir.path()).unwrap();
         let reader = index
             .reader_builder()
