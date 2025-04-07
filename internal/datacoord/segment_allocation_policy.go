@@ -301,7 +301,6 @@ func sealByBlockingL0(meta *meta) channelSealPolicy {
 		// util func to calculate blocking statistics
 		blockingStats := func(l0Segments []*SegmentInfo, minStartTs uint64) (blockingSize int64, blockingEntryNum int64) {
 			for _, l0Segment := range l0Segments {
-				// GetBinlogSizeAsBytes()
 				if l0Segment.GetDmlPosition().GetTimestamp() >= minStartTs {
 					blockingSize += id2Size[l0Segment.GetID()]
 					blockingEntryNum += id2EntryNum[l0Segment.GetID()]
@@ -314,6 +313,11 @@ func sealByBlockingL0(meta *meta) channelSealPolicy {
 
 		var result []*SegmentInfo
 		for len(candidates) > 0 {
+			// skip segments with nil start position
+			if candidates[0].GetStartPosition() == nil {
+				candidates = candidates[1:]
+				continue
+			}
 			// minStartPos must be [0], since growing is sorted
 			blockingSize, blockingEntryNum := blockingStats(l0segments, candidates[0].GetStartPosition().GetTimestamp())
 
