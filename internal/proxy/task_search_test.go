@@ -3032,9 +3032,10 @@ func TestSearchTask_Requery(t *testing.T) {
 					Ids: resultIDs,
 				},
 			},
-			schema: schema,
-			tr:     timerecord.NewTimeRecorder("search"),
-			node:   node,
+			schema:                 schema,
+			tr:                     timerecord.NewTimeRecorder("search"),
+			node:                   node,
+			translatedOutputFields: outputFields,
 		}
 
 		err := qt.Requery(nil)
