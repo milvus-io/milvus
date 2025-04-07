@@ -1,8 +1,8 @@
 grammar Plan;
 
 expr:
-	IntegerConstant											                     # Integer
-	| FloatingConstant										                     # Floating
+	(ADD | SUB)? IntegerConstant											     # Integer
+	| (ADD | SUB)? FloatingConstant										         # Floating
 	| BooleanConstant										                     # Boolean
 	| StringLiteral											                     # String
 	| (Identifier|Meta)           			      							     # Identifier
