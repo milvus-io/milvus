@@ -118,7 +118,8 @@ JsonInvertedIndex<T>::build_index_for_json(
 
             auto exists = path_exists(json_column->dom_doc(), tokens);
             if (!exists ||
-                json_column->doc().at_pointer(nested_path_).is_null()) {
+                nested_path_ != "" &&
+                    json_column->doc().at_pointer(nested_path_).is_null()) {
                 error_recorder_.Record(
                     *json_column, nested_path_, simdjson::NO_SUCH_FIELD);
                 this->null_offset_.push_back(offset);
