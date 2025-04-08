@@ -59,8 +59,9 @@ type queryTask struct {
 	queryParams    *queryParams
 	schema         *schemaInfo
 
-	userOutputFields  []string
-	userDynamicFields []string
+	translatedOutputFields []string
+	userOutputFields       []string
+	userDynamicFields      []string
 
 	resultBuf *typeutil.ConcurrentSet[*internalpb.RetrieveResults]
 
@@ -271,12 +272,12 @@ func (t *queryTask) createPlan(ctx context.Context) error {
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "query", metrics.SuccessLabel).Observe(float64(time.Since(start).Milliseconds()))
 	}
 
-	t.request.OutputFields, t.userOutputFields, t.userDynamicFields, _, err = translateOutputFields(t.request.OutputFields, t.schema, false)
+	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, _, err = translateOutputFields(t.request.OutputFields, t.schema, false)
 	if err != nil {
 		return err
 	}
 
-	outputFieldIDs, err := translateToOutputFieldIDs(t.request.GetOutputFields(), schema.CollectionSchema)
+	outputFieldIDs, err := translateToOutputFieldIDs(t.translatedOutputFields, schema.CollectionSchema)
 	if err != nil {
 		return err
 	}
