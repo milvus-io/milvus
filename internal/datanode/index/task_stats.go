@@ -177,7 +177,9 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		numRows,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return st.binlogIO.Upload(ctx, kvs)
-		}))
+		}),
+		storage.WithVersion(st.req.GetStorageVersion()),
+	)
 	if err != nil {
 		log.Ctx(ctx).Warn("sort segment wrong, unable to init segment writer",
 			zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
@@ -218,7 +220,9 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		log.Warn("sort task only support int64 and varchar pk field")
 	}
 
-	rr, err := storage.NewBinlogRecordReader(ctx, st.req.InsertLogs, st.req.Schema, storage.WithDownloader(st.binlogIO.Download))
+	rr, err := storage.NewBinlogRecordReader(ctx, st.req.InsertLogs, st.req.Schema,
+		storage.WithVersion(st.req.StorageVersion),
+		storage.WithDownloader(st.binlogIO.Download))
 	if err != nil {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
 		return nil, err
@@ -318,29 +322,6 @@ func (st *statsTask) Reset() {
 	st.cancel = nil
 	st.tr = nil
 	st.manager = nil
-}
-
-func (st *statsTask) isExpiredEntity(ts typeutil.Timestamp) bool {
-	now := st.req.GetCurrentTs()
-
-	// entity expire is not enabled if duration <= 0
-	if st.req.GetCollectionTtl() <= 0 {
-		return false
-	}
-
-	entityT, _ := tsoutil.ParseTS(ts)
-	nowT, _ := tsoutil.ParseTS(now)
-
-	return entityT.Add(time.Duration(st.req.GetCollectionTtl())).Before(nowT)
-}
-
-func mergeFieldBinlogs(base, paths map[typeutil.UniqueID]*datapb.FieldBinlog) {
-	for fID, fpath := range paths {
-		if _, ok := base[fID]; !ok {
-			base[fID] = &datapb.FieldBinlog{FieldID: fID, Binlogs: make([]*datapb.Binlog, 0)}
-		}
-		base[fID].Binlogs = append(base[fID].Binlogs, fpath.GetBinlogs()...)
-	}
 }
 
 func serializeWrite(ctx context.Context, rootPath string, startID int64, writer *compactor.SegmentWriter) (binlogNum int64, kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {
