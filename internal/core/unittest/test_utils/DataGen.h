@@ -1303,7 +1303,6 @@ GenVecIndexing(int64_t N,
     auto create_index_result = indexing->Upload();
     auto index_files = create_index_result->GetIndexFiles();
     conf["index_files"] = index_files;
-    conf[milvus::THREAD_POOL_PRIORITY] = milvus::ThreadPoolPriority::HIGH;
     // we need a load stage to use index as the producation does
     // knowhere would do some data preparation in this stage
     indexing->Load(milvus::tracer::TraceContext{}, conf);

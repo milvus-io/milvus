@@ -222,8 +222,6 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
     AssertInfo(infos.field_infos.find(primary_field_id.get()) !=
                    infos.field_infos.end(),
                "primary field data should be included");
-    auto priority = infos.recovering ? milvus::ThreadPoolPriority::HIGH
-                                     : milvus::ThreadPoolPriority::LOW;
 
     size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
     auto reserved_offset = PreInsert(num_rows);
@@ -236,31 +234,29 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
                       return std::stol(a.substr(a.find_last_of('/') + 1)) <
                              std::stol(b.substr(b.find_last_of('/') + 1));
                   });
-        LOG_INFO(
-            "segment {} loads field {} with num_rows {}, insert_files_count:{}",
-            this->get_segment_id(),
-            field_id.get(),
-            num_rows,
-            insert_files.size());
 
         auto channel = std::make_shared<FieldDataChannel>();
-        LoadFieldDatasFromRemote(insert_files, channel, priority);
-        auto loaded_field_datas_info =
-            storage::CollectFieldDataChannelWithInfos(channel);
-        LOG_INFO(
-            "segment {} loads field {} with num_rows {}, loaded_data_size:{}",
-            this->get_segment_id(),
-            field_id.get(),
-            num_rows,
-            loaded_field_datas_info.data_size_);
-        auto& loaded_field_datas = loaded_field_datas_info.loaded_field_datas_;
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+
+        LOG_INFO("segment {} loads field {} with num_rows {}",
+                 this->get_segment_id(),
+                 field_id.get(),
+                 num_rows);
+        auto load_future =
+            pool.Submit(LoadFieldDatasFromRemote, insert_files, channel);
+
+        LOG_INFO("segment {} submits load field {} task to thread pool",
+                 this->get_segment_id(),
+                 field_id.get());
+        auto field_data = storage::CollectFieldDataChannel(channel);
         if (field_id == TimestampFieldID) {
             // step 2: sort timestamp
             // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
 
             // step 3: fill into Segment.ConcurrentVector
             insert_record_.timestamps_.set_data_raw(reserved_offset,
-                                                    loaded_field_datas);
+                                                    field_data);
             continue;
         }
 
@@ -271,14 +267,14 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         if (!indexing_record_.HasRawData(field_id)) {
             if (insert_record_.is_valid_data_exist(field_id)) {
                 insert_record_.get_valid_data(field_id)->set_data_raw(
-                    loaded_field_datas);
+                    field_data);
             }
             insert_record_.get_data_base(field_id)->set_data_raw(
-                reserved_offset, loaded_field_datas);
+                reserved_offset, field_data);
         }
         if (segcore_config_.get_enable_interim_segment_index()) {
             auto offset = reserved_offset;
-            for (auto& data : loaded_field_datas) {
+            for (auto& data : field_data) {
                 auto row_count = data->get_num_rows();
                 indexing_record_.AppendingIndex(
                     offset, row_count, field_id, data, insert_record_);
@@ -288,7 +284,7 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         try_remove_chunks(field_id);
 
         if (field_id == primary_field_id) {
-            insert_record_.insert_pks(loaded_field_datas);
+            insert_record_.insert_pks(field_data);
         }
 
         // update average row data size
@@ -297,13 +293,13 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
             SegmentInternalInterface::set_field_avg_size(
                 field_id,
                 num_rows,
-                storage::GetByteSizeOfFieldDatas(loaded_field_datas));
+                storage::GetByteSizeOfFieldDatas(field_data));
         }
 
         // build text match index
         if (field_meta.enable_match()) {
             auto index = GetTextIndex(field_id);
-            index->BuildIndexFromFieldData(loaded_field_datas,
+            index->BuildIndexFromFieldData(field_data,
                                            field_meta.is_nullable());
             index->Commit();
             // Reload reader so that the index can be read immediately
@@ -313,20 +309,18 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         // build json match index
         if (field_meta.enable_growing_jsonStats()) {
             auto index = GetJsonKeyIndex(field_id);
-            index->BuildWithFieldData(loaded_field_datas,
-                                      field_meta.is_nullable());
+            index->BuildWithFieldData(field_data, field_meta.is_nullable());
             index->Commit();
             // Reload reader so that the index can be read immediately
             index->Reload();
         }
 
         // update the mem size
-        stats_.mem_size += storage::GetByteSizeOfFieldDatas(loaded_field_datas);
+        stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
 
-        LOG_INFO("segment {} loads field {} done, recovering:{}",
+        LOG_INFO("segment {} loads field {} done",
                  this->get_segment_id(),
-                 field_id.get(),
-                 infos.recovering);
+                 field_id.get());
     }
 
     // step 5: update small indexes

@@ -109,9 +109,3 @@ EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
     auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
     info->field_infos[field_id].enable_mmap = enabled;
 }
-
-void
-SetRecovering(CLoadFieldDataInfo c_load_field_data_info, bool recovering) {
-    auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
-    info->recovering = recovering;
-}

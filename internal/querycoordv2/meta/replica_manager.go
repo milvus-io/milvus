@@ -94,8 +94,7 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 		}
 
 		if collectionSet.Contain(replica.GetCollectionID()) {
-			rep := newRecoveringReplica(replica)
-			m.putReplicaInMemory(rep)
+			m.putReplicaInMemory(newReplica(replica))
 			log.Info("recover replica",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replica.GetID()),
@@ -296,15 +295,6 @@ func (m *ReplicaManager) RemoveCollection(ctx context.Context, collectionID type
 		delete(m.coll2Replicas, collectionID)
 	}
 	return nil
-}
-
-func (m *ReplicaManager) FinishRecoverReplica(replicaId typeutil.UniqueID) {
-	m.rwmutex.Lock()
-	defer m.rwmutex.Unlock()
-	rep := m.replicas[replicaId]
-	mutableRep := rep.CopyForWrite()
-	mutableRep.recovering = false
-	m.putReplicaInMemory(mutableRep.IntoReplica())
 }
 
 func (m *ReplicaManager) RemoveReplicas(ctx context.Context, collectionID typeutil.UniqueID, replicas ...typeutil.UniqueID) error {

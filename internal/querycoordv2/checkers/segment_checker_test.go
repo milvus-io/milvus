@@ -36,10 +36,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type SegmentCheckerTestSuite struct {
@@ -172,146 +170,6 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	suite.Len(tasks, 1)
 }
 
-func (suite *SegmentCheckerTestSuite) TestRecoverReplica() {
-	ctx := context.Background()
-	checker := suite.checker
-	// set meta
-	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	// set up a recovering replica
-	nodes := []int64{1, 2}
-	replica := meta.NewRecoveringReplica(
-		&querypb.Replica{
-			ID:            1,
-			CollectionID:  1,
-			Nodes:         nodes,
-			ResourceGroup: meta.DefaultResourceGroupName,
-		},
-		typeutil.NewUniqueSet(nodes...),
-	)
-	checker.meta.ReplicaManager.Put(ctx, replica)
-	// set up nodes
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
-
-	// set target
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-		},
-	}
-
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-	}
-
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
-
-	// set dist
-	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
-
-	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
-	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
-	suite.Equal(task.ActionTypeGrow, action.Type())
-	suite.EqualValues(1, action.GetSegmentID())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
-	// generated task should be run under recovering mode
-	// for recovering replica, recovering segment is added based on next target
-	suite.True(tasks[0].(*task.SegmentTask).Recovering())
-
-	// update dist for loading finished
-	segmentsInfos := make([]*meta.Segment, 0)
-	segmentsInfos = append(segmentsInfos, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
-	checker.dist.SegmentDistManager.Update(2, segmentsInfos...)
-	tasks = checker.Check(context.TODO())
-	suite.Len(tasks, 0)
-	newReplica := checker.meta.ReplicaManager.Get(context.TODO(), 1)
-	suite.False(newReplica.IsRecovering()) // Recover should be finished
-}
-
-func (suite *SegmentCheckerTestSuite) TestRecoverQueryNodes() {
-	ctx := context.Background()
-	checker := suite.checker
-	// set meta
-	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	// set up a normal running replica, not recovering
-	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	// set up nodes
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
-
-	// set target
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-		},
-	}
-
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-	}
-
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
-	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
-
-	// set dist
-	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
-
-	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
-	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
-	suite.Equal(task.ActionTypeGrow, action.Type())
-	suite.EqualValues(1, action.GetSegmentID())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
-	// generated task should also be run under recovering mode
-	// for normal replica, recovering segment is added based on current target
-	suite.True(tasks[0].(*task.SegmentTask).Recovering())
-}
-
 func (suite *SegmentCheckerTestSuite) TestLoadL0Segments() {
 	ctx := context.Background()
 	checker := suite.checker
@@ -370,7 +228,6 @@ func (suite *SegmentCheckerTestSuite) TestLoadL0Segments() {
 	suite.EqualValues(1, action.GetSegmentID())
 	suite.EqualValues(2, action.Node())
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
-	suite.True(tasks[0].(*task.SegmentTask).Recovering())
 
 	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
 	// test load l0 segments in current target
@@ -384,7 +241,6 @@ func (suite *SegmentCheckerTestSuite) TestLoadL0Segments() {
 	suite.EqualValues(1, action.GetSegmentID())
 	suite.EqualValues(2, action.Node())
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
-	suite.True(tasks[0].(*task.SegmentTask).Recovering())
 
 	// seg l0 segment exist on a non delegator node
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
@@ -400,102 +256,6 @@ func (suite *SegmentCheckerTestSuite) TestLoadL0Segments() {
 	suite.EqualValues(1, action.GetSegmentID())
 	suite.EqualValues(2, action.Node())
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
-	suite.True(tasks[0].(*task.SegmentTask).Recovering())
-}
-
-func (suite *SegmentCheckerTestSuite) TestRecoverL0Segments() {
-	ctx := context.Background()
-	checker := suite.checker
-	// set meta
-	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	nodes := []int64{1, 2}
-	replica := meta.NewRecoveringReplica(
-		&querypb.Replica{
-			ID:            1,
-			CollectionID:  1,
-			Nodes:         nodes,
-			ResourceGroup: meta.DefaultResourceGroupName,
-		},
-		typeutil.NewUniqueSet(nodes...),
-	)
-	checker.meta.ReplicaManager.Put(ctx, replica)
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "localhost",
-		Hostname: "localhost",
-		Version:  common.Version,
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "localhost",
-		Hostname: "localhost",
-		Version:  common.Version,
-	}))
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
-
-	// set target
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-			Level:         datapb.SegmentLevel_L0,
-		},
-		{
-			ID:            2,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-			Level:         datapb.SegmentLevel_L1,
-		},
-	}
-
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-	}
-
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
-
-	// set dist
-	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
-
-	// test load l0 segments in next target
-	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
-	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
-	suite.Equal(task.ActionTypeGrow, action.Type())
-	suite.EqualValues(1, action.GetSegmentID())
-	suite.EqualValues(2, action.Node())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
-	suite.True(tasks[0].(*task.SegmentTask).Recovering())
-
-	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
-	// test load l0 segments in current target
-	tasks = checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok = tasks[0].Actions()[0].(*task.SegmentAction)
-	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
-	suite.Equal(task.ActionTypeGrow, action.Type())
-	suite.EqualValues(1, action.GetSegmentID())
-	suite.EqualValues(2, action.Node())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
-	suite.True(tasks[0].(*task.SegmentTask).Recovering())
-
-	wrongRecovering := make([]bool, 1)
-	wrongTasks := checker.createSegmentLoadTasks(ctx, segments, wrongRecovering, replica)
-	suite.Nil(wrongTasks)
 }
 
 func (suite *SegmentCheckerTestSuite) TestReleaseL0Segments() {

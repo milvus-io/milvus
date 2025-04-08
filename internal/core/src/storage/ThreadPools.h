@@ -22,11 +22,10 @@
 
 namespace milvus {
 
-constexpr const char* THREAD_POOL_PRIORITY = "priority";
-
 enum ThreadPoolPriority {
     HIGH = 0,
-    LOW = 1,
+    MIDDLE = 1,
+    LOW = 2,
 };
 
 class ThreadPools {
@@ -41,14 +40,17 @@ class ThreadPools {
  private:
     ThreadPools() {
         name_map[HIGH] = "high_priority_thread_pool";
+        name_map[MIDDLE] = "middle_priority_thread_pool";
         name_map[LOW] = "low_priority_thread_pool";
     }
     static void
     SetUpCoefficients() {
         coefficient_map[HIGH] = HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
+        coefficient_map[MIDDLE] = MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
         coefficient_map[LOW] = LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
-        LOG_INFO("Init ThreadPools, high_priority_co={}, low={}",
+        LOG_INFO("Init ThreadPools, high_priority_co={}, middle={}, low={}",
                  HIGH_PRIORITY_THREAD_CORE_COEFFICIENT,
+                 MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT,
                  LOW_PRIORITY_THREAD_CORE_COEFFICIENT);
     }
     void

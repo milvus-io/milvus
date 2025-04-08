@@ -96,8 +96,7 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
             GetValueFromConfig<std::vector<std::string>>(config, "index_files");
         AssertInfo(index_files.has_value(),
                    "index file paths is empty when load disk ann index data");
-        file_manager_->CacheIndexToDisk(index_files.value(),
-                                        config[milvus::THREAD_POOL_PRIORITY]);
+        file_manager_->CacheIndexToDisk(index_files.value());
         read_file_span->End();
     }
 

@@ -19,10 +19,9 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"strconv"
-
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
+	"strconv"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
