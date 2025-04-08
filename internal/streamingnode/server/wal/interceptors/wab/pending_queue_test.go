@@ -112,7 +112,8 @@ func TestPendingQueue(t *testing.T) {
 	assert.Len(t, pq.buf, 2)
 	time.Sleep(20 * time.Millisecond)
 	pq.Evict()
-	assert.Len(t, pq.buf, 0)
+	// the last message should never be evicted.
+	assert.Len(t, pq.buf, 1)
 
 	assert.Panics(t, func() {
 		pq.Push([]message.ImmutableMessage{newImmutableMessage(t, 99, 10)})

@@ -272,7 +272,7 @@ mod tests {
 
             for i in 0..10 {
                 index_wrapper
-                    .add_data_by_batch("hello", Some(i as i64))
+                    .add_data_by_batch(&["hello"], Some(i as i64))
                     .unwrap();
             }
             index_wrapper.commit().unwrap();
