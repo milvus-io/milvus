@@ -1293,7 +1293,7 @@ class TestCollectionDataframe(TestcaseBase):
         df = pd.DataFrame(data=mix_data, columns=list("ABC"))
         error = {ct.err_code: 1,
                  ct.err_msg: "The Input data type is inconsistent with defined schema, "
-                             "{C} field should be a float_vector, but got a {<class 'list'>} instead."}
+                             "{C} field should be a FLOAT_VECTOR, but got a {<class 'list'>} instead."}
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field='A', check_task=CheckTasks.err_res,
                                                       check_items=error)
 
