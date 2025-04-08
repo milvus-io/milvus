@@ -91,13 +91,13 @@ impl IndexWriterWrapper {
         }
     }
 
-    pub fn add_batch_data<T>(&mut self, data: &[T], offset: Option<i64>) -> Result<()>
+    pub fn add_data_by_batch<T>(&mut self, data: &[T], offset: Option<i64>) -> Result<()>
     where
         T: TantivyValue<TantivyDocumentV5> + TantivyValue<TantivyDocumentV7>,
     {
         match self {
-            IndexWriterWrapper::V5(writer) => writer.add_batch_data(data, offset),
-            IndexWriterWrapper::V7(writer) => writer.add_batch_data(data, offset),
+            IndexWriterWrapper::V5(writer) => writer.add_data_by_batch(data, offset),
+            IndexWriterWrapper::V7(writer) => writer.add_data_by_batch(data, offset),
         }
     }
 
@@ -109,6 +109,17 @@ impl IndexWriterWrapper {
         match self {
             IndexWriterWrapper::V5(writer) => writer.add_array(data, offset),
             IndexWriterWrapper::V7(writer) => writer.add_array(data, offset),
+        }
+    }
+
+    pub fn add_string_by_batch(
+        &mut self,
+        data: &[*const c_char],
+        offset: Option<i64>,
+    ) -> Result<()> {
+        match self {
+            IndexWriterWrapper::V5(writer) => writer.add_string_by_batch(data, offset),
+            IndexWriterWrapper::V7(writer) => writer.add_string_by_batch(data, offset),
         }
     }
 
@@ -151,7 +162,7 @@ impl IndexWriterWrapper {
 #[cfg(test)]
 mod tests {
     use std::ops::Bound;
-
+    use tantivy_5::{query, Index, ReloadPolicy};
     use tempfile::TempDir;
 
     use crate::{data_type::TantivyDataType, TantivyIndexVersion};
@@ -177,13 +188,12 @@ mod tests {
 
             for i in 0..10 {
                 index_wrapper
-                    .add_batch_data::<i64>(i, Some(i as i64))
+                    .add_data_by_batch::<i64>(&[i], Some(i as i64))
                     .unwrap();
             }
             index_wrapper.commit().unwrap();
         }
 
-        use tantivy_5::{collector, query, Index, ReloadPolicy};
         let index = Index::open_in_dir(dir.path()).unwrap();
         let reader = index
             .reader_builder()
@@ -218,7 +228,7 @@ mod tests {
             .unwrap();
 
             for i in 0..10 {
-                index_wrapper.add_batch_data::<i64>(i, None).unwrap();
+                index_wrapper.add_data_by_batch::<i64>(&[i], None).unwrap();
             }
             index_wrapper.finish().unwrap();
         }
@@ -262,7 +272,7 @@ mod tests {
 
             for i in 0..10 {
                 index_wrapper
-                    .add_batch_data("hello", Some(i as i64))
+                    .add_data_by_batch("hello", Some(i as i64))
                     .unwrap();
             }
             index_wrapper.commit().unwrap();

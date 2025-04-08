@@ -83,8 +83,8 @@ mod tests {
         )
         .unwrap();
 
-        writer.add_batch_data("网球和滑雪", Some(0)).unwrap();
-        writer.add_batch_data("网球以及滑雪", Some(1)).unwrap();
+        writer.add_data_by_batch(&["网球和滑雪"], Some(0)).unwrap();
+        writer.add_data_by_batch(&["网球以及滑雪"], Some(1)).unwrap();
 
         writer.commit().unwrap();
 
@@ -115,7 +115,7 @@ mod tests {
         .unwrap();
 
         for i in 0..10000 {
-            writer.add_batch_data("hello world", Some(i)).unwrap();
+            writer.add_data_by_batch(&["hello world"], Some(i)).unwrap();
         }
         writer.commit().unwrap();
 
