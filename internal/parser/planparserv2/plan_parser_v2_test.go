@@ -194,6 +194,7 @@ func TestExpr_UnaryRange(t *testing.T) {
 		`VarCharField <= "str7"`,
 		`JSONField["A"] > 10`,
 		`$meta["A"] > 10`,
+		`A == -9223372036854775808`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
