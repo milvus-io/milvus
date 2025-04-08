@@ -14,7 +14,6 @@ use crate::data_type::TantivyDataType;
 
 use crate::error::{Result, TantivyBindingError};
 use crate::index_writer::TantivyValue;
-use crate::log::init_log;
 
 const BATCH_SIZE: usize = 4096;
 
@@ -111,7 +110,6 @@ impl IndexWriterWrapperImpl {
         data_type: TantivyDataType,
         path: String,
     ) -> Result<IndexWriterWrapperImpl> {
-        init_log();
         info!(
             "create single segment index writer, field_name: {}, data_type: {:?}, tantivy_index_version 5",
             field_name, data_type

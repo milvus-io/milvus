@@ -90,7 +90,7 @@ struct TantivyIndexWrapper {
         RustResultWrapper res;
         if (inverted_single_semgnent) {
             res = RustResultWrapper(tantivy_create_index_with_single_segment(
-                field_name, data_type, path, tantivy_index_version));
+                field_name, data_type, path));
         } else {
             res = RustResultWrapper(
                 tantivy_create_index(field_name,
