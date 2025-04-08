@@ -217,8 +217,7 @@ var (
 	ErrDuplicatedCompactionTask                   = newMilvusError("duplicated compaction task", 2315, false)
 	ErrCleanPartitionStatsFail                    = newMilvusError("fail to clean partition Stats", 2316, true)
 
-	ErrDataNodeSlotExhausted  = newMilvusError("datanode slot exhausted", 2401, false)
-	ErrIndexNodeSlotExhausted = newMilvusError("indexnode slot exhausted", 2402, false)
+	ErrDataNodeSlotExhausted = newMilvusError("datanode slot exhausted", 2401, false)
 
 	// General
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)
