@@ -83,12 +83,12 @@ func TestIndexNodeManager_PickClient(t *testing.T) {
 					Status: merr.Status(err),
 				}, nil),
 				8: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
-					TaskSlots: 1,
-					Status:    merr.Success(),
+					AvailableSlots: 1,
+					Status:         merr.Success(),
 				}, nil),
 				9: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
-					TaskSlots: 10,
-					Status:    merr.Success(),
+					AvailableSlots: 10,
+					Status:         merr.Success(),
 				}, nil),
 			},
 		}
