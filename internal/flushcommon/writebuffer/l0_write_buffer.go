@@ -207,7 +207,7 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 
 // bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
 func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition) error {
-	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos, storage.StorageV1)
+	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos)
 	segBuf := wb.getOrCreateBuffer(inData.segmentID)
 
 	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)

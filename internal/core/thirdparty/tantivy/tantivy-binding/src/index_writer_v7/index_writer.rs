@@ -5,17 +5,20 @@ use either::Either;
 use futures::executor::block_on;
 use libc::c_char;
 use log::info;
+use tantivy::indexer::UserOperation;
 use tantivy::schema::{
     Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, FAST, INDEXED,
 };
-use tantivy::{Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument};
+use tantivy::{doc, Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument};
 
 use crate::data_type::TantivyDataType;
 
-use crate::error::Result;
+use crate::error::{Result, TantivyBindingError};
 use crate::index_reader::IndexReaderWrapper;
 use crate::index_writer::TantivyValue;
 use crate::log::init_log;
+
+const BATCH_SIZE: usize = 4096;
 
 #[inline]
 fn schema_builder_add_field(
@@ -40,15 +43,33 @@ fn schema_builder_add_field(
     }
 }
 
+impl TantivyValue<TantivyDocument> for i8 {
+    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
+        document.add_i64(Field::from_field_id(field), *self as i64);
+    }
+}
+
+impl TantivyValue<TantivyDocument> for i16 {
+    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
+        document.add_i64(Field::from_field_id(field), *self as i64);
+    }
+}
+
+impl TantivyValue<TantivyDocument> for i32 {
+    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
+        document.add_i64(Field::from_field_id(field), *self as i64);
+    }
+}
+
 impl TantivyValue<TantivyDocument> for i64 {
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_i64(Field::from_field_id(field), *self);
     }
 }
 
-impl TantivyValue<TantivyDocument> for u64 {
+impl TantivyValue<TantivyDocument> for f32 {
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
-        document.add_u64(Field::from_field_id(field), *self);
+        document.add_f64(Field::from_field_id(field), *self as f64);
     }
 }
 
@@ -149,15 +170,58 @@ impl IndexWriterWrapperImpl {
         Ok(())
     }
 
-    pub fn add<T: TantivyValue<TantivyDocument>>(
+    pub fn add_data_by_batch<T: TantivyValue<TantivyDocument>>(
         &mut self,
-        data: T,
+        batch_data: &[T],
         offset: Option<i64>,
     ) -> Result<()> {
-        let mut document = TantivyDocument::default();
-        data.add_to_document(self.field.field_id(), &mut document);
+        match &self.index_writer {
+            Either::Left(_) => self.add_datas(batch_data, offset.unwrap()),
+            Either::Right(_) => self.add_datas_by_single_segment(batch_data),
+        }
+    }
 
-        self.add_document(document, offset)
+    fn add_datas<T: TantivyValue<TantivyDocument>>(
+        &mut self,
+        batch_data: &[T],
+        offset_begin: i64,
+    ) -> Result<()> {
+        let writer = self.index_writer.as_ref().left().unwrap();
+        let id_field = self.id_field.unwrap();
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+        for (idx, data) in batch_data.into_iter().enumerate() {
+            let offset = offset_begin + idx as i64;
+
+            let mut doc = TantivyDocument::default();
+            data.add_to_document(self.field.field_id(), &mut doc);
+            doc.add_i64(id_field, offset);
+
+            batch.push(UserOperation::Add(doc));
+            if batch.len() == BATCH_SIZE {
+                writer.run(std::mem::replace(
+                    &mut batch,
+                    Vec::with_capacity(BATCH_SIZE),
+                ))?;
+            }
+        }
+
+        if !batch.is_empty() {
+            writer.run(batch)?;
+        }
+
+        Ok(())
+    }
+
+    fn add_datas_by_single_segment<T: TantivyValue<TantivyDocument>>(
+        &mut self,
+        batch_data: &[T],
+    ) -> Result<()> {
+        for d in batch_data {
+            let mut document = TantivyDocument::default();
+            d.add_to_document(self.field.field_id(), &mut document);
+            self.add_document(document, None)?;
+        }
+        Ok(())
     }
 
     pub fn add_array<T: TantivyValue<TantivyDocument>, I>(
@@ -187,6 +251,56 @@ impl IndexWriterWrapperImpl {
         }
 
         self.add_document(document, offset)
+    }
+
+    pub fn add_string_by_batch(
+        &mut self,
+        data: &[*const c_char],
+        offset: Option<i64>,
+    ) -> Result<()> {
+        match &self.index_writer {
+            Either::Left(_) => self.add_strings(data, offset.unwrap()),
+            Either::Right(_) => self.add_strings_by_single_segment(data),
+        }
+    }
+
+    fn add_strings(&mut self, data: &[*const c_char], offset: i64) -> Result<()> {
+        let writer = self.index_writer.as_ref().left().unwrap();
+        let id_field = self.id_field.unwrap();
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+        for (idx, key) in data.into_iter().enumerate() {
+            let key = unsafe { CStr::from_ptr(*key) }
+                .to_str()
+                .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+            let key_offset = offset + idx as i64;
+            batch.push(UserOperation::Add(doc!(
+                id_field => key_offset,
+                self.field => key,
+            )));
+            if batch.len() >= BATCH_SIZE {
+                writer.run(std::mem::replace(
+                    &mut batch,
+                    Vec::with_capacity(BATCH_SIZE),
+                ))?;
+            }
+        }
+
+        if !batch.is_empty() {
+            writer.run(batch)?;
+        }
+
+        Ok(())
+    }
+
+    fn add_strings_by_single_segment(&mut self, data: &[*const c_char]) -> Result<()> {
+        let writer = self.index_writer.as_mut().right().unwrap();
+        for key in data {
+            let key = unsafe { CStr::from_ptr(*key) }
+                .to_str()
+                .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+            writer.add_document(doc!(self.field => key))?;
+        }
+        Ok(())
     }
 
     pub fn manual_merge(&mut self) -> Result<()> {
@@ -220,5 +334,46 @@ impl IndexWriterWrapperImpl {
     pub(crate) fn commit(&mut self) -> Result<()> {
         self.index_writer.as_mut().left().unwrap().commit()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::CString;
+
+    use tempfile::tempdir;
+
+    use crate::TantivyIndexVersion;
+
+    #[test]
+    pub fn test_add_json_key_stats() {
+        use crate::data_type::TantivyDataType;
+        use crate::index_writer::IndexWriterWrapper;
+
+        let temp_dir = tempdir().unwrap();
+        let mut index_writer = IndexWriterWrapper::new(
+            "test",
+            TantivyDataType::Keyword,
+            temp_dir.path().to_str().unwrap().to_string(),
+            1,
+            15 * 1024 * 1024,
+            TantivyIndexVersion::V7,
+        )
+        .unwrap();
+
+        let keys = (0..10000)
+            .map(|i| format!("key{:05}", i))
+            .collect::<Vec<_>>();
+
+        let c_keys: Vec<CString> = keys.into_iter().map(|k| CString::new(k).unwrap()).collect();
+        let key_ptrs: Vec<*const libc::c_char> = c_keys.iter().map(|cs| cs.as_ptr()).collect();
+
+        index_writer
+            .add_string_by_batch(&key_ptrs, Some(0))
+            .unwrap();
+        index_writer.commit().unwrap();
+        let reader = index_writer.create_reader().unwrap();
+        let count: u32 = reader.count().unwrap();
+        assert_eq!(count, 10000);
     }
 }

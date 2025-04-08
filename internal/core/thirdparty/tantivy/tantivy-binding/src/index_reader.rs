@@ -88,6 +88,7 @@ impl IndexReaderWrapper {
 
     // Generally, we should use [`crate::search`], except for some special senarios where the doc_id could beyound
     // the score of u32.
+    #[allow(dead_code)]
     pub(crate) fn search_i64(&self, q: &dyn Query) -> Result<Vec<i64>> {
         assert!(self.id_field.is_some());
         let searcher = self.reader.searcher();

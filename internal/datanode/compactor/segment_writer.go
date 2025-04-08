@@ -34,8 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -202,25 +200,6 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 	return nil
 }
 
-func (w *MultiSegmentWriter) splitColumnByRecord(r storage.Record, splitThresHold int64) []storagecommon.ColumnGroup {
-	groups := make([]storagecommon.ColumnGroup, 0)
-	shortColumnGroup := storagecommon.ColumnGroup{Columns: make([]int, 0)}
-	for i, field := range w.schema.Fields {
-		arr := r.Column(field.FieldID)
-		size := arr.Data().SizeInBytes()
-		rows := uint64(arr.Len())
-		if rows != 0 && int64(size/rows) >= splitThresHold {
-			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}})
-		} else {
-			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
-		}
-	}
-	if len(shortColumnGroup.Columns) > 0 {
-		groups = append(groups, shortColumnGroup)
-	}
-	return groups
-}
-
 func (w *MultiSegmentWriter) GetWrittenUncompressed() uint64 {
 	if w.writer == nil {
 		return 0
@@ -241,11 +220,6 @@ func (w *MultiSegmentWriter) GetCompactionSegments() []*datapb.CompactionSegment
 
 func (w *MultiSegmentWriter) Write(r storage.Record) error {
 	if w.writer == nil || w.writer.GetWrittenUncompressed() >= uint64(w.segmentSize) {
-		if w.storageVersion == storage.StorageV2 {
-			w.rwOption = append(w.rwOption,
-				storage.WithColumnGroups(w.splitColumnByRecord(r, packed.ColumnGroupSizeThreshold)),
-			)
-		}
 		if err := w.rotateWriter(); err != nil {
 			return err
 		}
@@ -255,15 +229,6 @@ func (w *MultiSegmentWriter) Write(r storage.Record) error {
 
 func (w *MultiSegmentWriter) WriteValue(v *storage.Value) error {
 	if w.writer == nil || w.writer.GetWrittenUncompressed() >= uint64(w.segmentSize) {
-		if w.storageVersion == storage.StorageV2 {
-			r, err := storage.ValueSerializer([]*storage.Value{v}, w.schema.Fields)
-			if err != nil {
-				return err
-			}
-			w.rwOption = append(w.rwOption,
-				storage.WithColumnGroups(w.splitColumnByRecord(r, packed.ColumnGroupSizeThreshold)),
-			)
-		}
 		if err := w.rotateWriter(); err != nil {
 			return err
 		}
