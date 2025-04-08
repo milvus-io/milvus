@@ -88,6 +88,41 @@ PhyNullExpr::ExecVisitorImpl(OffsetVector* input) {
     if (auto res = PreCheckNullable(input)) {
         return res;
     }
+    // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
+    // NOT ScalarIndex<ArrayView>
+    if (is_index_mode_ && std::is_same_v<T, ArrayView>) {
+        switch (expr_->column_.element_type_) {
+            case DataType::BOOL: {
+                return ExecVisitorImpl<bool>(input);
+            }
+            case DataType::INT8: {
+                return ExecVisitorImpl<int8_t>(input);
+            }
+            case DataType::INT16: {
+                return ExecVisitorImpl<int16_t>(input);
+            }
+            case DataType::INT32: {
+                return ExecVisitorImpl<int32_t>(input);
+            }
+            case DataType::INT64: {
+                return ExecVisitorImpl<int64_t>(input);
+            }
+            case DataType::FLOAT: {
+                return ExecVisitorImpl<float>(input);
+            }
+            case DataType::DOUBLE: {
+                return ExecVisitorImpl<double>(input);
+            }
+            case DataType::STRING:
+            case DataType::VARCHAR: {
+                return ExecVisitorImpl<std::string>(input);
+            }
+            default:
+                PanicInfo(DataTypeInvalid,
+                          "unsupported element type: {}",
+                          expr_->column_.element_type_);
+        }
+    }
     auto valid_res =
         (input != nullptr)
             ? ProcessChunksForValidByOffsets<T>(is_index_mode_, *input)
