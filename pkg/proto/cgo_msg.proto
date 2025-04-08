@@ -21,7 +21,6 @@ message LoadIndexInfo {
   int64 index_store_version = 14;
   int32 index_engine_version = 15;
   int64 index_file_size = 16;
-  bool recovering = 17;
 }
 
 message IndexStats {

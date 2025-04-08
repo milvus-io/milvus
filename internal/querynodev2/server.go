@@ -214,6 +214,8 @@ func (node *QueryNode) InitSegcore() error {
 	// set up thread pool for different priorities
 	cHighPriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt64())
 	C.InitHighPriorityThreadCoreCoefficient(cHighPriorityThreadCoreCoefficient)
+	cMiddlePriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt64())
+	C.InitMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
 	cLowPriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt64())
 	C.InitLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
 

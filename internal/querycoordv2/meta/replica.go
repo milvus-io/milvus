@@ -25,7 +25,6 @@ type Replica struct {
 	// always keep consistent with replicaPB.RoNodes.
 	// node used by replica but cannot add more channel or segment ont it.
 	// include rebalance node or node out of resource group.
-	recovering bool
 }
 
 // Deprecated: may break the consistency of ReplicaManager, use `Spawn` of `ReplicaManager` or `newReplica` instead.
@@ -39,17 +38,6 @@ func NewReplica(replica *querypb.Replica, nodes ...typeutil.UniqueSet) *Replica 
 	return newReplica(r)
 }
 
-// Deprecated: may break the consistency of ReplicaManager, use `Spawn` of `ReplicaManager` or `newReplica` instead.
-func NewRecoveringReplica(replica *querypb.Replica, nodes ...typeutil.UniqueSet) *Replica {
-	r := proto.Clone(replica).(*querypb.Replica)
-	// TODO: nodes is a bad parameter, break the consistency, should be removed in future.
-	// keep it for old unittest.
-	if len(nodes) > 0 && len(replica.Nodes) == 0 && nodes[0].Len() > 0 {
-		r.Nodes = nodes[0].Collect()
-	}
-	return newRecoveringReplica(r)
-}
-
 // newReplica creates a new replica from pb.
 func newReplica(replica *querypb.Replica) *Replica {
 	return &Replica{
@@ -57,19 +45,6 @@ func newReplica(replica *querypb.Replica) *Replica {
 		rwNodes:   typeutil.NewUniqueSet(replica.Nodes...),
 		roNodes:   typeutil.NewUniqueSet(replica.RoNodes...),
 	}
-}
-
-func newRecoveringReplica(replica *querypb.Replica) *Replica {
-	return &Replica{
-		replicaPB:  proto.Clone(replica).(*querypb.Replica),
-		rwNodes:    typeutil.NewUniqueSet(replica.Nodes...),
-		roNodes:    typeutil.NewUniqueSet(replica.RoNodes...),
-		recovering: true,
-	}
-}
-
-func (replica *Replica) IsRecovering() bool {
-	return replica.recovering
 }
 
 // GetID returns the id of the replica.
@@ -176,10 +151,9 @@ func (replica *Replica) CopyForWrite() *mutableReplica {
 
 	return &mutableReplica{
 		Replica: &Replica{
-			replicaPB:  proto.Clone(replica.replicaPB).(*querypb.Replica),
-			rwNodes:    typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
-			roNodes:    typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
-			recovering: replica.IsRecovering(),
+			replicaPB: proto.Clone(replica.replicaPB).(*querypb.Replica),
+			rwNodes:   typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
+			roNodes:   typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
 		},
 		exclusiveRWNodeToChannel: exclusiveRWNodeToChannel,
 	}

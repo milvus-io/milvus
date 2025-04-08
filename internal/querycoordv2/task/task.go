@@ -324,8 +324,7 @@ func (task *baseTask) Name() string {
 type SegmentTask struct {
 	*baseTask
 
-	segmentID  typeutil.UniqueID
-	recovering bool
+	segmentID typeutil.UniqueID
 }
 
 // NewSegmentTask creates a SegmentTask with actions,
@@ -336,7 +335,6 @@ func NewSegmentTask(ctx context.Context,
 	source Source,
 	collectionID typeutil.UniqueID,
 	replica *meta.Replica,
-	recovering bool,
 	actions ...Action,
 ) (*SegmentTask, error) {
 	if len(actions) == 0 {
@@ -361,14 +359,9 @@ func NewSegmentTask(ctx context.Context,
 	base := newBaseTask(ctx, source, collectionID, replica, shard, fmt.Sprintf("SegmentTask-%s-%d", actions[0].Type().String(), segmentID))
 	base.actions = actions
 	return &SegmentTask{
-		baseTask:   base,
-		segmentID:  segmentID,
-		recovering: recovering,
+		baseTask:  base,
+		segmentID: segmentID,
 	}, nil
-}
-
-func (task *SegmentTask) Recovering() bool {
-	return task.recovering
 }
 
 func (task *SegmentTask) SegmentID() typeutil.UniqueID {
@@ -384,7 +377,7 @@ func (task *SegmentTask) Name() string {
 }
 
 func (task *SegmentTask) String() string {
-	return fmt.Sprintf("%s [segmentID=%d][recovering=%t]", task.baseTask.String(), task.segmentID, task.recovering)
+	return fmt.Sprintf("%s [segmentID=%d]", task.baseTask.String(), task.segmentID)
 }
 
 func (task *SegmentTask) MarshalJSON() ([]byte, error) {

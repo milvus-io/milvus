@@ -459,7 +459,6 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -561,7 +560,6 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -656,7 +654,6 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -722,7 +719,6 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentAction(targetNode, ActionTypeReduce, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -767,7 +763,6 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentActionWithScope(targetNode, ActionTypeReduce, "", segment, querypb.DataScope_Streaming, 0),
 		)
 		suite.NoError(err)
@@ -864,7 +859,6 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 			NewSegmentAction(sourceNode, ActionTypeReduce, channel.GetChannelName(), segment),
 		)
@@ -949,7 +943,6 @@ func (suite *TaskSuite) TestMoveSegmentTaskStale() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 			NewSegmentAction(sourceNode, ActionTypeReduce, channel.GetChannelName(), segment),
 		)
@@ -1028,7 +1021,6 @@ func (suite *TaskSuite) TestTaskCanceled() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -1114,7 +1106,6 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -1335,19 +1326,19 @@ func (suite *TaskSuite) TestCreateTaskBehavior() {
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
-	segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, false)
+	segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	channelAction := NewChannelAction(0, 0, "fake-channel1")
-	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, false, channelAction)
+	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, channelAction)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	segmentAction1 := NewSegmentAction(0, 0, "", 0)
 	segmentAction2 := NewSegmentAction(0, 0, "", 1)
 
-	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, false, segmentAction1, segmentAction2)
+	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, segmentAction1, segmentAction2)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
@@ -1368,7 +1359,6 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
 		)
 		suite.NoError(err)
@@ -1386,7 +1376,6 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
 		)
 		suite.NoError(err)
@@ -1406,7 +1395,6 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
 		)
 		suite.NoError(err)
@@ -1447,7 +1435,6 @@ func (suite *TaskSuite) TestNoExecutor() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
-			false,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -1802,7 +1789,6 @@ func (suite *TaskSuite) TestGetTasksJSON() {
 		WrapIDSource(0),
 		suite.collection,
 		suite.replica,
-		false,
 		NewSegmentAction(1, ActionTypeGrow, "", 1),
 	)
 	suite.NoError(err)
@@ -1844,7 +1830,6 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		WrapIDSource(0),
 		coll,
 		suite.replica,
-		false,
 		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical, 100),
 	)
 	task1.SetID(1)
@@ -1874,7 +1859,6 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		WrapIDSource(0),
 		coll2,
 		suite.replica,
-		false,
 		NewSegmentActionWithScope(nodeID2, ActionTypeGrow, "", segmentID2, querypb.DataScope_Historical, 100),
 	)
 	suite.NoError(err)
@@ -1994,7 +1978,6 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 		WrapIDSource(0),
 		coll,
 		suite.replica,
-		false,
 		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", 1, querypb.DataScope_Historical, 100),
 	)
 	suite.NoError(err)

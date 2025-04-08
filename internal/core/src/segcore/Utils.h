@@ -28,7 +28,6 @@
 #include "log/Log.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"
-#include "storage/ThreadPools.h"
 
 namespace milvus::segcore {
 
@@ -116,16 +115,12 @@ ReverseDataFromIndex(const index::IndexBase* index,
                      const FieldMeta& field_meta);
 
 void
-LoadArrowReaderFromRemote(
-    const std::vector<std::string>& remote_files,
-    std::shared_ptr<ArrowReaderChannel> channel,
-    milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::LOW);
+LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
+                          std::shared_ptr<ArrowReaderChannel> channel);
 
 void
-LoadFieldDatasFromRemote(
-    const std::vector<std::string>& remote_files,
-    FieldDataChannelPtr channel,
-    milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::LOW);
+LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
+                         FieldDataChannelPtr channel);
 /**
  * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
  * (i.e. that is strictly greater than value), or last if no such element is found.

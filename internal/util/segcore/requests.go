@@ -34,10 +34,9 @@ type DeleteRequest struct {
 }
 
 type LoadFieldDataRequest struct {
-	Fields     []LoadFieldDataInfo
-	MMapDir    string
-	RowCount   int64
-	Recovering bool
+	Fields   []LoadFieldDataInfo
+	MMapDir  string
+	RowCount int64
 }
 
 type LoadFieldDataInfo struct {
@@ -83,7 +82,6 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 		defer C.free(unsafe.Pointer(mmapDir))
 		C.AppendMMapDirPath(cLoadFieldDataInfo, mmapDir)
 	}
-	C.SetRecovering(cLoadFieldDataInfo, C.bool(req.Recovering))
 	return &cLoadFieldDataRequest{
 		cLoadFieldDataInfo: cLoadFieldDataInfo,
 	}, nil

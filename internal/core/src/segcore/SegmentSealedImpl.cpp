@@ -320,17 +320,14 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
         auto parallel_degree = static_cast<uint64_t>(
             DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
         field_data_info.channel->set_capacity(parallel_degree * 2);
-        auto priority = load_info.recovering ? milvus::ThreadPoolPriority::HIGH
-                                             : milvus::ThreadPoolPriority::LOW;
-        LoadFieldDatasFromRemote(
-            insert_files, field_data_info.channel, priority);
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        pool.Submit(
+            LoadFieldDatasFromRemote, insert_files, field_data_info.channel);
 
-        LOG_INFO(
-            "segment {} submits load field {} task to thread pool, "
-            "recovering:{}",
-            this->get_segment_id(),
-            field_id.get(),
-            load_info.recovering);
+        LOG_INFO("segment {} submits load field {} task to thread pool",
+                 this->get_segment_id(),
+                 field_id.get());
         bool use_mmap = false;
         if (!info.enable_mmap ||
             SystemProperty::Instance().IsSystem(field_id)) {
