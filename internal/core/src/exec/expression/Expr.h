@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <type_traits>
 
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
@@ -866,6 +867,43 @@ class SegmentExpr : public Expr {
     TargetBitmap
     ProcessChunksForValid(bool use_index) {
         if (use_index) {
+            // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
+            // NOT ScalarIndex<ArrayView>
+            if (std::is_same_v<T, ArrayView>) {
+                auto element_type =
+                    segment_->get_schema()[field_id_].get_element_type();
+                switch (element_type) {
+                    case DataType::BOOL: {
+                        return ProcessIndexChunksForValid<bool>();
+                    }
+                    case DataType::INT8: {
+                        return ProcessIndexChunksForValid<int8_t>();
+                    }
+                    case DataType::INT16: {
+                        return ProcessIndexChunksForValid<int16_t>();
+                    }
+                    case DataType::INT32: {
+                        return ProcessIndexChunksForValid<int32_t>();
+                    }
+                    case DataType::INT64: {
+                        return ProcessIndexChunksForValid<int64_t>();
+                    }
+                    case DataType::FLOAT: {
+                        return ProcessIndexChunksForValid<float>();
+                    }
+                    case DataType::DOUBLE: {
+                        return ProcessIndexChunksForValid<double>();
+                    }
+                    case DataType::STRING:
+                    case DataType::VARCHAR: {
+                        return ProcessIndexChunksForValid<std::string>();
+                    }
+                    default:
+                        PanicInfo(DataTypeInvalid,
+                                  "unsupported element type: {}",
+                                  element_type);
+                }
+            }
             return ProcessIndexChunksForValid<T>();
         } else {
             return ProcessDataChunksForValid<T>();
@@ -884,6 +922,51 @@ class SegmentExpr : public Expr {
         valid_result.set();
 
         if (use_index) {
+            // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
+            // NOT ScalarIndex<ArrayView>
+            if (std::is_same_v<T, ArrayView>) {
+                auto element_type =
+                    segment_->get_schema()[field_id_].get_element_type();
+                switch (element_type) {
+                    case DataType::BOOL: {
+                        return ProcessChunksForValidByOffsets<bool>(use_index,
+                                                                    input);
+                    }
+                    case DataType::INT8: {
+                        return ProcessChunksForValidByOffsets<int8_t>(use_index,
+                                                                      input);
+                    }
+                    case DataType::INT16: {
+                        return ProcessChunksForValidByOffsets<int16_t>(
+                            use_index, input);
+                    }
+                    case DataType::INT32: {
+                        return ProcessChunksForValidByOffsets<int32_t>(
+                            use_index, input);
+                    }
+                    case DataType::INT64: {
+                        return ProcessChunksForValidByOffsets<int64_t>(
+                            use_index, input);
+                    }
+                    case DataType::FLOAT: {
+                        return ProcessChunksForValidByOffsets<float>(use_index,
+                                                                     input);
+                    }
+                    case DataType::DOUBLE: {
+                        return ProcessChunksForValidByOffsets<double>(use_index,
+                                                                      input);
+                    }
+                    case DataType::STRING:
+                    case DataType::VARCHAR: {
+                        return ProcessChunksForValidByOffsets<std::string>(
+                            use_index, input);
+                    }
+                    default:
+                        PanicInfo(DataTypeInvalid,
+                                  "unsupported element type: {}",
+                                  element_type);
+                }
+            }
             const Index& index =
                 segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
             auto* index_ptr = const_cast<Index*>(&index);
