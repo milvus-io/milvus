@@ -7,6 +7,7 @@ use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
 use crate::docid_collector::DocIdCollector;
 use crate::log::init_log;
+use crate::milvus_id_collector::MilvusIdCollector;
 use crate::util::make_bounds;
 use crate::vec_collector::VecCollector;
 
@@ -19,6 +20,7 @@ pub(crate) struct IndexReaderWrapper {
     pub(crate) reader: IndexReader,
     pub(crate) index: Arc<Index>,
     pub(crate) id_field: Option<Field>,
+    pub(crate) user_specified_doc_id: bool,
 }
 
 impl IndexReaderWrapper {
@@ -39,6 +41,8 @@ impl IndexReaderWrapper {
             Err(_) => None,
         };
 
+        assert!(!schema.user_specified_doc_id() || id_field.is_none());
+
         let reader = index
             .reader_builder()
             .reload_policy(ReloadPolicy::OnCommitWithDelay) // OnCommitWithDelay serve for growing segment.
@@ -51,6 +55,7 @@ impl IndexReaderWrapper {
             reader,
             index,
             id_field,
+            user_specified_doc_id: schema.user_specified_doc_id(),
         })
     }
 
@@ -63,7 +68,11 @@ impl IndexReaderWrapper {
         let metas = self.index.searchable_segment_metas()?;
         let mut sum: u32 = 0;
         for meta in metas {
-            sum += meta.max_doc();
+            if self.user_specified_doc_id {
+                sum = std::cmp::max(sum, meta.max_doc());
+            } else {
+                sum += meta.max_doc();
+            }
         }
         Ok(sum)
     }
@@ -78,16 +87,24 @@ impl IndexReaderWrapper {
                     .map_err(TantivyBindingError::TantivyError)
             }
             None => {
-                // older version without doc_id, only one segment.
-                searcher
-                    .search(q, &VecCollector {})
-                    .map_err(TantivyBindingError::TantivyError)
+                if self.user_specified_doc_id {
+                    // newer version with user specified doc id.
+                    searcher
+                        .search(q, &MilvusIdCollector::default())
+                        .map_err(TantivyBindingError::TantivyError)
+                } else {
+                    // older version without doc_id, only one segment.
+                    searcher
+                        .search(q, &VecCollector {})
+                        .map_err(TantivyBindingError::TantivyError)
+                }
             }
         }
     }
 
     // Generally, we should use [`crate::search`], except for some special senarios where the doc_id could beyound
     // the score of u32.
+    #[allow(dead_code)]
     pub(crate) fn search_i64(&self, q: &dyn Query) -> Result<Vec<i64>> {
         assert!(self.id_field.is_some());
         let searcher = self.reader.searcher();
@@ -289,7 +306,7 @@ mod test {
 
     use tantivy::{
         doc,
-        schema::{Schema, STORED, STRING},
+        schema::{Schema, STORED, STRING, TEXT_WITH_DOC_ID},
         Index,
     };
 
@@ -316,5 +333,41 @@ mod test {
         assert_eq!(res.len(), 1);
         res = index_reader_wrapper.prefix_query_keyword("$").unwrap();
         assert_eq!(res.len(), 1);
+    }
+
+    #[test]
+    fn test_count() {
+        let mut schema_builder = Schema::builder();
+        schema_builder.add_text_field("title", TEXT_WITH_DOC_ID);
+        schema_builder.enable_user_specified_doc_id();
+        let schema = schema_builder.build();
+        let title = schema.get_field("title").unwrap();
+
+        let index = Index::create_in_ram(schema.clone());
+        let mut index_writer = index.writer(50000000).unwrap();
+
+        for i in 0..10_000 {
+            index_writer
+                .add_document_with_doc_id(i, doc!(title => format!("abc{}", i)))
+                .unwrap();
+        }
+        index_writer.commit().unwrap();
+
+        let index_shared = Arc::new(index);
+        let index_reader_wrapper = IndexReaderWrapper::from_index(index_shared).unwrap();
+        let count = index_reader_wrapper.count().unwrap();
+        assert_eq!(count, 10000);
+
+        let batch: Vec<_> = (0..10_000)
+            .into_iter()
+            .map(|i| doc!(title => format!("hello{}", i)))
+            .collect();
+        index_writer
+            .add_documents_with_doc_id(10_000, batch)
+            .unwrap();
+        index_writer.commit().unwrap();
+        index_reader_wrapper.reload().unwrap();
+        let count = index_reader_wrapper.count().unwrap();
+        assert_eq!(count, 20000);
     }
 }

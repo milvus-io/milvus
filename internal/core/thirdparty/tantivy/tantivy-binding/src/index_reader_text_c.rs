@@ -21,10 +21,8 @@ pub extern "C" fn tantivy_phrase_match_query(
     slop: u32,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    unsafe {
-        let query = cstr_to_str!(query);
-        (*real).phrase_match_query(query, slop).into()
-    }
+    let query = cstr_to_str!(query);
+    unsafe { (*real).phrase_match_query(query, slop).into() }
 }
 
 #[no_mangle]

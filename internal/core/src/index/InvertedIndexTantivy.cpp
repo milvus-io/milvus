@@ -203,24 +203,26 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
     auto inverted_index_files = index_files.value();
 
     // need erase the index type file that has been readed
-    auto index_type_file =
-        disk_file_manager_->GetRemoteIndexPrefix() + std::string("/index_type");
-    inverted_index_files.erase(
-        std::remove_if(
-            inverted_index_files.begin(),
-            inverted_index_files.end(),
-            [&](const std::string& file) { return file == index_type_file; }),
-        inverted_index_files.end());
+    auto GetFileName = [](const std::string& path) -> std::string {
+        auto pos = path.find_last_of('/');
+        return pos == std::string::npos ? path : path.substr(pos + 1);
+    };
+    inverted_index_files.erase(std::remove_if(inverted_index_files.begin(),
+                                              inverted_index_files.end(),
+                                              [&](const std::string& file) {
+                                                  return GetFileName(file) ==
+                                                         "index_type";
+                                              }),
+                               inverted_index_files.end());
 
     std::vector<std::string> null_offset_files;
     std::shared_ptr<FieldDataBase> null_offset_data;
 
-    auto find_file = [&](const std::string& file) -> auto {
+    auto find_file = [&](const std::string& target) -> auto{
         return std::find_if(inverted_index_files.begin(),
                             inverted_index_files.end(),
-                            [&](const std::string& f) {
-                                return f.substr(f.find_last_of('/') + 1) ==
-                                       file;
+                            [&](const std::string& filename) {
+                                return GetFileName(filename) == target;
                             });
     };
 

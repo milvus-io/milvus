@@ -184,8 +184,7 @@ RustResult tantivy_create_index(const char *field_name,
 
 RustResult tantivy_create_index_with_single_segment(const char *field_name,
                                                     TantivyDataType data_type,
-                                                    const char *path,
-                                                    uint32_t tantivy_index_version);
+                                                    const char *path);
 
 void tantivy_free_index_writer(void *ptr);
 
@@ -258,9 +257,14 @@ RustResult tantivy_index_add_bools_by_single_segment_writer(void *ptr,
                                                             const bool *array,
                                                             uintptr_t len);
 
-RustResult tantivy_index_add_string(void *ptr, const char *s, int64_t offset);
+RustResult tantivy_index_add_strings(void *ptr,
+                                     const char *const *array,
+                                     uintptr_t len,
+                                     int64_t offset);
 
-RustResult tantivy_index_add_string_by_single_segment_writer(void *ptr, const char *s);
+RustResult tantivy_index_add_strings_by_single_segment_writer(void *ptr,
+                                                              const char *const *array,
+                                                              uintptr_t len);
 
 RustResult tantivy_index_add_array_int8s(void *ptr,
                                          const int8_t *array,

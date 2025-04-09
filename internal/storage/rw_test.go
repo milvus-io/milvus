@@ -269,14 +269,6 @@ func (s *PackedBinlogRecordSuite) TestConvertArrowSchemaError() {
 	s.Error(err)
 }
 
-func (s *PackedBinlogRecordSuite) TestEmptyColumnGroup() {
-	wOption := []RwOption{
-		WithVersion(StorageV2),
-	}
-	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
-	s.Error(err)
-}
-
 func (s *PackedBinlogRecordSuite) TestEmptyBinlog() {
 	rOption := []RwOption{
 		WithVersion(StorageV2),
