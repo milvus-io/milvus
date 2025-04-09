@@ -15,11 +15,11 @@ class TestE2e(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_default(self):
         # create
-        name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         t0 = time.time()
-        collection_w = self.init_collection_wrap(name=name, active_trace=True)
+        collection_w = self.init_collection_wrap(name=collection_name, active_trace=True)
         tt = time.time() - t0
-        assert collection_w.name == name
+        assert collection_w.name == collection_name
 
         # index
         index_params = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "L2"}

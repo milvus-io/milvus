@@ -76,8 +76,8 @@ class TestMilvusClientV2Base(Base):
     @trace()
     def create_collection(self, client, collection_name, dimension=None, primary_field_name='id',
                           id_type='int', vector_field_name='vector', metric_type='COSINE',
-                          auto_id=False, schema=None, index_params=None, timeout=None, check_task=None,
-                          check_items=None, **kwargs):
+                          auto_id=False, schema=None, index_params=None, timeout=None, force_teardown=True,
+                          check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         consistency_level = kwargs.get("consistency_level", "Strong")
         kwargs.update({"consistency_level": consistency_level})
@@ -89,8 +89,9 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        collection_name=collection_name, dimension=dimension,
                                        **kwargs).run()
-
-        self.tear_down_collection_names.append(collection_name)
+        if force_teardown:
+            # if running with collection-shared-mode, please not teardown here, but do it in the specific test class
+            self.tear_down_collection_names.append(collection_name)
         return res, check_result
 
     def has_collection(self, client, collection_name, timeout=None, check_task=None,
