@@ -49,7 +49,6 @@ jobs:
       - name: 'Setup $HOME'
         # hot fix
         run: |
-            echo '/tmp/core.%e.%p' | tee /proc/sys/kernel/core_pattern
             lsof -i :9000
             # Check if $HOME is not set
             if [ -z "$HOME" ]; then
