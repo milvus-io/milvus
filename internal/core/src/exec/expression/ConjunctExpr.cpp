@@ -104,6 +104,7 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto all_flat_result = GetColumnVector(result);
             if (CanSkipFollowingExprs(all_flat_result)) {
                 SkipFollowingExprs(i + 1);
+                ClearBitmapInput(context);
                 return;
             }
             SetNextExprBitmapInput(all_flat_result, context);
@@ -115,6 +116,7 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             UpdateResult(input_flat_result, context, all_flat_result);
         if (active_rows == 0) {
             SkipFollowingExprs(i + 1);
+            ClearBitmapInput(context);
             return;
         }
         SetNextExprBitmapInput(all_flat_result, context);
