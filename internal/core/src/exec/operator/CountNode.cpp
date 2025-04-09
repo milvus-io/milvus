@@ -34,7 +34,11 @@ wrap_num_entities(int64_t cnt, int64_t size) {
 PhyCountNode::PhyCountNode(int32_t operator_id,
                            DriverContext* driverctx,
                            const std::shared_ptr<const plan::CountNode>& node)
-    : Operator(driverctx, node->output_type(), operator_id, node->id()) {
+    : Operator(driverctx,
+               node->output_type(),
+               operator_id,
+               node->id(),
+               "PhyCountNode") {
     ExecContext* exec_context = operator_context_->get_exec_context();
     query_context_ = exec_context->get_query_context();
     segment_ = query_context_->get_segment();

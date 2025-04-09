@@ -361,7 +361,7 @@ queryCoord:
   balanceCostThreshold: 0.001 # the threshold of balance cost, if the difference of cluster's cost after executing the balance plan is less than this value, the plan will not be executed
   checkSegmentInterval: 1000
   checkChannelInterval: 1000
-  checkBalanceInterval: 3000
+  checkBalanceInterval: 300
   autoBalanceInterval: 3000 # the interval for triggerauto balance
   checkIndexInterval: 10000
   channelTaskTimeout: 60000 # 1 minute
@@ -507,8 +507,6 @@ indexCoord:
 indexNode:
   scheduler:
     buildParallel: 1
-  enableDisk: true # enable build disk vector index
-  maxDiskUsagePercentage: 95
 
 dataCoord:
   channel:
@@ -635,6 +633,9 @@ dataCoord:
     clusteringCompactionUsage: 16 # slot usage of clustering compaction job.
     mixCompactionUsage: 8 # slot usage of mix compaction job.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction job.
+    indexTaskSlotUsage: 64 # slot usage of index task per 512mb
+    statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
+    analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
@@ -1138,6 +1139,26 @@ streaming:
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffInitialInterval: 50ms
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default
+    balancePolicy:
+      name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
+      vchannelFair:
+        # The weight of pchannel count in vchannelFair balance policy, 
+        # the pchannel count will more evenly distributed if the weight is greater, 0.4 by default
+        pchannelWeight: 0.4
+        # The weight of vchannel count in vchannelFair balance policy, 
+        # the vchannel count will more evenly distributed if the weight is greater, 0.3 by default
+        vchannelWeight: 0.3
+        # The weight of affinity in vchannelFair balance policy, 
+        # the fewer VChannels belonging to the same Collection between two PChannels, the higher the affinity,
+        # the vchannel of one collection will more evenly distributed if the weight is greater, 0.01 by default
+        antiAffinityWeight: 0.01
+        # The tolerance of vchannelFair balance policy, if the score of two balance result is less than the tolerance,
+        # the balance result will be ignored, the lower tolerance, the sensitive rebalance, 0.01 by default
+        rebalanceTolerance: 0.01
+        # Indicates how many pchannels will be considered as a batch for rebalancing,
+        # the larger step, more aggressive and accurate rebalance, 
+        # it also determine the depth of depth first search method that is used to find the best balance result, 3 by default
+        rebalanceMaxStep: 3
   walBroadcaster:
     concurrencyRatio: 1 # The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.
   txn:

@@ -38,9 +38,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-func (s *CompactionSuite) TestMixCompaction() {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
-	defer cancel()
+func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionName string) {
 	c := s.Cluster
 
 	const (
@@ -53,8 +51,6 @@ func (s *CompactionSuite) TestMixCompaction() {
 		metricType = metric.L2
 		vecType    = schemapb.DataType_FloatVector
 	)
-
-	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
 
 	schema := integration.ConstructSchemaOfVecDataType(collectionName, dim, true, vecType)
 	marshaledSchema, err := proto.Marshal(schema)
@@ -122,20 +118,24 @@ func (s *CompactionSuite) TestMixCompaction() {
 		log.Info("insert done", zap.Int("i", i))
 	}
 
-	segments, err := c.MetaWatcher.ShowSegments()
-	s.NoError(err)
-	s.NotEmpty(segments)
-	// The stats task of segments will create a new segment, potentially triggering compaction simultaneously,
-	// which may lead to an increase or decrease in the number of segments.
-	s.True(len(segments) > 0)
+	showSegments := func() {
+		segments, err := c.MetaWatcher.ShowSegments()
+		s.NoError(err)
+		s.NotEmpty(segments)
+		// The stats task of segments will create a new segment, potentially triggering compaction simultaneously,
+		// which may lead to an increase or decrease in the number of segments.
+		s.True(len(segments) > 0)
 
-	for _, segment := range segments {
-		log.Info("show segment result", zap.String("segment", segment.String()))
+		for _, segment := range segments {
+			log.Info("show segment result", zap.Any("segment", segment))
+		}
 	}
 
+	showSegments()
+
 	// wait for compaction completed
-	showSegments := func() bool {
-		segments, err = c.MetaWatcher.ShowSegments()
+	waitCompaction := func() bool {
+		segments, err := c.MetaWatcher.ShowSegments()
 		s.NoError(err)
 		s.NotEmpty(segments)
 
@@ -153,7 +153,7 @@ func (s *CompactionSuite) TestMixCompaction() {
 		return len(compactToSegments) <= paramtable.Get().DataCoordCfg.MinSegmentToMerge.GetAsInt()
 	}
 
-	for !showSegments() {
+	for !waitCompaction() {
 		select {
 		case <-ctx.Done():
 			s.Fail("waiting for compaction timeout")
@@ -161,6 +161,23 @@ func (s *CompactionSuite) TestMixCompaction() {
 		case <-time.After(1 * time.Second):
 		}
 	}
+
+	showSegments()
+}
+
+func (s *CompactionSuite) assertQuery(ctx context.Context, collectionName string) {
+	c := s.Cluster
+
+	const (
+		dim    = 128
+		dbName = ""
+		rowNum = 10000
+		batch  = 1000
+
+		indexType  = integration.IndexFaissIvfFlat
+		metricType = metric.L2
+		vecType    = schemapb.DataType_FloatVector
+	)
 
 	// load
 	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -202,6 +219,15 @@ func (s *CompactionSuite) TestMixCompaction() {
 	})
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
+}
+
+func (s *CompactionSuite) TestMixCompaction() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
+	defer cancel()
+
+	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
+	s.assertMixCompaction(ctx, collectionName)
+	s.assertQuery(ctx, collectionName)
 
 	// drop collection
 	// status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
@@ -211,4 +237,18 @@ func (s *CompactionSuite) TestMixCompaction() {
 	// s.NoError(err)
 
 	log.Info("Test compaction succeed")
+}
+
+func (s *CompactionSuite) TestMixCompactionV2() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableStorageV2.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableStorageV2.Key)
+	// disable index based compaction for v2 because we don't support v2 reader yet.
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
+	defer cancel()
+
+	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
+	s.assertMixCompaction(ctx, collectionName)
 }

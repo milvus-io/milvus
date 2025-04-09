@@ -23,6 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
@@ -34,9 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
 )
 
 func TestClusteringCompactionTaskStorageV2Suite(t *testing.T) {
@@ -114,6 +115,10 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 		Begin: 1,
 		End:   101,
 	}
+	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
+		Begin: 200,
+		End:   2000,
+	}
 
 	compactionResultV2, err := s.task.Compact()
 	s.Require().NoError(err)
@@ -170,6 +175,10 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 	s.task.plan.PreAllocatedSegmentIDs = &datapb.IDRange{
 		Begin: 1,
 		End:   101,
+	}
+	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{
+		Begin: 200,
+		End:   2000,
 	}
 
 	compactionResult, err := s.task.Compact()

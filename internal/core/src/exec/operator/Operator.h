@@ -97,7 +97,7 @@ class Operator {
              DataType output_type,
              int32_t operator_id,
              const std::string& plannode_id,
-             const std::string& operator_type = "")
+             const std::string& operator_type)
         : operator_context_(std::make_unique<OperatorContext>(
               ctx, plannode_id, operator_id, operator_type)) {
     }

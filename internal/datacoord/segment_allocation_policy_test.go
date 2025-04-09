@@ -349,6 +349,12 @@ func Test_sealByBlockingL0(t *testing.T) {
 			StartPosition: &msgpb.MsgPosition{Timestamp: 35},
 		},
 	}
+	growing_3 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            2003,
+			InsertChannel: "channel_1",
+		},
+	}
 
 	testCases := []*testCase{
 		{
@@ -384,6 +390,13 @@ func Test_sealByBlockingL0(t *testing.T) {
 			growingSegments: []*SegmentInfo{growing_1, growing_2},
 			sizeLimit:       -1,
 			entryNumLimit:   -1,
+			expected:        []int64{},
+		},
+		{
+			tag:             "growing_segment_with_nil_start_position",
+			channel:         "channel_1",
+			l0Segments:      []*SegmentInfo{l0_1, l0_2},
+			growingSegments: []*SegmentInfo{growing_3},
 			expected:        []int64{},
 		},
 	}

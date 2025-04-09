@@ -30,9 +30,11 @@ PhyLogicalUnaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
         auto flat_vec = GetColumnVector(result);
         TargetBitmapView data(flat_vec->GetRawData(), flat_vec->size());
         data.flip();
-        TargetBitmapView valid_data(flat_vec->GetValidRawData(),
-                                    flat_vec->size());
-        data &= valid_data;
+        if (context.get_apply_valid_data_after_flip()) {
+            TargetBitmapView valid_data(flat_vec->GetValidRawData(),
+                                        flat_vec->size());
+            data &= valid_data;
+        }
     }
 }
 

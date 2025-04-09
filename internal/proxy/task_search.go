@@ -70,8 +70,9 @@ type searchTask struct {
 	isTopkReduce           bool
 	isRecallEvaluation     bool
 
-	userOutputFields  []string
-	userDynamicFields []string
+	translatedOutputFields []string
+	userOutputFields       []string
+	userDynamicFields      []string
 
 	resultBuf *typeutil.ConcurrentSet[*internalpb.SearchResults]
 
@@ -167,13 +168,13 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	t.request.OutputFields, t.userOutputFields, t.userDynamicFields, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
+	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
 	if err != nil {
-		log.Warn("translate output fields failed", zap.Error(err))
+		log.Warn("translate output fields failed", zap.Error(err), zap.Any("schema", t.schema))
 		return err
 	}
 	log.Debug("translate output fields",
-		zap.Strings("output fields", t.request.GetOutputFields()))
+		zap.Strings("output fields", t.translatedOutputFields))
 
 	if t.SearchRequest.GetIsAdvanced() {
 		if len(t.request.GetSubReqs()) > defaultMaxSearchRequest {
@@ -201,7 +202,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	outputFieldIDs, err := getOutputFieldIDs(t.schema, t.request.GetOutputFields())
+	outputFieldIDs, err := getOutputFieldIDs(t.schema, t.translatedOutputFields)
 	if err != nil {
 		log.Info("fail to get output field ids", zap.Error(err))
 		return err
@@ -211,11 +212,11 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// Currently, we get vectors by requery. Once we support getting vectors from search,
 	// searches with small result size could no longer need requery.
 	vectorOutputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
-		return lo.Contains(t.request.GetOutputFields(), field.GetName()) && typeutil.IsVectorType(field.GetDataType())
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
 
 	if t.SearchRequest.GetIsAdvanced() {
-		t.requery = len(t.request.OutputFields) > 0
+		t.requery = len(t.translatedOutputFields) > 0
 		err = t.initAdvancedSearchRequest(ctx)
 	} else {
 		t.requery = len(vectorOutputFields) > 0
@@ -848,6 +849,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		}
 		t.result.Results.FieldsData = append(t.result.Results.FieldsData, pkFieldData)
 	}
+	t.result.Results.PrimaryFieldName = primaryFieldSchema.GetName()
 	if t.isIterator && len(t.queryInfos) == 1 && t.queryInfos[0] != nil {
 		if iterInfo := t.queryInfos[0].GetSearchIteratorV2Info(); iterInfo != nil {
 			t.result.Results.SearchIteratorV2Results = &schemapb.SearchIteratorV2Results{
@@ -913,7 +915,7 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 
 func (t *searchTask) estimateResultSize(nq int64, topK int64) (int64, error) {
 	vectorOutputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
-		return lo.Contains(t.request.GetOutputFields(), field.GetName()) && typeutil.IsVectorType(field.GetDataType())
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
 	// Currently, we get vectors by requery. Once we support getting vectors from search,
 	// searches with small result size could no longer need requery.
@@ -924,7 +926,7 @@ func (t *searchTask) estimateResultSize(nq int64, topK int64) (int64, error) {
 	return 0, nil
 
 	//outputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
-	//	return lo.Contains(t.request.GetOutputFields(), field.GetName())
+	//	return lo.Contains(t.translatedOutputFields, field.GetName())
 	//})
 	//sizePerRecord, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{Fields: outputFields})
 	//if err != nil {
@@ -944,7 +946,7 @@ func (t *searchTask) Requery(span trace.Span) error {
 		ConsistencyLevel:      t.SearchRequest.GetConsistencyLevel(),
 		NotReturnAllMeta:      t.request.GetNotReturnAllMeta(),
 		Expr:                  "",
-		OutputFields:          t.request.GetOutputFields(),
+		OutputFields:          t.translatedOutputFields,
 		PartitionNames:        t.request.GetPartitionNames(),
 		UseDefaultConsistency: false,
 		GuaranteeTimestamp:    t.SearchRequest.GuaranteeTimestamp,
@@ -1016,21 +1018,21 @@ func (t *searchTask) Requery(span trace.Span) error {
 	for i := 0; i < typeutil.GetSizeOfIDs(ids); i++ {
 		id := typeutil.GetPK(ids, int64(i))
 		if _, ok := offsets[id]; !ok {
-			return merr.WrapErrInconsistentRequery(fmt.Sprintf("incomplete query result, missing id %s, len(searchIDs) = %d, len(queryIDs) = %d, collection=%d",
+			return merr.WrapErrInconsistentRequery(fmt.Sprintf("incomplete query result, missing id %v, len(searchIDs) = %d, len(queryIDs) = %d, collection=%d",
 				id, typeutil.GetSizeOfIDs(ids), len(offsets), t.GetCollectionID()))
 		}
 		typeutil.AppendFieldData(t.result.Results.FieldsData, queryResult.GetFieldsData(), int64(offsets[id]))
 	}
 
 	t.result.Results.FieldsData = lo.Filter(t.result.Results.FieldsData, func(fieldData *schemapb.FieldData, i int) bool {
-		return lo.Contains(t.request.GetOutputFields(), fieldData.GetFieldName())
+		return lo.Contains(t.translatedOutputFields, fieldData.GetFieldName())
 	})
 	return nil
 }
 
 func (t *searchTask) fillInFieldInfo() {
-	if len(t.request.OutputFields) != 0 && len(t.result.Results.FieldsData) != 0 {
-		for i, name := range t.request.OutputFields {
+	if len(t.translatedOutputFields) != 0 && len(t.result.Results.FieldsData) != 0 {
+		for i, name := range t.translatedOutputFields {
 			for _, field := range t.schema.Fields {
 				if t.result.Results.FieldsData[i] != nil && field.Name == name {
 					t.result.Results.FieldsData[i].FieldName = field.Name

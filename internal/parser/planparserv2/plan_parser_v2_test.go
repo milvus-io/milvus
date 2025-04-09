@@ -10,6 +10,7 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -193,6 +194,7 @@ func TestExpr_UnaryRange(t *testing.T) {
 		`VarCharField <= "str7"`,
 		`JSONField["A"] > 10`,
 		`$meta["A"] > 10`,
+		`A == -9223372036854775808`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1704,4 +1706,41 @@ func TestNestedPathWithChinese(t *testing.T) {
 	assert.Equal(t, "A", paths[0])
 	assert.Equal(t, "年份", paths[1])
 	assert.Equal(t, "月份", paths[2])
+}
+
+func Test_JSONPathNullExpr(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	exprPairs := [][]string{
+		{`A["a"] is null`, `not exists A["a"]`},
+		{`A["a"] is not null`, `exists A["a"]`},
+		{`dyn_field is null`, `not exists dyn_field`},
+		{`dyn_field is not null`, `exists dyn_field`},
+	}
+
+	for _, expr := range exprPairs {
+		plan, err := CreateSearchPlan(schema, expr[0], "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, plan)
+
+		plan2, err := CreateSearchPlan(schema, expr[1], "FloatVectorField", &planpb.QueryInfo{
+			Topk:         0,
+			MetricType:   "",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, plan2)
+
+		planStr, err := proto.Marshal(plan)
+		assert.NoError(t, err)
+		plan2Str, err := proto.Marshal(plan2)
+		assert.NoError(t, err)
+		assert.Equal(t, planStr, plan2Str)
+	}
 }

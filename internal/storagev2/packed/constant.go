@@ -21,4 +21,6 @@ const (
 	DefaultWriteBufferSize = 32 * 1024 * 1024 // 32MB
 	// DefaultMultiPartUploadSize is the default size of each part of a multipart upload.
 	DefaultMultiPartUploadSize = 10 * 1024 * 1024 // 10MB
+	// Arrow will convert these field IDs to a metadata key named PARQUET:field_id on the appropriate field.
+	ArrowFieldIdMetadataKey = "PARQUET:field_id"
 )

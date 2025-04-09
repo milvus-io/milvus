@@ -76,17 +76,17 @@ func (_c *MockBufferManager_BufferData_Call) RunAndReturn(run func(string, []*In
 	return _c
 }
 
-// CreateNewGrowingSegment provides a mock function with given fields: ctx, channel, partition, segmentID, storageVersion
-func (_m *MockBufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, partition int64, segmentID int64, storageVersion int64) error {
-	ret := _m.Called(ctx, channel, partition, segmentID, storageVersion)
+// CreateNewGrowingSegment provides a mock function with given fields: ctx, channel, partition, segmentID
+func (_m *MockBufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, partition int64, segmentID int64) error {
+	ret := _m.Called(ctx, channel, partition, segmentID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateNewGrowingSegment")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, int64, int64, int64) error); ok {
-		r0 = rf(ctx, channel, partition, segmentID, storageVersion)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, int64) error); ok {
+		r0 = rf(ctx, channel, partition, segmentID)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -104,14 +104,13 @@ type MockBufferManager_CreateNewGrowingSegment_Call struct {
 //   - channel string
 //   - partition int64
 //   - segmentID int64
-//   - storageVersion int64
-func (_e *MockBufferManager_Expecter) CreateNewGrowingSegment(ctx interface{}, channel interface{}, partition interface{}, segmentID interface{}, storageVersion interface{}) *MockBufferManager_CreateNewGrowingSegment_Call {
-	return &MockBufferManager_CreateNewGrowingSegment_Call{Call: _e.mock.On("CreateNewGrowingSegment", ctx, channel, partition, segmentID, storageVersion)}
+func (_e *MockBufferManager_Expecter) CreateNewGrowingSegment(ctx interface{}, channel interface{}, partition interface{}, segmentID interface{}) *MockBufferManager_CreateNewGrowingSegment_Call {
+	return &MockBufferManager_CreateNewGrowingSegment_Call{Call: _e.mock.On("CreateNewGrowingSegment", ctx, channel, partition, segmentID)}
 }
 
-func (_c *MockBufferManager_CreateNewGrowingSegment_Call) Run(run func(ctx context.Context, channel string, partition int64, segmentID int64, storageVersion int64)) *MockBufferManager_CreateNewGrowingSegment_Call {
+func (_c *MockBufferManager_CreateNewGrowingSegment_Call) Run(run func(ctx context.Context, channel string, partition int64, segmentID int64)) *MockBufferManager_CreateNewGrowingSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(int64), args[4].(int64))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(int64))
 	})
 	return _c
 }
@@ -121,7 +120,7 @@ func (_c *MockBufferManager_CreateNewGrowingSegment_Call) Return(_a0 error) *Moc
 	return _c
 }
 
-func (_c *MockBufferManager_CreateNewGrowingSegment_Call) RunAndReturn(run func(context.Context, string, int64, int64, int64) error) *MockBufferManager_CreateNewGrowingSegment_Call {
+func (_c *MockBufferManager_CreateNewGrowingSegment_Call) RunAndReturn(run func(context.Context, string, int64, int64) error) *MockBufferManager_CreateNewGrowingSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }

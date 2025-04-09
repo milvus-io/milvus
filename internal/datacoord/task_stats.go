@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
@@ -37,6 +38,8 @@ type statsTask struct {
 	targetSegmentID int64
 	nodeID          int64
 	taskInfo        *workerpb.StatsResult
+
+	taskSlot int64
 
 	queueTime time.Time
 	startTime time.Time
@@ -49,7 +52,7 @@ type statsTask struct {
 
 var _ Task = (*statsTask)(nil)
 
-func newStatsTask(taskID int64, segmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob) *statsTask {
+func newStatsTask(taskID int64, segmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob, taskSlot int64) *statsTask {
 	return &statsTask{
 		taskID:          taskID,
 		segmentID:       segmentID,
@@ -59,6 +62,7 @@ func newStatsTask(taskID int64, segmentID, targetSegmentID int64, subJobType ind
 			State:  indexpb.JobState_JobStateInit,
 		},
 		subJobType: subJobType,
+		taskSlot:   taskSlot,
 	}
 }
 
@@ -75,9 +79,7 @@ func (st *statsTask) GetNodeID() int64 {
 }
 
 func (st *statsTask) ResetTask(mt *meta) {
-	st.nodeID = 0
 	// reset isCompacting
-
 	mt.SetSegmentsCompacting(context.TODO(), []UniqueID{st.segmentID}, false)
 	mt.SetSegmentStating(st.segmentID, false)
 }
@@ -126,6 +128,10 @@ func (st *statsTask) GetState() indexpb.JobState {
 
 func (st *statsTask) GetFailReason() string {
 	return st.taskInfo.GetFailReason()
+}
+
+func (st *statsTask) GetTaskSlot() int64 {
+	return st.taskSlot
 }
 
 func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
@@ -212,7 +218,7 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		return false
 	}
 
-	binlogNum := (segment.getSegmentSize()/Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() + 1) * int64(len(collInfo.Schema.GetFields())) * 100
+	binlogNum := (segment.getSegmentSize()/Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() + 1) * int64(len(collInfo.Schema.GetFields())) * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
 	// binlogNum + BM25logNum + statslogNum
 	start, end, err := dependency.allocator.AllocN(binlogNum + int64(len(collInfo.Schema.GetFunctions())) + 1)
 	if err != nil {
@@ -238,8 +244,10 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		CollectionTtl:   collTtl.Nanoseconds(),
 		CurrentTs:       tsoutil.GetCurrentTime(),
 		// update version after check
-		TaskVersion:   statsMeta.GetVersion() + 1,
-		BinlogMaxSize: Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		TaskVersion:    statsMeta.GetVersion() + 1,
+		BinlogMaxSize:  Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		StorageVersion: segment.StorageVersion,
+		TaskSlot:       st.taskSlot,
 	}
 
 	log.Info("stats task pre check successfully", zap.String("subJobType", st.subJobType.String()),

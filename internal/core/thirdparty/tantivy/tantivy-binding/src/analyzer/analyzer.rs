@@ -163,7 +163,7 @@ impl AnalyzerBuilder<'_> {
                 }
                 return self.build_template(type_.as_str().unwrap());
             }
-            None => {}
+            _ => {}
         };
 
         //build custom analyzer

@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	typeutil "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -84,12 +83,12 @@ func TestIndexNodeManager_PickClient(t *testing.T) {
 					Status: merr.Status(err),
 				}, nil),
 				8: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
-					TaskSlots: 1,
-					Status:    merr.Success(),
+					AvailableSlots: 1,
+					Status:         merr.Success(),
 				}, nil),
 				9: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
-					TaskSlots: 10,
-					Status:    merr.Success(),
+					AvailableSlots: 10,
+					Status:         merr.Success(),
 				}, nil),
 			},
 		}
@@ -97,95 +96,6 @@ func TestIndexNodeManager_PickClient(t *testing.T) {
 		selectNodeID, client := nm.PickClient()
 		assert.NotNil(t, client)
 		assert.Contains(t, []typeutil.UniqueID{8, 9}, selectNodeID)
-	})
-}
-
-func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
-	paramtable.Init()
-	getMockedGetJobStatsClient := func(resp *workerpb.GetJobStatsResponse, err error) types.DataNodeClient {
-		ic := mocks.NewMockDataNodeClient(t)
-		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(resp, err)
-		return ic
-	}
-
-	err := errors.New("error")
-
-	t.Run("support", func(t *testing.T) {
-		nm := &IndexNodeManager{
-			ctx:  context.Background(),
-			lock: lock.RWMutex{},
-			nodeClients: map[typeutil.UniqueID]types.DataNodeClient{
-				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
-					Status:     merr.Success(),
-					TaskSlots:  1,
-					JobInfos:   nil,
-					EnableDisk: true,
-				}, nil),
-			},
-		}
-
-		support := nm.ClientSupportDisk()
-		assert.True(t, support)
-	})
-
-	t.Run("not support", func(t *testing.T) {
-		nm := &IndexNodeManager{
-			ctx:  context.Background(),
-			lock: lock.RWMutex{},
-			nodeClients: map[typeutil.UniqueID]types.DataNodeClient{
-				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
-					Status:     merr.Success(),
-					TaskSlots:  1,
-					JobInfos:   nil,
-					EnableDisk: false,
-				}, nil),
-			},
-		}
-
-		support := nm.ClientSupportDisk()
-		assert.False(t, support)
-	})
-
-	t.Run("no indexnode", func(t *testing.T) {
-		nm := &IndexNodeManager{
-			ctx:         context.Background(),
-			lock:        lock.RWMutex{},
-			nodeClients: map[typeutil.UniqueID]types.DataNodeClient{},
-		}
-
-		support := nm.ClientSupportDisk()
-		assert.False(t, support)
-	})
-
-	t.Run("error", func(t *testing.T) {
-		nm := &IndexNodeManager{
-			ctx:  context.Background(),
-			lock: lock.RWMutex{},
-			nodeClients: map[typeutil.UniqueID]types.DataNodeClient{
-				1: getMockedGetJobStatsClient(nil, err),
-			},
-		}
-
-		support := nm.ClientSupportDisk()
-		assert.False(t, support)
-	})
-
-	t.Run("fail reason", func(t *testing.T) {
-		nm := &IndexNodeManager{
-			ctx:  context.Background(),
-			lock: lock.RWMutex{},
-			nodeClients: map[typeutil.UniqueID]types.DataNodeClient{
-				1: getMockedGetJobStatsClient(&workerpb.GetJobStatsResponse{
-					Status:     merr.Status(err),
-					TaskSlots:  0,
-					JobInfos:   nil,
-					EnableDisk: false,
-				}, nil),
-			},
-		}
-
-		support := nm.ClientSupportDisk()
-		assert.False(t, support)
 	})
 }
 

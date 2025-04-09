@@ -312,7 +312,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     bool
     HasIndex(FieldId field_id,
              const std::string& nested_path,
-             DataType data_type) const override {
+             DataType data_type,
+             bool any_type = false) const override {
         return false;
     };
 
@@ -350,6 +351,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     std::vector<SegOffset>
     search_pk(const PkType& pk, int64_t insert_barrier) const override {
         return insert_record_.search_pk(pk, insert_barrier);
+    }
+
+    bool
+    is_field_exist(FieldId field_id) const override {
+        return schema_->get_fields().find(field_id) !=
+               schema_->get_fields().end();
     }
 
  protected:

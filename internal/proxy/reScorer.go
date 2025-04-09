@@ -77,12 +77,18 @@ func (rs *rrfScorer) scorerType() rankType {
 
 type weightedScorer struct {
 	baseScorer
-	weight float32
+	weight    float32
+	normScore bool
 }
 
 type activateFunc func(float32) float32
 
 func (ws *weightedScorer) getActivateFunc() activateFunc {
+	if !ws.normScore {
+		return func(distance float32) float32 {
+			return distance
+		}
+	}
 	mUpper := strings.ToUpper(ws.getMetricType())
 	isCosine := mUpper == strings.ToUpper(metric.COSINE)
 	isIP := mUpper == strings.ToUpper(metric.IP)
@@ -190,6 +196,11 @@ func NewReScorers(ctx context.Context, reqCnt int, rankParams []*commonpb.KeyVal
 		if _, ok := params[WeightsParamsKey]; !ok {
 			return nil, errors.New(WeightsParamsKey + " not found in rank_params")
 		}
+		// normalize scores by default
+		normScore := true
+		if _, ok := params[NormScoreKey]; ok {
+			normScore = params[NormScoreKey].(bool)
+		}
 		weights := make([]float32, 0)
 		switch reflect.TypeOf(params[WeightsParamsKey]).Kind() {
 		case reflect.Slice:
@@ -210,7 +221,7 @@ func NewReScorers(ctx context.Context, reqCnt int, rankParams []*commonpb.KeyVal
 			return nil, errors.New("The weights param should be an array")
 		}
 
-		log.Debug("weights params", zap.Any("weights", weights))
+		log.Debug("weights params", zap.Any("weights", weights), zap.Bool("norm_score", normScore))
 		if reqCnt != len(weights) {
 			return nil, merr.WrapErrParameterInvalid(fmt.Sprint(reqCnt), fmt.Sprint(len(weights)), "the length of weights param mismatch with ann search requests")
 		}
@@ -219,7 +230,8 @@ func NewReScorers(ctx context.Context, reqCnt int, rankParams []*commonpb.KeyVal
 				baseScorer: baseScorer{
 					scorerName: "weighted",
 				},
-				weight: weights[i],
+				weight:    weights[i],
+				normScore: normScore,
 			}
 		}
 	default:

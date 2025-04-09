@@ -21,13 +21,13 @@ extern "C" {
 #endif
 
 typedef void* CTokenStream;
-typedef struct CToken{
-  const char *token;
-  int64_t start_offset;
-  int64_t end_offset;
-  int64_t position;
-  int64_t position_length;
-}CToken;
+typedef struct CToken {
+    const char* token;
+    int64_t start_offset;
+    int64_t end_offset;
+    int64_t position;
+    int64_t position_length;
+} CToken;
 
 void free_token_stream(CTokenStream);
 

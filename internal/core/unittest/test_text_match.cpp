@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <optional>
 #include <string>
 
 #include "common/Schema.h"
@@ -33,7 +34,11 @@ GenTestSchema(std::map<std::string, std::string> params = {},
               bool nullable = false) {
     auto schema = std::make_shared<Schema>();
     {
-        FieldMeta f(FieldName("pk"), FieldId(100), DataType::INT64, false);
+        FieldMeta f(FieldName("pk"),
+                    FieldId(100),
+                    DataType::INT64,
+                    false,
+                    std::nullopt);
         schema->AddField(std::move(f));
         schema->set_primary_field_id(FieldId(100));
     }
@@ -45,7 +50,8 @@ GenTestSchema(std::map<std::string, std::string> params = {},
                     nullable,
                     true,
                     true,
-                    params);
+                    params,
+                    std::nullopt);
         schema->AddField(std::move(f));
     }
     {
@@ -54,7 +60,8 @@ GenTestSchema(std::map<std::string, std::string> params = {},
                     DataType::VECTOR_FLOAT,
                     16,
                     knowhere::metric::L2,
-                    false);
+                    false,
+                    std::nullopt);
         schema->AddField(std::move(f));
     }
     return schema;
@@ -943,9 +950,13 @@ TEST(TextMatch, SealedJieBaNullable) {
 TEST(TextMatch, GrowingLoadData) {
     int64_t N = 7;
     auto schema = GenTestSchema({}, true);
-    schema->AddField(FieldName("RowID"), FieldId(0), DataType::INT64, false);
     schema->AddField(
-        FieldName("Timestamp"), FieldId(1), DataType::INT64, false);
+        FieldName("RowID"), FieldId(0), DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     FieldId(1),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
     std::vector<std::string> raw_str = {"football, basketball, pingpang",
                                         "swimming, football",
                                         "golf",

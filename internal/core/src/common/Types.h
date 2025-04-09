@@ -24,6 +24,7 @@
 #include <boost/container/vector.hpp>
 #include <boost/dynamic_bitset.hpp>
 #include <folly/FBVector.h>
+#include <arrow/type.h>
 
 #include <limits>
 #include <memory>
@@ -103,6 +104,7 @@ using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertRecordProto = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
+using DefaultValueType = proto::schema::ValueField;
 
 inline size_t
 GetDataTypeSize(DataType data_type, int dim = 1) {
@@ -748,5 +750,386 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
                 break;
         }
         return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<milvus::proto::schema::DataType>
+    : formatter<std::string> {
+    auto
+    format(milvus::proto::schema::DataType dt, format_context& ctx) const {
+        std::string name;
+        switch (dt) {
+            case milvus::proto::schema::DataType::None:
+                name = "None";
+                break;
+            case milvus::proto::schema::DataType::Bool:
+                name = "Bool";
+                break;
+            case milvus::proto::schema::DataType::Int8:
+                name = "Int8";
+                break;
+            case milvus::proto::schema::DataType::Int16:
+                name = "Int16";
+                break;
+            case milvus::proto::schema::DataType::Int32:
+                name = "Int32";
+                break;
+            case milvus::proto::schema::DataType::Int64:
+                name = "Int64";
+                break;
+            case milvus::proto::schema::DataType::Float:
+                name = "Float";
+                break;
+            case milvus::proto::schema::DataType::Double:
+                name = "Double";
+                break;
+            case milvus::proto::schema::DataType::String:
+                name = "String";
+                break;
+            case milvus::proto::schema::DataType::VarChar:
+                name = "VarChar";
+                break;
+            case milvus::proto::schema::DataType::Array:
+                name = "Array";
+                break;
+            case milvus::proto::schema::DataType::JSON:
+                name = "JSON";
+                break;
+            case milvus::proto::schema::DataType::Geometry:
+                name = "Geometry";
+                break;
+            case milvus::proto::schema::DataType::Text:
+                name = "Text";
+                break;
+            case milvus::proto::schema::DataType::BinaryVector:
+                name = "BinaryVector";
+                break;
+            case milvus::proto::schema::DataType::FloatVector:
+                name = "FloatVector";
+                break;
+            case milvus::proto::schema::DataType::Float16Vector:
+                name = "Float16Vector";
+                break;
+            case milvus::proto::schema::DataType::BFloat16Vector:
+                name = "BFloat16Vector";
+                break;
+            case milvus::proto::schema::DataType::Int8Vector:
+                name = "Int8Vector";
+                break;
+            default:
+                name = "Unknown";
+        }
+        return formatter<std::string>::format(name, ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<arrow::Type::type> : fmt::formatter<std::string> {
+    auto
+    format(arrow::Type::type type, fmt::format_context& ctx) const {
+        std::string name;
+        switch (type) {
+            case arrow::Type::NA:
+                name = "Null";
+                break;
+            case arrow::Type::BOOL:
+                name = "Bool";
+                break;
+            case arrow::Type::UINT8:
+                name = "UInt8";
+                break;
+            case arrow::Type::INT8:
+                name = "Int8";
+                break;
+            case arrow::Type::UINT16:
+                name = "UInt16";
+                break;
+            case arrow::Type::INT16:
+                name = "Int16";
+                break;
+            case arrow::Type::UINT32:
+                name = "UInt32";
+                break;
+            case arrow::Type::INT32:
+                name = "Int32";
+                break;
+            case arrow::Type::UINT64:
+                name = "UInt64";
+                break;
+            case arrow::Type::INT64:
+                name = "Int64";
+                break;
+            case arrow::Type::HALF_FLOAT:
+                name = "HalfFloat";
+                break;
+            case arrow::Type::FLOAT:
+                name = "Float";
+                break;
+            case arrow::Type::DOUBLE:
+                name = "Double";
+                break;
+            case arrow::Type::STRING:
+                name = "String";
+                break;
+            case arrow::Type::BINARY:
+                name = "Binary";
+                break;
+            case arrow::Type::FIXED_SIZE_BINARY:
+                name = "FixedSizeBinary";
+                break;
+            case arrow::Type::DATE32:
+                name = "Date32";
+                break;
+            case arrow::Type::DATE64:
+                name = "Date64";
+                break;
+            case arrow::Type::TIMESTAMP:
+                name = "Timestamp";
+                break;
+            case arrow::Type::TIME32:
+                name = "Time32";
+                break;
+            case arrow::Type::TIME64:
+                name = "Time64";
+                break;
+            case arrow::Type::INTERVAL_MONTHS:
+                name = "IntervalMonths";
+                break;
+            case arrow::Type::INTERVAL_DAY_TIME:
+                name = "IntervalDayTime";
+                break;
+            case arrow::Type::DECIMAL128:
+                name = "Decimal128";
+                break;
+            case arrow::Type::DECIMAL256:
+                name = "Decimal256";
+                break;
+            case arrow::Type::LIST:
+                name = "List";
+                break;
+            case arrow::Type::STRUCT:
+                name = "Struct";
+                break;
+            case arrow::Type::SPARSE_UNION:
+                name = "SparseUnion";
+                break;
+            case arrow::Type::DENSE_UNION:
+                name = "DenseUnion";
+                break;
+            case arrow::Type::DICTIONARY:
+                name = "Dictionary";
+                break;
+            case arrow::Type::MAP:
+                name = "Map";
+                break;
+            case arrow::Type::EXTENSION:
+                name = "Extension";
+                break;
+            case arrow::Type::FIXED_SIZE_LIST:
+                name = "FixedSizeList";
+                break;
+            case arrow::Type::DURATION:
+                name = "Duration";
+                break;
+            case arrow::Type::LARGE_STRING:
+                name = "LargeString";
+                break;
+            case arrow::Type::LARGE_BINARY:
+                name = "LargeBinary";
+                break;
+            case arrow::Type::LARGE_LIST:
+                name = "LargeList";
+                break;
+            case arrow::Type::INTERVAL_MONTH_DAY_NANO:
+                name = "IntervalMonthDayNano";
+                break;
+            case arrow::Type::RUN_END_ENCODED:
+                name = "RunEndEncoded";
+                break;
+            case arrow::Type::STRING_VIEW:
+                name = "StringView";
+                break;
+            case arrow::Type::BINARY_VIEW:
+                name = "BinaryView";
+                break;
+            case arrow::Type::LIST_VIEW:
+                name = "ListView";
+                break;
+            case arrow::Type::LARGE_LIST_VIEW:
+                name = "LargeListView";
+                break;
+            default:
+                name = "Unknown";
+        }
+        return fmt::formatter<std::string>::format(name, ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<SegmentType> : fmt::formatter<std::string> {
+    auto
+    format(SegmentType type, fmt::format_context& ctx) const {
+        std::string name;
+        switch (type) {
+            case Invalid:
+                name = "Invalid";
+                break;
+            case Growing:
+                name = "Growing";
+                break;
+            case Sealed:
+                name = "Sealed";
+                break;
+            case Indexing:
+                name = "Indexing";
+                break;
+            case ChunkedSealed:
+                name = "ChunkedSealed";
+                break;
+            default:
+                name = "Unknown";
+        }
+        return fmt::formatter<std::string>::format(name, ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<milvus::ErrorCode> : fmt::formatter<std::string> {
+    auto
+    format(milvus::ErrorCode code, fmt::format_context& ctx) const {
+        std::string name;
+        switch (code) {
+            case milvus::Success:
+                name = "Success";
+                break;
+            case milvus::UnexpectedError:
+                name = "UnexpectedError";
+                break;
+            case milvus::NotImplemented:
+                name = "NotImplemented";
+                break;
+            case milvus::Unsupported:
+                name = "Unsupported";
+                break;
+            case milvus::IndexBuildError:
+                name = "IndexBuildError";
+                break;
+            case milvus::IndexAlreadyBuild:
+                name = "IndexAlreadyBuild";
+                break;
+            case milvus::ConfigInvalid:
+                name = "ConfigInvalid";
+                break;
+            case milvus::DataTypeInvalid:
+                name = "DataTypeInvalid";
+                break;
+            case milvus::PathInvalid:
+                name = "PathInvalid";
+                break;
+            case milvus::PathAlreadyExist:
+                name = "PathAlreadyExist";
+                break;
+            case milvus::PathNotExist:
+                name = "PathNotExist";
+                break;
+            case milvus::FileOpenFailed:
+                name = "FileOpenFailed";
+                break;
+            case milvus::FileCreateFailed:
+                name = "FileCreateFailed";
+                break;
+            case milvus::FileReadFailed:
+                name = "FileReadFailed";
+                break;
+            case milvus::FileWriteFailed:
+                name = "FileWriteFailed";
+                break;
+            case milvus::BucketInvalid:
+                name = "BucketInvalid";
+                break;
+            case milvus::ObjectNotExist:
+                name = "ObjectNotExist";
+                break;
+            case milvus::S3Error:
+                name = "S3Error";
+                break;
+            case milvus::RetrieveError:
+                name = "RetrieveError";
+                break;
+            case milvus::FieldIDInvalid:
+                name = "FieldIDInvalid";
+                break;
+            case milvus::FieldAlreadyExist:
+                name = "FieldAlreadyExist";
+                break;
+            case milvus::OpTypeInvalid:
+                name = "OpTypeInvalid";
+                break;
+            case milvus::DataIsEmpty:
+                name = "DataIsEmpty";
+                break;
+            case milvus::DataFormatBroken:
+                name = "DataFormatBroken";
+                break;
+            case milvus::JsonKeyInvalid:
+                name = "JsonKeyInvalid";
+                break;
+            case milvus::MetricTypeInvalid:
+                name = "MetricTypeInvalid";
+                break;
+            case milvus::FieldNotLoaded:
+                name = "FieldNotLoaded";
+                break;
+            case milvus::ExprInvalid:
+                name = "ExprInvalid";
+                break;
+            case milvus::UnistdError:
+                name = "UnistdError";
+                break;
+            case milvus::MetricTypeNotMatch:
+                name = "MetricTypeNotMatch";
+                break;
+            case milvus::DimNotMatch:
+                name = "DimNotMatch";
+                break;
+            case milvus::ClusterSkip:
+                name = "ClusterSkip";
+                break;
+            case milvus::MemAllocateFailed:
+                name = "MemAllocateFailed";
+                break;
+            case milvus::MemAllocateSizeNotMatch:
+                name = "MemAllocateSizeNotMatch";
+                break;
+            case milvus::MmapError:
+                name = "MmapError";
+                break;
+            case milvus::FollyOtherException:
+                name = "FollyOtherException";
+                break;
+            case milvus::FollyCancel:
+                name = "FollyCancel";
+                break;
+            case milvus::OutOfRange:
+                name = "OutOfRange";
+                break;
+            case milvus::GcpNativeError:
+                name = "GcpNativeError";
+                break;
+            case milvus::TextIndexNotFound:
+                name = "TextIndexNotFound";
+                break;
+            case milvus::InvalidParameter:
+                name = "InvalidParameter";
+                break;
+            case milvus::KnowhereError:
+                name = "KnowhereError";
+                break;
+            default:
+                name = "UnknownError";
+                break;
+        }
+        return fmt::formatter<std::string>::format(name, ctx);
     }
 };

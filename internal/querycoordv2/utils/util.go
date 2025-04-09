@@ -48,32 +48,32 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 	log := log.Ctx(context.TODO()).
 		WithRateGroup(fmt.Sprintf("util.CheckDelegatorDataReady-%d", leader.CollectionID), 1, 60).
 		With(zap.Int64("leaderID", leader.ID), zap.Int64("collectionID", leader.CollectionID))
-	info := nodeMgr.Get(leader.ID)
 
 	// Check whether leader is online
-	err := CheckNodeAvailable(leader.ID, info)
-	if err != nil {
+	info := nodeMgr.Get(leader.ID)
+	if info == nil {
+		err := merr.WrapErrNodeOffline(leader.ID)
 		log.Info("leader is not available", zap.Error(err))
 		return fmt.Errorf("leader not available: %w", err)
 	}
 
-	for id, version := range leader.Segments {
-		info := nodeMgr.Get(version.GetNodeID())
-		err = CheckNodeAvailable(version.GetNodeID(), info)
-		if err != nil {
-			log.Info("leader is not available due to QueryNode unavailable",
-				zap.Int64("segmentID", id),
-				zap.Error(err))
-			return err
-		}
-	}
 	segmentDist := targetMgr.GetSealedSegmentsByChannel(context.TODO(), leader.CollectionID, leader.Channel, scope)
 	// Check whether segments are fully loaded
 	for segmentID := range segmentDist {
-		_, exist := leader.Segments[segmentID]
+		version, exist := leader.Segments[segmentID]
 		if !exist {
 			log.RatedInfo(10, "leader is not available due to lack of segment", zap.Int64("segmentID", segmentID))
 			return merr.WrapErrSegmentLack(segmentID)
+		}
+
+		// Check whether segment's worker node is online
+		info := nodeMgr.Get(version.GetNodeID())
+		if info == nil {
+			err := merr.WrapErrNodeOffline(leader.ID)
+			log.Info("leader is not available due to QueryNode unavailable",
+				zap.Int64("segmentID", segmentID),
+				zap.Error(err))
+			return err
 		}
 	}
 	return nil
