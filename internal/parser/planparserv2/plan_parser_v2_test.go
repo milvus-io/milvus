@@ -182,7 +182,6 @@ func TestExpr_UnaryRange(t *testing.T) {
 		`VarCharField <= "str7"`,
 		`JSONField["A"] > 10`,
 		`$meta["A"] > 10`,
-		`A == -9223372036854775808`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -638,6 +637,7 @@ func TestExpr_Invalid(t *testing.T) {
 		`"str" != false`,
 		`VarCharField != FloatField`,
 		`FloatField == VarCharField`,
+		`A == -9223372036854775808`,
 		// ---------------------- relational --------------------
 		//`not_in_schema < 1`, // maybe in json
 		//`1 <= not_in_schema`, // maybe in json
