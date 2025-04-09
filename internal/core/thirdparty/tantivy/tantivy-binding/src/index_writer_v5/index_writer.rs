@@ -8,7 +8,9 @@ use log::info;
 use tantivy_5::schema::{
     Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, FAST, INDEXED,
 };
-use tantivy_5::{doc, Document as TantivyDocument, Index, IndexWriter, SingleSegmentIndexWriter, UserOperation};
+use tantivy_5::{
+    doc, Document as TantivyDocument, Index, IndexWriter, SingleSegmentIndexWriter, UserOperation,
+};
 
 use crate::data_type::TantivyDataType;
 
@@ -39,7 +41,7 @@ fn schema_builder_add_field(
                 .set_tokenizer("raw")
                 .set_index_option(IndexRecordOption::Basic);
             let text_options = TextOptions::default().set_indexing_options(text_field_indexing);
-            schema_builder.add_text_field(&field_name, text_options)
+            schema_builder.add_text_field(field_name, text_options)
         }
         TantivyDataType::Text => {
             panic!("text should be indexed with analyzer");
@@ -135,10 +137,10 @@ impl IndexWriterWrapperImpl {
 
         match &mut self.index_writer {
             Either::Left(writer) => {
-                let _ = writer.add_document(document)?;
+                writer.add_document(document)?;
             }
             Either::Right(single_segment_writer) => {
-                let _ = single_segment_writer.add_document(document)?;
+                single_segment_writer.add_document(document)?;
             }
         }
         Ok(())

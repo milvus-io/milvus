@@ -89,7 +89,7 @@ fn get_decompounder_filter(params: &json::Map<String, json::Value>) -> Result<Sy
         Ok(f) => Ok(SystemFilter::Decompounder(f)),
         Err(e) => Err(TantivyBindingError::InternalError(format!(
             "create decompounder failed: {}",
-            e.to_string()
+            e
         ))),
     }
 }
@@ -106,7 +106,7 @@ fn get_stemmer_filter(params: &json::Map<String, json::Value>) -> Result<SystemF
         Ok(language) => Ok(SystemFilter::Stemmer(Stemmer::new(language))),
         Err(e) => Err(TantivyBindingError::InternalError(format!(
             "create stemmer failed : {}",
-            e.to_string()
+            e
         ))),
     }
 }

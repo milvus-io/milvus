@@ -33,7 +33,7 @@ fn schema_builder_add_field(
                 .set_tokenizer("raw")
                 .set_index_option(IndexRecordOption::Basic);
             let text_options = TextOptions::default().set_indexing_options(text_field_indexing);
-            schema_builder.add_text_field(&field_name, text_options)
+            schema_builder.add_text_field(field_name, text_options)
         }
         TantivyDataType::Text => {
             panic!("text should be indexed with analyzer");

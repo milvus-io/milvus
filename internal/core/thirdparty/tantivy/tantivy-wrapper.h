@@ -89,6 +89,9 @@ struct TantivyIndexWrapper {
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
         RustResultWrapper res;
         if (inverted_single_semgnent) {
+            AssertInfo(tantivy_index_version == 5,
+                       "TantivyIndexWrapper: inverted_single_semgnent only "
+                       "support tantivy 5");
             res = RustResultWrapper(tantivy_create_index_with_single_segment(
                 field_name, data_type, path));
         } else {
