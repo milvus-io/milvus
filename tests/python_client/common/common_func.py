@@ -2439,7 +2439,8 @@ def gen_json_field_expressions_all_single_operator():
                    "array_contains_all(json_field['a'], [1.0, 2])", "ARRAY_CONTAINS_ALL(json_field['a'], [1.0, 2])",
                    "array_contains_any(json_field['a'], [1.0, 2])", "ARRAY_CONTAINS_ANY(json_field['a'], [1.0, 2])",
                    "array_length(json_field['a']) < 10", "ARRAY_LENGTH(json_field['a']) < 10",
-                   "json_field is null", "json_field IS NULL", "json_field is not null", "json_field IS NOT NULL"
+                   "json_field is null", "json_field IS NULL", "json_field is not null", "json_field IS NOT NULL",
+                   "json_field['a'] is null", "json_field['a'] IS NULL", "json_field['a'] is not null", "json_field['a'] IS NOT NULL"
                    ]
     
     return expressions
