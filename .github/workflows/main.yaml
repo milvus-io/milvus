@@ -203,7 +203,6 @@ jobs:
         continue-on-error: true
         run: |
           ulimit -c unlimited
-          echo '/tmp/core.%e.%p' | tee /proc/sys/kernel/core_pattern
           chmod +x build/builder.sh
           chmod +x scripts/run_go_codecov.sh
           docker ps
@@ -213,7 +212,7 @@ jobs:
         if: failure()
         with:
           name: core-dump
-          path: /tmp/core.*
+          path: ./core.*
       - name: Archive result
         uses: actions/upload-artifact@v4
         with:
