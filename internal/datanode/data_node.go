@@ -87,9 +87,6 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 //	`rootCoord` is a grpc client of root coordinator.
 //	`dataCoord` is a grpc client of data service.
 //	`stateCode` is current statement of this data node, indicating whether it's healthy.
-//
-//	`clearSignal` is a signal channel for releasing the flowgraph resources.
-//	`segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
@@ -109,7 +106,6 @@ type DataNode struct {
 	taskScheduler  *index.TaskScheduler
 	taskManager    *index.TaskManager
 
-	segmentCache             *util.Cache
 	compactionExecutor       compactor.Executor
 	timeTickSender           *util2.TimeTickSender
 	channelCheckpointUpdater *util2.ChannelCheckpointUpdater
@@ -156,7 +152,6 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		rootCoord:              nil,
 		dataCoord:              nil,
 		factory:                factory,
-		segmentCache:           util.NewCache(),
 		compactionExecutor:     compactor.NewExecutor(),
 		reportImportRetryTimes: 10,
 		metricsRequest:         metricsinfo.NewMetricsRequest(),
