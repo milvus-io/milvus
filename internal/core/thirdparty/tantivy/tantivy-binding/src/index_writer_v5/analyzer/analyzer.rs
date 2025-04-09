@@ -37,9 +37,9 @@ impl AnalyzerBuilder<'_> {
             return Ok(tokenizer.unwrap());
         }
 
-        Err(TantivyBindingError::InternalError(format!(
-            "tokenizer name should be string or dict"
-        )))
+        Err(TantivyBindingError::InternalError(
+            "tokenizer name should be string or dict".to_string(),
+        ))
     }
 
     fn add_custom_filter(

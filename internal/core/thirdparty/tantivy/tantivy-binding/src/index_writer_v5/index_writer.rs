@@ -16,7 +16,6 @@ use crate::data_type::TantivyDataType;
 
 use crate::error::{Result, TantivyBindingError};
 use crate::index_writer::TantivyValue;
-use crate::log::init_log;
 
 const BATCH_SIZE: usize = 4096;
 
@@ -42,7 +41,7 @@ fn schema_builder_add_field(
                 .set_tokenizer("raw")
                 .set_index_option(IndexRecordOption::Basic);
             let text_options = TextOptions::default().set_indexing_options(text_field_indexing);
-            schema_builder.add_text_field(&field_name, text_options)
+            schema_builder.add_text_field(field_name, text_options)
         }
         TantivyDataType::Text => {
             panic!("text should be indexed with analyzer");
@@ -131,7 +130,6 @@ impl IndexWriterWrapperImpl {
         data_type: TantivyDataType,
         path: String,
     ) -> Result<IndexWriterWrapperImpl> {
-        init_log();
         info!(
             "create single segment index writer, field_name: {}, data_type: {:?}, tantivy_index_version 5",
             field_name, data_type
@@ -157,10 +155,10 @@ impl IndexWriterWrapperImpl {
 
         match &mut self.index_writer {
             Either::Left(writer) => {
-                let _ = writer.add_document(document)?;
+                writer.add_document(document)?;
             }
             Either::Right(single_segment_writer) => {
-                let _ = single_segment_writer.add_document(document)?;
+                single_segment_writer.add_document(document)?;
             }
         }
         Ok(())
