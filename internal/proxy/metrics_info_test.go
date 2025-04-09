@@ -79,18 +79,6 @@ func getMockProxyRequestMetrics() *Proxy {
 			},
 		}
 
-		resp, _ := metricsinfo.MarshalTopology(rootCoordTopology)
-
-		return &milvuspb.GetMetricsResponse{
-			Status:        merr.Success(),
-			Response:      resp,
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, id),
-		}, nil
-	}
-
-	mixc.getMetricsFunc = func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-		id := typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-
 		clusterTopology := metricsinfo.DataClusterTopology{
 			Self: metricsinfo.DataCoordInfos{
 				BaseComponentInfos: metricsinfo.BaseComponentInfos{
@@ -134,13 +122,51 @@ func getMockProxyRequestMetrics() *Proxy {
 			},
 		}
 
-		resp, _ := metricsinfo.MarshalTopology(coordTopology)
+		systemTopology := metricsinfo.SystemTopology{
+			NodesInfo: []metricsinfo.SystemTopologyNode{
+				{
+					Identifier: int(id),
+					Connected: []metricsinfo.ConnectionEdge{
+						{
+							ConnectedIdentifier: int(id),
+							Type:                metricsinfo.CoordConnectToNode,
+							TargetType:          typeutil.QueryCoordRole,
+						},
+						{
+							ConnectedIdentifier: int(id),
+							Type:                metricsinfo.CoordConnectToNode,
+							TargetType:          typeutil.DataCoordRole,
+						},
+					},
+					Infos: &rootCoordTopology.Self,
+				},
+				{
+					Identifier: int(id),
+					Connected: []metricsinfo.ConnectionEdge{
+						{
+							ConnectedIdentifier: int(id),
+							Type:                metricsinfo.CoordConnectToNode,
+							TargetType:          typeutil.RootCoordRole,
+						},
+						{
+							ConnectedIdentifier: int(id),
+							Type:                metricsinfo.CoordConnectToNode,
+							TargetType:          typeutil.QueryCoordRole,
+						},
+					},
+					Infos: &coordTopology.Cluster.Self,
+				},
+			},
+		}
+
+		resp, _ := metricsinfo.MarshalTopology(systemTopology)
 
 		return &milvuspb.GetMetricsResponse{
 			Status:        merr.Success(),
 			Response:      resp,
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, id),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.MixCoordRole, id),
 		}, nil
 	}
+
 	return proxy
 }

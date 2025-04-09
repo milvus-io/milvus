@@ -1002,7 +1002,7 @@ func (coord *MixCoordMock) ShowConfigurations(ctx context.Context, req *internal
 		}, nil
 	}
 
-	if coord.getMetricsFunc != nil {
+	if coord.showConfigurationsFunc != nil {
 		return coord.showConfigurationsFunc(ctx, req)
 	}
 
@@ -1015,15 +1015,6 @@ func (coord *MixCoordMock) ShowConfigurations(ctx context.Context, req *internal
 }
 
 func (coord *MixCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	if !coord.healthy() {
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "unhealthy",
-			},
-		}, nil
-	}
-
 	if coord.getMetricsFunc != nil {
 		return coord.getMetricsFunc(ctx, req)
 	}
@@ -1092,7 +1083,7 @@ func (coord *MixCoordMock) ListImportTasks(ctx context.Context, in *milvuspb.Lis
 }
 
 func NewMixCoordMock(opts ...RootCoordMockOption) *MixCoordMock {
-	rc := &MixCoordMock{
+	coord := &MixCoordMock{
 		nodeID:            typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 		address:           funcutil.GenRandomStr(), // TODO(dragondriver): random address
 		statisticsChannel: funcutil.GenRandomStr(),
@@ -1106,11 +1097,11 @@ func NewMixCoordMock(opts ...RootCoordMockOption) *MixCoordMock {
 	}
 
 	for _, opt := range opts {
-		opt(rc)
+		opt(coord)
 	}
 
-	rc.updateState(commonpb.StateCode_Healthy)
-	return rc
+	coord.updateState(commonpb.StateCode_Healthy)
+	return coord
 }
 
 func (coord *MixCoordMock) CreateCredential(ctx context.Context, req *internalpb.CredentialInfo, opts ...grpc.CallOption) (*commonpb.Status, error) {

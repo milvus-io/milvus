@@ -448,6 +448,14 @@ func (m *mockMixCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	}, nil
 }
 
+func (m *mockMixCoord) GetDcMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockMixCoord) GetQcMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockMixCoord) BackupRBAC(ctx context.Context, req *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
 	panic("not implemented") // TODO: Implement
 }

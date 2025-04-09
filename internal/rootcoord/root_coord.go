@@ -31,6 +31,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -445,8 +446,8 @@ func (c *Core) initInternal() error {
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
-	// c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.queryCoord, c.dataCoord, c.tsoAllocator, c.meta)
-	// log.Debug("RootCoord init QuotaCenter done")
+	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.mixCoord, c.tsoAllocator, c.meta)
+	log.Debug("RootCoord init QuotaCenter done")
 
 	if err := c.initCredentials(initCtx); err != nil {
 		return err
@@ -683,9 +684,9 @@ func (c *Core) startInternal() error {
 		panic(err)
 	}
 
-	// if Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
-	// 	c.quotaCenter.Start()
-	// }
+	if Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
+		c.quotaCenter.Start()
+	}
 
 	c.scheduler.Start()
 	c.stepExecutor.Start()
@@ -3043,51 +3044,51 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 		}, nil
 	}
 
-	// group, ctx := errgroup.WithContext(ctx)
-	// errs := typeutil.NewConcurrentSet[error]()
+	group, ctx := errgroup.WithContext(ctx)
+	errs := typeutil.NewConcurrentSet[error]()
 
-	// proxyClients := c.proxyClientManager.GetProxyClients()
-	// proxyClients.Range(func(key int64, value types.ProxyClient) bool {
-	// 	nodeID := key
-	// 	proxyClient := value
-	// 	group.Go(func() error {
-	// 		sta, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
-	// 		if err != nil {
-	// 			errs.Insert(err)
-	// 			return err
-	// 		}
+	proxyClients := c.proxyClientManager.GetProxyClients()
+	proxyClients.Range(func(key int64, value types.ProxyClient) bool {
+		nodeID := key
+		proxyClient := value
+		group.Go(func() error {
+			sta, err := proxyClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+			if err != nil {
+				errs.Insert(err)
+				return err
+			}
 
-	// 		err = merr.AnalyzeState("Proxy", nodeID, sta)
-	// 		if err != nil {
-	// 			errs.Insert(err)
-	// 		}
+			err = merr.AnalyzeState("Proxy", nodeID, sta)
+			if err != nil {
+				errs.Insert(err)
+			}
 
-	// 		return err
-	// 	})
-	// 	return true
-	// })
+			return err
+		})
+		return true
+	})
 
-	// maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
-	// if maxDelay > 0 {
-	// 	group.Go(func() error {
-	// 		err := CheckTimeTickLagExceeded(ctx, c.queryCoord, c.dataCoord, maxDelay)
-	// 		if err != nil {
-	// 			errs.Insert(err)
-	// 		}
-	// 		return err
-	// 	})
-	// }
+	maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
+	if maxDelay > 0 {
+		group.Go(func() error {
+			err := CheckTimeTickLagExceeded(ctx, c.mixCoord, maxDelay)
+			if err != nil {
+				errs.Insert(err)
+			}
+			return err
+		})
+	}
 
-	// err := group.Wait()
-	// if err != nil {
-	// 	return &milvuspb.CheckHealthResponse{
-	// 		Status:    merr.Success(),
-	// 		IsHealthy: false,
-	// 		Reasons: lo.Map(errs.Collect(), func(e error, i int) string {
-	// 			return err.Error()
-	// 		}),
-	// 	}, nil
-	// }
+	err := group.Wait()
+	if err != nil {
+		return &milvuspb.CheckHealthResponse{
+			Status:    merr.Success(),
+			IsHealthy: false,
+			Reasons: lo.Map(errs.Collect(), func(e error, i int) string {
+				return err.Error()
+			}),
+		}, nil
+	}
 
 	return &milvuspb.CheckHealthResponse{Status: merr.Success(), IsHealthy: true, Reasons: []string{}}, nil
 }

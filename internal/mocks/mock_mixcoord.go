@@ -3053,6 +3053,65 @@ func (_c *MixCoord_GetCredential_Call) RunAndReturn(run func(context.Context, *r
 	return _c
 }
 
+// GetDcMetrics provides a mock function with given fields: ctx, req
+func (_m *MixCoord) GetDcMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDcMetrics")
+	}
+
+	var r0 *milvuspb.GetMetricsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) *milvuspb.GetMetricsResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetMetricsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetMetricsRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetDcMetrics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDcMetrics'
+type MixCoord_GetDcMetrics_Call struct {
+	*mock.Call
+}
+
+// GetDcMetrics is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.GetMetricsRequest
+func (_e *MixCoord_Expecter) GetDcMetrics(ctx interface{}, req interface{}) *MixCoord_GetDcMetrics_Call {
+	return &MixCoord_GetDcMetrics_Call{Call: _e.mock.On("GetDcMetrics", ctx, req)}
+}
+
+func (_c *MixCoord_GetDcMetrics_Call) Run(run func(ctx context.Context, req *milvuspb.GetMetricsRequest)) *MixCoord_GetDcMetrics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetMetricsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetDcMetrics_Call) Return(_a0 *milvuspb.GetMetricsResponse, _a1 error) *MixCoord_GetDcMetrics_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetDcMetrics_Call) RunAndReturn(run func(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)) *MixCoord_GetDcMetrics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetFlushAllState provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) GetFlushAllState(_a0 context.Context, _a1 *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -3875,6 +3934,65 @@ func (_c *MixCoord_GetPartitionStatistics_Call) Return(_a0 *datapb.GetPartitionS
 }
 
 func (_c *MixCoord_GetPartitionStatistics_Call) RunAndReturn(run func(context.Context, *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error)) *MixCoord_GetPartitionStatistics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetQcMetrics provides a mock function with given fields: ctx, req
+func (_m *MixCoord) GetQcMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetQcMetrics")
+	}
+
+	var r0 *milvuspb.GetMetricsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) *milvuspb.GetMetricsResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetMetricsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetMetricsRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetQcMetrics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQcMetrics'
+type MixCoord_GetQcMetrics_Call struct {
+	*mock.Call
+}
+
+// GetQcMetrics is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.GetMetricsRequest
+func (_e *MixCoord_Expecter) GetQcMetrics(ctx interface{}, req interface{}) *MixCoord_GetQcMetrics_Call {
+	return &MixCoord_GetQcMetrics_Call{Call: _e.mock.On("GetQcMetrics", ctx, req)}
+}
+
+func (_c *MixCoord_GetQcMetrics_Call) Run(run func(ctx context.Context, req *milvuspb.GetMetricsRequest)) *MixCoord_GetQcMetrics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetMetricsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetQcMetrics_Call) Return(_a0 *milvuspb.GetMetricsResponse, _a1 error) *MixCoord_GetQcMetrics_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetQcMetrics_Call) RunAndReturn(run func(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)) *MixCoord_GetQcMetrics_Call {
 	_c.Call.Return(run)
 	return _c
 }

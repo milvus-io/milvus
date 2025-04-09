@@ -219,7 +219,6 @@ func (s *DBPropertiesSuite) TearDownSuite() {
 }
 
 func TestLimitWithDBProperties(t *testing.T) {
-	t.Skip("skip test")
 	suite.Run(t, new(DBPropertiesSuite))
 }
 

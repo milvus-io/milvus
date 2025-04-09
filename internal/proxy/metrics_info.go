@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"sync"
 
 	"go.uber.org/zap"
 
@@ -167,7 +166,6 @@ func getSystemInfoMetrics(
 	proxyRoleName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, paramtable.GetNodeID())
 	identifierMap[proxyRoleName] = int(node.session.ServerID)
 
-	// FIXME:All proxy metrics are retrieved from RootCoord, while single proxy metrics are obtained from the proxy itself.
 	proxyInfo := getProxyMetricInfo(ctx, node, nil)
 	proxyTopologyNode := metricsinfo.SystemTopologyNode{
 		Identifier: int(node.session.ServerID),
@@ -176,202 +174,77 @@ func getSystemInfoMetrics(
 	}
 	metricsinfo.FillDeployMetricsWithEnv(&(proxyTopologyNode.Infos.(*metricsinfo.ProxyInfos).SystemInfo))
 
-	var wg sync.WaitGroup
+	mixCoordResp, err := node.mixCoord.GetMetrics(ctx, request)
+	if err != nil {
+		return &milvuspb.GetMetricsResponse{
+			Status:        merr.Status(err),
+			Response:      "",
+			ComponentName: proxyRoleName,
+		}, nil
+	}
 
-	var queryCoordResp *milvuspb.GetMetricsResponse
-	var queryCoordErr error
-	var queryCoordTopology metricsinfo.QueryCoordTopology
-	queryCoordRoleName := ""
+	var mixCoordTopology metricsinfo.SystemTopology
+	err = metricsinfo.UnmarshalTopology(mixCoordResp.GetResponse(), &mixCoordTopology)
+	if err != nil {
+		return &milvuspb.GetMetricsResponse{
+			Status:        merr.Status(err),
+			Response:      "",
+			ComponentName: proxyRoleName,
+		}, nil
+	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		queryCoordResp, queryCoordErr = node.mixCoord.GetMetrics(ctx, request)
-		if queryCoordErr != nil {
-			return
-		}
-		queryCoordRoleName = queryCoordResp.GetComponentName()
-		queryCoordErr = metricsinfo.UnmarshalTopology(queryCoordResp.GetResponse(), &queryCoordTopology)
-	}()
-
-	wg.Wait()
-
-	identifierMap[queryCoordRoleName] = int(queryCoordTopology.Cluster.Self.ID)
-
-	if queryCoordErr == nil && queryCoordResp != nil {
-		proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
-			ConnectedIdentifier: identifierMap[queryCoordRoleName],
-			Type:                metricsinfo.Forward,
-			TargetType:          typeutil.QueryCoordRole,
-		})
-
-		// QueryCoord in system topology graph
-		queryCoordTopologyNode := metricsinfo.SystemTopologyNode{
-			Identifier: identifierMap[queryCoordRoleName],
-			Connected:  make([]metricsinfo.ConnectionEdge, 0),
-			Infos:      &queryCoordTopology.Cluster.Self,
-		}
-
-		// fill connection edge, a little trick here
-		for _, edge := range queryCoordTopology.Connections.ConnectedComponents {
-			switch edge.TargetType {
-			case typeutil.QueryCoordRole:
-				queryCoordTopologyNode.Connected = append(queryCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-					ConnectedIdentifier: identifierMap[queryCoordRoleName],
+	for _, node := range mixCoordTopology.NodesInfo {
+		if node.Infos != nil {
+			switch node.Infos.(type) {
+			case *metricsinfo.RootCoordInfos:
+				proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
+					ConnectedIdentifier: node.Identifier,
+					Type:                metricsinfo.Forward,
+					TargetType:          typeutil.RootCoordRole,
+				})
+			case *metricsinfo.DataCoordInfos:
+				proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
+					ConnectedIdentifier: node.Identifier,
+					Type:                metricsinfo.Forward,
+					TargetType:          typeutil.DataCoordRole,
+				})
+			case *metricsinfo.QueryCoordInfos:
+				proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
+					ConnectedIdentifier: node.Identifier,
 					Type:                metricsinfo.Forward,
 					TargetType:          typeutil.QueryCoordRole,
 				})
+			case *metricsinfo.QueryNodeInfos:
+				proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
+					ConnectedIdentifier: node.Identifier,
+					Type:                metricsinfo.Forward,
+					TargetType:          typeutil.QueryNodeRole,
+				})
+			case *metricsinfo.DataNodeInfos:
+				proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
+					ConnectedIdentifier: node.Identifier,
+					Type:                metricsinfo.Forward,
+					TargetType:          typeutil.DataNodeRole,
+				})
 			}
 		}
-
-		// add query nodes to system topology graph
-		for _, queryNode := range queryCoordTopology.Cluster.ConnectedNodes {
-			node := queryNode
-			identifier := int(node.ID)
-			identifierMap[queryNode.Name] = identifier
-			queryNodeTopologyNode := metricsinfo.SystemTopologyNode{
-				Identifier: identifier,
-				Connected:  nil,
-				Infos:      &node,
-			}
-			systemTopology.NodesInfo = append(systemTopology.NodesInfo, queryNodeTopologyNode)
-			queryCoordTopologyNode.Connected = append(queryCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-				ConnectedIdentifier: identifier,
-				Type:                metricsinfo.CoordConnectToNode,
-				TargetType:          typeutil.QueryNodeRole,
-			})
-		}
-
-		// add QueryCoord to system topology graph
-		systemTopology.NodesInfo = append(systemTopology.NodesInfo, queryCoordTopologyNode)
 	}
 
-	// if dataCoordErr == nil && dataCoordResp != nil {
-	// 	proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
-	// 		ConnectedIdentifier: identifierMap[dataCoordRoleName],
-	// 		Type:                metricsinfo.Forward,
-	// 		TargetType:          typeutil.DataCoordRole,
-	// 	})
-
-	// 	// DataCoord in system topology graph
-	// 	dataCoordTopologyNode := metricsinfo.SystemTopologyNode{
-	// 		Identifier: identifierMap[dataCoordRoleName],
-	// 		Connected:  make([]metricsinfo.ConnectionEdge, 0),
-	// 		Infos:      &dataCoordTopology.Cluster.Self,
-	// 	}
-
-	// 	// fill connection edge, a little trick here
-	// 	for _, edge := range dataCoordTopology.Connections.ConnectedComponents {
-	// 		switch edge.TargetType {
-	// 		case typeutil.RootCoordRole:
-	// 			if rootCoordErr == nil && rootCoordResp != nil {
-	// 				dataCoordTopologyNode.Connected = append(dataCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-	// 					ConnectedIdentifier: identifierMap[rootCoordRoleName],
-	// 					Type:                metricsinfo.Forward,
-	// 					TargetType:          typeutil.RootCoordRole,
-	// 				})
-	// 			}
-	// 		case typeutil.DataCoordRole:
-	// 			dataCoordTopologyNode.Connected = append(dataCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-	// 				ConnectedIdentifier: identifierMap[dataCoordRoleName],
-	// 				Type:                metricsinfo.Forward,
-	// 				TargetType:          typeutil.DataCoordRole,
-	// 			})
-	// 		case typeutil.QueryCoordRole:
-	// 			if queryCoordErr == nil && queryCoordResp != nil {
-	// 				dataCoordTopologyNode.Connected = append(dataCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-	// 					ConnectedIdentifier: identifierMap[queryCoordRoleName],
-	// 					Type:                metricsinfo.Forward,
-	// 					TargetType:          typeutil.QueryCoordRole,
-	// 				})
-	// 			}
-	// 		}
-	// 	}
-
-	// 	// add data nodes to system topology graph
-	// 	for _, dataNode := range dataCoordTopology.Cluster.ConnectedDataNodes {
-	// 		node := dataNode
-	// 		identifier := int(node.ID)
-	// 		identifierMap[dataNode.Name] = identifier
-	// 		dataNodeTopologyNode := metricsinfo.SystemTopologyNode{
-	// 			Identifier: identifier,
-	// 			Connected:  nil,
-	// 			Infos:      &node,
-	// 		}
-	// 		systemTopology.NodesInfo = append(systemTopology.NodesInfo, dataNodeTopologyNode)
-	// 		dataCoordTopologyNode.Connected = append(dataCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-	// 			ConnectedIdentifier: identifier,
-	// 			Type:                metricsinfo.CoordConnectToNode,
-	// 			TargetType:          typeutil.DataNodeRole,
-	// 		})
-	// 	}
-
-	// 	// add DataCoord to system topology graph
-	// 	systemTopology.NodesInfo = append(systemTopology.NodesInfo, dataCoordTopologyNode)
-	// }
-
-	// if rootCoordErr == nil && rootCoordResp != nil {
-	// 	proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
-	// 		ConnectedIdentifier: identifierMap[rootCoordRoleName],
-	// 		Type:                metricsinfo.Forward,
-	// 		TargetType:          typeutil.RootCoordRole,
-	// 	})
-
-	// 	// root coord in system topology graph
-	// 	rootCoordTopologyNode := metricsinfo.SystemTopologyNode{
-	// 		Identifier: identifierMap[rootCoordRoleName],
-	// 		Connected:  make([]metricsinfo.ConnectionEdge, 0),
-	// 		Infos:      &rootCoordTopology.Self,
-	// 	}
-
-	// 	// fill connection edge, a little trick here
-	// 	for _, edge := range rootCoordTopology.Connections.ConnectedComponents {
-	// 		switch edge.TargetType {
-	// 		case typeutil.RootCoordRole:
-	// 			rootCoordTopologyNode.Connected = append(rootCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-	// 				ConnectedIdentifier: identifierMap[rootCoordRoleName],
-	// 				Type:                metricsinfo.Forward,
-	// 				TargetType:          typeutil.RootCoordRole,
-	// 			})
-	// 		case typeutil.DataCoordRole:
-	// 			if dataCoordErr == nil && dataCoordResp != nil {
-	// 				rootCoordTopologyNode.Connected = append(rootCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-	// 					ConnectedIdentifier: identifierMap[dataCoordRoleName],
-	// 					Type:                metricsinfo.Forward,
-	// 					TargetType:          typeutil.DataCoordRole,
-	// 				})
-	// 			}
-	// 		case typeutil.QueryCoordRole:
-	// 			if queryCoordErr == nil && queryCoordResp != nil {
-	// 				rootCoordTopologyNode.Connected = append(rootCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-	// 					ConnectedIdentifier: identifierMap[queryCoordRoleName],
-	// 					Type:                metricsinfo.Forward,
-	// 					TargetType:          typeutil.QueryCoordRole,
-	// 				})
-	// 			}
-	// 		}
-	// 	}
-
-	// 	// add root coord to system topology graph
-	// 	systemTopology.NodesInfo = append(systemTopology.NodesInfo, rootCoordTopologyNode)
-	// }
-
-	// add proxy to system topology graph
 	systemTopology.NodesInfo = append(systemTopology.NodesInfo, proxyTopologyNode)
+	systemTopology.NodesInfo = append(systemTopology.NodesInfo, mixCoordTopology.NodesInfo...)
 
 	resp, err := metricsinfo.MarshalTopology(systemTopology)
 	if err != nil {
 		return &milvuspb.GetMetricsResponse{
 			Status:        merr.Status(err),
 			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, paramtable.GetNodeID()),
+			ComponentName: proxyRoleName,
 		}, nil
 	}
 
 	return &milvuspb.GetMetricsResponse{
 		Status:        merr.Success(),
 		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, paramtable.GetNodeID()),
+		ComponentName: proxyRoleName,
 	}, nil
 }

@@ -139,10 +139,9 @@ type QuotaCenter struct {
 	cancel context.CancelFunc
 
 	// clients
-	proxies    proxyutil.ProxyClientManagerInterface
-	queryCoord types.QueryCoordClient
-	dataCoord  types.DataCoordClient
-	meta       IMetaTable
+	proxies  proxyutil.ProxyClientManagerInterface
+	mixCoord types.MixCoord
+	meta     IMetaTable
 
 	// metrics
 	queryNodeMetrics map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics
@@ -173,8 +172,7 @@ type QuotaCenter struct {
 }
 
 // NewQuotaCenter returns a new QuotaCenter.
-func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, queryCoord types.QueryCoordClient,
-	dataCoord types.DataCoordClient, tsoAllocator tso.Allocator, meta IMetaTable,
+func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, mixCoord types.MixCoord, tsoAllocator tso.Allocator, meta IMetaTable,
 ) *QuotaCenter {
 	ctx, cancel := context.WithCancel(context.TODO())
 
@@ -182,8 +180,7 @@ func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, queryCoord ty
 		ctx:                  ctx,
 		cancel:               cancel,
 		proxies:              proxies,
-		queryCoord:           queryCoord,
-		dataCoord:            dataCoord,
+		mixCoord:             mixCoord,
 		tsoAllocator:         tsoAllocator,
 		meta:                 meta,
 		readableCollections:  make(map[int64]map[int64][]int64, 0),
@@ -398,7 +395,7 @@ func (q *QuotaCenter) collectMetrics() error {
 
 	// get Query cluster metrics
 	group.Go(func() error {
-		queryCoordTopology, err := getQueryCoordMetrics(ctx, q.queryCoord)
+		queryCoordTopology, err := getQueryCoordMetrics(ctx, q.mixCoord)
 		if err != nil {
 			return err
 		}
@@ -443,7 +440,7 @@ func (q *QuotaCenter) collectMetrics() error {
 	})
 	// get Data cluster metrics
 	group.Go(func() error {
-		dataCoordTopology, err := getDataCoordMetrics(ctx, q.dataCoord)
+		dataCoordTopology, err := getDataCoordMetrics(ctx, q.mixCoord)
 		if err != nil {
 			return err
 		}

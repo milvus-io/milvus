@@ -576,7 +576,171 @@ func (s *mixCoordImpl) GetStatisticsChannel(ctx context.Context, req *internalpb
 
 // GetMetrics get metrics
 func (s *mixCoordImpl) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	return s.rootcoordServer.GetMetrics(ctx, in)
+	systemTopology := metricsinfo.SystemTopology{
+		NodesInfo: make([]metricsinfo.SystemTopologyNode, 0),
+	}
+
+	identifierMap := make(map[string]int)
+
+	rootCoordResp, rootCoordErr := s.rootcoordServer.GetMetrics(ctx, in)
+	var rootCoordTopology metricsinfo.RootCoordTopology
+	rootCoordRoleName := ""
+	if rootCoordErr == nil && rootCoordResp != nil {
+		rootCoordRoleName = rootCoordResp.GetComponentName()
+		rootCoordErr = metricsinfo.UnmarshalTopology(rootCoordResp.GetResponse(), &rootCoordTopology)
+		identifierMap[rootCoordRoleName] = int(rootCoordTopology.Self.ID)
+	}
+
+	dataCoordResp, dataCoordErr := s.datacoordServer.GetMetrics(ctx, in)
+	var dataCoordTopology metricsinfo.DataCoordTopology
+	dataCoordRoleName := ""
+	if dataCoordErr == nil && dataCoordResp != nil {
+		dataCoordRoleName = dataCoordResp.GetComponentName()
+		dataCoordErr = metricsinfo.UnmarshalTopology(dataCoordResp.GetResponse(), &dataCoordTopology)
+		identifierMap[dataCoordRoleName] = int(dataCoordTopology.Cluster.Self.ID)
+	}
+
+	queryCoordResp, queryCoordErr := s.queryCoordServer.GetMetrics(ctx, in)
+	var queryCoordTopology metricsinfo.QueryCoordTopology
+	queryCoordRoleName := ""
+	if queryCoordErr == nil && queryCoordResp != nil {
+		queryCoordRoleName = queryCoordResp.GetComponentName()
+		queryCoordErr = metricsinfo.UnmarshalTopology(queryCoordResp.GetResponse(), &queryCoordTopology)
+		identifierMap[queryCoordRoleName] = int(queryCoordTopology.Cluster.Self.ID)
+	}
+
+	if rootCoordErr == nil && rootCoordResp != nil {
+		rootCoordTopologyNode := metricsinfo.SystemTopologyNode{
+			Identifier: identifierMap[rootCoordRoleName],
+			Connected:  make([]metricsinfo.ConnectionEdge, 0),
+			Infos:      &rootCoordTopology.Self,
+		}
+
+		if dataCoordErr == nil && dataCoordResp != nil {
+			rootCoordTopologyNode.Connected = append(rootCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
+				ConnectedIdentifier: identifierMap[dataCoordRoleName],
+				Type:                metricsinfo.Forward,
+				TargetType:          typeutil.DataCoordRole,
+			})
+		}
+		if queryCoordErr == nil && queryCoordResp != nil {
+			rootCoordTopologyNode.Connected = append(rootCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
+				ConnectedIdentifier: identifierMap[queryCoordRoleName],
+				Type:                metricsinfo.Forward,
+				TargetType:          typeutil.QueryCoordRole,
+			})
+		}
+
+		systemTopology.NodesInfo = append(systemTopology.NodesInfo, rootCoordTopologyNode)
+	}
+
+	if dataCoordErr == nil && dataCoordResp != nil {
+		dataCoordTopologyNode := metricsinfo.SystemTopologyNode{
+			Identifier: identifierMap[dataCoordRoleName],
+			Connected:  make([]metricsinfo.ConnectionEdge, 0),
+			Infos:      &dataCoordTopology.Cluster.Self,
+		}
+
+		if rootCoordErr == nil && rootCoordResp != nil {
+			dataCoordTopologyNode.Connected = append(dataCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
+				ConnectedIdentifier: identifierMap[rootCoordRoleName],
+				Type:                metricsinfo.Forward,
+				TargetType:          typeutil.RootCoordRole,
+			})
+		}
+		if queryCoordErr == nil && queryCoordResp != nil {
+			dataCoordTopologyNode.Connected = append(dataCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
+				ConnectedIdentifier: identifierMap[queryCoordRoleName],
+				Type:                metricsinfo.Forward,
+				TargetType:          typeutil.QueryCoordRole,
+			})
+		}
+
+		for _, dataNode := range dataCoordTopology.Cluster.ConnectedDataNodes {
+			node := dataNode
+			identifier := int(node.ID)
+			identifierMap[dataNode.Name] = identifier
+			dataNodeTopologyNode := metricsinfo.SystemTopologyNode{
+				Identifier: identifier,
+				Connected:  nil,
+				Infos:      &node,
+			}
+			systemTopology.NodesInfo = append(systemTopology.NodesInfo, dataNodeTopologyNode)
+			dataCoordTopologyNode.Connected = append(dataCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
+				ConnectedIdentifier: identifier,
+				Type:                metricsinfo.CoordConnectToNode,
+				TargetType:          typeutil.DataNodeRole,
+			})
+		}
+
+		systemTopology.NodesInfo = append(systemTopology.NodesInfo, dataCoordTopologyNode)
+	}
+
+	if queryCoordErr == nil && queryCoordResp != nil {
+		queryCoordTopologyNode := metricsinfo.SystemTopologyNode{
+			Identifier: identifierMap[queryCoordRoleName],
+			Connected:  make([]metricsinfo.ConnectionEdge, 0),
+			Infos:      &queryCoordTopology.Cluster.Self,
+		}
+
+		if rootCoordErr == nil && rootCoordResp != nil {
+			queryCoordTopologyNode.Connected = append(queryCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
+				ConnectedIdentifier: identifierMap[rootCoordRoleName],
+				Type:                metricsinfo.Forward,
+				TargetType:          typeutil.RootCoordRole,
+			})
+		}
+		if dataCoordErr == nil && dataCoordResp != nil {
+			queryCoordTopologyNode.Connected = append(queryCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
+				ConnectedIdentifier: identifierMap[dataCoordRoleName],
+				Type:                metricsinfo.Forward,
+				TargetType:          typeutil.DataCoordRole,
+			})
+		}
+
+		for _, queryNode := range queryCoordTopology.Cluster.ConnectedNodes {
+			node := queryNode
+			identifier := int(node.ID)
+			identifierMap[queryNode.Name] = identifier
+			queryNodeTopologyNode := metricsinfo.SystemTopologyNode{
+				Identifier: identifier,
+				Connected:  nil,
+				Infos:      &node,
+			}
+			systemTopology.NodesInfo = append(systemTopology.NodesInfo, queryNodeTopologyNode)
+			queryCoordTopologyNode.Connected = append(queryCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
+				ConnectedIdentifier: identifier,
+				Type:                metricsinfo.CoordConnectToNode,
+				TargetType:          typeutil.QueryNodeRole,
+			})
+		}
+
+		systemTopology.NodesInfo = append(systemTopology.NodesInfo, queryCoordTopologyNode)
+	}
+
+	resp, err := metricsinfo.MarshalTopology(systemTopology)
+	if err != nil {
+		return &milvuspb.GetMetricsResponse{
+			Status:        merr.Status(err),
+			Response:      "",
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.MixCoordRole, paramtable.GetNodeID()),
+		}, nil
+	}
+
+	return &milvuspb.GetMetricsResponse{
+		Status:        merr.Success(),
+		Response:      resp,
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.MixCoordRole, paramtable.GetNodeID()),
+	}, nil
+}
+
+// GetMetrics get metrics
+func (s *mixCoordImpl) GetDcMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.datacoordServer.GetMetrics(ctx, in)
+}
+
+func (s *mixCoordImpl) GetQcMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.queryCoordServer.GetMetrics(ctx, in)
 }
 
 // QueryCoordServer
