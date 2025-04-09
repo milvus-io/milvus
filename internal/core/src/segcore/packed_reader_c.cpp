@@ -40,12 +40,8 @@ NewPackedReader(char** paths,
                                           "Failed to get filesystem");
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
-        std::set<int> needed_columns;
-        for (int i = 0; i < trueSchema->num_fields(); i++) {
-            needed_columns.emplace(i);
-        }
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
-            trueFs, truePaths, trueSchema, needed_columns, buffer_size);
+            trueFs, truePaths, trueSchema, buffer_size);
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

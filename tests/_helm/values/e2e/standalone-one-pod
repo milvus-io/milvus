@@ -40,9 +40,6 @@ extraConfigFiles:
     indexCoord:
       scheduler:
         interval: 100
-    indexNode:
-      scheduler:
-        buildParallel: 4
 indexNode:
   enabled: false
   disk:

@@ -47,9 +47,9 @@ func (suite *PackedTestSuite) SetupSuite() {
 func (suite *PackedTestSuite) SetupTest() {
 	initcore.InitLocalArrowFileSystem("/tmp")
 	schema := arrow.NewSchema([]arrow.Field{
-		{Name: "a", Type: arrow.PrimitiveTypes.Int32},
-		{Name: "b", Type: arrow.PrimitiveTypes.Int64},
-		{Name: "c", Type: arrow.BinaryTypes.String},
+		{Name: "a", Type: arrow.PrimitiveTypes.Int32, Nullable: false, Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"100"})},
+		{Name: "b", Type: arrow.PrimitiveTypes.Int64, Nullable: false, Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"101"})},
+		{Name: "c", Type: arrow.BinaryTypes.String, Nullable: false, Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"102"})},
 	}, nil)
 	suite.schema = schema
 

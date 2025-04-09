@@ -633,6 +633,9 @@ dataCoord:
     clusteringCompactionUsage: 16 # slot usage of clustering compaction job.
     mixCompactionUsage: 8 # slot usage of mix compaction job.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction job.
+    indexTaskSlotUsage: 64 # slot usage of index task per 512mb
+    statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
+    analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
