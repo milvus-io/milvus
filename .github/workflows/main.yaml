@@ -196,10 +196,12 @@ jobs:
         shell: bash
         run: |
           docker compose up -d pulsar etcd minio azurite gcpnative
+          docker ps
       - name: UT
         run: |
           chmod +x build/builder.sh
           chmod +x scripts/run_go_codecov.sh
+          docker ps
           ./build/builder.sh /bin/bash -c "make codecov-go-without-build"
       - name: Archive result
         uses: actions/upload-artifact@v4
