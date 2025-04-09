@@ -3101,7 +3101,7 @@ def install_milvus_operator_specific_config(namespace, milvus_mode, release_name
     }
     mil = MilvusOperator()
     mil.install(data_config)
-    if mil.wait_for_healthy(release_name, namespace, timeout=300):
+    if mil.wait_for_healthy(release_name, namespace, timeout=1800):
         host = mil.endpoint(release_name, namespace).split(':')[0]
     else:
         raise MilvusException(message=f'Milvus healthy timeout 1800s')
@@ -3410,6 +3410,6 @@ def gen_collection_name_by_testcase_name(module_index=1):
     """
     Gen a unique collection name by testcase name
     if calling from the test base class, module_index=2
-    if calling form the testcase, module_index=1
+    if calling from the testcase, module_index=1
     """
     return inspect.stack()[module_index][3] + gen_unique_str("_")
