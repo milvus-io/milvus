@@ -59,6 +59,7 @@ import (
 
 type CompactionMeta interface {
 	GetSegment(ctx context.Context, segID UniqueID) *SegmentInfo
+	GetSegmentInfos(segIDs []UniqueID) []*SegmentInfo
 	SelectSegments(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo
 	GetHealthySegment(ctx context.Context, segID UniqueID) *SegmentInfo
 	UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error
@@ -613,6 +614,19 @@ func (m *meta) GetSegments(segIDs []UniqueID, filterFunc SegmentInfoSelector) []
 	return result
 }
 
+func (m *meta) GetSegmentInfos(segIDs []UniqueID) []*SegmentInfo {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	var result []*SegmentInfo
+	for _, id := range segIDs {
+		segment := m.segments.GetSegment(id)
+		if segment != nil {
+			result = append(result, segment)
+		}
+	}
+	return result
+}
+
 // GetSegment returns segment info with provided id
 // include the unhealthy segment
 // if not segment is found, nil will be returned
@@ -831,6 +845,27 @@ func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateO
 		if status == commonpb.SegmentState_Dropped {
 			segment.DroppedAt = uint64(time.Now().UnixNano())
 		}
+		return true
+	}
+}
+
+// Set storage version
+func SetStorageVersion(segmentID int64, version int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update storage version failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		if segment.GetStorageVersion() == version {
+			log.Ctx(context.TODO()).Info("meta update: segment stats already is target version",
+				zap.Int64("segmentID", segmentID), zap.Int64("version", version))
+			return false
+		}
+
+		segment.StorageVersion = version
 		return true
 	}
 }

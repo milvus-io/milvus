@@ -20,11 +20,8 @@ import (
 	"container/heap"
 	"io"
 	"sort"
-	"strconv"
 
-	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/apache/arrow/go/v17/arrow/memory"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -92,58 +89,29 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 		})
 	}
 
-	// Due to current arrow impl (v12), the write performance is largely dependent on the batch size,
-	//	small batch size will cause write performance degradation. To work around this issue, we accumulate
-	//	records and write them in batches. This requires additional memory copy.
+	rb := NewRecordBuilder(schema)
 	batchSize := 100000
-	builders := make([]array.Builder, len(schema.Fields))
-	for i, f := range schema.Fields {
-		b := array.NewBuilder(memory.DefaultAllocator, records[0].Column(f.FieldID).DataType())
-		b.Reserve(batchSize)
-		builders[i] = b
-	}
-
-	writeRecord := func(rowNum int64) error {
-		arrays := make([]arrow.Array, len(builders))
-		fields := make([]arrow.Field, len(builders))
-		field2Col := make(map[FieldID]int, len(builders))
-
-		for c, builder := range builders {
-			arrays[c] = builder.NewArray()
-			fid := schema.Fields[c].FieldID
-			fields[c] = arrow.Field{
-				Name:     strconv.Itoa(int(fid)),
-				Type:     arrays[c].DataType(),
-				Nullable: true, // No nullable check here.
-			}
-			field2Col[fid] = c
-		}
-
-		rec := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, rowNum), field2Col)
+	writeRecord := func() error {
+		rec := rb.Build()
 		defer rec.Release()
-		return rw.Write(rec)
+		if rec.Len() > 0 {
+			return rw.Write(rec)
+		}
+		return nil
 	}
 
 	for i, idx := range indices {
-		for c, builder := range builders {
-			fid := schema.Fields[c].FieldID
-			defaultValue := schema.Fields[c].GetDefaultValue()
-			if err := appendValueAt(builder, records[idx.ri].Column(fid), idx.i, defaultValue); err != nil {
-				return 0, err
-			}
-		}
+		rb.Append(records[idx.ri], idx.i, idx.i+1)
 		if (i+1)%batchSize == 0 {
-			if err := writeRecord(int64(batchSize)); err != nil {
+			if err := writeRecord(); err != nil {
 				return 0, err
 			}
 		}
 	}
 
 	// write the last batch
-	if len(indices)%batchSize != 0 {
-		if err := writeRecord(int64(len(indices) % batchSize)); err != nil {
-			return 0, err
-		}
+	if err := writeRecord(); err != nil {
+		return 0, err
 	}
 
 	return len(indices), nil

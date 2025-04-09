@@ -104,7 +104,6 @@ type SessionRaw struct {
 	LeaseID                  *clientv3.LeaseID  `json:"LeaseID,omitempty"`
 
 	HostName     string            `json:"HostName,omitempty"`
-	EnableDisk   bool              `json:"EnableDisk,omitempty"`
 	ServerLabels map[string]string `json:"ServerLabels,omitempty"`
 }
 
@@ -190,12 +189,6 @@ func WithScalarIndexEngineVersion(minimal, current int32) SessionOption {
 	return func(session *Session) {
 		session.ScalarIndexEngineVersion.MinimalIndexVersion = minimal
 		session.ScalarIndexEngineVersion.CurrentIndexVersion = current
-	}
-}
-
-func WithEnableDisk(enableDisk bool) SessionOption {
-	return func(s *Session) {
-		s.EnableDisk = enableDisk
 	}
 }
 

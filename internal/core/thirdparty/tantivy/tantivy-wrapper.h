@@ -82,6 +82,7 @@ struct TantivyIndexWrapper {
     TantivyIndexWrapper(const char* field_name,
                         TantivyDataType data_type,
                         const char* path,
+                        uint32_t tantivy_index_version,
                         bool inverted_single_semgnent = false,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
@@ -89,12 +90,13 @@ struct TantivyIndexWrapper {
         RustResultWrapper res;
         if (inverted_single_semgnent) {
             res = RustResultWrapper(tantivy_create_index_with_single_segment(
-                field_name, data_type, path));
+                field_name, data_type, path, tantivy_index_version));
         } else {
             res = RustResultWrapper(
                 tantivy_create_index(field_name,
                                      data_type,
                                      path,
+                                     tantivy_index_version,
                                      num_threads,
                                      overall_memory_budget_in_bytes));
         }
@@ -120,6 +122,7 @@ struct TantivyIndexWrapper {
     TantivyIndexWrapper(const char* field_name,
                         bool in_ram,
                         const char* path,
+                        uint32_t tantivy_index_version,
                         const char* tokenizer_name = DEFAULT_TOKENIZER_NAME,
                         const char* analyzer_params = DEFAULT_analyzer_params,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
@@ -128,6 +131,7 @@ struct TantivyIndexWrapper {
         auto res = RustResultWrapper(
             tantivy_create_text_writer(field_name,
                                        path,
+                                       tantivy_index_version,
                                        tokenizer_name,
                                        analyzer_params,
                                        num_threads,
@@ -245,16 +249,17 @@ struct TantivyIndexWrapper {
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
-            // TODO: not very efficient, a lot of overhead due to rust-ffi call.
+            std::vector<const char*> views;
+            views.reserve(len);
             for (uintptr_t i = 0; i < len; i++) {
-                auto res = RustResultWrapper(tantivy_index_add_string(
-                    writer_,
-                    static_cast<const std::string*>(array)[i].c_str(),
-                    offset_begin + i));
-                AssertInfo(res.result_->success,
-                           "failed to add string: {}",
-                           res.result_->error);
+                views.push_back(
+                    static_cast<const std::string*>(array)[i].c_str());
             }
+            auto res = RustResultWrapper(tantivy_index_add_strings(
+                writer_, views.data(), len, offset_begin));
+            AssertInfo(res.result_->success,
+                       "failed to add string: {}",
+                       res.result_->error);
             return;
         }
 
@@ -424,16 +429,18 @@ struct TantivyIndexWrapper {
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
-            // TODO: not very efficient, a lot of overhead due to rust-ffi call.
+            std::vector<const char*> views;
+            views.reserve(len);
             for (uintptr_t i = 0; i < len; i++) {
-                auto res = RustResultWrapper(
-                    tantivy_index_add_string_by_single_segment_writer(
-                        writer_,
-                        static_cast<const std::string*>(array)[i].c_str()));
-                AssertInfo(res.result_->success,
-                           "failed to add string: {}",
-                           res.result_->error);
+                views.push_back(
+                    static_cast<const std::string*>(array)[i].c_str());
             }
+            auto res = RustResultWrapper(
+                tantivy_index_add_strings_by_single_segment_writer(
+                    writer_, views.data(), len));
+            AssertInfo(res.result_->success,
+                       "failed to add string: {}",
+                       res.result_->error);
             return;
         }
 

@@ -251,7 +251,8 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
 				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
 			},
-			BeginLogID: 100,
+			BeginLogID:         100,
+			PreAllocatedLogIDs: &datapb.IDRange{Begin: 200, End: 2000},
 		}
 
 		resp, err := node.CompactionV2(ctx, req)
@@ -275,6 +276,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 			Type:                   datapb.CompactionType_ClusteringCompaction,
 			BeginLogID:             100,
 			PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 100, End: 200},
+			PreAllocatedLogIDs:     &datapb.IDRange{Begin: 200, End: 2000},
 		}
 
 		resp, err := node.CompactionV2(ctx, req)
@@ -295,8 +297,9 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
 				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
 			},
-			Type:       datapb.CompactionType_ClusteringCompaction,
-			BeginLogID: 0,
+			Type:               datapb.CompactionType_ClusteringCompaction,
+			BeginLogID:         0,
+			PreAllocatedLogIDs: &datapb.IDRange{Begin: 200, End: 2000},
 		}
 
 		resp, err := node.CompactionV2(ctx, req)
@@ -320,6 +323,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 			Type:                   datapb.CompactionType_ClusteringCompaction,
 			BeginLogID:             100,
 			PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 0, End: 0},
+			PreAllocatedLogIDs:     &datapb.IDRange{Begin: 200, End: 2000},
 		}
 
 		resp, err := node.CompactionV2(ctx, req)

@@ -627,12 +627,13 @@ message CompactionPlan {
   string analyze_result_path = 14;
   repeated int64 analyze_segment_ids = 15;
   int32 state = 16;
-  int64 begin_logID = 17;
+  int64 begin_logID = 17; // deprecated, use pre_allocated_logIDs instead.
   IDRange pre_allocated_segmentIDs = 18;
   int64 slot_usage = 19;
   int64 max_size = 20;
   // bf path for importing
   // collection is importing
+  IDRange pre_allocated_logIDs = 21;
 }
 
 message CompactionSegment {
@@ -752,6 +753,17 @@ message AlterCollectionRequest {
   repeated common.KeyValuePair properties = 5;
   int64  dbID = 6;
   repeated string vChannels = 7;
+}
+
+message AddCollectionFieldRequest {
+  int64  collectionID = 1;
+  int64  dbID = 2;
+  schema.FieldSchema field_schema = 3;
+  schema.CollectionSchema schema = 4;
+  repeated int64 partitionIDs = 5;
+  repeated common.KeyDataPair start_positions = 6;
+  repeated common.KeyValuePair properties = 7;
+  repeated string vChannels = 8;
 }
 
 message GcConfirmRequest {

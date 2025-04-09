@@ -186,6 +186,7 @@ func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...g
 			return err
 		}
 		resultSet = ResultSet{
+			sch:    collection.Schema,
 			Fields: columns,
 		}
 		if len(columns) > 0 {

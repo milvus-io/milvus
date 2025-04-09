@@ -59,6 +59,10 @@ class FieldDataBase {
     virtual void
     FillFieldData(const std::shared_ptr<arrow::Array> array) = 0;
 
+    virtual void
+    FillFieldData(const std::optional<DefaultValueType> default_value,
+                  ssize_t element_count) = 0;
+
     // For all FieldDataImpl subclasses, this method returns Type* that points
     // at all rows in this field data.
     virtual void*
@@ -167,6 +171,15 @@ class FieldBitsetImpl : public FieldDataBase {
         PanicInfo(NotImplemented,
                   "FillFieldData(const std::shared_ptr<arrow::Array>& array) "
                   "not implemented for bitset");
+    }
+
+    void
+    FillFieldData(const std::optional<DefaultValueType> default_value,
+                  ssize_t element_count) override {
+        PanicInfo(NotImplemented,
+                  "FillFieldData(const const std::optional<DefaultValueType> "
+                  "default_value, "
+                  "ssize_t element_count) not implemented for bitset");
     }
 
     virtual void
@@ -356,6 +369,10 @@ class FieldDataImpl : public FieldDataBase {
 
     void
     FillFieldData(const std::shared_ptr<arrow::Array> array) override;
+
+    void
+    FillFieldData(const std::optional<DefaultValueType> default_value,
+                  ssize_t element_count) override;
 
     virtual void
     FillFieldData(const std::shared_ptr<arrow::StringArray>& array) {
@@ -608,6 +625,27 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
                    array->type()->ToString());
         auto json_array = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
         FillFieldData(json_array);
+    }
+
+    // used for generate added field which has no related binlogs
+    void
+    FillFieldData(const std::optional<DefaultValueType> default_value,
+                  ssize_t element_count) override {
+        // todo: add json default_value
+        AssertInfo(!default_value.has_value(),
+                   "json type not support default_value");
+        if (element_count == 0) {
+            return;
+        }
+        null_count_ = element_count;
+
+        std::lock_guard lck(tell_mutex_);
+        if (length_ + element_count > get_num_rows()) {
+            resize_field_data(length_ + element_count);
+        }
+
+        valid_data_.assign((element_count + 7) / 8, 0x00);
+        length_ += element_count;
     }
 
     void

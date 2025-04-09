@@ -61,11 +61,7 @@ func getInsertDataRowNum(data *storage.InsertData, schema *schemapb.CollectionSc
 	return 0
 }
 
-func CheckVarcharLength(data any, maxLength int64, field *schemapb.FieldSchema) error {
-	str, ok := data.(string)
-	if !ok {
-		return fmt.Errorf("expected string type for field %s, but got %T", field.GetName(), data)
-	}
+func CheckVarcharLength(str string, maxLength int64, field *schemapb.FieldSchema) error {
 	if (int64)(len(str)) > maxLength {
 		return fmt.Errorf("value length(%d) for field %s exceeds max_length(%d)", len(str), field.GetName(), maxLength)
 	}
@@ -95,4 +91,11 @@ func EstimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema
 		return 1, nil
 	}
 	return ret, nil
+}
+
+func CheckValidUTF8(s string, field *schemapb.FieldSchema) error {
+	if !typeutil.IsUTF8(s) {
+		return fmt.Errorf("field %s contains invalid UTF-8 data, value=%s", field.GetName(), s)
+	}
+	return nil
 }

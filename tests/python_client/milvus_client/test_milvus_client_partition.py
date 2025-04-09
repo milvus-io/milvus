@@ -470,7 +470,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
                                 check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1896")
+    @pytest.mark.skip(reason="pymilvus issue 1896")
     @pytest.mark.parametrize("partition_name", ["12 s", "(mn)", "中文", "%$#"])
     def test_milvus_client_release_partition_invalid_partition_name(self, partition_name):
         """
@@ -488,7 +488,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
                                 check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1896")
+    @pytest.mark.skip(reason="pymilvus issue 1896")
     def test_milvus_client_release_partition_invalid_partition_name_list(self):
         """
         target: test release partition -- invalid partition name value

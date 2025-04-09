@@ -42,6 +42,7 @@ type indexBuildTask struct {
 	taskID   int64
 	nodeID   int64
 	taskInfo *workerpb.IndexTaskInfo
+	taskSlot int64
 
 	queueTime time.Time
 	startTime time.Time
@@ -52,9 +53,10 @@ type indexBuildTask struct {
 
 var _ Task = (*indexBuildTask)(nil)
 
-func newIndexBuildTask(taskID int64) *indexBuildTask {
+func newIndexBuildTask(taskID int64, taskSlot int64) *indexBuildTask {
 	return &indexBuildTask{
-		taskID: taskID,
+		taskID:   taskID,
+		taskSlot: taskSlot,
 		taskInfo: &workerpb.IndexTaskInfo{
 			BuildID: taskID,
 			State:   commonpb.IndexState_Unissued,
@@ -71,7 +73,6 @@ func (it *indexBuildTask) GetNodeID() int64 {
 }
 
 func (it *indexBuildTask) ResetTask(mt *meta) {
-	it.nodeID = 0
 }
 
 func (it *indexBuildTask) SetQueueTime(t time.Time) {
@@ -120,6 +121,10 @@ func (it *indexBuildTask) GetFailReason() string {
 	return it.taskInfo.FailReason
 }
 
+func (it *indexBuildTask) GetTaskSlot() int64 {
+	return it.taskSlot
+}
+
 func (it *indexBuildTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
 	if err := meta.indexMeta.UpdateVersion(it.taskID, nodeID); err != nil {
 		return err
@@ -160,7 +165,9 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	typeParams := dependency.meta.indexMeta.GetTypeParams(segIndex.CollectionID, segIndex.IndexID)
 
 	fieldID := dependency.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID)
+
 	binlogIDs := getBinLogIDs(segment, fieldID)
+	totalRows := getTotalBinlogRows(segment, fieldID)
 
 	// When new index parameters are added, these parameters need to be updated to ensure they are included during the index-building process.
 	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && Params.KnowhereConfig.Enable.GetAsBool() {
@@ -257,7 +264,11 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		OptionalScalarFields:      optionalFields,
 		Field:                     field,
 		PartitionKeyIsolation:     partitionKeyIsolation,
+		StorageVersion:            segment.StorageVersion,
+		TaskSlot:                  it.taskSlot,
 	}
+
+	it.req.LackBinlogRows = it.req.NumRows - totalRows
 
 	log.Ctx(ctx).Info("index task pre check successfully", zap.Int64("taskID", it.GetTaskID()),
 		zap.Int64("segID", segment.GetID()),

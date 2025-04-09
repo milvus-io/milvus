@@ -1222,7 +1222,7 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 			},
 			loadFields:       nil,
 			skipDynamicField: false,
-			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 1, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 4},
+			expectResult:     []int64{},
 			expectErr:        false,
 		},
 		{

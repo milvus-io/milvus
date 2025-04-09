@@ -650,6 +650,14 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
     def metric_type(self, request):
         yield request.param
 
+    @pytest.fixture(scope="function", params=["INVERTED"])
+    def supported_varchar_scalar_index(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "BOOL", "double", "varchar", "bool"])
+    def supported_json_cast_type(self, request):
+        yield request.param
+
     """
     ******************************************************************
     #  The following are valid base cases
@@ -877,7 +885,127 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                              search_params=search_params, limit=500,
                              check_task=CheckTasks.check_search_iterator,
                              check_items={"batch_size": batch_size})
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_search_iterator_external_filter_func_default(self):
         pass
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("metric_type", ct.float_metrics)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_search_iterator_after_json_path_index(self, metric_type, enable_dynamic_field,
+                                                                 supported_json_cast_type,
+                                                                 supported_varchar_scalar_index):
+        """
+        target: test search iterator after creating json path index
+        method: Search iterator after creating json path index
+        Step: 1. create schema
+              2. prepare index_params with vector and all the json path index params
+              3. create collection with the above schema and index params
+              4. insert
+              5. flush
+              6. release collection
+              7. load collection
+              8. search iterator
+        expected: Search successfully
+        """
+        batch_size = 20
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # 1. create collection
+        json_field_name = "my_json"
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        if not enable_dynamic_field:
+            schema.add_field(json_field_name, DataType.JSON)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type=metric_type)
+        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(field_name=json_field_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']"})
+        index_params.add_index(field_name=json_field_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}"})
+        index_params.add_index(field_name=json_field_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a'][0]['b']"})
+        index_params.add_index(field_name=json_field_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a'][0]"})
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params, metric_type=metric_type)
+        # 2. insert
+        rows = [{default_primary_key_field_name: i,
+                 default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
+                 default_float_field_name: i * 1.0,
+                 default_string_field_name: str(i),
+                 json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. release and load collection to make sure the new index is loaded
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+        # 4. search iterator
+        vectors_to_search = cf.gen_vectors(1, default_dim)
+        search_params = {"params": {}}
+        self.search_iterator(client, collection_name=collection_name, data=vectors_to_search,
+                             anns_field=default_vector_field_name,
+                             search_params=search_params, batch_size=batch_size,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"metric_type": metric_type, "batch_size": batch_size})
+        limit = 200
+        res = self.search(client, collection_name, vectors_to_search,
+                          search_params=search_params, limit=limit,
+                          check_task=CheckTasks.check_search_results,
+                          check_items={"nq": 1, "limit": limit, "enable_milvus_client_api": True})[0]
+        for limit in [batch_size - 3, batch_size, batch_size * 2, -1]:
+            if metric_type != "L2":
+                radius = res[0][limit // 2].get('distance', 0) - 0.1  # pick a radius to make sure there exists results
+                range_filter = res[0][0].get('distance', 0) + 0.1
+            else:
+                radius = res[0][limit // 2].get('distance', 0) + 0.1
+                range_filter = res[0][0].get('distance', 0) - 0.1
+            search_params = {"params": {"radius": radius, "range_filter": range_filter}}
+            log.debug(f"search iterator with limit={limit} radius={radius}, range_filter={range_filter}")
+            expected_batch_size = batch_size if limit == -1 else min(batch_size, limit)
+            # external filter not set
+            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
+                                 search_params=search_params, limit=limit,
+                                 check_task=CheckTasks.check_search_iterator,
+                                 check_items={"batch_size": expected_batch_size})
+            # external filter half
+            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
+                                 search_params=search_params, limit=limit,
+                                 external_filter_func=external_filter_half,
+                                 check_task=CheckTasks.check_search_iterator,
+                                 check_items={"batch_size": expected_batch_size})
+            # external filter nothing
+            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
+                                 search_params=search_params, limit=limit,
+                                 external_filter_func=external_filter_nothing,
+                                 check_task=CheckTasks.check_search_iterator,
+                                 check_items={"batch_size": expected_batch_size})
+            # external filter with outputs
+            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
+                                 search_params=search_params, limit=limit, output_fields=["*"],
+                                 external_filter_func=external_filter_with_outputs,
+                                 check_task=CheckTasks.check_search_iterator,
+                                 check_items={"batch_size": expected_batch_size})
+            # external filter all
+            self.search_iterator(client, collection_name, vectors_to_search, batch_size,
+                                 search_params=search_params, limit=limit,
+                                 external_filter_func=external_filter_all,
+                                 check_task=CheckTasks.check_search_iterator,
+                                 check_items={"batch_size": 0, "iterate_times": 1})
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
