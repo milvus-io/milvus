@@ -24,8 +24,9 @@ from collections import Counter
 import bm25s
 import jieba
 import re
+import inspect
 
-from pymilvus import CollectionSchema, DataType, FunctionType, Function
+from pymilvus import CollectionSchema, DataType, FunctionType, Function, MilvusException
 
 from bm25s.tokenization import Tokenizer
 
@@ -3101,8 +3102,8 @@ def install_milvus_operator_specific_config(namespace, milvus_mode, release_name
     }
     mil = MilvusOperator()
     mil.install(data_config)
-    if mil.wait_for_healthy(release_name, NAMESPACE, timeout=TIMEOUT):
-        host = mic.endpoint(release_name, NAMESPACE).split(':')[0]
+    if mil.wait_for_healthy(release_name, namespace, timeout=1800):
+        host = mil.endpoint(release_name, namespace).split(':')[0]
     else:
         raise MilvusException(message=f'Milvus healthy timeout 1800s')
 
@@ -3404,3 +3405,12 @@ def iter_insert_list_data(data: list, batch: int, total_len: int):
     data_obj = [iter(d) for d in data]
     for n in nb_list:
         yield [[next(o) for _ in range(n)] for o in data_obj]
+
+
+def gen_collection_name_by_testcase_name(module_index=1):
+    """
+    Gen a unique collection name by testcase name
+    if calling from the test base class, module_index=2
+    if calling from the testcase, module_index=1
+    """
+    return inspect.stack()[module_index][3] + gen_unique_str("_")
