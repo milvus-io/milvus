@@ -177,7 +177,9 @@ func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL) (wal
 	}
 	if startMessageID := impl.flusherComponents.StartMessageID(); startMessageID != nil {
 		impl.logger.Info("wal start to scan from minimum checkpoint", zap.Stringer("startMessageID", startMessageID))
-		readOpt.DeliverPolicy = options.DeliverPolicyStartAfter(startMessageID)
+		// !!! we always set the deliver policy to start from the last confirmed message id.
+		// because the catchup scanner at the streamingnode server must see the last confirmed message id if it's the last timetick.
+		readOpt.DeliverPolicy = options.DeliverPolicyStartFrom(startMessageID)
 	}
 	impl.logger.Info("wal start to scan from the beginning")
 	return l.Read(ctx, readOpt)
