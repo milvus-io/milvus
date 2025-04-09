@@ -275,19 +275,19 @@ func (_c *MockWorkerManager_PickClient_Call) RunAndReturn(run func() (int64, typ
 }
 
 // QuerySlots provides a mock function with given fields:
-func (_m *MockWorkerManager) QuerySlots() map[int64]int64 {
+func (_m *MockWorkerManager) QuerySlots() map[int64]*WorkerSlots {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for QuerySlots")
 	}
 
-	var r0 map[int64]int64
-	if rf, ok := ret.Get(0).(func() map[int64]int64); ok {
+	var r0 map[int64]*WorkerSlots
+	if rf, ok := ret.Get(0).(func() map[int64]*WorkerSlots); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[int64]int64)
+			r0 = ret.Get(0).(map[int64]*WorkerSlots)
 		}
 	}
 
@@ -311,12 +311,12 @@ func (_c *MockWorkerManager_QuerySlots_Call) Run(run func()) *MockWorkerManager_
 	return _c
 }
 
-func (_c *MockWorkerManager_QuerySlots_Call) Return(_a0 map[int64]int64) *MockWorkerManager_QuerySlots_Call {
+func (_c *MockWorkerManager_QuerySlots_Call) Return(_a0 map[int64]*WorkerSlots) *MockWorkerManager_QuerySlots_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWorkerManager_QuerySlots_Call) RunAndReturn(run func() map[int64]int64) *MockWorkerManager_QuerySlots_Call {
+func (_c *MockWorkerManager_QuerySlots_Call) RunAndReturn(run func() map[int64]*WorkerSlots) *MockWorkerManager_QuerySlots_Call {
 	_c.Call.Return(run)
 	return _c
 }

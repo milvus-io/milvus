@@ -849,6 +849,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		}
 		t.result.Results.FieldsData = append(t.result.Results.FieldsData, pkFieldData)
 	}
+	t.result.Results.PrimaryFieldName = primaryFieldSchema.GetName()
 	if t.isIterator && len(t.queryInfos) == 1 && t.queryInfos[0] != nil {
 		if iterInfo := t.queryInfos[0].GetSearchIteratorV2Info(); iterInfo != nil {
 			t.result.Results.SearchIteratorV2Results = &schemapb.SearchIteratorV2Results{

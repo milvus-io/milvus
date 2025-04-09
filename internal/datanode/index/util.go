@@ -29,10 +29,12 @@ import "C"
 
 import (
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 )
 
 func getCurrentIndexVersion(v int32) int32 {
@@ -75,4 +77,16 @@ func mapToKVPairs(m map[string]string) []*commonpb.KeyValuePair {
 		})
 	}
 	return kvs
+}
+
+func CalculateNodeSlots() int64 {
+	cpuNum := hardware.GetCPUNum()
+	memory := hardware.GetMemoryCount()
+
+	slot := int64(cpuNum / 2)
+	memorySlot := int64(memory / (8 * 1024 * 1024 * 1024))
+	if slot > memorySlot {
+		slot = memorySlot
+	}
+	return max(slot, 1) * paramtable.Get().DataNodeCfg.WorkerSlotUnit.GetAsInt64() * paramtable.Get().DataNodeCfg.BuildParallel.GetAsInt64()
 }

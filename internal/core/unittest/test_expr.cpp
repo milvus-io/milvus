@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
 #include <boost/format.hpp>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -16505,6 +16506,8 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
         test_cases = {
             {{"a"}, true, 0b1111111000000100},
             {{"a", "b"}, true, 0b0000100000000000},
+            {{"a"}, false, 0b0000000111111011},
+            {{"a", "b"}, false, 0b1111011111111111},
         };
 
     auto json_index_path = GetParam();
@@ -16513,7 +16516,7 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
-    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
     schema->set_primary_field_id(i64_fid);
 
     auto seg = CreateSealedSegment(schema);
@@ -16535,12 +16538,15 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
         static_cast<json_index_type*>(inv_index.release()));
 
     auto json_field =
-        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
     std::vector<milvus::Json> jsons;
     for (auto& json_str : json_strs) {
         jsons.push_back(milvus::Json(simdjson::padded_string(json_str)));
     }
     json_field->add_json_data(jsons);
+    auto json_valid_data = json_field->ValidData();
+    json_valid_data[0] = 0xFF;
+    json_valid_data[1] = 0xFE;
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
