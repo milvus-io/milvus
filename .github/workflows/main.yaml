@@ -199,6 +199,12 @@ jobs:
           docker ps
       - name: UT
         run: |
+          apt-get update
+          apt-get install lsof -y
+          lsof -i :9000
+          sleep 300
+          lsof -i :4443
+          lsof -i :9000
           chmod +x build/builder.sh
           chmod +x scripts/run_go_codecov.sh
           docker ps
