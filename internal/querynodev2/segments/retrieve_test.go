@@ -176,6 +176,10 @@ func (suite *RetrieveSuite) TestRetrieveSealed() {
 	suite.Len(resultByOffsets.Offset, 0)
 }
 
+func (suite *RetrieveSuite) TestGenerateCore() {
+	TestCgoUtil(context.Background())
+}
+
 func (suite *RetrieveSuite) TestRetrieveGrowing() {
 	plan, err := mock_segcore.GenSimpleRetrievePlan(suite.collection.GetCCollection())
 	suite.NoError(err)
