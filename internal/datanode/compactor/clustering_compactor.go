@@ -316,6 +316,10 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 	}
 	buckets, containsNull := t.splitClusterByScalarValue(analyzeDict)
 	scalarToClusterBufferMap := make(map[interface{}]*ClusterBuffer, 0)
+	compactionParams, err := compaction.GetParamsFromJSON(t.plan.GetJsonParams())
+	if err != nil {
+		return err
+	}
 	for id, bucket := range buckets {
 		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
 		if err != nil {
@@ -326,7 +330,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.GetParams(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
+		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), compactionParams, t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
 		if err != nil {
 			return err
 		}
@@ -345,7 +349,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.GetParams(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
+		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), compactionParams, t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
 		if err != nil {
 			return err
 		}
@@ -401,7 +405,11 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		fieldStats.SetVectorCentroids(centroidValues...)
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.GetParams(), t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
+		compactionParams, err := compaction.GetParamsFromJSON(t.plan.GetJsonParams())
+		if err != nil {
+			return err
+		}
+		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), compactionParams, t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
 		if err != nil {
 			return err
 		}

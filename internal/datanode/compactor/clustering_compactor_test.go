@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -42,12 +43,11 @@ import (
 )
 
 func refreshPlanParams(plan *datapb.CompactionPlan) {
-	plan.Params = []*commonpb.KeyValuePair{
-		{Key: paramtable.Get().CommonCfg.EnableStorageV2.Key, Value: paramtable.Get().CommonCfg.EnableStorageV2.GetValue()},
-		{Key: paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, Value: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetValue()},
-		{Key: paramtable.Get().DataNodeCfg.UseMergeSort.Key, Value: paramtable.Get().DataNodeCfg.UseMergeSort.GetValue()},
-		{Key: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.Key, Value: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetValue()},
+	params, err := compaction.GetJSONParams()
+	if err != nil {
+		panic(err)
 	}
+	plan.JsonParams = params
 }
 
 func TestClusteringCompactionTaskSuite(t *testing.T) {
@@ -90,6 +90,10 @@ func (s *ClusteringCompactionTaskSuite) setupTest() {
 	s.task = NewClusteringCompactionTask(context.Background(), s.mockBinlogIO, nil)
 
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EntityExpirationTTL.Key, "0")
+	params, err := compaction.GetJSONParams()
+	if err != nil {
+		panic(err)
+	}
 
 	s.plan = &datapb.CompactionPlan{
 		PlanID: 999,
@@ -105,12 +109,7 @@ func (s *ClusteringCompactionTaskSuite) setupTest() {
 			Begin: 200,
 			End:   2000,
 		},
-		Params: []*commonpb.KeyValuePair{
-			{Key: paramtable.Get().CommonCfg.EnableStorageV2.Key, Value: paramtable.Get().CommonCfg.EnableStorageV2.GetValue()},
-			{Key: paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, Value: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetValue()},
-			{Key: paramtable.Get().DataNodeCfg.UseMergeSort.Key, Value: paramtable.Get().DataNodeCfg.UseMergeSort.GetValue()},
-			{Key: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.Key, Value: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetValue()},
-		},
+		JsonParams: params,
 	}
 	s.task.plan = s.plan
 }

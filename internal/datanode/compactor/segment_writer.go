@@ -20,16 +20,15 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -38,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -89,31 +87,13 @@ func (alloc *compactionAlloactor) allocSegmentID() (typeutil.UniqueID, error) {
 }
 
 func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator *compactionAlloactor, segmentSize int64,
-	schema *schemapb.CollectionSchema, params []*commonpb.KeyValuePair,
+	schema *schemapb.CollectionSchema, params compaction.Params,
 	maxRows int64, partitionID, collectionID int64, channel string, batchSize int, rwOption ...storage.RwOption,
 ) (*MultiSegmentWriter, error) {
 	storageVersion := storage.StorageV1
 
-	enableStorageV2Str, err := funcutil.GetAttrByKeyFromRepeatedKV(paramtable.Get().CommonCfg.EnableStorageV2.Key, params)
-	if err != nil {
-		return nil, err
-	}
-	enableStorageV2, err := strconv.ParseBool(enableStorageV2Str)
-	if err != nil {
-		return nil, err
-	}
-
-	if enableStorageV2 {
+	if params.EnableStorageV2 {
 		storageVersion = storage.StorageV2
-	}
-
-	binlogMaxSizeStr, err := funcutil.GetAttrByKeyFromRepeatedKV(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, params)
-	if err != nil {
-		return nil, err
-	}
-	binlogMaxSize, err := strconv.ParseUint(binlogMaxSizeStr, 10, 64)
-	if err != nil {
-		return nil, err
 	}
 
 	rwOpts := rwOption
@@ -131,7 +111,7 @@ func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator 
 		collectionID:   collectionID,
 		channel:        channel,
 		batchSize:      batchSize,
-		binLogMaxSize:  binlogMaxSize,
+		binLogMaxSize:  params.BinLogMaxSize,
 		res:            make([]*datapb.CompactionSegment, 0),
 		storageVersion: storageVersion,
 		rwOption:       rwOpts,

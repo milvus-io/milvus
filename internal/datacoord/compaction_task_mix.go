@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -306,6 +307,10 @@ func (t *mixCompactionTask) CheckCompactionContainsSegment(segmentID int64) bool
 }
 
 func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
+	compactionParams, err := compaction.GetJSONParams()
+	if err != nil {
+		return nil, err
+	}
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	plan := &datapb.CompactionPlan{
@@ -320,7 +325,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		PreAllocatedSegmentIDs: taskProto.GetPreAllocatedSegmentIDs(),
 		SlotUsage:              t.GetSlotUsage(),
 		MaxSize:                taskProto.GetMaxSize(),
-		Params:                 GetCompactionExtraParams(),
+		JsonParams:             compactionParams,
 	}
 
 	segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))

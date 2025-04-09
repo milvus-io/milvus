@@ -21,7 +21,6 @@ import (
 	"fmt"
 	sio "io"
 	"math"
-	"strconv"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -144,7 +143,11 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.plan.GetParams(), t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096)
+	compactionParams, err := compaction.GetParamsFromJSON(t.plan.GetJsonParams())
+	if err != nil {
+		return nil, err
+	}
+	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096)
 	if err != nil {
 		return nil, err
 	}
@@ -324,16 +327,12 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, errors.New("illegal compaction plan")
 	}
 
-	useMergeSortStr, err := funcutil.GetAttrByKeyFromRepeatedKV(paramtable.Get().DataNodeCfg.UseMergeSort.Key, t.plan.GetParams())
-	if err != nil {
-		return nil, err
-	}
-	useMergeSort, err := strconv.ParseBool(useMergeSortStr)
+	compactionParams, err := compaction.GetParamsFromJSON(t.plan.GetJsonParams())
 	if err != nil {
 		return nil, err
 	}
 
-	sortMergeAppicable := useMergeSort
+	sortMergeAppicable := compactionParams.UseMergeSort
 	if sortMergeAppicable {
 		for _, segment := range t.plan.GetSegmentBinlogs() {
 			if !segment.GetIsSorted() {
@@ -341,16 +340,8 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 				break
 			}
 		}
-		maxSegmentMergeSortStr, err := funcutil.GetAttrByKeyFromRepeatedKV(paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.Key, t.plan.GetParams())
-		if err != nil {
-			return nil, err
-		}
-		maxSegmentMergeSort, err := strconv.Atoi(maxSegmentMergeSortStr)
-		if err != nil {
-			return nil, err
-		}
 		if len(t.plan.GetSegmentBinlogs()) <= 1 ||
-			len(t.plan.GetSegmentBinlogs()) > maxSegmentMergeSort {
+			len(t.plan.GetSegmentBinlogs()) > compactionParams.MaxSegmentMergeSort {
 			// sort merge is not applicable if there is only one segment or too many segments
 			sortMergeAppicable = false
 		}

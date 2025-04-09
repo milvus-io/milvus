@@ -71,6 +71,10 @@ func (s *MixCompactionTaskSuite) setupTest() {
 	s.meta = genTestCollectionMeta()
 
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EntityExpirationTTL.Key, "0")
+	params, err := compaction.GetJSONParams()
+	if err != nil {
+		panic(err)
+	}
 
 	plan := &datapb.CompactionPlan{
 		PlanID: 999,
@@ -86,12 +90,7 @@ func (s *MixCompactionTaskSuite) setupTest() {
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
 		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
 		MaxSize:                64 * 1024 * 1024,
-		Params: []*commonpb.KeyValuePair{
-			{Key: paramtable.Get().CommonCfg.EnableStorageV2.Key, Value: paramtable.Get().CommonCfg.EnableStorageV2.GetValue()},
-			{Key: paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, Value: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetValue()},
-			{Key: paramtable.Get().DataNodeCfg.UseMergeSort.Key, Value: paramtable.Get().DataNodeCfg.UseMergeSort.GetValue()},
-			{Key: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.Key, Value: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetValue()},
-		},
+		JsonParams:             params,
 	}
 
 	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan)
@@ -104,6 +103,10 @@ func (s *MixCompactionTaskSuite) SetupTest() {
 func (s *MixCompactionTaskSuite) SetupBM25() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.meta = genTestCollectionMetaWithBM25()
+	params, err := compaction.GetJSONParams()
+	if err != nil {
+		panic(err)
+	}
 
 	plan := &datapb.CompactionPlan{
 		PlanID: 999,
@@ -119,12 +122,7 @@ func (s *MixCompactionTaskSuite) SetupBM25() {
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
 		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
 		MaxSize:                64 * 1024 * 1024,
-		Params: []*commonpb.KeyValuePair{
-			{Key: paramtable.Get().CommonCfg.EnableStorageV2.Key, Value: paramtable.Get().CommonCfg.EnableStorageV2.GetValue()},
-			{Key: paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, Value: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetValue()},
-			{Key: paramtable.Get().DataNodeCfg.UseMergeSort.Key, Value: paramtable.Get().DataNodeCfg.UseMergeSort.GetValue()},
-			{Key: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.Key, Value: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetValue()},
-		},
+		JsonParams:             params,
 	}
 
 	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan)

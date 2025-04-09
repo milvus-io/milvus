@@ -634,7 +634,7 @@ message CompactionPlan {
   // bf path for importing
   // collection is importing
   IDRange pre_allocated_logIDs = 21;
-  repeated common.KeyValuePair params = 22;
+  string json_params = 22;
 }
 
 message CompactionSegment {

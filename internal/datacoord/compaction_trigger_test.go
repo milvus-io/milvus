@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -526,6 +527,11 @@ func Test_compactionTrigger_force(t *testing.T) {
 	im.segmentIndexes.Insert(2, segIdx2)
 	im.segmentIndexes.Insert(3, segIdx3)
 
+	params, err := compaction.GetJSONParams()
+	if err != nil {
+		panic(err)
+	}
+
 	tests := []struct {
 		name         string
 		fields       fields
@@ -631,12 +637,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					PreAllocatedLogIDs:     &datapb.IDRange{Begin: 100, End: 200},
 					MaxSize:                1342177280,
 					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
-					Params: []*commonpb.KeyValuePair{
-						{Key: paramtable.Get().CommonCfg.EnableStorageV2.Key, Value: paramtable.Get().CommonCfg.EnableStorageV2.GetValue()},
-						{Key: paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, Value: paramtable.Get().DataNodeCfg.BinLogMaxSize.GetValue()},
-						{Key: paramtable.Get().DataNodeCfg.UseMergeSort.Key, Value: paramtable.Get().DataNodeCfg.UseMergeSort.GetValue()},
-						{Key: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.Key, Value: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetValue()},
-					},
+					JsonParams:             params,
 				},
 			},
 		},
