@@ -198,7 +198,6 @@ jobs:
           docker compose up -d pulsar etcd minio azurite gcpnative
           docker ps
       - name: UT
-        continue-on-error: true
         run: |
           ulimit -c unlimited
           chmod +x build/builder.sh
