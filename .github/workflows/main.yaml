@@ -49,6 +49,7 @@ jobs:
       - name: 'Setup $HOME'
         # hot fix
         run: |
+            lsof -i :9000
             # Check if $HOME is not set
             if [ -z "$HOME" ]; then
                 echo '$HOME was no set'
@@ -199,8 +200,6 @@ jobs:
           docker ps
       - name: UT
         run: |
-          apt-get update
-          apt-get install lsof -y
           lsof -i :9000
           sleep 300
           lsof -i :4443
