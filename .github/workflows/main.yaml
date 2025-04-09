@@ -49,6 +49,7 @@ jobs:
       - name: 'Setup $HOME'
         # hot fix
         run: |
+            echo '/tmp/core.%e.%p' | tee /proc/sys/kernel/core_pattern
             lsof -i :9000
             # Check if $HOME is not set
             if [ -z "$HOME" ]; then
@@ -199,15 +200,20 @@ jobs:
           docker compose up -d pulsar etcd minio azurite gcpnative
           docker ps
       - name: UT
+        continue-on-error: true
         run: |
-          lsof -i :9000
-          sleep 300
-          lsof -i :4443
-          lsof -i :9000
+          ulimit -c unlimited
+          echo '/tmp/core.%e.%p' | tee /proc/sys/kernel/core_pattern
           chmod +x build/builder.sh
           chmod +x scripts/run_go_codecov.sh
           docker ps
           ./build/builder.sh /bin/bash -c "make codecov-go-without-build"
+      - name: Upload core dump
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: core-dump
+          path: /tmp/core.*
       - name: Archive result
         uses: actions/upload-artifact@v4
         with:
