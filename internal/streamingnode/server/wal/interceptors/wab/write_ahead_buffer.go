@@ -160,6 +160,11 @@ func (w *WriteAheadBuffer) createSnapshotFromTimeTick(ctx context.Context, timeT
 
 		// error is eof, which means that the time tick is behind the message buffer.
 		// The lastTimeTickMessage should always be greater or equal to the lastTimeTick in the pending queue.
+		if w.pendingMessages.LastTimeTick() == timeTick {
+			offset := w.pendingMessages.CurrentOffset() + 1
+			w.cond.L.Unlock()
+			return nil, offset, nil
+		}
 
 		if w.lastTimeTickMessage.TimeTick() > timeTick {
 			// check if the last time tick is greater than the given time tick, return it to update the timetick.
@@ -169,11 +174,6 @@ func (w *WriteAheadBuffer) createSnapshotFromTimeTick(ctx context.Context, timeT
 			}
 			w.cond.L.Unlock()
 			return []messageWithOffset{msg}, msg.Offset, nil
-		}
-		if w.lastTimeTickMessage.TimeTick() == timeTick {
-			offset := w.pendingMessages.CurrentOffset() + 1
-			w.cond.L.Unlock()
-			return nil, offset, nil
 		}
 
 		if err := w.cond.Wait(ctx); err != nil {
