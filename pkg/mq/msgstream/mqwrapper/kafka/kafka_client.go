@@ -256,7 +256,7 @@ func (kc *kafkaClient) StringToMsgID(id string) (common.MessageID, error) {
 func (kc *kafkaClient) specialExtraConfig(current *kafka.ConfigMap, special kafka.ConfigMap) {
 	for k, v := range special {
 		if existingConf, _ := current.Get(k, nil); existingConf != nil {
-			log.Warn(fmt.Sprintf("The existing config :  %v=%v  will be covered by the speciled kafka config :  %v.", k, v, existingConf))
+			log.Warn(fmt.Sprintf("The existing config :  %v=%v  will be covered by the special kafka config :  %v.", k, v, existingConf))
 		}
 
 		current.SetKey(k, v)
