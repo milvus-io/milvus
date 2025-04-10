@@ -43,7 +43,7 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
                                        const char* unique_id,
                                        const std::string& path);
 
-    ~JsonKeyStatsInvertedIndex() override {};
+    ~JsonKeyStatsInvertedIndex() override{};
 
  public:
     IndexStatsPtr
