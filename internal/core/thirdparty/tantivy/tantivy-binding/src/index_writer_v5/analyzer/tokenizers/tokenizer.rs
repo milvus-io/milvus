@@ -24,9 +24,9 @@ pub fn lindera_builder(
     params: Option<&json::Map<String, json::Value>>,
 ) -> Result<TextAnalyzerBuilder> {
     if params.is_none() {
-        return Err(TantivyBindingError::InvalidArgument(format!(
-            "lindera tokenizer must be costum"
-        )));
+        return Err(TantivyBindingError::InvalidArgument(
+            "lindera tokenizer must be costum".to_string(),
+        ));
     }
     let tokenizer = LinderaTokenizer::from_json(params.unwrap())?;
     Ok(TextAnalyzer::builder(tokenizer).dynamic())
@@ -43,16 +43,16 @@ pub fn get_builder_with_tokenizer(params: &json::Value) -> Result<TextAnalyzerBu
         match m.get("type") {
             Some(val) => {
                 if !val.is_string() {
-                    return Err(TantivyBindingError::InvalidArgument(format!(
-                        "tokenizer type should be string"
-                    )));
+                    return Err(TantivyBindingError::InvalidArgument(
+                        "tokenizer type should be string".to_string(),
+                    ));
                 }
                 name = val.as_str().unwrap();
             }
             _ => {
-                return Err(TantivyBindingError::InvalidArgument(format!(
-                    "costum tokenizer must set type"
-                )))
+                return Err(TantivyBindingError::InvalidArgument(
+                    "costum tokenizer must set type".to_string(),
+                ))
             }
         }
         params_map = Some(m);

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use either::Either;
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, FAST};
 use tantivy::Index;
 
@@ -36,21 +35,20 @@ impl IndexWriterWrapperImpl {
         let tokenizer = create_analyzer(tokenizer_params)?;
 
         let (schema, field, id_field) = build_text_schema(field_name, tokenizer_name);
-        let index: Index;
-        if in_ram {
-            index = Index::create_in_ram(schema);
+        let index = if in_ram {
+            Index::create_in_ram(schema)
         } else {
-            index = Index::create_in_dir(path.to_string(), schema).unwrap();
-        }
-        index.tokenizers().register(&tokenizer_name, tokenizer);
+            Index::create_in_dir(path, schema).unwrap()
+        };
+        index.tokenizers().register(tokenizer_name, tokenizer);
         let index_writer = index
             .writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)
             .unwrap();
 
         Ok(IndexWriterWrapperImpl {
             field,
-            index_writer: Either::Left(index_writer),
-            id_field: Some(id_field),
+            index_writer,
+            id_field,
             index: Arc::new(index),
         })
     }

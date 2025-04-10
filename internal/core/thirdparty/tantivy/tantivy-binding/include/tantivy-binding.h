@@ -184,8 +184,7 @@ RustResult tantivy_create_index(const char *field_name,
 
 RustResult tantivy_create_index_with_single_segment(const char *field_name,
                                                     TantivyDataType data_type,
-                                                    const char *path,
-                                                    uint32_t tantivy_index_version);
+                                                    const char *path);
 
 void tantivy_free_index_writer(void *ptr);
 
