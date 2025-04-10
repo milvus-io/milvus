@@ -25,7 +25,7 @@
 #include "common/Tracer.h"
 #include "log/Log.h"
 
-std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7;
+std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7, flag8;
 std::once_flag traceFlag;
 
 void
@@ -66,8 +66,7 @@ InitLowPriorityThreadCoreCoefficient(const int64_t value) {
 
 void
 InitCpuNum(const int value) {
-    std::call_once(
-        flag3, [](int value) { milvus::SetCpuNum(value); }, value);
+    std::call_once(flag3, [](int value) { milvus::SetCpuNum(value); }, value);
 }
 
 void
@@ -113,4 +112,12 @@ SetTrace(CTraceConfig* config) {
                                                    config->oltpSecure,
                                                    config->nodeID};
     milvus::tracer::initTelemetry(traceConfig);
+}
+
+void
+SetDefaultNumThreadsForIndexNode(const uint64_t threads) {
+    std::call_once(
+        flag8,
+        [](uint64_t threads) { milvus::SetDefaultNumThreadsForIndexNode(threads); },
+        threads);
 }

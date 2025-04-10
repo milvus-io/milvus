@@ -51,6 +51,9 @@ SetTrace(CTraceConfig* config);
 void
 InitDefaultOptimizeExprEnable(bool val);
 
+void
+SetDefaultNumThreadsForIndexNode(uint64_t threads);
+
 #ifdef __cplusplus
 };
 #endif

@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "tantivy-wrapper.h"
 #include "common/Common.h"
 #include "log/Log.h"
 
@@ -72,6 +73,11 @@ void
 SetDefaultOptimizeExprEnable(bool val) {
     OPTIMIZE_EXPR_ENABLED = val;
     LOG_INFO("set default optimize expr enabled: {}", OPTIMIZE_EXPR_ENABLED);
+}
+
+void
+SetDefaultNumThreadsForIndexNode(const uint64_t threads) {
+    milvus::tantivy::DEFAULT_NUM_THREADS_FOR_INDEX_NODE = threads;
 }
 
 }  // namespace milvus

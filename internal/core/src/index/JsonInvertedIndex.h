@@ -92,6 +92,9 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
             field_name.c_str(),
             this->d_type_,
             this->path_.c_str(),
+            milvus::tantivy::DEFAULT_NUM_THREADS_FOR_INDEX_NODE,
+            milvus::tantivy::DEFAULT_NUM_THREADS_FOR_INDEX_NODE *
+                milvus::tantivy::DEFAULT_MEMORY_BUDGET_PER_THREAD,
             TANTIVY_INDEX_LATEST_VERSION /* json index is not supported in old version */);
     }
 
