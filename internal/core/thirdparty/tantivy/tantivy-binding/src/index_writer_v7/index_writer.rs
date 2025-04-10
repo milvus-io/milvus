@@ -4,7 +4,6 @@ use std::sync::Arc;
 use futures::executor::block_on;
 use libc::c_char;
 use log::info;
-use tantivy::indexer::UserOperation;
 use tantivy::schema::{
     Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, INDEXED,
 };

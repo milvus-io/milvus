@@ -14,6 +14,7 @@ fn build_text_schema(field_name: &str, tokenizer_name: &str) -> (Schema, Field) 
     // positions is required for matching phase.
     let indexing = TextFieldIndexing::default()
         .set_tokenizer(tokenizer_name)
+        .set_fieldnorms(false)
         .set_index_option(IndexRecordOption::WithFreqsAndPositions);
     let option = TextOptions::default().set_indexing_options(indexing);
     let field = schema_builder.add_text_field(field_name, option);
