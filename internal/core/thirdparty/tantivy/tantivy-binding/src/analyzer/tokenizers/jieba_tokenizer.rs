@@ -192,7 +192,7 @@ impl Tokenizer for JiebaTokenizer<'static> {
 mod tests {
     use serde_json as json;
 
-    use crate::analyzer::tokenizers::jieba_tokenizer::JiebaTokenizer;
+    use super::JiebaTokenizer;
     use tantivy::tokenizer::TokenStream;
     use tantivy::tokenizer::Tokenizer;
 

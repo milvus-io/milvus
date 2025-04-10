@@ -122,11 +122,11 @@ fn fetch_lindera_kind(params: &json::Map<String, json::Value>) -> Result<Diction
 
 #[cfg(test)]
 mod tests {
+    use super::LinderaTokenizer;
     use serde_json as json;
 
-    use crate::analyzer::tokenizers::lindera_tokenizer::LinderaTokenizer;
-
     #[test]
+    #[cfg(feature = "lindera-ipadic")]
     fn test_lindera_tokenizer() {
         let params = r#"{
             "type": "lindera",
