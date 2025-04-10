@@ -33,12 +33,17 @@ services:
       AZURE_STORAGE_CONNECTION_STRING: ${AZURITE_CONNECTION_STRING}
       ENABLE_GCP_NATIVE: ${ENABLE_GCP_NATIVE}
     volumes: &builder-volumes
+      - /cores:/cores:delegated
       - .:/go/src/github.com/milvus-io/milvus:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache:/ccache:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-go-mod:/go/pkg/mod:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-vscode-extensions:/home/milvus/.vscode-server/extensions:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-conan:/home/milvus/.conan:delegated
     working_dir: '/go/src/github.com/milvus-io/milvus'
+    cap_add:
+      - SYS_PTRACE
+    ulimits:
+      core: -1
     depends_on:
       - etcd
       - minio
