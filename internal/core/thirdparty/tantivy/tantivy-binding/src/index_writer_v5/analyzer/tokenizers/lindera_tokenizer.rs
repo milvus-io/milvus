@@ -106,17 +106,15 @@ fn fetch_lindera_kind(params: &json::Map<String, json::Value>) -> Result<Diction
     match params.get("dict_kind") {
         Some(val) => {
             if !val.is_string() {
-                return Err(TantivyBindingError::InvalidArgument(format!(
-                    "lindera tokenizer dict kind should be string"
-                )));
+                return Err(TantivyBindingError::InvalidArgument(
+                    "lindera tokenizer dict kind should be string".to_string(),
+                ));
             }
             val.as_str().unwrap().into_dict_kind()
         }
-        _ => {
-            return Err(TantivyBindingError::InvalidArgument(format!(
-                "lindera tokenizer dict_kind must be set"
-            )))
-        }
+        _ => Err(TantivyBindingError::InvalidArgument(
+            "lindera tokenizer dict_kind must be set".to_string(),
+        )),
     }
 }
 

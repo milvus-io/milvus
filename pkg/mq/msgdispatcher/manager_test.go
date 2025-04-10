@@ -172,7 +172,10 @@ func TestManager(t *testing.T) {
 		assert.Equal(t, 3, c.NumTarget())
 		assert.Eventually(t, func() bool {
 			return c.NumConsumer() >= 1
-		}, 3*time.Second, 10*time.Millisecond)
+		}, 10*time.Second, 10*time.Millisecond)
+		if c.(*dispatcherManager).mainDispatcher == nil {
+			t.FailNow()
+		}
 		c.(*dispatcherManager).mainDispatcher.curTs.Store(1000)
 		for _, d := range c.(*dispatcherManager).deputyDispatchers {
 			d.curTs.Store(1000)

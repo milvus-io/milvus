@@ -50,7 +50,8 @@ AsyncSearch(CTraceContext c_trace,
             CSegmentInterface c_segment,
             CSearchPlan c_plan,
             CPlaceholderGroup c_placeholder_group,
-            uint64_t timestamp);
+            uint64_t timestamp,
+            int32_t consistency_level);
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);
@@ -61,7 +62,8 @@ AsyncRetrieve(CTraceContext c_trace,
               CRetrievePlan c_plan,
               uint64_t timestamp,
               int64_t limit_size,
-              bool ignore_non_pk);
+              bool ignore_non_pk,
+              int32_t consistency_level);
 
 CFuture*  // Future<CRetrieveResult>
 AsyncRetrieveByOffsets(CTraceContext c_trace,
@@ -121,6 +123,12 @@ CStatus
 LoadTextIndex(CSegmentInterface c_segment,
               const uint8_t* serialized_load_text_index_info,
               const uint64_t len);
+
+CStatus
+LoadJsonKeyIndex(CTraceContext c_trace,
+                 CSegmentInterface c_segment,
+                 const uint8_t* serialied_load_json_key_index_info,
+                 const uint64_t len);
 
 CStatus
 UpdateFieldRawDataSize(CSegmentInterface c_segment,

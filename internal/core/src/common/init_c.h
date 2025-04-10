@@ -51,6 +51,12 @@ SetTrace(CTraceConfig* config);
 void
 InitDefaultOptimizeExprEnable(bool val);
 
+void
+InitDefaultJSONKeyStatsCommitInterval(int64_t val);
+
+void
+InitDefaultGrowingJSONKeyStatsEnable(bool val);
+
 #ifdef __cplusplus
 };
 #endif

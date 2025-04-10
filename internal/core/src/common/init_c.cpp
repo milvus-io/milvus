@@ -25,7 +25,7 @@
 #include "common/Tracer.h"
 #include "log/Log.h"
 
-std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7;
+std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7, flag8, flag9;
 std::once_flag traceFlag;
 
 void
@@ -83,6 +83,22 @@ InitDefaultOptimizeExprEnable(bool val) {
     std::call_once(
         flag7,
         [](bool val) { milvus::SetDefaultOptimizeExprEnable(val); },
+        val);
+}
+
+void
+InitDefaultJSONKeyStatsCommitInterval(int64_t val) {
+    std::call_once(
+        flag8,
+        [](int val) { milvus::SetDefaultJSONKeyStatsCommitInterval(val); },
+        val);
+}
+
+void
+InitDefaultGrowingJSONKeyStatsEnable(bool val) {
+    std::call_once(
+        flag9,
+        [](bool val) { milvus::SetDefaultGrowingJSONKeyStatsEnable(val); },
         val);
 }
 

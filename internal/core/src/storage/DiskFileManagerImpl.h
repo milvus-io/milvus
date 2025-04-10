@@ -51,6 +51,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
     bool
     AddTextLog(const std::string& filename) noexcept;
 
+    bool
+    AddJsonKeyIndexLog(const std::string& filename) noexcept;
+
  public:
     std::string
     GetName() const override {
@@ -58,20 +61,32 @@ class DiskFileManagerImpl : public FileManagerImpl {
     }
 
     std::string
-    GetLocalIndexObjectPrefix();
-
-    // Similar to GetTextIndexIdentifier, segment_id and field_id is also required.
-    std::string
-    GetLocalTextIndexPrefix();
-
-    std::string
     GetIndexIdentifier();
+
+    std::string
+    GetLocalIndexObjectPrefix();
 
     // Different from user index, a text index task may have multiple text fields sharing same build_id/task_id. So
     // segment_id and field_id are required to identify a unique text index, in case that we support multiple index task
     // in the same indexnode at the same time later.
     std::string
     GetTextIndexIdentifier();
+
+    // Similar to GetTextIndexIdentifier, segment_id and field_id is also required.
+    std::string
+    GetLocalTextIndexPrefix();
+
+    // Used for building index, using this index identifier mode to construct tmp building-index dir.
+    std::string
+    GetJsonKeyIndexIdentifier();
+
+    // Used for loading index, using this index prefix dir to store index.
+    std::string
+    GetLocalJsonKeyIndexPrefix();
+
+    // Used for upload index to remote storage, using this index prefix dir as remote storage directory
+    std::string
+    GetRemoteJsonKeyLogPrefix();
 
     std::string
     GetLocalRawDataObjectPrefix();
@@ -91,6 +106,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     void
     CacheTextLogToDisk(const std::vector<std::string>& remote_files);
+
+    void
+    CacheJsonKeyIndexToDisk(const std::vector<std::string>& remote_files);
 
     void
     AddBatchIndexFiles(const std::string& local_file_name,
@@ -115,6 +133,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
         return added_total_file_size_;
     }
 
+    std::string
+    GetFileName(const std::string& localfile);
+
  private:
     int64_t
     GetIndexBuildId() {
@@ -122,13 +143,23 @@ class DiskFileManagerImpl : public FileManagerImpl {
     }
 
     std::string
-    GetFileName(const std::string& localfile);
-
-    std::string
     GetRemoteIndexPath(const std::string& file_name, int64_t slice_num) const;
 
     std::string
     GetRemoteTextLogPath(const std::string& file_name, int64_t slice_num) const;
+
+    std::string
+    GetRemoteJsonKeyIndexPath(const std::string& file_name, int64_t slice_num);
+
+    bool
+    AddFileInternal(const std::string& file_name,
+                    const std::function<std::string(const std::string&, int)>&
+                        get_remote_path) noexcept;
+
+    void
+    CacheIndexToDiskInternal(
+        const std::vector<std::string>& remote_files,
+        const std::function<std::string()>& get_local_index_prefix) noexcept;
 
  private:
     // local file path (abs path)

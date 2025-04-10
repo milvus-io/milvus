@@ -25,10 +25,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func defaultResponse(c *gin.Context) {
@@ -57,7 +59,6 @@ func (p *BufferPool) Put(buf *bytes.Buffer) {
 
 // Timeout struct
 type Timeout struct {
-	timeout  time.Duration
 	handler  gin.HandlerFunc
 	response gin.HandlerFunc
 }
@@ -81,7 +82,7 @@ func NewWriter(w gin.ResponseWriter, buf *bytes.Buffer) *Writer {
 // Write will write data to response body
 func (w *Writer) Write(data []byte) (int, error) {
 	if w.timeout || w.body == nil {
-		return 0, nil
+		return 0, errors.New("Response writer closed")
 	}
 
 	w.mu.Lock()
@@ -153,7 +154,6 @@ func checkWriteHeaderCode(code int) {
 
 func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	t := &Timeout{
-		timeout:  mhttp.HTTPDefaultTimeout,
 		handler:  handler,
 		response: defaultResponse,
 	}
@@ -163,9 +163,10 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		defer cancel()
 		gCtx.Request = gCtx.Request.WithContext(topCtx)
 
+		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
 		timeoutSecond, err := strconv.ParseInt(gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout), 10, 64)
 		if err == nil {
-			t.timeout = time.Duration(timeoutSecond) * time.Second
+			timeout = time.Duration(timeoutSecond) * time.Second
 		}
 		finish := make(chan struct{}, 1)
 		panicChan := make(chan interface{}, 1)
@@ -208,7 +209,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			tw.FreeBuffer()
 			bufPool.Put(buffer)
 
-		case <-time.After(t.timeout):
+		case <-time.After(timeout):
 			gCtx.Abort()
 			tw.mu.Lock()
 			defer tw.mu.Unlock()

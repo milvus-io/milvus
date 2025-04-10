@@ -29,6 +29,7 @@ impl IndexWriterWrapper {
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         tanviy_index_version: TantivyIndexVersion,
+        in_ram: bool,
     ) -> Result<IndexWriterWrapper> {
         init_log();
         match tanviy_index_version {
@@ -39,6 +40,7 @@ impl IndexWriterWrapper {
                     path,
                     num_threads,
                     overall_memory_budget_in_bytes,
+                    in_ram,
                 )?;
                 Ok(IndexWriterWrapper::V5(writer))
             }
@@ -49,33 +51,22 @@ impl IndexWriterWrapper {
                     path,
                     num_threads,
                     overall_memory_budget_in_bytes,
+                    in_ram,
                 )?;
                 Ok(IndexWriterWrapper::V7(writer))
             }
         }
     }
-
     pub fn new_with_single_segment(
         field_name: &str,
         data_type: TantivyDataType,
         path: String,
-        tanviy_index_version: TantivyIndexVersion,
     ) -> Result<IndexWriterWrapper> {
         init_log();
-        match tanviy_index_version {
-            TantivyIndexVersion::V5 => {
-                let writer = index_writer_v5::IndexWriterWrapperImpl::new_with_single_segment(
-                    field_name, data_type, path,
-                )?;
-                Ok(IndexWriterWrapper::V5(writer))
-            }
-            TantivyIndexVersion::V7 => {
-                let writer = index_writer_v7::IndexWriterWrapperImpl::new_with_single_segment(
-                    field_name, data_type, path,
-                )?;
-                Ok(IndexWriterWrapper::V7(writer))
-            }
-        }
+        let writer = index_writer_v5::IndexWriterWrapperImpl::new_with_single_segment(
+            field_name, data_type, path,
+        )?;
+        Ok(IndexWriterWrapper::V5(writer))
     }
 
     pub fn create_reader(&self) -> Result<IndexReaderWrapper> {
@@ -97,7 +88,7 @@ impl IndexWriterWrapper {
     {
         match self {
             IndexWriterWrapper::V5(writer) => writer.add_data_by_batch(data, offset),
-            IndexWriterWrapper::V7(writer) => writer.add_data_by_batch(data, offset),
+            IndexWriterWrapper::V7(writer) => writer.add_data_by_batch(data, offset.unwrap()),
         }
     }
 
@@ -108,7 +99,7 @@ impl IndexWriterWrapper {
     {
         match self {
             IndexWriterWrapper::V5(writer) => writer.add_array(data, offset),
-            IndexWriterWrapper::V7(writer) => writer.add_array(data, offset),
+            IndexWriterWrapper::V7(writer) => writer.add_array(data, offset.unwrap()),
         }
     }
 
@@ -119,7 +110,7 @@ impl IndexWriterWrapper {
     ) -> Result<()> {
         match self {
             IndexWriterWrapper::V5(writer) => writer.add_string_by_batch(data, offset),
-            IndexWriterWrapper::V7(writer) => writer.add_string_by_batch(data, offset),
+            IndexWriterWrapper::V7(writer) => writer.add_string_by_batch(data, offset.unwrap()),
         }
     }
 
@@ -130,7 +121,7 @@ impl IndexWriterWrapper {
     ) -> Result<()> {
         match self {
             IndexWriterWrapper::V5(writer) => writer.add_array_keywords(datas, offset),
-            IndexWriterWrapper::V7(writer) => writer.add_array_keywords(datas, offset),
+            IndexWriterWrapper::V7(writer) => writer.add_array_keywords(datas, offset.unwrap()),
         }
     }
 
@@ -223,7 +214,6 @@ mod tests {
                 field_name,
                 data_type,
                 dir.path().to_str().unwrap().to_string(),
-                TantivyIndexVersion::V5,
             )
             .unwrap();
 

@@ -16,7 +16,6 @@ use crate::data_type::TantivyDataType;
 
 use crate::error::{Result, TantivyBindingError};
 use crate::index_writer::TantivyValue;
-use crate::log::init_log;
 
 const BATCH_SIZE: usize = 4096;
 
@@ -42,7 +41,7 @@ fn schema_builder_add_field(
                 .set_tokenizer("raw")
                 .set_index_option(IndexRecordOption::Basic);
             let text_options = TextOptions::default().set_indexing_options(text_field_indexing);
-            schema_builder.add_text_field(&field_name, text_options)
+            schema_builder.add_text_field(field_name, text_options)
         }
         TantivyDataType::Text => {
             panic!("text should be indexed with analyzer");
@@ -105,6 +104,7 @@ impl IndexWriterWrapperImpl {
         path: String,
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
+        in_ram: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!(
             "create index writer, field_name: {}, data_type: {:?}, tantivy_index_version 5",
@@ -115,7 +115,11 @@ impl IndexWriterWrapperImpl {
         // We cannot build direct connection from rows in multi-segments to milvus row data. So we have this doc_id field.
         let id_field = schema_builder.add_i64_field("doc_id", FAST);
         let schema = schema_builder.build();
-        let index = Index::create_in_dir(path.clone(), schema)?;
+        let index = if in_ram {
+            Index::create_in_ram(schema)
+        } else {
+            Index::create_in_dir(path.clone(), schema)?
+        };
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
         Ok(IndexWriterWrapperImpl {
@@ -131,7 +135,6 @@ impl IndexWriterWrapperImpl {
         data_type: TantivyDataType,
         path: String,
     ) -> Result<IndexWriterWrapperImpl> {
-        init_log();
         info!(
             "create single segment index writer, field_name: {}, data_type: {:?}, tantivy_index_version 5",
             field_name, data_type
@@ -157,10 +160,10 @@ impl IndexWriterWrapperImpl {
 
         match &mut self.index_writer {
             Either::Left(writer) => {
-                let _ = writer.add_document(document)?;
+                writer.add_document(document)?;
             }
             Either::Right(single_segment_writer) => {
-                let _ = single_segment_writer.add_document(document)?;
+                single_segment_writer.add_document(document)?;
             }
         }
         Ok(())
