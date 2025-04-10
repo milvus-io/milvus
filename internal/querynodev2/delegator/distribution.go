@@ -57,10 +57,12 @@ func getClosedCh() chan struct{} {
 
 // QueryView maintains the sealed segment list which should be used for search/query.
 type QueryView struct {
-	sealedSegments []int64            // sealed segment list which should be used for search/query
-	partitions     typeutil.UniqueSet // partitions list which sealed segments belong to
-	version        int64              // version of current query view, same as targetVersion in qc
+	growingSegments []int64            // growing segment list which should be used for search/query
+	sealedSegments  []int64            // sealed segment list which should be used for search/query
+	partitions      typeutil.UniqueSet // partitions list which sealed segments belong to
+	version         int64              // version of current query view, same as targetVersion in qc
 
+	loadedRatio *atomic.Float64 // loaded ratio of current query view, set serviceable to true if loadedRatio == 1.0
 	serviceable *atomic.Bool
 }
 
@@ -70,6 +72,10 @@ func (q *QueryView) GetVersion() int64 {
 
 func (q *QueryView) Serviceable() bool {
 	return q.serviceable.Load()
+}
+
+func (q *QueryView) GetLoadedRatio() float64 {
+	return q.loadedRatio.Load()
 }
 
 // distribution is the struct to store segment distribution.
@@ -116,6 +122,7 @@ func NewDistribution(channelName string) *distribution {
 		snapshots:       typeutil.NewConcurrentMap[int64, *snapshot](),
 		current:         atomic.NewPointer[snapshot](nil),
 		queryView: &QueryView{
+			loadedRatio: atomic.NewFloat64(0),
 			serviceable: atomic.NewBool(false),
 			partitions:  typeutil.NewSet[int64](),
 			version:     initialTargetVersion,
@@ -123,6 +130,14 @@ func NewDistribution(channelName string) *distribution {
 	}
 
 	dist.genSnapshot()
+	return dist
+}
+
+func NewDistributionWithQueryView(channelName string, queryView *QueryView) *distribution {
+	dist := NewDistribution(channelName)
+	dist.queryView = queryView
+	dist.genSnapshot()
+	dist.updateServiceable("NewDistributionWithQueryView")
 	return dist
 }
 
@@ -217,21 +232,29 @@ func (d *distribution) Serviceable() bool {
 }
 
 func (d *distribution) updateServiceable(triggerAction string) {
-	if d.queryView.version != initialTargetVersion {
-		serviceable := true
-		for _, s := range d.queryView.sealedSegments {
-			if entry, ok := d.sealedSegments[s]; !ok || entry.Offline {
-				serviceable = false
-				break
-			}
+	loadedSealedSegments := 0
+	loadedGrowingSegments := 0
+	for _, s := range d.queryView.sealedSegments {
+		if entry, ok := d.sealedSegments[s]; ok && entry.Offline {
+			loadedSealedSegments++
 		}
-		if serviceable != d.queryView.serviceable.Load() {
-			d.queryView.serviceable.Store(serviceable)
-			log.Info("channel distribution serviceable changed",
-				zap.String("channel", d.channelName),
-				zap.Bool("serviceable", serviceable),
-				zap.String("action", triggerAction))
+	}
+
+	for _, s := range d.queryView.growingSegments {
+		if _, ok := d.growingSegments[s]; ok {
+			loadedGrowingSegments++
 		}
+	}
+
+	loadedRatio := float64(loadedGrowingSegments+loadedSealedSegments) / float64(len(d.queryView.sealedSegments)+len(d.queryView.growingSegments))
+	d.queryView.loadedRatio.Store(loadedRatio)
+	serviceable := loadedRatio == 1.0
+	if serviceable != d.queryView.serviceable.Load() {
+		d.queryView.serviceable.Store(serviceable)
+		log.Info("channel distribution serviceable changed",
+			zap.String("channel", d.channelName),
+			zap.Bool("serviceable", serviceable),
+			zap.String("action", triggerAction))
 	}
 }
 
