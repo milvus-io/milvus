@@ -29,7 +29,6 @@ impl IndexWriterWrapper {
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         tanviy_index_version: TantivyIndexVersion,
-        in_ram: bool,
     ) -> Result<IndexWriterWrapper> {
         init_log();
         match tanviy_index_version {
@@ -40,7 +39,6 @@ impl IndexWriterWrapper {
                     path,
                     num_threads,
                     overall_memory_budget_in_bytes,
-                    in_ram,
                 )?;
                 Ok(IndexWriterWrapper::V5(writer))
             }
@@ -51,7 +49,6 @@ impl IndexWriterWrapper {
                     path,
                     num_threads,
                     overall_memory_budget_in_bytes,
-                    in_ram,
                 )?;
                 Ok(IndexWriterWrapper::V7(writer))
             }

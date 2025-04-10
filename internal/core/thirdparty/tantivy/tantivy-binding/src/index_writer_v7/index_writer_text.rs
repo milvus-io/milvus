@@ -1,3 +1,4 @@
+use log::info;
 use std::sync::Arc;
 
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions};
@@ -31,6 +32,11 @@ impl IndexWriterWrapperImpl {
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
     ) -> Result<IndexWriterWrapperImpl> {
+        info!(
+            "create text index writer, field_name: {}, tantivy_index_version 7",
+            field_name
+        );
+
         let tokenizer = create_analyzer(tokenizer_params)?;
 
         let (schema, field) = build_text_schema(field_name, tokenizer_name);

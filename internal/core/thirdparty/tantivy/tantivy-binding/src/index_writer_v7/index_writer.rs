@@ -102,7 +102,6 @@ impl IndexWriterWrapperImpl {
         path: String,
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
-        in_ram: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!(
             "create index writer, field_name: {}, data_type: {:?}, tantivy_index_version 7",
@@ -112,11 +111,7 @@ impl IndexWriterWrapperImpl {
         let field = schema_builder_add_field(&mut schema_builder, field_name, data_type);
         schema_builder.enable_user_specified_doc_id();
         let schema = schema_builder.build();
-        let index = if in_ram {
-            Index::create_in_ram(schema)
-        } else {
-            Index::create_in_dir(path.clone(), schema)?
-        };
+        let index = Index::create_in_dir(path.clone(), schema)?;
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
         Ok(IndexWriterWrapperImpl {

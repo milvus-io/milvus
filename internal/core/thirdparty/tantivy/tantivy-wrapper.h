@@ -84,7 +84,6 @@ struct TantivyIndexWrapper {
                         const char* path,
                         uint32_t tantivy_index_version,
                         bool inverted_single_semgnent = false,
-                        bool in_ram = false,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
@@ -102,8 +101,7 @@ struct TantivyIndexWrapper {
                                      path,
                                      tantivy_index_version,
                                      num_threads,
-                                     overall_memory_budget_in_bytes,
-                                     in_ram));
+                                     overall_memory_budget_in_bytes));
         }
         AssertInfo(res.result_->success,
                    "failed to create index: {}",
@@ -148,6 +146,29 @@ struct TantivyIndexWrapper {
         writer_ = res.result_->value.ptr._0;
         path_ = std::string(path);
     }
+
+    // create index writer for json key stats
+    TantivyIndexWrapper(const char* field_name,
+                        const char* path,
+                        uint32_t tantivy_index_version,
+                        bool in_ram = false,
+                        uintptr_t num_threads = DEFAULT_NUM_THREADS,
+                        uintptr_t overall_memory_budget_in_bytes =
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+        auto res = RustResultWrapper(
+            tantivy_create_json_key_stats_writer(field_name,
+                                                 path,
+                                                 tantivy_index_version,
+                                                 num_threads,
+                                                 overall_memory_budget_in_bytes,
+                                                 in_ram));
+        AssertInfo(res.result_->success,
+                   "failed to create text writer: {}",
+                   res.result_->error);
+        writer_ = res.result_->value.ptr._0;
+        path_ = std::string(path);
+    }
+
     // create reader.
     void
     create_reader() {
