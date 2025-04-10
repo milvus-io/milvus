@@ -464,12 +464,11 @@ func (s *Server) initObserver() {
 func (s *Server) afterStart() {}
 
 func (s *Server) Start() error {
-	if !s.enableActiveStandBy {
-		if err := s.startQueryCoord(); err != nil {
-			return err
-		}
-		log.Ctx(s.ctx).Info("QueryCoord started")
+	if err := s.startQueryCoord(); err != nil {
+		return err
 	}
+	log.Ctx(s.ctx).Info("QueryCoord started")
+
 	return nil
 }
 

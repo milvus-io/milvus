@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -1061,7 +1062,26 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 	//   1. doRegistered: if registered the active_key by this session or by other session
 	//   2. revision: revision of the active_key
 	//   3. err: etcd error, should retry
+
+	oldRoles := []string{
+		typeutil.RootCoordRole,
+		typeutil.DataCoordRole,
+		typeutil.QueryCoordRole,
+	}
+
 	registerActiveFn := func() (bool, int64, error) {
+		for _, role := range oldRoles {
+			sessions, _, err := s.GetSessions(role)
+			if err != nil {
+				log.Debug("failed to get old sessions", zap.String("role", role), zap.Error(err))
+				continue
+			}
+			if len(sessions) > 0 {
+				log.Info("old session exists", zap.String("role", role))
+				return false, -1, nil
+			}
+		}
+
 		log.Info(fmt.Sprintf("try to register as ACTIVE %v service...", s.ServerName))
 		sessionJSON, err := json.Marshal(s)
 		if err != nil {
@@ -1105,8 +1125,32 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 		if registered {
 			break
 		}
-		log.Info(fmt.Sprintf("%s start to watch ACTIVE key %s", s.ServerName, s.activeKey))
 		ctx, cancel := context.WithCancel(s.ctx)
+		oldWatchChans := make([]clientv3.WatchChan, len(oldRoles))
+		for i, role := range oldRoles {
+			oldWatchChans[i] = s.etcdCli.Watch(ctx, path.Join(s.metaRoot, DefaultServiceRoot, role), clientv3.WithPrevKV())
+		}
+
+		for _, oldWatchChan := range oldWatchChans {
+			select {
+			case wresp, ok := <-oldWatchChan:
+				if !ok {
+					continue
+				}
+				if wresp.Err() != nil {
+					continue
+				}
+				for _, event := range wresp.Events {
+					if event.Type == mvccpb.DELETE {
+						log.Debug("old session deleted", zap.String("key", string(event.Kv.Key)))
+						cancel()
+					}
+				}
+			default:
+			}
+		}
+
+		log.Info(fmt.Sprintf("%s start to watch ACTIVE key %s", s.ServerName, s.activeKey))
 		watchChan := s.etcdCli.Watch(ctx, s.activeKey, clientv3.WithPrevKV(), clientv3.WithRev(revision))
 		select {
 		case <-ctx.Done():

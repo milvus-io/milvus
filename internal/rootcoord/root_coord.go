@@ -126,8 +126,7 @@ type Core struct {
 
 	factory dependency.Factory
 
-	enableActiveStandBy bool
-	activateFunc        func() error
+	activateFunc func() error
 
 	metricsRequest *metricsinfo.MetricsRequest
 }
@@ -139,11 +138,10 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
 	rand.Seed(time.Now().UnixNano())
 	core := &Core{
-		ctx:                 ctx,
-		cancel:              cancel,
-		factory:             factory,
-		enableActiveStandBy: Params.RootCoordCfg.EnableActiveStandby.GetAsBool(),
-		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		ctx:            ctx,
+		cancel:         cancel,
+		factory:        factory,
+		metricsRequest: metricsinfo.NewMetricsRequest(),
 	}
 
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -478,34 +476,10 @@ func (c *Core) Init() error {
 	c.factory.Init(Params)
 	c.initKVCreator()
 
-	if c.enableActiveStandBy {
-		c.activateFunc = func() error {
-			log.Info("RootCoord switch from standby to active, activating")
-
-			var err error
-			c.initOnce.Do(func() {
-				if err = c.initInternal(); err != nil {
-					log.Error("RootCoord init failed", zap.Error(err))
-				}
-			})
-			if err != nil {
-				return err
-			}
-			c.startOnce.Do(func() {
-				if err = c.startInternal(); err != nil {
-					log.Error("RootCoord start failed", zap.Error(err))
-				}
-			})
-			log.Info("RootCoord startup success", zap.String("address", c.session.GetAddress()))
-			return err
-		}
-		c.UpdateStateCode(commonpb.StateCode_StandBy)
-		log.Info("RootCoord enter standby mode successfully")
-	} else {
-		c.initOnce.Do(func() {
-			initError = c.initInternal()
-		})
-	}
+	c.initOnce.Do(func() {
+		initError = c.initInternal()
+	})
+	log.Info("RootCoord init successfully")
 
 	return initError
 }
@@ -730,11 +704,9 @@ func (c *Core) startServerLoop() {
 // Start starts RootCoord.
 func (c *Core) Start() error {
 	var err error
-	if !c.enableActiveStandBy {
-		c.startOnce.Do(func() {
-			err = c.startInternal()
-		})
-	}
+	c.startOnce.Do(func() {
+		err = c.startInternal()
+	})
 
 	return err
 }

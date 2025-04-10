@@ -205,7 +205,6 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		notifyIndexChan:     make(chan UniqueID, 1024),
 		dataNodeCreator:     defaultDataNodeCreatorFunc,
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
-		enableActiveStandBy: Params.DataCoordCfg.EnableActiveStandby.GetAsBool(),
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
 	}
 
@@ -232,7 +231,6 @@ func (s *Server) Register() error {
 
 // Init change server state to Initializing
 func (s *Server) Init() error {
-	log := log.Ctx(s.ctx)
 	s.registerMetricsRequest()
 	s.factory.Init(Params)
 	if err := s.initSession(); err != nil {
@@ -240,22 +238,6 @@ func (s *Server) Init() error {
 	}
 	if err := s.initKV(); err != nil {
 		return err
-	}
-
-	if s.enableActiveStandBy {
-		s.activateFunc = func() error {
-			log.Info("DataCoord switch from standby to active, activating")
-			if err := s.initDataCoord(); err != nil {
-				log.Error("DataCoord init failed", zap.Error(err))
-				return err
-			}
-			s.startDataCoord()
-			log.Info("DataCoord startup success")
-			return nil
-		}
-		s.UpdateStateCode(commonpb.StateCode_StandBy)
-		log.Info("DataCoord enter standby mode successfully")
-		return nil
 	}
 
 	return s.initDataCoord()
@@ -349,10 +331,8 @@ func (s *Server) initDataCoord() error {
 //  4. set server state to Healthy
 func (s *Server) Start() error {
 	log := log.Ctx(s.ctx)
-	if !s.enableActiveStandBy {
-		s.startDataCoord()
-		log.Info("DataCoord startup successfully")
-	}
+	s.startDataCoord()
+	log.Info("DataCoord startup successfully")
 
 	return nil
 }

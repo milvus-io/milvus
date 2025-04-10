@@ -79,18 +79,20 @@ type mixCoordImpl struct {
 	mixCoordClient types.MixCoordClient
 }
 
-func NewMixCoordServer(c context.Context, factory dependency.Factory) (types.MixCoordComponent, error) {
+func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoordImpl, error) {
 	ctx, cancel := context.WithCancel(c)
 	rootCoordServer, _ := rootcoord.NewCore(ctx, factory)
 	queryCoordServer, _ := querycoordv2.NewQueryCoord(c)
 	dataCoordServer := datacoord.CreateServer(c, factory)
 
 	return &mixCoordImpl{
-		ctx:              ctx,
-		cancel:           cancel,
-		rootcoordServer:  rootCoordServer,
-		queryCoordServer: queryCoordServer,
-		datacoordServer:  dataCoordServer,
+		ctx:                 ctx,
+		cancel:              cancel,
+		rootcoordServer:     rootCoordServer,
+		queryCoordServer:    queryCoordServer,
+		datacoordServer:     dataCoordServer,
+		enableActiveStandBy: Params.MixCoordCfg.EnableActiveStandby.GetAsBool(),
+		factory:             factory,
 	}, nil
 }
 
@@ -100,6 +102,7 @@ func (s *mixCoordImpl) Register() error {
 	s.session.Register()
 	afterRegister := func() {
 		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.MixCoordRole).Inc()
+		log.Info("MixCoord Register Finished")
 		s.session.LivenessCheck(s.ctx, func() {
 			log.Error("MixCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.GetServerID()))
 			os.Exit(1)
@@ -126,6 +129,7 @@ func (s *mixCoordImpl) Init() error {
 		initErr = err
 		return initErr
 	}
+	s.factory.Init(Params)
 	s.initKVCreator()
 	if s.enableActiveStandBy {
 		s.activateFunc = func() error {
@@ -257,7 +261,6 @@ func (s *mixCoordImpl) initStreamingCoord() {
 func (s *mixCoordImpl) initSession() error {
 	s.session = sessionutil.NewSession(s.ctx)
 	s.session.Init(typeutil.MixCoordRole, s.address, true, true)
-	s.enableActiveStandBy = Params.RootCoordCfg.EnableActiveStandby.GetAsBool()
 	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	s.rootcoordServer.SetSession(s.session)
 	s.datacoordServer.SetSession(s.session)
