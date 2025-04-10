@@ -17,8 +17,6 @@
 package httpserver
 
 import (
-	"time"
-
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 )
 
@@ -120,7 +118,6 @@ const (
 	HTTPHeaderAllowInt64     = "Accept-Type-Allow-Int64"
 	HTTPHeaderDBName         = "DB-Name"
 	HTTPHeaderRequestTimeout = "Request-Timeout"
-	HTTPDefaultTimeout       = 30 * time.Second
 	HTTPReturnCode           = "code"
 	HTTPReturnMessage        = "message"
 	HTTPReturnData           = "data"
