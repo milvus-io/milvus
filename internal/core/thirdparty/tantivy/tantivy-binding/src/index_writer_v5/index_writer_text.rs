@@ -5,7 +5,6 @@ use tantivy_5::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, Tex
 use tantivy_5::Index;
 
 use crate::error::Result;
-use crate::log::init_log;
 
 use super::analyzer::create_analyzer;
 use super::IndexWriterWrapperImpl;
@@ -32,8 +31,6 @@ impl IndexWriterWrapperImpl {
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
     ) -> Result<IndexWriterWrapperImpl> {
-        init_log();
-
         let tokenizer = create_analyzer(tokenizer_params)?;
 
         let (schema, field, id_field) = build_text_schema(field_name, tokenizer_name);

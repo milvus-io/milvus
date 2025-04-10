@@ -18,7 +18,7 @@ use crate::index_writer::TantivyValue;
 const BATCH_SIZE: usize = 4096;
 
 #[inline]
-fn schema_builder_add_field(
+pub(crate) fn schema_builder_add_field(
     schema_builder: &mut SchemaBuilder,
     field_name: &str,
     data_type: TantivyDataType,

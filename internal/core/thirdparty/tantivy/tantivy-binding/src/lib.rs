@@ -7,6 +7,8 @@ mod demo_c;
 mod docid_collector;
 mod error;
 mod hashmap_c;
+mod index_json_key_stats_writer;
+mod index_json_key_stats_writer_c;
 mod index_reader;
 mod index_reader_c;
 mod index_reader_text;
