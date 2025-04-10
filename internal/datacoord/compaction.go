@@ -169,10 +169,10 @@ type compactionPlanHandler struct {
 
 func (c *compactionPlanHandler) getCompactionInfo(ctx context.Context, triggerID int64) *compactionInfo {
 	tasks := c.meta.GetCompactionTasksByTriggerID(ctx, triggerID)
-	return summaryCompactionState(tasks)
+	return summaryCompactionState(triggerID, tasks)
 }
 
-func summaryCompactionState(tasks []*datapb.CompactionTask) *compactionInfo {
+func summaryCompactionState(triggerID int64, tasks []*datapb.CompactionTask) *compactionInfo {
 	ret := &compactionInfo{}
 	var executingCnt, pipeliningCnt, completedCnt, failedCnt, timeoutCnt, analyzingCnt, indexingCnt, cleanedCnt, metaSavedCnt, stats int
 	mergeInfos := make(map[int64]*milvuspb.CompactionMergeInfo)
@@ -220,6 +220,7 @@ func summaryCompactionState(tasks []*datapb.CompactionTask) *compactionInfo {
 	}
 
 	log.Info("compaction states",
+		zap.Int64("triggerID", triggerID),
 		zap.String("state", ret.state.String()),
 		zap.Int("executingCnt", executingCnt),
 		zap.Int("pipeliningCnt", pipeliningCnt),
