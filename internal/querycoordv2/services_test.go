@@ -1701,7 +1701,7 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 		for _, node := range suite.nodes {
 			suite.dist.SegmentDistManager.Update(node)
 			suite.dist.ChannelDistManager.Update(node)
-			suite.dist.LeaderViewManager.Update(node)
+			suite.dist.ShardLeaderManager.Remove(node)
 		}
 		suite.updateChannelDistWithoutSegment(ctx, collection)
 		suite.fetchHeartbeats(time.Now())
@@ -1712,7 +1712,7 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 
 	// channel not subscribed
 	for _, node := range suite.nodes {
-		suite.dist.LeaderViewManager.Update(node)
+		suite.dist.ShardLeaderManager.Remove(node)
 	}
 	for _, collection := range suite.collections {
 		req := &querypb.GetShardLeadersRequest{
@@ -1955,20 +1955,29 @@ func (suite *ServiceSuite) updateChannelDist(ctx context.Context, collection int
 	for _, replica := range replicas {
 		i := 0
 		for _, node := range suite.sortInt64(replica.GetNodes()) {
-			suite.dist.ChannelDistManager.Update(node, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
-				CollectionID: collection,
-				ChannelName:  channels[i],
-			}))
-			suite.dist.LeaderViewManager.Update(node, &meta.LeaderView{
-				ID:           node,
-				CollectionID: collection,
-				Channel:      channels[i],
-				Segments: lo.SliceToMap(segments, func(segment int64) (int64, *querypb.SegmentDist) {
-					return segment, &querypb.SegmentDist{
-						NodeID:  node,
-						Version: time.Now().Unix(),
-					}
-				}),
+			suite.dist.ChannelDistManager.Update(node, &meta.DmChannel{
+				VchannelInfo: &datapb.VchannelInfo{
+					CollectionID: collection,
+					ChannelName:  channels[i],
+				},
+				Node: node,
+				View: &meta.LeaderView{
+					ID:           node,
+					CollectionID: collection,
+					Channel:      channels[i],
+					Segments: lo.SliceToMap(segments, func(segment int64) (int64, *querypb.SegmentDist) {
+						return segment, &querypb.SegmentDist{
+							NodeID:  node,
+							Version: time.Now().Unix(),
+						}
+					}),
+				},
+			})
+			suite.dist.ShardLeaderManager.Update(&meta.ShardLeader{
+				NodeID:      node,
+				ChannelName: channels[i],
+				ReplicaID:   replica.GetID(),
+				Serviceable: true,
 			})
 			i++
 			if i >= len(channels) {
@@ -1996,11 +2005,10 @@ func (suite *ServiceSuite) updateChannelDistWithoutSegment(ctx context.Context, 
 				CollectionID: collection,
 				ChannelName:  channels[i],
 			}))
-			suite.dist.LeaderViewManager.Update(node, &meta.LeaderView{
-				ID:                 node,
-				CollectionID:       collection,
-				Channel:            channels[i],
-				UnServiceableError: merr.ErrSegmentLack,
+			suite.dist.ShardLeaderManager.Update(&meta.ShardLeader{
+				NodeID:      node,
+				ChannelName: channels[i],
+				ReplicaID:   replica.GetID(),
 			})
 			i++
 			if i >= len(channels) {
