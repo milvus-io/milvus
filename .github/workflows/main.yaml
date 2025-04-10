@@ -199,17 +199,20 @@ jobs:
           docker ps
       - name: UT
         run: |
+          sudo mkdir /cores
+          sudo chmod 777 /cores
+          sudo bash -c 'echo "/cores/%e.%p.%t" > /proc/sys/kernel/core_pattern'
           ulimit -c unlimited
           chmod +x build/builder.sh
           chmod +x scripts/run_go_codecov.sh
           docker ps
-          ./build/builder.sh /bin/bash -c "make codecov-go-without-build"
+          sudo ./build/builder.sh /bin/bash -c "make codecov-go-without-build"
       - name: Upload core dump
         uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: core-dump
-          path: ./core.*
+          path: /cores
       - name: Archive result
         uses: actions/upload-artifact@v4
         with:
