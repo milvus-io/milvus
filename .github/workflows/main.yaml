@@ -96,7 +96,7 @@ jobs:
           kind: 'cpp'
       - name: Build
         run: |
-          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp"
+          ./build/builder.sh /bin/bash -c "ulimit -a && make USE_ASAN=${{env.useasan}} build-cpp"
       - run: |
           zip -r code.zip . -x "./.docker/*" -x "./cmake_build/thirdparty/**" -x ".git/**"
       - name: Archive code
@@ -206,7 +206,7 @@ jobs:
           chmod +x build/builder.sh
           chmod +x scripts/run_go_codecov.sh
           docker ps
-          sudo ./build/builder.sh /bin/bash -c "ulimit -c unlimited && make codecov-go-without-build"
+          sudo ./build/builder.sh /bin/bash -c "ulimit -c unlimited && echo '/cores/%e.%p.%t' > /proc/sys/kernel/core_pattern && make codecov-go-without-build"
       - name: Upload core dump
         uses: actions/upload-artifact@v4
         if: failure()
