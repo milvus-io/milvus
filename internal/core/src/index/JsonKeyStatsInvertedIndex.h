@@ -299,7 +299,7 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
         std::chrono::time_point<std::chrono::system_clock> index_build_begin_;
         std::chrono::time_point<std::chrono::system_clock> tantivy_build_begin_;
         // The time that we have finished push add operations to tantivy, which will be
-        // executed asynchronously.
+        // executed asynchronously
         std::chrono::time_point<std::chrono::system_clock>
             tantivy_add_schedule_end_;
         std::chrono::time_point<std::chrono::system_clock> index_build_done_;
