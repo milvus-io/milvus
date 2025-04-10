@@ -1333,7 +1333,7 @@ type mixCoordConfig struct {
 func (p *mixCoordConfig) init(base *BaseTable) {
 	p.EnableActiveStandby = ParamItem{
 		Key:          "mixCoord.enableActiveStandby",
-		Version:      "2.2.0",
+		Version:      "2.6.0",
 		DefaultValue: "false",
 		Export:       true,
 		FallbackKeys: []string{"rootCoord.enableActiveStandby"},

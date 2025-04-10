@@ -1078,7 +1078,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 			}
 			if len(sessions) > 0 {
 				log.Info("old session exists", zap.String("role", role))
-				return false, -1, nil
+				return false, -1, errors.New("old session exists")
 			}
 		}
 
@@ -1126,27 +1126,30 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 			break
 		}
 		ctx, cancel := context.WithCancel(s.ctx)
-		oldWatchChans := make([]clientv3.WatchChan, len(oldRoles))
-		for i, role := range oldRoles {
-			oldWatchChans[i] = s.etcdCli.Watch(ctx, path.Join(s.metaRoot, DefaultServiceRoot, role), clientv3.WithPrevKV())
-		}
+		if errors.Is(err, errors.New("old session exists")) {
+			log.Info("old session exists, start to watch old sessions")
+			oldWatchChans := make([]clientv3.WatchChan, len(oldRoles))
+			for i, role := range oldRoles {
+				oldWatchChans[i] = s.etcdCli.Watch(ctx, path.Join(s.metaRoot, DefaultServiceRoot, role), clientv3.WithPrevKV())
+			}
 
-		for _, oldWatchChan := range oldWatchChans {
-			select {
-			case wresp, ok := <-oldWatchChan:
-				if !ok {
-					continue
-				}
-				if wresp.Err() != nil {
-					continue
-				}
-				for _, event := range wresp.Events {
-					if event.Type == mvccpb.DELETE {
-						log.Debug("old session deleted", zap.String("key", string(event.Kv.Key)))
-						cancel()
+			for _, oldWatchChan := range oldWatchChans {
+				select {
+				case wresp, ok := <-oldWatchChan:
+					if !ok {
+						continue
 					}
+					if wresp.Err() != nil {
+						continue
+					}
+					for _, event := range wresp.Events {
+						if event.Type == mvccpb.DELETE {
+							log.Debug("old session deleted", zap.String("key", string(event.Kv.Key)))
+							cancel()
+						}
+					}
+				default:
 				}
-			default:
 			}
 		}
 
