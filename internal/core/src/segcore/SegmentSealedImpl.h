@@ -36,6 +36,7 @@
 #include "common/Types.h"
 #include "common/IndexMeta.h"
 #include "index/TextMatchIndex.h"
+#include "index/JsonKeyStatsInvertedIndex.h"
 
 namespace milvus::segcore {
 
@@ -99,6 +100,17 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     LoadTextIndex(FieldId field_id,
                   std::unique_ptr<index::TextMatchIndex> index) override;
+
+    void
+    LoadJsonKeyIndex(
+        FieldId field_id,
+        std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) override;
+
+    index::JsonKeyStatsInvertedIndex*
+    GetJsonKeyIndex(FieldId field_id) const override;
+
+    std::pair<std::string_view, bool>
+    GetJsonData(FieldId field_id, size_t offset) const override;
 
  public:
     size_t
@@ -412,6 +424,11 @@ class SegmentSealedImpl : public SegmentSealed {
 
     // whether the segment is sorted by the pk
     bool is_sorted_by_pk_ = false;
+
+    // used for json expr optimization
+    std::unordered_map<FieldId,
+                       std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
+        json_key_indexes_;
 };
 
 inline SegmentSealedUPtr

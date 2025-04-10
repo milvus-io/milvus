@@ -59,14 +59,18 @@ using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
 
-class ExprTest : public ::testing::TestWithParam<
-                     std::pair<milvus::DataType, knowhere::MetricType>> {
+class ExprTest
+    : public ::testing::TestWithParam<
+          std::tuple<std::pair<milvus::DataType, knowhere::MetricType>, bool>> {
  public:
     void
     SetUp() override {
         auto param = GetParam();
-        data_type = param.first;
-        metric_type = param.second;
+        data_type = std::get<0>(param).first;  // Get the DataType from the pair
+        metric_type =
+            std::get<0>(param).second;  // Get the MetricType from the pair
+        GROWING_JSON_KEY_STATS_ENABLED =
+            std::get<1>(param);  // Get the bool parameter
     }
 
     // replace the metric type in the plan string with the proper type
@@ -81,13 +85,29 @@ class ExprTest : public ::testing::TestWithParam<
     knowhere::MetricType metric_type;
 };
 
+// Instantiate test suite with new bool parameter
 INSTANTIATE_TEST_SUITE_P(
     ExprTestSuite,
     ExprTest,
     ::testing::Values(
-        std::pair(milvus::DataType::VECTOR_FLOAT, knowhere::metric::L2),
-        std::pair(milvus::DataType::VECTOR_SPARSE_FLOAT, knowhere::metric::IP),
-        std::pair(milvus::DataType::VECTOR_BINARY, knowhere::metric::JACCARD)));
+        std::make_tuple(std::pair(milvus::DataType::VECTOR_FLOAT,
+                                  knowhere::metric::L2),
+                        false),
+        std::make_tuple(std::pair(milvus::DataType::VECTOR_SPARSE_FLOAT,
+                                  knowhere::metric::IP),
+                        false),
+        std::make_tuple(std::pair(milvus::DataType::VECTOR_BINARY,
+                                  knowhere::metric::JACCARD),
+                        false),
+        std::make_tuple(std::pair(milvus::DataType::VECTOR_FLOAT,
+                                  knowhere::metric::L2),
+                        true),
+        std::make_tuple(std::pair(milvus::DataType::VECTOR_SPARSE_FLOAT,
+                                  knowhere::metric::IP),
+                        true),
+        std::make_tuple(std::pair(milvus::DataType::VECTOR_BINARY,
+                                  knowhere::metric::JACCARD),
+                        true)));
 
 TEST_P(ExprTest, Range) {
     SUCCEED();
@@ -842,7 +862,7 @@ TEST_P(ExprTest, TestBinaryRangeJSON) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     for (auto testcase : testcases) {
         auto check = [&](int64_t value) {
@@ -966,7 +986,7 @@ TEST_P(ExprTest, TestBinaryRangeJSONNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     for (auto testcase : testcases) {
         auto check = [&](int64_t value, bool valid) {
@@ -1085,7 +1105,7 @@ TEST_P(ExprTest, TestExistsJson) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     for (auto testcase : testcases) {
@@ -1162,7 +1182,7 @@ TEST_P(ExprTest, TestExistsJsonNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     for (auto testcase : testcases) {
@@ -1245,16 +1265,13 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
         int64_t val;
         std::vector<std::string> nested_path;
     };
-    std::vector<Testcase> testcases{
-        {10, {"int"}},
-        {20, {"int"}},
-        {30, {"int"}},
-        {40, {"int"}},
-        {10, {"double"}},
-        {20, {"double"}},
-        {30, {"double"}},
-        {40, {"double"}},
-    };
+    std::vector<Testcase> testcases{{10, {"int"}},
+                                    {20, {"int"}},
+                                    {30, {"int"}},
+                                    {40, {"int"}},
+                                    {1, {"array", "0"}},
+                                    {2, {"array", "1"}},
+                                    {3, {"array", "2"}}};
 
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
@@ -1278,7 +1295,7 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     std::vector<OpType> ops{
@@ -1356,13 +1373,16 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
 
             for (int i = 0; i < N * num_iters; ++i) {
                 auto ans = final[i];
-                if (testcase.nested_path[0] == "int") {
+                if (testcase.nested_path[0] == "int" ||
+                    testcase.nested_path[0] == "array") {
                     auto val =
                         milvus::Json(simdjson::padded_string(json_col[i]))
                             .template at<int64_t>(pointer)
                             .value();
+
                     auto ref = f(val);
-                    ASSERT_EQ(ans, ref);
+                    ASSERT_EQ(ans, ref) << "@" << i << "op" << op;
+
                     if (i % 2 == 0) {
                         ASSERT_EQ(view[int(i / 2)], ref);
                     }
@@ -1370,6 +1390,272 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                     auto val =
                         milvus::Json(simdjson::padded_string(json_col[i]))
                             .template at<double>(pointer)
+                            .value();
+                    auto ref = f(val);
+                    ASSERT_EQ(ans, ref);
+                    if (i % 2 == 0) {
+                        ASSERT_EQ(view[int(i / 2)], ref);
+                    }
+                }
+            }
+        }
+    }
+
+    {
+        struct Testcase {
+            int64_t val;
+            std::vector<std::string> nested_path;
+        };
+        std::vector<Testcase> testcases{{1.1, {"double"}},
+                                        {2.2, {"double"}},
+                                        {3.3, {"double"}},
+                                        {4.4, {"double"}},
+                                        {1e40, {"double"}}};
+
+        auto schema = std::make_shared<Schema>();
+        auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+        auto json_fid = schema->AddDebugField("json", DataType::JSON);
+        schema->set_primary_field_id(i64_fid);
+
+        auto seg = CreateGrowingSegment(schema, empty_index_meta);
+        int N = 1000;
+        std::vector<std::string> json_col;
+        int num_iters = 1;
+        for (int iter = 0; iter < num_iters; ++iter) {
+            auto raw_data = DataGen(schema, N, iter);
+            auto new_json_col = raw_data.get_col<std::string>(json_fid);
+
+            json_col.insert(
+                json_col.end(), new_json_col.begin(), new_json_col.end());
+            seg->PreInsert(N);
+            seg->Insert(iter * N,
+                        N,
+                        raw_data.row_ids_.data(),
+                        raw_data.timestamps_.data(),
+                        raw_data.raw_);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
+        auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+        std::vector<OpType> ops{
+            OpType::Equal,
+            OpType::NotEqual,
+            OpType::GreaterThan,
+            OpType::GreaterEqual,
+            OpType::LessThan,
+            OpType::LessEqual,
+        };
+        for (const auto& testcase : testcases) {
+            auto check = [&](double value) { return value == testcase.val; };
+            std::function<bool(double)> f = check;
+            for (auto& op : ops) {
+                switch (op) {
+                    case OpType::Equal: {
+                        f = [&](double value) { return value == testcase.val; };
+                        break;
+                    }
+                    case OpType::NotEqual: {
+                        f = [&](double value) { return value != testcase.val; };
+                        break;
+                    }
+                    case OpType::GreaterEqual: {
+                        f = [&](double value) { return value >= testcase.val; };
+                        break;
+                    }
+                    case OpType::GreaterThan: {
+                        f = [&](double value) { return value > testcase.val; };
+                        break;
+                    }
+                    case OpType::LessEqual: {
+                        f = [&](double value) { return value <= testcase.val; };
+                        break;
+                    }
+                    case OpType::LessThan: {
+                        f = [&](double value) { return value < testcase.val; };
+                        break;
+                    }
+                    default: {
+                        PanicInfo(Unsupported, "unsupported range node");
+                    }
+                }
+
+                auto pointer = milvus::Json::pointer(testcase.nested_path);
+                proto::plan::GenericValue value;
+                value.set_float_val(testcase.val);
+                auto expr =
+                    std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+                        milvus::expr::ColumnInfo(
+                            json_fid, DataType::JSON, testcase.nested_path),
+                        op,
+                        value,
+                        std::vector<proto::plan::GenericValue>{});
+                auto plan = std::make_shared<plan::FilterBitsNode>(
+                    DEFAULT_PLANNODE_ID, expr);
+                auto final = ExecuteQueryExpr(
+                    plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
+                EXPECT_EQ(final.size(), N * num_iters);
+
+                // specify some offsets and do scalar filtering on these offsets
+                milvus::exec::OffsetVector offsets;
+                offsets.reserve(N * num_iters / 2);
+                for (auto i = 0; i < N * num_iters; ++i) {
+                    if (i % 2 == 0) {
+                        offsets.emplace_back(i);
+                    }
+                }
+                auto col_vec = milvus::test::gen_filter_res(plan.get(),
+                                                            seg_promote,
+                                                            N * num_iters,
+                                                            MAX_TIMESTAMP,
+                                                            &offsets);
+                BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+                EXPECT_EQ(view.size(), N * num_iters / 2);
+
+                for (int i = 0; i < N * num_iters; ++i) {
+                    auto ans = final[i];
+
+                    auto val =
+                        milvus::Json(simdjson::padded_string(json_col[i]))
+                            .template at<double>(pointer)
+                            .value();
+                    auto ref = f(val);
+                    ASSERT_EQ(ans, ref);
+                    if (i % 2 == 0) {
+                        ASSERT_EQ(view[int(i / 2)], ref);
+                    }
+                }
+            }
+        }
+    }
+
+    {
+        struct Testcase {
+            std::string val;
+            std::vector<std::string> nested_path;
+        };
+        std::vector<Testcase> testcases{
+            {"abc", {"string"}},
+            {"This is a line break\\nThis is a new line!", {"string"}}};
+
+        auto schema = std::make_shared<Schema>();
+        auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+        auto json_fid = schema->AddDebugField("json", DataType::JSON);
+        schema->set_primary_field_id(i64_fid);
+
+        auto seg = CreateGrowingSegment(schema, empty_index_meta);
+        int N = 1000;
+        std::vector<std::string> json_col;
+        int num_iters = 1;
+        for (int iter = 0; iter < num_iters; ++iter) {
+            auto raw_data = DataGen(schema, N, iter);
+            auto new_json_col = raw_data.get_col<std::string>(json_fid);
+
+            json_col.insert(
+                json_col.end(), new_json_col.begin(), new_json_col.end());
+            seg->PreInsert(N);
+            seg->Insert(iter * N,
+                        N,
+                        raw_data.row_ids_.data(),
+                        raw_data.timestamps_.data(),
+                        raw_data.raw_);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
+        auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+        std::vector<OpType> ops{
+            OpType::Equal,
+            OpType::NotEqual,
+            OpType::GreaterThan,
+            OpType::GreaterEqual,
+            OpType::LessThan,
+            OpType::LessEqual,
+        };
+        for (const auto& testcase : testcases) {
+            auto check = [&](std::string_view value) {
+                return value == testcase.val;
+            };
+            std::function<bool(std::string_view)> f = check;
+            for (auto& op : ops) {
+                switch (op) {
+                    case OpType::Equal: {
+                        f = [&](std::string_view value) {
+                            return value == testcase.val;
+                        };
+                        break;
+                    }
+                    case OpType::NotEqual: {
+                        f = [&](std::string_view value) {
+                            return value != testcase.val;
+                        };
+                        break;
+                    }
+                    case OpType::GreaterEqual: {
+                        f = [&](std::string_view value) {
+                            return value >= testcase.val;
+                        };
+                        break;
+                    }
+                    case OpType::GreaterThan: {
+                        f = [&](std::string_view value) {
+                            return value > testcase.val;
+                        };
+                        break;
+                    }
+                    case OpType::LessEqual: {
+                        f = [&](std::string_view value) {
+                            return value <= testcase.val;
+                        };
+                        break;
+                    }
+                    case OpType::LessThan: {
+                        f = [&](std::string_view value) {
+                            return value < testcase.val;
+                        };
+                        break;
+                    }
+                    default: {
+                        PanicInfo(Unsupported, "unsupported range node");
+                    }
+                }
+
+                auto pointer = milvus::Json::pointer(testcase.nested_path);
+                proto::plan::GenericValue value;
+                value.set_string_val(testcase.val);
+                auto expr =
+                    std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+                        milvus::expr::ColumnInfo(
+                            json_fid, DataType::JSON, testcase.nested_path),
+                        op,
+                        value,
+                        std::vector<proto::plan::GenericValue>{});
+                auto plan = std::make_shared<plan::FilterBitsNode>(
+                    DEFAULT_PLANNODE_ID, expr);
+                auto final = ExecuteQueryExpr(
+                    plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
+                EXPECT_EQ(final.size(), N * num_iters);
+
+                // specify some offsets and do scalar filtering on these offsets
+                milvus::exec::OffsetVector offsets;
+                offsets.reserve(N * num_iters / 2);
+                for (auto i = 0; i < N * num_iters; ++i) {
+                    if (i % 2 == 0) {
+                        offsets.emplace_back(i);
+                    }
+                }
+                auto col_vec = milvus::test::gen_filter_res(plan.get(),
+                                                            seg_promote,
+                                                            N * num_iters,
+                                                            MAX_TIMESTAMP,
+                                                            &offsets);
+                BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+                EXPECT_EQ(view.size(), N * num_iters / 2);
+
+                for (int i = 0; i < N * num_iters; ++i) {
+                    auto ans = final[i];
+
+                    auto val =
+                        milvus::Json(simdjson::padded_string(json_col[i]))
+                            .template at<std::string_view>(pointer)
                             .value();
                     auto ref = f(val);
                     ASSERT_EQ(ans, ref);
@@ -1457,16 +1743,13 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
         int64_t val;
         std::vector<std::string> nested_path;
     };
-    std::vector<Testcase> testcases{
-        {10, {"int"}},
-        {20, {"int"}},
-        {30, {"int"}},
-        {40, {"int"}},
-        {10, {"double"}},
-        {20, {"double"}},
-        {30, {"double"}},
-        {40, {"double"}},
-    };
+    std::vector<Testcase> testcases{{10, {"int"}},
+                                    {20, {"int"}},
+                                    {30, {"int"}},
+                                    {40, {"int"}},
+                                    {1, {"array", "0"}},
+                                    {2, {"array", "1"}},
+                                    {3, {"array", "2"}}};
 
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
@@ -1492,7 +1775,7 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     std::vector<OpType> ops{
@@ -1717,7 +2000,7 @@ TEST_P(ExprTest, TestTermJson) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     for (auto testcase : testcases) {
@@ -1810,7 +2093,7 @@ TEST_P(ExprTest, TestTermJsonNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     for (auto testcase : testcases) {
@@ -11573,7 +11856,7 @@ TEST_P(ExprTest, TestUnaryRangeWithJSON) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     int offset = 0;
@@ -11833,7 +12116,7 @@ TEST_P(ExprTest, TestUnaryRangeWithJSONNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     int offset = 0;
@@ -12139,7 +12422,7 @@ TEST_P(ExprTest, TestTermWithJSON) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     int offset = 0;
@@ -12372,7 +12655,7 @@ TEST_P(ExprTest, TestTermWithJSONNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     int offset = 0;
@@ -12550,7 +12833,7 @@ TEST_P(ExprTest, TestExistsWithJSON) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     int offset = 0;
@@ -12778,7 +13061,7 @@ TEST_P(ExprTest, TestExistsWithJSONNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     int offset = 0;
@@ -13661,7 +13944,7 @@ TEST_P(ExprTest, TestJsonContainsAny) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
@@ -13951,7 +14234,7 @@ TEST_P(ExprTest, TestJsonContainsAnyNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
@@ -14252,7 +14535,7 @@ TEST_P(ExprTest, TestJsonContainsAll) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     std::vector<Testcase<bool>> bool_testcases{{{true, true}, {"bool"}},
@@ -14566,7 +14849,7 @@ TEST_P(ExprTest, TestJsonContainsAllNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     std::vector<Testcase<bool>> bool_testcases{{{true, true}, {"bool"}},
@@ -14890,7 +15173,7 @@ TEST_P(ExprTest, TestJsonContainsArray) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
@@ -15278,7 +15561,7 @@ TEST_P(ExprTest, TestJsonContainsArrayNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     proto::plan::GenericValue generic_a;
@@ -15702,7 +15985,7 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeArray) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     proto::plan::GenericValue int_value;
@@ -15833,7 +16116,7 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeArrayNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
@@ -15968,7 +16251,7 @@ TEST_P(ExprTest, TestJsonContainsDiffType) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     proto::plan::GenericValue int_val;
@@ -16103,7 +16386,7 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeNullable) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 

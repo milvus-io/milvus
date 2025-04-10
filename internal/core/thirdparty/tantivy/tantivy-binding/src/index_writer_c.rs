@@ -28,6 +28,7 @@ pub extern "C" fn tantivy_create_index(
     tantivy_index_version: u32,
     num_threads: usize,
     overall_memory_budget_in_bytes: usize,
+    in_ram : bool,
 ) -> RustResult {
     let field_name_str = cstr_to_str!(field_name);
     let path_str = cstr_to_str!(path);
@@ -44,6 +45,7 @@ pub extern "C" fn tantivy_create_index(
         num_threads,
         overall_memory_budget_in_bytes,
         tantivy_index_version,
+        in_ram,
     ) {
         Ok(wrapper) => RustResult::from_ptr(create_binding(wrapper)),
         Err(e) => RustResult::from_error(e.to_string()),

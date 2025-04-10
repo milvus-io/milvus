@@ -149,6 +149,8 @@ RustResult tantivy_term_query_bool(void *ptr, bool term);
 
 RustResult tantivy_term_query_keyword(void *ptr, const char *term);
 
+RustResult tantivy_term_query_keyword_i64(void *ptr, const char *term);
+
 RustResult tantivy_lower_bound_range_query_keyword(void *ptr,
                                                    const char *lower_bound,
                                                    bool inclusive);
@@ -180,7 +182,8 @@ RustResult tantivy_create_index(const char *field_name,
                                 const char *path,
                                 uint32_t tantivy_index_version,
                                 uintptr_t num_threads,
-                                uintptr_t overall_memory_budget_in_bytes);
+                                uintptr_t overall_memory_budget_in_bytes,
+                                bool in_ram);
 
 RustResult tantivy_create_index_with_single_segment(const char *field_name,
                                                     TantivyDataType data_type,

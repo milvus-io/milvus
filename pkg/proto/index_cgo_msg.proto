@@ -82,10 +82,21 @@ message BuildIndexInfo {
   repeated OptionalFieldInfo opt_fields = 19;
   bool partition_key_isolation = 20;
   int32 current_scalar_index_version = 21;
-  int64 lack_binlog_rows = 22;
+  int64 json_key_stats_tantivy_memory = 22;
+  int64 lack_binlog_rows = 23;
 }
 
 message LoadTextIndexInfo {
+  int64 FieldID = 1;
+  int64 version = 2;
+  int64 buildID = 3;
+  repeated string files = 4;
+  schema.FieldSchema schema = 5;
+  int64 collectionID = 6;
+  int64 partitionID = 7;
+}
+
+message LoadJsonKeyIndexInfo {
   int64 FieldID = 1;
   int64 version = 2;
   int64 buildID = 3;

@@ -335,7 +335,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         const std::string& name,
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
-        int64_t batch_size)
+        int64_t batch_size,
+        int32_t consistency_level)
         : SegmentExpr(std::move(input),
                       name,
                       segment,
@@ -343,7 +344,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       expr->column_.nested_path_,
                       FromValCase(expr->val_.val_case()),
                       active_count,
-                      batch_size),
+                      batch_size,
+                      consistency_level),
           expr_(expr) {
     }
 
@@ -413,6 +415,10 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     template <typename ExprValueType>
     VectorPtr
+    ExecRangeVisitorImplJsonForIndex();
+
+    template <typename ExprValueType>
+    VectorPtr
     ExecRangeVisitorImplArray(EvalCtx& context);
 
     template <typename T>
@@ -441,6 +447,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     VectorPtr
     ExecTextMatch();
+
+    std::pair<std::string, std::string>
+    SplitAtFirstSlashDigit(std::string input);
 
  private:
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;

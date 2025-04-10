@@ -295,7 +295,9 @@ type commonConfig struct {
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 
-	EnabledOptimizeExpr ParamItem `refreshable:"true"`
+	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
+	EnabledJSONKeyStats               ParamItem `refreshable:"true"`
+	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1007,6 +1009,23 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnabledOptimizeExpr.Init(base.mgr)
+	p.EnabledJSONKeyStats = ParamItem{
+		Key:          "common.enabledJSONKeyStats",
+		Version:      "2.5.5",
+		DefaultValue: "false",
+		Doc:          "Indicates sealedsegment whether to enable JSON key stats",
+		Export:       true,
+	}
+	p.EnabledJSONKeyStats.Init(base.mgr)
+
+	p.EnabledGrowingSegmentJSONKeyStats = ParamItem{
+		Key:          "common.enabledGrowingSegmentJSONKeyStats",
+		Version:      "2.5.5",
+		DefaultValue: "false",
+		Doc:          "Indicates growingsegment whether to enable JSON key stats",
+		Export:       true,
+	}
+	p.EnabledGrowingSegmentJSONKeyStats.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -2742,6 +2761,10 @@ type queryNodeConfig struct {
 
 	// worker
 	WorkerPoolingSize ParamItem `refreshable:"false"`
+
+	// Json Key Stats
+	JSONKeyStatsCommitInterval        ParamItem `refreshable:"false"`
+	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -3410,6 +3433,15 @@ user-task-polling:
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
 
+	p.JSONKeyStatsCommitInterval = ParamItem{
+		Key:          "queryNode.segcore.jsonKeyStatsCommitInterval",
+		Version:      "2.5.0",
+		DefaultValue: "200",
+		Doc:          "the commit interval for the JSON key Stats to commit",
+		Export:       true,
+	}
+	p.JSONKeyStatsCommitInterval.Init(base.mgr)
+
 	p.CleanExcludeSegInterval = ParamItem{
 		Key:          "queryCoord.cleanExcludeSegmentInterval",
 		Version:      "2.4.0",
@@ -3625,9 +3657,13 @@ type dataCoordConfig struct {
 	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
 
-	EnableStatsTask       ParamItem `refreshable:"true"`
-	TaskCheckInterval     ParamItem `refreshable:"true"`
-	StatsTaskTriggerCount ParamItem `refreshable:"true"`
+	EnableStatsTask                   ParamItem `refreshable:"true"`
+	TaskCheckInterval                 ParamItem `refreshable:"true"`
+	StatsTaskTriggerCount             ParamItem `refreshable:"true"`
+	JSONStatsTriggerCount             ParamItem `refreshable:"true"`
+	JSONStatsTriggerInterval          ParamItem `refreshable:"true"`
+	EnabledJSONKeyStatsInSort         ParamItem `refreshable:"true"`
+	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
@@ -4572,6 +4608,36 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.TaskCheckInterval.Init(base.mgr)
 
+	p.StatsTaskTriggerCount = ParamItem{
+		Key:          "dataCoord.statsTaskTriggerCount",
+		Version:      "2.5.5",
+		Doc:          "stats task count per trigger",
+		DefaultValue: "100",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.StatsTaskTriggerCount.Init(base.mgr)
+
+	p.JSONStatsTriggerCount = ParamItem{
+		Key:          "dataCoord.jsonStatsTriggerCount",
+		Version:      "2.5.5",
+		Doc:          "jsonkey stats task count per trigger",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.JSONStatsTriggerCount.Init(base.mgr)
+
+	p.JSONStatsTriggerInterval = ParamItem{
+		Key:          "dataCoord.jsonStatsTriggerInterval",
+		Version:      "2.5.5",
+		Doc:          "jsonkey task interval per trigger",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.JSONStatsTriggerInterval.Init(base.mgr)
+
 	p.RequestTimeoutSeconds = ParamItem{
 		Key:          "dataCoord.requestTimeoutSeconds",
 		Version:      "2.5.5",
@@ -4591,6 +4657,23 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.StatsTaskTriggerCount.Init(base.mgr)
+	p.JSONKeyStatsMemoryBudgetInTantivy = ParamItem{
+		Key:          "dataCoord.jsonKeyStatsMemoryBudgetInTantivy",
+		Version:      "2.5.5",
+		DefaultValue: "16777216",
+		Doc:          "the memory budget for the JSON index In Tantivy, the unit is bytes",
+		Export:       true,
+	}
+	p.JSONKeyStatsMemoryBudgetInTantivy.Init(base.mgr)
+
+	p.EnabledJSONKeyStatsInSort = ParamItem{
+		Key:          "dataCoord.enabledJSONKeyStatsInSort",
+		Version:      "2.5.5",
+		DefaultValue: "false",
+		Doc:          "Indicates whether to enable JSON key stats task with sort",
+		Export:       true,
+	}
+	p.EnabledJSONKeyStatsInSort.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
