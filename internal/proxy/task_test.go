@@ -2847,6 +2847,132 @@ func Test_dropCollectionTask_PostExecute(t *testing.T) {
 	assert.NoError(t, dct.PostExecute(context.Background()))
 }
 
+func Test_loadCollectionTask_Execute(t *testing.T) {
+	rc := NewMixCoordMock()
+
+	dbName := funcutil.GenRandomStr()
+	collectionName := funcutil.GenRandomStr()
+	collectionID := UniqueID(1)
+	// fieldName := funcutil.GenRandomStr()
+	indexName := funcutil.GenRandomStr()
+	ctx := context.Background()
+	indexID := int64(1000)
+
+	shardMgr := newShardClientMgr()
+	// failed to get collection id.
+	_ = InitMetaCache(ctx, rc, shardMgr)
+
+	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Status:         merr.Success(),
+			Schema:         newTestSchema(),
+			CollectionID:   collectionID,
+			CollectionName: request.CollectionName,
+		}, nil
+	}
+
+	lct := &loadCollectionTask{
+		LoadCollectionRequest: &milvuspb.LoadCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_LoadCollection,
+				MsgID:     1,
+				Timestamp: 1,
+				SourceID:  1,
+				TargetID:  1,
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
+			ReplicaNumber:  1,
+		},
+		ctx:          ctx,
+		mixCoord:     rc,
+		result:       nil,
+		collectionID: 0,
+	}
+
+	t.Run("indexcoord describe index error", func(t *testing.T) {
+		err := lct.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("indexcoord describe index not success", func(t *testing.T) {
+		rc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "fail reason",
+				},
+			}, nil
+		}
+
+		err := lct.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("no vector index", func(t *testing.T) {
+		rc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
+				Status: merr.Success(),
+				IndexInfos: []*indexpb.IndexInfo{
+					{
+						CollectionID:         collectionID,
+						FieldID:              100,
+						IndexName:            indexName,
+						IndexID:              indexID,
+						TypeParams:           nil,
+						IndexParams:          nil,
+						IndexedRows:          1025,
+						TotalRows:            1025,
+						State:                commonpb.IndexState_Finished,
+						IndexStateFailReason: "",
+						IsAutoIndex:          false,
+						UserIndexParams:      nil,
+					},
+				},
+			}, nil
+		}
+
+		err := lct.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("not all vector fields with index", func(t *testing.T) {
+		vecFields := make([]*schemapb.FieldSchema, 0)
+		for _, field := range newTestSchema().GetFields() {
+			if typeutil.IsVectorType(field.GetDataType()) {
+				vecFields = append(vecFields, field)
+			}
+		}
+
+		assert.GreaterOrEqual(t, len(vecFields), 2)
+
+		rc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
+				Status: merr.Success(),
+				IndexInfos: []*indexpb.IndexInfo{
+					{
+						CollectionID:         collectionID,
+						FieldID:              vecFields[0].FieldID,
+						IndexName:            indexName,
+						IndexID:              indexID,
+						TypeParams:           nil,
+						IndexParams:          nil,
+						IndexedRows:          1025,
+						TotalRows:            1025,
+						State:                commonpb.IndexState_Finished,
+						IndexStateFailReason: "",
+						IsAutoIndex:          false,
+						UserIndexParams:      nil,
+					},
+				},
+			}, nil
+		}
+
+		err := lct.Execute(ctx)
+		assert.Error(t, err)
+	})
+}
+
 func Test_loadPartitionTask_Execute(t *testing.T) {
 	qc := NewMixCoordMock()
 
