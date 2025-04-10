@@ -17,12 +17,14 @@
 package paramtable
 
 type httpConfig struct {
-	Enabled              ParamItem `refreshable:"false"`
-	DebugMode            ParamItem `refreshable:"false"`
-	Port                 ParamItem `refreshable:"false"`
-	AcceptTypeAllowInt64 ParamItem `refreshable:"true"`
-	EnablePprof          ParamItem `refreshable:"false"`
-	RequestTimeoutMs     ParamItem `refreshable:"true"`
+	Enabled               ParamItem `refreshable:"false"`
+	DebugMode             ParamItem `refreshable:"false"`
+	Port                  ParamItem `refreshable:"false"`
+	AcceptTypeAllowInt64  ParamItem `refreshable:"true"`
+	EnablePprof           ParamItem `refreshable:"false"`
+	RequestTimeoutMs      ParamItem `refreshable:"true"`
+	HSTSMaxAge            ParamItem `refreshable:"false"`
+	HSTSIncludeSubDomains ParamItem `refreshable:"false"`
 }
 
 func (p *httpConfig) init(base *BaseTable) {
@@ -80,4 +82,22 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       false,
 	}
 	p.RequestTimeoutMs.Init(base.mgr)
+
+	p.HSTSMaxAge = ParamItem{
+		Key:          "proxy.http.hstsMaxAge",
+		DefaultValue: "31536000", // 1 year
+		Version:      "2.5.0",
+		Doc:          "Strict-Transport-Security max-age in seconds",
+		Export:       true,
+	}
+	p.HSTSMaxAge.Init(base.mgr)
+
+	p.HSTSIncludeSubDomains = ParamItem{
+		Key:          "proxy.http.hstsIncludeSubDomains",
+		DefaultValue: "true",
+		Version:      "2.5.0",
+		Doc:          "Include subdomains in Strict-Transport-Security",
+		Export:       true,
+	}
+	p.HSTSIncludeSubDomains.Init(base.mgr)
 }
