@@ -114,6 +114,73 @@ func TestProxy_CheckHealth(t *testing.T) {
 		assert.Equal(t, true, resp.IsHealthy)
 		assert.Empty(t, resp.Reasons)
 	})
+
+	t.Run("proxy health check is fail", func(t *testing.T) {
+		checkHealthFunc1 := func(ctx context.Context,
+			req *milvuspb.CheckHealthRequest,
+			opts ...grpc.CallOption,
+		) (*milvuspb.CheckHealthResponse, error) {
+			return &milvuspb.CheckHealthResponse{
+				IsHealthy: false,
+				Reasons:   []string{"unHealth"},
+			}, nil
+		}
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
+		node := &Proxy{
+			session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
+			mixCoord: NewMixCoordMock(func(mock *MixCoordMock) {
+				mock.checkHealthFunc = checkHealthFunc1
+			}),
+		}
+		node.simpleLimiter = NewSimpleLimiter(0, 0)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		ctx := context.Background()
+		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, false, resp.IsHealthy)
+		assert.Equal(t, 1, len(resp.Reasons))
+	})
+
+	t.Run("check quota state", func(t *testing.T) {
+		node := &Proxy{
+			mixCoord: NewMixCoordMock(),
+		}
+		node.simpleLimiter = NewSimpleLimiter(0, 0)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := node.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, true, resp.IsHealthy)
+		assert.Equal(t, 0, len(resp.GetQuotaStates()))
+		assert.Equal(t, 0, len(resp.GetReasons()))
+
+		states := []milvuspb.QuotaState{milvuspb.QuotaState_DenyToWrite, milvuspb.QuotaState_DenyToRead}
+		codes := []commonpb.ErrorCode{commonpb.ErrorCode_MemoryQuotaExhausted, commonpb.ErrorCode_ForceDeny}
+		err = node.simpleLimiter.SetRates(&proxypb.LimiterNode{
+			Limiter: &proxypb.Limiter{},
+			// db level
+			Children: map[int64]*proxypb.LimiterNode{
+				1: {
+					Limiter: &proxypb.Limiter{},
+					// collection level
+					Children: map[int64]*proxypb.LimiterNode{
+						100: {
+							Limiter: &proxypb.Limiter{
+								States: states,
+								Codes:  codes,
+							},
+							Children: make(map[int64]*proxypb.LimiterNode),
+						},
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		resp, err = node.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, true, resp.IsHealthy)
+	})
 }
 
 func TestProxyRenameCollection(t *testing.T) {
@@ -863,63 +930,62 @@ func TestProxyCreateDatabase(t *testing.T) {
 }
 
 func TestProxyDropDatabase(t *testing.T) {
-	// paramtable.Init()
+	paramtable.Init()
 
-	// t.Run("not healthy", func(t *testing.T) {
-	// 	node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-	// 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	// 	ctx := context.Background()
-	// 	resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{})
-	// 	assert.NoError(t, err)
-	// 	assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
-	// })
+	t.Run("not healthy", func(t *testing.T) {
+		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		ctx := context.Background()
+		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
+	})
 
-	// factory := dependency.NewDefaultFactory(true)
-	// ctx := context.Background()
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
 
-	// node, err := NewProxy(ctx, factory)
-	// node.initRateCollector()
-	// assert.NoError(t, err)
-	// node.tsoAllocator = &timestampAllocator{
-	// 	tso: newMockTimestampAllocatorInterface(),
-	// }
-	// node.simpleLimiter = NewSimpleLimiter(0, 0)
-	// node.UpdateStateCode(commonpb.StateCode_Healthy)
-	// node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
-	// node.sched.ddQueue.setMaxTaskNum(10)
-	// assert.NoError(t, err)
-	// err = node.sched.Start()
-	// assert.NoError(t, err)
-	// defer node.sched.Close()
+	node, err := NewProxy(ctx, factory)
+	node.initRateCollector()
+	assert.NoError(t, err)
+	node.tsoAllocator = &timestampAllocator{
+		tso: newMockTimestampAllocatorInterface(),
+	}
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
+	node.sched.ddQueue.setMaxTaskNum(10)
+	assert.NoError(t, err)
+	err = node.sched.Start()
+	assert.NoError(t, err)
+	defer node.sched.Close()
 
-	// rpcRequestChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
-	// node.replicateMsgStream, err = node.factory.NewMsgStream(node.ctx)
-	// assert.NoError(t, err)
-	// node.replicateMsgStream.AsProducer(ctx, []string{rpcRequestChannel})
+	rpcRequestChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
+	node.replicateMsgStream, err = node.factory.NewMsgStream(node.ctx)
+	assert.NoError(t, err)
+	node.replicateMsgStream.AsProducer(ctx, []string{rpcRequestChannel})
 
-	// t.Run("drop database fail", func(t *testing.T) {
-	// 	mixc := mocks.NewMockMixCoordClient(t)
-	// 	mixc.On("DropDatabase", mock.Anything, mock.Anything).
-	// 		Return(nil, errors.New("fail"))
-	// 	node.mixCoord = mixc
-	// 	ctx := context.Background()
-	// 	resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{DbName: "db"})
-	// 	assert.NoError(t, err)
-	// 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
-	// })
+	t.Run("drop database fail", func(t *testing.T) {
+		mixc := mocks.NewMockMixCoordClient(t)
+		mixc.On("DropDatabase", mock.Anything, mock.Anything).
+			Return(nil, errors.New("fail"))
+		node.mixCoord = mixc
+		ctx := context.Background()
+		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{DbName: "db"})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
 
-	// t.Run("drop database ok", func(t *testing.T) {
-	// 	mixc := mocks.NewMockMixCoordClient(t)
-	// 	mixc.On("DropDatabase", mock.Anything, mock.Anything).
-	// 		Return(merr.Success(), nil)
-	// 	node.mixCoord = mixc
-	// 	node.UpdateStateCode(commonpb.StateCode_Healthy)
-	// 	ctx := context.Background()
+	t.Run("drop database ok", func(t *testing.T) {
+		mix := mocks.NewMockMixCoordClient(t)
+		mix.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		node.mixCoord = mix
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		ctx := context.Background()
 
-	// 	resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{DbName: "db"})
-	// 	assert.NoError(t, err)
-	// 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	// })
+		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{DbName: "db"})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
 }
 
 func TestProxyListDatabase(t *testing.T) {
