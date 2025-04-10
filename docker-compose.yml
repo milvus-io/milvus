@@ -18,6 +18,7 @@ services:
         TARGETARCH: ${IMAGE_ARCH}
       cache_from:
         - ${IMAGE_REPO}/milvus-env:${OS_NAME}-${LATEST_DATE_VERSION}
+    privileged: true
     platform: linux/${IMAGE_ARCH}
     shm_size: 2G
     # expose 19530 port so we can directly access milvus inside build container
