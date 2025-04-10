@@ -71,4 +71,13 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.EnablePprof.Init(base.mgr)
+
+	p.RequestTimeoutMs = ParamItem{
+		Key:          "proxy.http.requestTimeoutMs",
+		DefaultValue: "30000",
+		Version:      "2.5.10",
+		Doc:          "default restful request timeout duration in milliseconds",
+		Export:       false,
+	}
+	p.RequestTimeoutMs.Init(base.mgr)
 }
