@@ -38,12 +38,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	_ "github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -311,6 +313,26 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			return err
 		}
 	}
+	if (st.req.EnableJsonKeyStatsInSort && st.req.GetSubJobType() == indexpb.StatsSubJob_Sort) || st.req.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob {
+		if !st.req.GetEnableJsonKeyStats() {
+			return nil
+		}
+
+		err = st.createJSONKeyStats(ctx,
+			st.req.GetStorageConfig(),
+			st.req.GetCollectionID(),
+			st.req.GetPartitionID(),
+			st.req.GetTargetSegmentID(),
+			st.req.GetTaskVersion(),
+			st.req.GetTaskID(),
+			st.req.GetJsonKeyStatsTantivyMemory(),
+			st.req.GetJsonKeyStatsDataFormat(),
+			insertLogs)
+		if err != nil {
+			log.Warn("stats wrong, failed to create json index", zap.Error(err))
+			return err
+		}
+	}
 
 	return nil
 }
@@ -464,5 +486,110 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		textIndexLogs)
+	return nil
+}
+
+func (st *statsTask) createJSONKeyStats(ctx context.Context,
+	storageConfig *indexpb.StorageConfig,
+	collectionID int64,
+	partitionID int64,
+	segmentID int64,
+	version int64,
+	taskID int64,
+	tantivyMemory int64,
+	jsonKeyStatsDataFormat int64,
+	insertBinlogs []*datapb.FieldBinlog,
+) error {
+	log := log.Ctx(ctx).With(
+		zap.String("clusterID", st.req.GetClusterID()),
+		zap.Int64("taskID", st.req.GetTaskID()),
+		zap.Int64("collectionID", st.req.GetCollectionID()),
+		zap.Int64("partitionID", st.req.GetPartitionID()),
+		zap.Int64("segmentID", st.req.GetSegmentID()),
+		zap.Any("statsJobType", st.req.GetSubJobType()),
+		zap.Int64("jsonKeyStatsDataFormat", jsonKeyStatsDataFormat),
+	)
+	if jsonKeyStatsDataFormat != 1 {
+		log.Info("create json key index failed dataformat invalid")
+		return nil
+	}
+	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
+		return binlog.GetFieldID()
+	})
+
+	getInsertFiles := func(fieldID int64) ([]string, error) {
+		binlogs, ok := fieldBinlogs[fieldID]
+		if !ok {
+			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
+		}
+		result := make([]string, 0, len(binlogs))
+		for _, binlog := range binlogs {
+			for _, file := range binlog.GetBinlogs() {
+				result = append(result, metautil.BuildInsertLogPath(storageConfig.GetRootPath(), collectionID, partitionID, segmentID, fieldID, file.GetLogID()))
+			}
+		}
+		return result, nil
+	}
+
+	newStorageConfig, err := ParseStorageConfig(storageConfig)
+	if err != nil {
+		return err
+	}
+
+	jsonKeyIndexStats := make(map[int64]*datapb.JsonKeyStats)
+	for _, field := range st.req.GetSchema().GetFields() {
+		h := typeutil.CreateFieldSchemaHelper(field)
+		if !h.EnableJSONKeyStatsIndex() {
+			continue
+		}
+		log.Info("field enable json key index, ready to create json key index", zap.Int64("field id", field.GetFieldID()))
+		files, err := getInsertFiles(field.GetFieldID())
+		if err != nil {
+			return err
+		}
+
+		buildIndexParams := &indexcgopb.BuildIndexInfo{
+			BuildID:                   taskID,
+			CollectionID:              collectionID,
+			PartitionID:               partitionID,
+			SegmentID:                 segmentID,
+			IndexVersion:              version,
+			InsertFiles:               files,
+			FieldSchema:               field,
+			StorageConfig:             newStorageConfig,
+			JsonKeyStatsTantivyMemory: tantivyMemory,
+		}
+
+		uploaded, err := indexcgowrapper.CreateJSONKeyStats(ctx, buildIndexParams)
+		if err != nil {
+			return err
+		}
+		jsonKeyIndexStats[field.GetFieldID()] = &datapb.JsonKeyStats{
+			FieldID:                field.GetFieldID(),
+			Version:                version,
+			BuildID:                taskID,
+			Files:                  lo.Keys(uploaded),
+			JsonKeyStatsDataFormat: jsonKeyStatsDataFormat,
+		}
+		log.Info("field enable json key index, create json key index done",
+			zap.Int64("field id", field.GetFieldID()),
+			zap.Strings("files", lo.Keys(uploaded)),
+		)
+	}
+
+	totalElapse := st.tr.RecordSpan()
+
+	st.manager.StoreJSONKeyStatsResult(st.req.GetClusterID(),
+		st.req.GetTaskID(),
+		st.req.GetCollectionID(),
+		st.req.GetPartitionID(),
+		st.req.GetTargetSegmentID(),
+		st.req.GetInsertChannel(),
+		jsonKeyIndexStats)
+
+	metrics.DataNodeBuildJSONStatsLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(totalElapse.Seconds())
+	log.Info("create json key index done",
+		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
+		zap.Duration("total elapse", totalElapse))
 	return nil
 }

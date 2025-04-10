@@ -178,7 +178,7 @@ impl IndexReaderWrapper {
     }
 
     pub fn term_query_f64(&self, term: f64) -> Result<Vec<u32>> {
-        let q = TermQuery::new(
+        let q: TermQuery = TermQuery::new(
             Term::from_field_f64(self.field, term),
             IndexRecordOption::Basic,
         );
@@ -249,6 +249,14 @@ impl IndexReaderWrapper {
             IndexRecordOption::Basic,
         );
         self.search(&q)
+    }
+
+    pub fn term_query_keyword_i64(&self, term: &str) -> Result<Vec<i64>> {
+        let q = TermQuery::new(
+            Term::from_field_text(self.field, term),
+            IndexRecordOption::Basic,
+        );
+        self.search_i64(&q)
     }
 
     pub fn lower_bound_range_query_keyword(

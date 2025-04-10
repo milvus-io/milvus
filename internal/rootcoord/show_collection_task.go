@@ -97,10 +97,15 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 					privilegeColls.Insert(util.AnyWord)
 					return privilegeColls, nil
 				}
-				// should list collection level built-in privilege group objects
-				if objectType != commonpb.ObjectType_Collection.String() &&
-					!Params.RbacConfig.IsCollectionPrivilegeGroup(priv) {
-					continue
+				// should list collection level built-in privilege group or custom privilege group objects
+				if objectType != commonpb.ObjectType_Collection.String() {
+					customGroup, err := t.core.meta.IsCustomPrivilegeGroup(ctx, priv)
+					if err != nil {
+						return nil, err
+					}
+					if !customGroup && !Params.RbacConfig.IsCollectionPrivilegeGroup(priv) {
+						continue
+					}
 				}
 				collectionName := entity.GetObjectName()
 				privilegeColls.Insert(collectionName)
