@@ -17,6 +17,7 @@
 package delegator
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/samber/lo"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -55,21 +57,38 @@ func getClosedCh() chan struct{} {
 	return closedCh
 }
 
-// QueryView maintains the sealed segment list which should be used for search/query.
-type QueryView struct {
-	sealedSegments []int64            // sealed segment list which should be used for search/query
-	partitions     typeutil.UniqueSet // partitions list which sealed segments belong to
-	version        int64              // version of current query view, same as targetVersion in qc
+// channelQueryView maintains the sealed segment list which should be used for search/query.
+// for new delegator, will got a new channelQueryView from WatchChannel, and get the queryView update from querycoord before it becomes serviceable
+// after delegator becomes serviceable, it only update the queryView by SyncTargetVersion
+type channelQueryView struct {
+	growingSegments []int64            // growing segment list which should be used for search/query
+	sealedSegments  []int64            // sealed segment list which should be used for search/query
+	partitions      typeutil.UniqueSet // partitions list which sealed segments belong to
+	version         int64              // version of current query view, same as targetVersion in qc
 
-	serviceable *atomic.Bool
+	loadedRatio *atomic.Float64 // loaded ratio of current query view, set serviceable to true if loadedRatio == 1.0
 }
 
-func (q *QueryView) GetVersion() int64 {
+func NewChannelQueryView(growings, sealeds []int64, partitions []int64, version int64) *channelQueryView {
+	return &channelQueryView{
+		growingSegments: growings,
+		sealedSegments:  sealeds,
+		partitions:      typeutil.NewUniqueSet(partitions...),
+		version:         version,
+		loadedRatio:     atomic.NewFloat64(0),
+	}
+}
+
+func (q *channelQueryView) GetVersion() int64 {
 	return q.version
 }
 
-func (q *QueryView) Serviceable() bool {
-	return q.serviceable.Load()
+func (q *channelQueryView) Serviceable() bool {
+	return q.loadedRatio.Load() >= 1.0
+}
+
+func (q *channelQueryView) GetLoadedRatio() float64 {
+	return q.loadedRatio.Load()
 }
 
 // distribution is the struct to store segment distribution.
@@ -93,7 +112,7 @@ type distribution struct {
 
 	// distribution info
 	channelName string
-	queryView   *QueryView
+	queryView   *channelQueryView
 }
 
 // SegmentEntry stores the segment meta information.
@@ -107,22 +126,17 @@ type SegmentEntry struct {
 	Offline       bool // if delegator failed to execute forwardDelete/Query/Search on segment, it will be offline
 }
 
-// NewDistribution creates a new distribution instance with all field initialized.
-func NewDistribution(channelName string) *distribution {
+func NewDistribution(channelName string, queryView *channelQueryView) *distribution {
 	dist := &distribution{
 		channelName:     channelName,
 		growingSegments: make(map[UniqueID]SegmentEntry),
 		sealedSegments:  make(map[UniqueID]SegmentEntry),
 		snapshots:       typeutil.NewConcurrentMap[int64, *snapshot](),
 		current:         atomic.NewPointer[snapshot](nil),
-		queryView: &QueryView{
-			serviceable: atomic.NewBool(false),
-			partitions:  typeutil.NewSet[int64](),
-			version:     initialTargetVersion,
-		},
+		queryView:       queryView,
 	}
-
 	dist.genSnapshot()
+	dist.updateServiceable("NewDistribution")
 	return dist
 }
 
@@ -132,12 +146,16 @@ func (d *distribution) SetIDFOracle(idfOracle IDFOracle) {
 	d.idfOracle = idfOracle
 }
 
-func (d *distribution) PinReadableSegments(partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64, err error) {
+func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64, err error) {
 	d.mut.RLock()
 	defer d.mut.RUnlock()
 
 	if !d.Serviceable() {
 		return nil, nil, -1, merr.WrapErrChannelNotAvailable("channel distribution is not serviceable")
+	}
+
+	if d.queryView.GetLoadedRatio() < requiredLoadRatio {
+		return nil, nil, -1, merr.WrapErrChannelNotAvailable(d.channelName, fmt.Sprintf("channel distribution is not serviceable, required load ratio is %f, current load ratio is %f", requiredLoadRatio, d.queryView.GetLoadedRatio()))
 	}
 
 	current := d.current.Load()
@@ -213,25 +231,40 @@ func (d *distribution) getTargetVersion() int64 {
 
 // Serviceable returns wether current snapshot is serviceable.
 func (d *distribution) Serviceable() bool {
-	return d.queryView.serviceable.Load()
+	return d.queryView.Serviceable()
 }
 
 func (d *distribution) updateServiceable(triggerAction string) {
-	if d.queryView.version != initialTargetVersion {
-		serviceable := true
-		for _, s := range d.queryView.sealedSegments {
-			if entry, ok := d.sealedSegments[s]; !ok || entry.Offline {
-				serviceable = false
-				break
-			}
+	loadedSealedSegments := 0
+	loadedGrowingSegments := 0
+	for _, s := range d.queryView.sealedSegments {
+		if entry, ok := d.sealedSegments[s]; ok && !entry.Offline {
+			loadedSealedSegments++
 		}
-		if serviceable != d.queryView.serviceable.Load() {
-			d.queryView.serviceable.Store(serviceable)
-			log.Info("channel distribution serviceable changed",
-				zap.String("channel", d.channelName),
-				zap.Bool("serviceable", serviceable),
-				zap.String("action", triggerAction))
+	}
+
+	for _, s := range d.queryView.growingSegments {
+		if _, ok := d.growingSegments[s]; ok {
+			loadedGrowingSegments++
 		}
+	}
+
+	// Notice: if querynode consume stream data faster than datanode, then loadedGrowingSegments > len(d.queryView.growingSegments)
+	// which may cause loadedRatio > 1.0
+	loadedRatio := 0.0
+	if len(d.queryView.sealedSegments)+len(d.queryView.growingSegments) == 0 {
+		loadedRatio = 1.0
+	} else {
+		loadedRatio = float64(loadedGrowingSegments+loadedSealedSegments) / float64(len(d.queryView.sealedSegments)+len(d.queryView.growingSegments))
+	}
+	d.queryView.loadedRatio.Store(loadedRatio)
+
+	serviceable := loadedRatio >= 1.0
+	if serviceable != d.queryView.Serviceable() {
+		log.Info("channel distribution serviceable changed",
+			zap.String("channel", d.channelName),
+			zap.Bool("serviceable", serviceable),
+			zap.String("action", triggerAction))
 	}
 }
 
@@ -306,60 +339,65 @@ func (d *distribution) MarkOfflineSegments(segmentIDs ...int64) {
 	}
 }
 
-// UpdateTargetVersion update readable segment version
-func (d *distribution) SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, redundantGrowings []int64) {
+// update readable channel view
+// 1. update readable channel view to support partial result before distribution is serviceable
+// 2. update readable channel view to support full result after new distribution is serviceable
+// Notice: if we don't need to be compatible with 2.5.x, we can just update new query view to support query,
+// and new query view will become serviceable automatically, a sync action after distribution is serviceable is unnecessary
+func (d *distribution) SyncReadableChannelView(action *querypb.SyncAction, partitions []int64) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
-	for _, segmentID := range growingInTarget {
+	oldValue := d.queryView.version
+	d.queryView = &channelQueryView{
+		growingSegments: action.GetGrowingInTarget(),
+		sealedSegments:  action.GetSealedInTarget(),
+		partitions:      typeutil.NewUniqueSet(partitions...),
+		version:         action.GetTargetVersion(),
+		loadedRatio:     atomic.NewFloat64(0),
+	}
+
+	sealedSet := typeutil.NewUniqueSet(action.GetSealedInTarget()...)
+	droppedSet := typeutil.NewUniqueSet(action.GetDroppedInTarget()...)
+	for _, s := range d.growingSegments {
+		// sealed segment already exists or dropped, make growing segment redundant
+		if sealedSet.Contain(s.SegmentID) || droppedSet.Contain(s.SegmentID) {
+			s.TargetVersion = redundantTargetVersion
+			d.growingSegments[s.SegmentID] = s
+		}
+	}
+
+	for _, segmentID := range d.queryView.growingSegments {
 		entry, ok := d.growingSegments[segmentID]
 		if !ok {
 			log.Warn("readable growing segment lost, consume from dml seems too slow",
 				zap.Int64("segmentID", segmentID))
 			continue
 		}
-		entry.TargetVersion = newVersion
+		entry.TargetVersion = action.GetTargetVersion()
 		d.growingSegments[segmentID] = entry
 	}
 
-	for _, segmentID := range redundantGrowings {
-		entry, ok := d.growingSegments[segmentID]
-		if !ok {
-			continue
-		}
-		entry.TargetVersion = redundantTargetVersion
-		d.growingSegments[segmentID] = entry
-	}
-
-	for _, segmentID := range sealedInTarget {
+	for _, segmentID := range d.queryView.sealedSegments {
 		entry, ok := d.sealedSegments[segmentID]
 		if !ok {
 			continue
 		}
-		entry.TargetVersion = newVersion
+		entry.TargetVersion = action.TargetVersion
 		d.sealedSegments[segmentID] = entry
 	}
 
-	oldValue := d.queryView.version
-	d.queryView = &QueryView{
-		sealedSegments: sealedInTarget,
-		partitions:     typeutil.NewUniqueSet(partitions...),
-		version:        newVersion,
-		serviceable:    d.queryView.serviceable,
-	}
-
-	// update working partition list
 	d.genSnapshot()
-	// if sealed segment in leader view is less than sealed segment in target, set delegator to unserviceable
 	d.updateServiceable("SyncTargetVersion")
-
 	log.Info("Update channel query view",
 		zap.String("channel", d.channelName),
 		zap.Int64s("partitions", partitions),
 		zap.Int64("oldVersion", oldValue),
-		zap.Int64("newVersion", newVersion),
-		zap.Int("growingSegmentNum", len(growingInTarget)),
-		zap.Int("sealedSegmentNum", len(sealedInTarget)),
+		zap.Int64("newVersion", action.GetTargetVersion()),
+		zap.Bool("serviceable", d.queryView.Serviceable()),
+		zap.Float64("loadedRatio", d.queryView.GetLoadedRatio()),
+		zap.Int("growingSegmentNum", len(action.GetGrowingInTarget())),
+		zap.Int("sealedSegmentNum", len(action.GetSealedInTarget())),
 	)
 }
 

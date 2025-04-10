@@ -163,7 +163,7 @@ func (s *DelegatorSuite) SetupTest() {
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
-	}, 10000, nil, s.chunkManager)
+	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 }
 
@@ -202,7 +202,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 				return s.mq, nil
 			},
-		}, 10000, nil, s.chunkManager)
+		}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.Error(err)
 	})
 
@@ -245,7 +245,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 				return s.mq, nil
 			},
-		}, 10000, nil, s.chunkManager)
+		}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.NoError(err)
 	})
 }
@@ -325,7 +325,14 @@ func (s *DelegatorSuite) initSegments() {
 			Version:     2001,
 		},
 	)
-	s.delegator.SyncTargetVersion(2001, []int64{500, 501}, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{}, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
+	s.delegator.SyncReadableTarget(&querypb.SyncAction{
+		TargetVersion:   2001,
+		GrowingInTarget: []int64{1004},
+		SealedInTarget:  []int64{1000, 1001, 1002, 1003},
+		DroppedInTarget: []int64{},
+		Checkpoint:      &msgpb.MsgPosition{},
+		DeleteCP:        &msgpb.MsgPosition{},
+	}, []int64{500, 501})
 }
 
 func (s *DelegatorSuite) TestSearch() {

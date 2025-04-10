@@ -264,6 +264,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		channel.GetSeekPosition().GetTimestamp(),
 		node.queryHook,
 		node.chunkManager,
+		delegator.NewChannelQueryView(channel.GetUnflushedSegmentIds(), channel.GetFlushedSegmentIds(), req.GetPartitionIDs(), req.GetTargetVersion()),
 	)
 	if err != nil {
 		log.Warn("failed to create shard delegator", zap.Error(err))
@@ -1331,16 +1332,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				return id, action.GetCheckpoint().Timestamp
 			})
 			shardDelegator.AddExcludedSegments(flushedInfo)
-			deleteCP := action.GetDeleteCP()
-			if deleteCP == nil {
-				// for compatible with 2.4, we use checkpoint as deleteCP when deleteCP is nil
-				deleteCP = action.GetCheckpoint()
-				log.Info("use checkpoint as deleteCP",
-					zap.String("channelName", req.GetChannel()),
-					zap.Time("deleteSeekPos", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())))
-			}
-			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), req.GetLoadMeta().GetPartitionIDs(), action.GetGrowingInTarget(),
-				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint(), deleteCP)
+			shardDelegator.SyncReadableTarget(action, req.GetLoadMeta().GetPartitionIDs())
 		case querypb.SyncType_UpdatePartitionStats:
 			log.Info("sync update partition stats versions")
 			shardDelegator.SyncPartitionStats(ctx, action.PartitionStatsVersions)

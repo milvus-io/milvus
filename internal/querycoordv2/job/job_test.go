@@ -1604,6 +1604,7 @@ func (suite *JobSuite) updateChannelDist(ctx context.Context, collection int64, 
 	segments := lo.Flatten(lo.Values(suite.segments[collection]))
 
 	replicas := suite.meta.ReplicaManager.GetByCollection(ctx, collection)
+	targetVersion := suite.targetMgr.GetCollectionTargetVersion(ctx, collection, meta.CurrentTargetFirst)
 	for _, replica := range replicas {
 		if loaded {
 			i := 0
@@ -1624,6 +1625,10 @@ func (suite *JobSuite) updateChannelDist(ctx context.Context, collection int64, 
 								Version: time.Now().Unix(),
 							}
 						}),
+						TargetVersion: targetVersion,
+						Status: &querypb.LeaderViewStatus{
+							Serviceable: true,
+						},
 					},
 				})
 				i++

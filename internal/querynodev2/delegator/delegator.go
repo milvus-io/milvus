@@ -35,7 +35,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -86,8 +85,8 @@ type ShardDelegator interface {
 	LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
-	SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition, deleteSeekPos *msgpb.MsgPosition)
-	GetQueryView() *QueryView
+	SyncReadableTarget(action *querypb.SyncAction, partitions []int64)
+	GetQueryView() *channelQueryView
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
 
 	// manage exclude segments
@@ -381,7 +380,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(1.0, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to search, current distribution is not serviceable", zap.Error(err))
 		return nil, err
@@ -498,7 +497,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(1.0, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
 		return err
@@ -574,7 +573,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(1.0, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
 		return nil, err
@@ -644,7 +643,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 		return nil, err
 	}
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.Req.GetPartitionIDs()...)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(1.0, req.Req.GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to GetStatistics, current distribution is not servicable")
 		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not serviceable")
@@ -941,6 +940,7 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader,
 	factory msgstream.Factory, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
+	queryView *channelQueryView,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replicaID),
@@ -971,7 +971,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		segmentManager: manager.Segment,
 		workerManager:  workerManager,
 		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
-		distribution:   NewDistribution(channel),
+		distribution:   NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
 		pkOracle:         pkoracle.NewPkOracle(),

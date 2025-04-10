@@ -333,6 +333,7 @@ message WatchDmChannelsRequest {
     int64 offlineNodeID = 11;
     int64 version = 12;
     repeated index.IndexInfo index_info_list = 13;
+    int64 target_version = 14;
 }
 
 message UnsubDmChannelRequest {
@@ -624,7 +625,7 @@ message LeaderView {
 }
 
 message LeaderViewStatus {
-    bool serviceable = 10;
+    bool serviceable = 1;
 }
 
 message SegmentDist {
