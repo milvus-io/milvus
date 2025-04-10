@@ -620,7 +620,7 @@ test_string() {
             auto dataset = std::make_shared<Dataset>();
             auto prefix = data[0];
             dataset->Set(index::OPERATOR_TYPE, OpType::PrefixMatch);
-            dataset->Set(index::PREFIX_VALUE, prefix);
+            dataset->Set(index::MATCH_VALUE, prefix);
             auto bitset = real_index->Query(dataset);
             ASSERT_EQ(cnt, bitset.size());
             for (size_t i = 0; i < bitset.size(); i++) {
