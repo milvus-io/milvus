@@ -136,8 +136,8 @@ message CreateStatsRequest {
   int64 json_key_stats_tantivy_memory = 21;
   int64 json_key_stats_data_format = 22;
   bool enable_json_key_stats_in_sort = 23;
-  int64 storage_version = 24;
-  int64 task_slot = 25;
+  int64 task_slot = 24;
+  int64 storage_version = 25;
 }
 
 message CreateJobV2Request {
