@@ -88,20 +88,20 @@ func (b *BalanceChecker) readyToCheck(ctx context.Context, collectionID int64) b
 }
 
 func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context) []int64 {
-	ids := b.meta.GetAll(ctx)
+	hasUnbalancedCollection := false
+	defer func() {
+		if !hasUnbalancedCollection {
+			b.stoppingBalanceCollectionsCurrentRound.Clear()
+			log.RatedDebug(10, "BalanceChecker has triggered stopping balance for all "+
+				"collections in one round, clear collectionIDs for this round")
+		}
+	}()
 
+	ids := b.meta.GetAll(ctx)
 	// Sort collections using the configured sort order
 	ids = b.sortCollections(ctx, ids)
 
 	if paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
-		hasUnbalancedCollection := false
-		defer func() {
-			if !hasUnbalancedCollection {
-				b.stoppingBalanceCollectionsCurrentRound.Clear()
-				log.RatedDebug(10, "BalanceChecker has triggered stopping balance for all "+
-					"collections in one round, clear collectionIDs for this round")
-			}
-		}()
 		for _, cid := range ids {
 			// if target and meta isn't ready, skip balance this collection
 			if !b.readyToCheck(ctx, cid) {
@@ -127,18 +127,30 @@ func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context) []int
 		}
 	}
 
+	// finish current round for stopping balance if no unbalanced collection
+	hasUnbalancedCollection = false
 	return nil
 }
 
 func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context) []int64 {
+	hasUnbalancedCollection := false
+	defer func() {
+		if !hasUnbalancedCollection {
+			b.normalBalanceCollectionsCurrentRound.Clear()
+			log.RatedDebug(10, "BalanceChecker has triggered normal balance for all "+
+				"collections in one round, clear collectionIDs for this round")
+		}
+	}()
+
 	// 1. no stopping balance and auto balance is disabled, return empty collections for balance
 	// 2. when balancer isn't active, skip auto balance
 	if !Params.QueryCoordCfg.AutoBalance.GetAsBool() || !b.IsActive() {
+		// finish current round for normal balance if normal balance isn't triggered
+		hasUnbalancedCollection = false
 		return nil
 	}
 
 	ids := b.meta.GetAll(ctx)
-
 	// all replicas belonging to loading collection will be skipped
 	loadedCollections := lo.Filter(ids, func(cid int64, _ int) bool {
 		collection := b.meta.GetCollection(ctx, cid)
@@ -152,6 +164,8 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context) []int64
 		return !b.targetMgr.IsCurrentTargetReady(ctx, cid)
 	})
 	if len(notReadyCollections) > 0 {
+		// finish current round for normal balance if any collection isn't ready
+		hasUnbalancedCollection = false
 		log.RatedInfo(10, "skip normal balance, cause collection not ready for balance", zap.Int64s("collectionIDs", notReadyCollections))
 		return nil
 	}
@@ -161,7 +175,6 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context) []int64
 
 	// iterator one normal collection in one round
 	normalReplicasToBalance := make([]int64, 0)
-	hasUnbalancedCollection := false
 	for _, cid := range loadedCollections {
 		if b.normalBalanceCollectionsCurrentRound.Contain(cid) {
 			log.RatedDebug(10, "BalanceChecker is balancing this collection, skip balancing in this round",
@@ -174,12 +187,6 @@ func (b *BalanceChecker) getReplicaForNormalBalance(ctx context.Context) []int64
 			normalReplicasToBalance = append(normalReplicasToBalance, replica.GetID())
 		}
 		break
-	}
-
-	if !hasUnbalancedCollection {
-		b.normalBalanceCollectionsCurrentRound.Clear()
-		log.RatedDebug(10, "BalanceChecker has triggered normal balance for all "+
-			"collections in one round, clear collectionIDs for this round")
 	}
 	return normalReplicasToBalance
 }
