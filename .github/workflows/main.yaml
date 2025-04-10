@@ -206,7 +206,7 @@ jobs:
           chmod +x build/builder.sh
           chmod +x scripts/run_go_codecov.sh
           docker ps
-          sudo ./build/builder.sh /bin/bash -c "make codecov-go-without-build"
+          sudo ./build/builder.sh /bin/bash -c "ulimit -c unlimited && make codecov-go-without-build"
       - name: Upload core dump
         uses: actions/upload-artifact@v4
         if: failure()
