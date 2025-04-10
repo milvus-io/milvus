@@ -58,7 +58,6 @@ func (p *BufferPool) Put(buf *bytes.Buffer) {
 
 // Timeout struct
 type Timeout struct {
-	timeout  time.Duration
 	handler  gin.HandlerFunc
 	response gin.HandlerFunc
 }
@@ -154,7 +153,6 @@ func checkWriteHeaderCode(code int) {
 
 func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	t := &Timeout{
-		timeout:  paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond),
 		handler:  handler,
 		response: defaultResponse,
 	}
@@ -164,9 +162,10 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		defer cancel()
 		gCtx.Request = gCtx.Request.WithContext(topCtx)
 
+		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
 		timeoutSecond, err := strconv.ParseInt(gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout), 10, 64)
 		if err == nil {
-			t.timeout = time.Duration(timeoutSecond) * time.Second
+			timeout = time.Duration(timeoutSecond) * time.Second
 		}
 		finish := make(chan struct{}, 1)
 		panicChan := make(chan interface{}, 1)
@@ -209,7 +208,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			tw.FreeBuffer()
 			bufPool.Put(buffer)
 
-		case <-time.After(t.timeout):
+		case <-time.After(timeout):
 			gCtx.Abort()
 			tw.mu.Lock()
 			defer tw.mu.Unlock()
