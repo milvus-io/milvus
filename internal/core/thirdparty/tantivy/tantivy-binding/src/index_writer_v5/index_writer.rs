@@ -316,10 +316,10 @@ impl IndexWriterWrapperImpl {
                 .to_str()
                 .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
 
-            let json_offsets =
+            let offsets =
                 unsafe { std::slice::from_raw_parts(json_offsets[i], json_offsets_len[i]) };
 
-            for offset in json_offsets {
+            for offset in offsets {
                 batch.push(UserOperation::Add(doc!(
                     id_field => *offset,
                     self.field => key,
