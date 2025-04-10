@@ -40,6 +40,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -1078,7 +1079,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 			}
 			if len(sessions) > 0 {
 				log.Info("old session exists", zap.String("role", role))
-				return false, -1, errors.New("old session exists")
+				return false, -1, merr.ErrOldSessionExists
 			}
 		}
 
@@ -1126,7 +1127,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 			break
 		}
 		ctx, cancel := context.WithCancel(s.ctx)
-		if errors.Is(err, errors.New("old session exists")) {
+		if errors.Is(err, merr.ErrOldSessionExists) {
 			log.Info("old session exists, start to watch old sessions")
 			oldWatchChans := make([]clientv3.WatchChan, len(oldRoles))
 			for i, role := range oldRoles {

@@ -57,9 +57,11 @@ type MockMixCoordClientInterface struct {
 	Error       bool
 	AccessCount int32
 
-	listPolicy          func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error)
-	showLoadCollections func(ctx context.Context, in *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error)
-	getShardLeaders     func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error)
+	listPolicy            func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error)
+	showLoadCollections   func(ctx context.Context, in *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error)
+	getShardLeaders       func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error)
+	listResourceGroups    func(ctx context.Context, in *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error)
+	describeResourceGroup func(ctx context.Context, in *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error)
 }
 
 func EqualSchema(t *testing.T, expect, actual *schemapb.CollectionSchema) {
@@ -863,7 +865,15 @@ func (c *MockMixCoordClientInterface) DropResourceGroup(ctx context.Context, req
 }
 
 func (c *MockMixCoordClientInterface) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest, opts ...grpc.CallOption) (*querypb.DescribeResourceGroupResponse, error) {
-	panic("implement me")
+	if c.describeResourceGroup != nil {
+		return c.describeResourceGroup(ctx, req)
+	}
+	return &querypb.DescribeResourceGroupResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}, nil
 }
 
 func (c *MockMixCoordClientInterface) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -871,11 +881,23 @@ func (c *MockMixCoordClientInterface) TransferNode(ctx context.Context, req *mil
 }
 
 func (c *MockMixCoordClientInterface) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	panic("implement me")
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
 }
 
 func (c *MockMixCoordClientInterface) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest, opts ...grpc.CallOption) (*milvuspb.ListResourceGroupsResponse, error) {
-	panic("implement me")
+	if c.listResourceGroups != nil {
+		return c.listResourceGroups(ctx, req)
+	}
+
+	return &milvuspb.ListResourceGroupsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}, nil
 }
 
 func (c *MockMixCoordClientInterface) ListCheckers(ctx context.Context, req *querypb.ListCheckersRequest, opts ...grpc.CallOption) (*querypb.ListCheckersResponse, error) {

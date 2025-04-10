@@ -39,11 +39,13 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -3178,205 +3180,210 @@ func TestTransferNodeTask(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
 }
 
-// func TestTransferReplicaTask(t *testing.T) {
-// 	rc := &MockRootCoordClientInterface{}
+func TestTransferReplicaTask(t *testing.T) {
+	rc := &MockMixCoordClientInterface{}
 
-// 	ctx := context.Background()
-// 	mgr := newShardClientMgr()
-// 	InitMetaCache(ctx, rc, mgr)
-// 	// make it avoid remote call on rc
-// 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, mgr)
+	// make it avoid remote call on rc
+	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
 
-// 	req := &milvuspb.TransferReplicaRequest{
-// 		Base: &commonpb.MsgBase{
-// 			MsgID:     1,
-// 			Timestamp: 2,
-// 			TargetID:  3,
-// 		},
-// 		CollectionName:      "collection1",
-// 		SourceResourceGroup: "rg1",
-// 		TargetResourceGroup: "rg2",
-// 		NumReplica:          1,
-// 	}
+	req := &milvuspb.TransferReplicaRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:     1,
+			Timestamp: 2,
+			TargetID:  3,
+		},
+		CollectionName:      "collection1",
+		SourceResourceGroup: "rg1",
+		TargetResourceGroup: "rg2",
+		NumReplica:          1,
+	}
 
-// 	task := &TransferReplicaTask{
-// 		TransferReplicaRequest: req,
-// 		ctx:                    ctx,
-// 		queryCoord:             qc,
-// 	}
-// 	task.OnEnqueue()
-// 	task.PreExecute(ctx)
+	task := &TransferReplicaTask{
+		TransferReplicaRequest: req,
+		ctx:                    ctx,
+		mixCoord:               rc,
+	}
+	task.OnEnqueue()
+	task.PreExecute(ctx)
 
-// 	assert.Equal(t, commonpb.MsgType_TransferReplica, task.Type())
-// 	assert.Equal(t, UniqueID(1), task.ID())
-// 	assert.Equal(t, Timestamp(2), task.BeginTs())
-// 	assert.Equal(t, Timestamp(2), task.EndTs())
-// 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
-// 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
+	assert.Equal(t, commonpb.MsgType_TransferReplica, task.Type())
+	assert.Equal(t, UniqueID(1), task.ID())
+	assert.Equal(t, Timestamp(2), task.BeginTs())
+	assert.Equal(t, Timestamp(2), task.EndTs())
+	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
+	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
-// 	err := task.Execute(ctx)
-// 	assert.NoError(t, err)
-// 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
-// }
+	err := task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
+}
 
-// func TestListResourceGroupsTask(t *testing.T) {
-// 	rc := &MockRootCoordClientInterface{}
-// 	qc := getQueryCoordClient()
-// 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-// 	qc.EXPECT().ListResourceGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListResourceGroupsResponse{
-// 		Status:         merr.Success(),
-// 		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
-// 	}, nil)
+func TestListResourceGroupsTask(t *testing.T) {
+	rc := &MockMixCoordClientInterface{}
 
-// 	ctx := context.Background()
-// 	mgr := newShardClientMgr()
-// 	InitMetaCache(ctx, rc, qc, mgr)
+	rc.listResourceGroups = func(ctx context.Context, request *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
+		return &milvuspb.ListResourceGroupsResponse{
+			Status:         merr.Success(),
+			ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
+		}, nil
+	}
 
-// 	req := &milvuspb.ListResourceGroupsRequest{
-// 		Base: &commonpb.MsgBase{
-// 			MsgID:     1,
-// 			Timestamp: 2,
-// 			TargetID:  3,
-// 		},
-// 	}
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, mgr)
 
-// 	task := &ListResourceGroupsTask{
-// 		ListResourceGroupsRequest: req,
-// 		ctx:                       ctx,
-// 		queryCoord:                qc,
-// 	}
-// 	task.OnEnqueue()
-// 	task.PreExecute(ctx)
+	req := &milvuspb.ListResourceGroupsRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:     1,
+			Timestamp: 2,
+			TargetID:  3,
+		},
+	}
 
-// 	assert.Equal(t, commonpb.MsgType_ListResourceGroups, task.Type())
-// 	assert.Equal(t, UniqueID(1), task.ID())
-// 	assert.Equal(t, Timestamp(2), task.BeginTs())
-// 	assert.Equal(t, Timestamp(2), task.EndTs())
-// 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
-// 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
+	task := &ListResourceGroupsTask{
+		ListResourceGroupsRequest: req,
+		ctx:                       ctx,
+		mixCoord:                  rc,
+	}
+	task.OnEnqueue()
+	task.PreExecute(ctx)
 
-// 	err := task.Execute(ctx)
-// 	assert.NoError(t, err)
-// 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
-// 	groups := task.result.GetResourceGroups()
-// 	assert.Contains(t, groups, meta.DefaultResourceGroupName)
-// 	assert.Contains(t, groups, "rg")
-// }
+	assert.Equal(t, commonpb.MsgType_ListResourceGroups, task.Type())
+	assert.Equal(t, UniqueID(1), task.ID())
+	assert.Equal(t, Timestamp(2), task.BeginTs())
+	assert.Equal(t, Timestamp(2), task.EndTs())
+	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
+	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
-// func TestDescribeResourceGroupTask(t *testing.T) {
-// 	rc := &MockRootCoordClientInterface{}
-// 	qc := getQueryCoordClient()
-// 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-// 	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
-// 		Status: merr.Success(),
-// 		ResourceGroup: &querypb.ResourceGroupInfo{
-// 			Name:             "rg",
-// 			Capacity:         2,
-// 			NumAvailableNode: 1,
-// 			NumOutgoingNode:  map[int64]int32{1: 1},
-// 			NumIncomingNode:  map[int64]int32{2: 2},
-// 		},
-// 	}, nil)
+	err := task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
+	groups := task.result.GetResourceGroups()
+	assert.Contains(t, groups, meta.DefaultResourceGroupName)
+	assert.Contains(t, groups, "rg")
+}
 
-// 	ctx := context.Background()
-// 	mgr := newShardClientMgr()
-// 	InitMetaCache(ctx, rc, qc, mgr)
-// 	// make it avoid remote call on rc
-// 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
-// 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
+func TestDescribeResourceGroupTask(t *testing.T) {
+	rc := &MockMixCoordClientInterface{}
+	rc.describeResourceGroup = func(ctx context.Context, request *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+		return &querypb.DescribeResourceGroupResponse{
+			Status: merr.Success(),
+			ResourceGroup: &querypb.ResourceGroupInfo{
+				Name:             "rg",
+				Capacity:         2,
+				NumAvailableNode: 1,
+				NumOutgoingNode:  map[int64]int32{1: 1},
+				NumIncomingNode:  map[int64]int32{2: 2},
+			},
+		}, nil
+	}
 
-// 	req := &milvuspb.DescribeResourceGroupRequest{
-// 		Base: &commonpb.MsgBase{
-// 			MsgID:     1,
-// 			Timestamp: 2,
-// 			TargetID:  3,
-// 		},
-// 		ResourceGroup: "rg",
-// 	}
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, mgr)
+	// make it avoid remote call on rc
+	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
+	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
 
-// 	task := &DescribeResourceGroupTask{
-// 		DescribeResourceGroupRequest: req,
-// 		ctx:                          ctx,
-// 		queryCoord:                   qc,
-// 	}
-// 	task.OnEnqueue()
-// 	task.PreExecute(ctx)
+	req := &milvuspb.DescribeResourceGroupRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:     1,
+			Timestamp: 2,
+			TargetID:  3,
+		},
+		ResourceGroup: "rg",
+	}
 
-// 	assert.Equal(t, commonpb.MsgType_DescribeResourceGroup, task.Type())
-// 	assert.Equal(t, UniqueID(1), task.ID())
-// 	assert.Equal(t, Timestamp(2), task.BeginTs())
-// 	assert.Equal(t, Timestamp(2), task.EndTs())
-// 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
-// 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
+	task := &DescribeResourceGroupTask{
+		DescribeResourceGroupRequest: req,
+		ctx:                          ctx,
+		mixCoord:                     rc,
+	}
+	task.OnEnqueue()
+	task.PreExecute(ctx)
 
-// 	err := task.Execute(ctx)
-// 	assert.NoError(t, err)
-// 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
-// 	groupInfo := task.result.GetResourceGroup()
-// 	outgoingNodeNum := groupInfo.GetNumOutgoingNode()
-// 	incomingNodeNum := groupInfo.GetNumIncomingNode()
-// 	assert.NotNil(t, outgoingNodeNum["collection1"])
-// 	assert.NotNil(t, incomingNodeNum["collection2"])
-// }
+	assert.Equal(t, commonpb.MsgType_DescribeResourceGroup, task.Type())
+	assert.Equal(t, UniqueID(1), task.ID())
+	assert.Equal(t, Timestamp(2), task.BeginTs())
+	assert.Equal(t, Timestamp(2), task.EndTs())
+	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
+	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
 
-// func TestDescribeResourceGroupTaskFailed(t *testing.T) {
-// 	rc := &MockRootCoordClientInterface{}
-// 	qc := getQueryCoordClient()
-// 	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-// 	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
-// 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
-// 	}, nil)
-// 	ctx := context.Background()
-// 	mgr := newShardClientMgr()
-// 	InitMetaCache(ctx, rc, qc, mgr)
-// 	// make it avoid remote call on rc
-// 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
-// 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
+	err := task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
+	groupInfo := task.result.GetResourceGroup()
+	outgoingNodeNum := groupInfo.GetNumOutgoingNode()
+	incomingNodeNum := groupInfo.GetNumIncomingNode()
+	assert.NotNil(t, outgoingNodeNum["collection1"])
+	assert.NotNil(t, incomingNodeNum["collection2"])
+}
 
-// 	req := &milvuspb.DescribeResourceGroupRequest{
-// 		Base: &commonpb.MsgBase{
-// 			MsgID:     1,
-// 			Timestamp: 2,
-// 			TargetID:  3,
-// 		},
-// 		ResourceGroup: "rgggg",
-// 	}
+func TestDescribeResourceGroupTaskFailed(t *testing.T) {
+	rc := &MockMixCoordClientInterface{}
 
-// 	task := &DescribeResourceGroupTask{
-// 		DescribeResourceGroupRequest: req,
-// 		ctx:                          ctx,
-// 		queryCoord:                   qc,
-// 	}
-// 	task.OnEnqueue()
-// 	task.PreExecute(ctx)
+	rc.describeResourceGroup = func(ctx context.Context, request *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+		return &querypb.DescribeResourceGroupResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+		}, nil
+	}
 
-// 	assert.Equal(t, commonpb.MsgType_DescribeResourceGroup, task.Type())
-// 	assert.Equal(t, UniqueID(1), task.ID())
-// 	assert.Equal(t, Timestamp(2), task.BeginTs())
-// 	assert.Equal(t, Timestamp(2), task.EndTs())
-// 	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
-// 	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, mgr)
+	// make it avoid remote call on rc
+	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
+	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
 
-// 	err := task.Execute(ctx)
-// 	assert.NoError(t, err)
-// 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.GetStatus().GetErrorCode())
+	req := &milvuspb.DescribeResourceGroupRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:     1,
+			Timestamp: 2,
+			TargetID:  3,
+		},
+		ResourceGroup: "rgggg",
+	}
 
-// 	qc.ExpectedCalls = nil
-// 	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
-// 		Status: merr.Success(),
-// 		ResourceGroup: &querypb.ResourceGroupInfo{
-// 			Name:             "rg",
-// 			Capacity:         2,
-// 			NumAvailableNode: 1,
-// 			NumOutgoingNode:  map[int64]int32{3: 1},
-// 			NumIncomingNode:  map[int64]int32{4: 2},
-// 		},
-// 	}, nil)
-// 	err = task.Execute(ctx)
-// 	assert.NoError(t, err)
-// 	assert.Len(t, task.result.ResourceGroup.NumOutgoingNode, 0)
-// 	assert.Len(t, task.result.ResourceGroup.NumIncomingNode, 0)
-// }
+	task := &DescribeResourceGroupTask{
+		DescribeResourceGroupRequest: req,
+		ctx:                          ctx,
+		mixCoord:                     rc,
+	}
+	task.OnEnqueue()
+	task.PreExecute(ctx)
+
+	assert.Equal(t, commonpb.MsgType_DescribeResourceGroup, task.Type())
+	assert.Equal(t, UniqueID(1), task.ID())
+	assert.Equal(t, Timestamp(2), task.BeginTs())
+	assert.Equal(t, Timestamp(2), task.EndTs())
+	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
+	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
+
+	err := task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.GetStatus().GetErrorCode())
+
+	rc.describeResourceGroup = func(ctx context.Context, request *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+		return &querypb.DescribeResourceGroupResponse{
+			Status: merr.Success(),
+			ResourceGroup: &querypb.ResourceGroupInfo{
+				Name:             "rg",
+				Capacity:         2,
+				NumAvailableNode: 1,
+				NumOutgoingNode:  map[int64]int32{3: 1},
+				NumIncomingNode:  map[int64]int32{4: 2},
+			},
+		}, nil
+	}
+
+	err = task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, task.result.ResourceGroup.NumOutgoingNode, 0)
+	assert.Len(t, task.result.ResourceGroup.NumIncomingNode, 0)
+}
 
 func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 	rc := NewMixCoordMock()
@@ -3564,91 +3571,83 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	// t.Run("Execute", func(t *testing.T) {
-	// 	err = task.Execute(ctx)
-	// 	assert.NoError(t, err)
+	t.Run("Execute", func(t *testing.T) {
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
 
-	// 	qc := getMixCoordClient()
-	// 	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	// 	qc.EXPECT().ListPolicy(ctx, mock.Anything).Return(&internalpb.ListPolicyResponse{
-	// 		Status: merr.Success(),
-	// 	}, nil).Maybe()
-	// 	qc.EXPECT().DescribeCollection(ctx, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-	// 		Status: merr.Success(),
-	// 	}, nil)
-	// 	// check default partitions
-	// 	err = InitMetaCache(ctx, qc, nil)
-	// 	assert.NoError(t, err)
-	// 	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, "", task.CollectionName)
-	// 	assert.NoError(t, err)
-	// 	assert.Equal(t, task.GetNumPartitions(), int64(len(partitionNames)))
+		// check default partitions
+		err = InitMetaCache(ctx, rc, nil)
+		assert.NoError(t, err)
+		partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, "", task.CollectionName)
+		assert.NoError(t, err)
+		assert.Equal(t, task.GetNumPartitions(), int64(len(partitionNames)))
 
-	// 	createPartitionTask := &createPartitionTask{
-	// 		Condition: NewTaskCondition(ctx),
-	// 		CreatePartitionRequest: &milvuspb.CreatePartitionRequest{
-	// 			Base: &commonpb.MsgBase{
-	// 				MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
-	// 				Timestamp: Timestamp(time.Now().UnixNano()),
-	// 			},
-	// 			DbName:         dbName,
-	// 			CollectionName: collectionName,
-	// 			PartitionName:  "new_partition",
-	// 		},
-	// 		ctx:      ctx,
-	// 		mixCoord: qc,
-	// 	}
-	// 	err = createPartitionTask.PreExecute(ctx)
-	// 	assert.Error(t, err)
+		createPartitionTask := &createPartitionTask{
+			Condition: NewTaskCondition(ctx),
+			CreatePartitionRequest: &milvuspb.CreatePartitionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         dbName,
+				CollectionName: collectionName,
+				PartitionName:  "new_partition",
+			},
+			ctx:      ctx,
+			mixCoord: rc,
+		}
+		err = createPartitionTask.PreExecute(ctx)
+		assert.Error(t, err)
 
-	// 	dropPartitionTask := &dropPartitionTask{
-	// 		Condition: NewTaskCondition(ctx),
-	// 		DropPartitionRequest: &milvuspb.DropPartitionRequest{
-	// 			Base: &commonpb.MsgBase{
-	// 				MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
-	// 				Timestamp: Timestamp(time.Now().UnixNano()),
-	// 			},
-	// 			DbName:         dbName,
-	// 			CollectionName: collectionName,
-	// 			PartitionName:  "new_partition",
-	// 		},
-	// 		ctx:      ctx,
-	// 		mixCoord: qc,
-	// 	}
-	// 	err = dropPartitionTask.PreExecute(ctx)
-	// 	assert.Error(t, err)
+		dropPartitionTask := &dropPartitionTask{
+			Condition: NewTaskCondition(ctx),
+			DropPartitionRequest: &milvuspb.DropPartitionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         dbName,
+				CollectionName: collectionName,
+				PartitionName:  "new_partition",
+			},
+			ctx:      ctx,
+			mixCoord: rc,
+		}
+		err = dropPartitionTask.PreExecute(ctx)
+		assert.Error(t, err)
 
-	// 	loadPartitionTask := &loadPartitionsTask{
-	// 		Condition: NewTaskCondition(ctx),
-	// 		LoadPartitionsRequest: &milvuspb.LoadPartitionsRequest{
-	// 			Base: &commonpb.MsgBase{
-	// 				MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
-	// 				Timestamp: Timestamp(time.Now().UnixNano()),
-	// 			},
-	// 			DbName:         dbName,
-	// 			CollectionName: collectionName,
-	// 			PartitionNames: []string{"_default_0"},
-	// 		},
-	// 		ctx: ctx,
-	// 	}
-	// 	err = loadPartitionTask.PreExecute(ctx)
-	// 	assert.Error(t, err)
+		loadPartitionTask := &loadPartitionsTask{
+			Condition: NewTaskCondition(ctx),
+			LoadPartitionsRequest: &milvuspb.LoadPartitionsRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         dbName,
+				CollectionName: collectionName,
+				PartitionNames: []string{"_default_0"},
+			},
+			ctx: ctx,
+		}
+		err = loadPartitionTask.PreExecute(ctx)
+		assert.Error(t, err)
 
-	// 	releasePartitionsTask := &releasePartitionsTask{
-	// 		Condition: NewTaskCondition(ctx),
-	// 		ReleasePartitionsRequest: &milvuspb.ReleasePartitionsRequest{
-	// 			Base: &commonpb.MsgBase{
-	// 				MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
-	// 				Timestamp: Timestamp(time.Now().UnixNano()),
-	// 			},
-	// 			DbName:         dbName,
-	// 			CollectionName: collectionName,
-	// 			PartitionNames: []string{"_default_0"},
-	// 		},
-	// 		ctx: ctx,
-	// 	}
-	// 	err = releasePartitionsTask.PreExecute(ctx)
-	// 	assert.Error(t, err)
-	// })
+		releasePartitionsTask := &releasePartitionsTask{
+			Condition: NewTaskCondition(ctx),
+			ReleasePartitionsRequest: &milvuspb.ReleasePartitionsRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         dbName,
+				CollectionName: collectionName,
+				PartitionNames: []string{"_default_0"},
+			},
+			ctx: ctx,
+		}
+		err = releasePartitionsTask.PreExecute(ctx)
+		assert.Error(t, err)
+	})
 }
 
 func TestPartitionKey(t *testing.T) {
@@ -4235,39 +4234,44 @@ func TestClusteringKey(t *testing.T) {
 }
 
 func TestAlterCollectionCheckLoaded(t *testing.T) {
-	// qc := NewMixCoordMock()
-	// InitMetaCache(context.Background(), qc, nil)
-	// collectionName := "test_alter_collection_check_loaded"
-	// createColReq := &milvuspb.CreateCollectionRequest{
-	// 	Base: &commonpb.MsgBase{
-	// 		MsgType:   commonpb.MsgType_DropCollection,
-	// 		MsgID:     100,
-	// 		Timestamp: 100,
-	// 	},
-	// 	DbName:         dbName,
-	// 	CollectionName: collectionName,
-	// 	Schema:         nil,
-	// 	ShardsNum:      1,
-	// }
-	// qc.CreateCollection(context.Background(), createColReq)
-	// resp, err := qc.DescribeCollection(context.Background(), &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
-	// assert.NoError(t, err)
+	qc := NewMixCoordMock()
+	InitMetaCache(context.Background(), qc, nil)
+	collectionName := "test_alter_collection_check_loaded"
+	createColReq := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DropCollection,
+			MsgID:     100,
+			Timestamp: 100,
+		},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         nil,
+		ShardsNum:      1,
+	}
+	qc.CreateCollection(context.Background(), createColReq)
+	resp, err := qc.DescribeCollection(context.Background(), &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	assert.NoError(t, err)
 
-	// qc.ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-	// 	Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-	// 	CollectionIDs:       []int64{resp.CollectionID},
-	// 	InMemoryPercentages: []int64{100},
-	// }, nil)
-	// task := &alterCollectionTask{
-	// 	AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-	// 		Base:           &commonpb.MsgBase{},
-	// 		CollectionName: collectionName,
-	// 		Properties:     []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
-	// 	},
-	// 	mixCoord: qc,
-	// }
-	// err = task.PreExecute(context.Background())
-	// assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+	qc.ShowLoadCollectionsFunc = func(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
+		return &querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			CollectionIDs:       []int64{resp.CollectionID},
+			InMemoryPercentages: []int64{100},
+		}, nil
+	}
+
+	task := &alterCollectionTask{
+		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+			Base:           &commonpb.MsgBase{},
+			CollectionName: collectionName,
+			Properties:     []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
+		},
+		mixCoord: qc,
+	}
+	err = task.PreExecute(context.Background())
+	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
 }
 
 func TestTaskPartitionKeyIsolation(t *testing.T) {
@@ -4452,6 +4456,36 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		createIsoCollection(colName, true, false, false)
 		alterTask := getAlterCollectionTask(colName, true)
 		assert.ErrorContains(t, alterTask.PreExecute(ctx), "partition key isolation mode is enabled but current Milvus does not support it")
+	})
+
+	t.Run("alter collection with vec index and isolation", func(t *testing.T) {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		colName := collectionName + "AlterVecIndex"
+		createIsoCollection(colName, true, true, false)
+		resp, err := qc.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: dbName, CollectionName: colName})
+		assert.NoError(t, err)
+		var vecFieldID int64 = 0
+		for _, field := range resp.Schema.Fields {
+			if field.DataType == schemapb.DataType_FloatVector {
+				vecFieldID = field.FieldID
+				break
+			}
+		}
+		assert.NotEqual(t, vecFieldID, int64(0))
+		qc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
+				Status: merr.Success(),
+				IndexInfos: []*indexpb.IndexInfo{
+					{
+						FieldID: vecFieldID,
+					},
+				},
+			}, nil
+		}
+		alterTask := getAlterCollectionTask(colName, false)
+		assert.ErrorContains(t, alterTask.PreExecute(ctx),
+			"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
 	})
 }
 
