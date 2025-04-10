@@ -199,7 +199,7 @@ jobs:
           docker ps
       - name: UT
         run: |
-          sudo mkdir /cores
+          sudo mkdir -p /cores
           sudo chmod 777 /cores
           cat /proc/sys/kernel/core_pattern
           sudo bash -c 'echo "/cores/%e.%p.%t" > /proc/sys/kernel/core_pattern'
