@@ -227,32 +227,28 @@ impl IndexWriterWrapperImpl {
         json_offsets_len: &[usize],
     ) -> Result<()> {
         let mut batch = Vec::with_capacity(BATCH_SIZE);
-        keys.iter()
-            .zip(json_offsets.iter())
-            .zip(json_offsets_len.iter())
-            .try_for_each(|((key, json_offsets), json_offsets_len)| -> Result<()> {
-                let key = unsafe { CStr::from_ptr(*key) }
-                    .to_str()
-                    .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
-                let json_offsets =
-                    unsafe { std::slice::from_raw_parts(*json_offsets, *json_offsets_len) };
+        for i in 0..keys.len() {
+            let key = unsafe { CStr::from_ptr(keys[i]) }
+                .to_str()
+                .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
 
-                for offset in json_offsets {
-                    batch.push(UserOperation::Add(doc!(
-                        self.id_field => *offset,
-                        self.field => key,
-                    )));
+            let json_offsets =
+                unsafe { std::slice::from_raw_parts(json_offsets[i], json_offsets_len[i]) };
 
-                    if batch.len() >= BATCH_SIZE {
-                        self.index_writer.run(std::mem::replace(
-                            &mut batch,
-                            Vec::with_capacity(BATCH_SIZE),
-                        ))?;
-                    }
+            for offset in json_offsets {
+                batch.push(UserOperation::Add(doc!(
+                    self.id_field => *offset,
+                    self.field => key,
+                )));
+
+                if batch.len() >= BATCH_SIZE {
+                    self.index_writer.run(std::mem::replace(
+                        &mut batch,
+                        Vec::with_capacity(BATCH_SIZE),
+                    ))?;
                 }
-
-                Ok(())
-            })?;
+            }
+        }
 
         if !batch.is_empty() {
             self.index_writer.run(batch)?;

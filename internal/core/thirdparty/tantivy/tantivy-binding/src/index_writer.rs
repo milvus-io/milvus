@@ -131,6 +131,8 @@ impl IndexWriterWrapper {
         json_offsets: &[*const i64],
         json_offsets_len: &[usize],
     ) -> Result<()> {
+        assert!(keys.len() == json_offsets.len());
+        assert!(keys.len() == json_offsets_len.len());
         match self {
             IndexWriterWrapper::V5(writer) => {
                 writer.add_json_key_stats(keys, json_offsets, json_offsets_len)
