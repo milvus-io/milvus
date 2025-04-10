@@ -22,7 +22,7 @@ type httpConfig struct {
 	Port                 ParamItem `refreshable:"false"`
 	AcceptTypeAllowInt64 ParamItem `refreshable:"true"`
 	EnablePprof          ParamItem `refreshable:"false"`
-	RequestTimeoutMs     ParamItem `refreshable:"false"`
+	RequestTimeoutMs     ParamItem `refreshable:"true"`
 }
 
 func (p *httpConfig) init(base *BaseTable) {
