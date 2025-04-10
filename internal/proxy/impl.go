@@ -6512,18 +6512,6 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
 	}
 
-	collectionReplicateEnable := paramtable.Get().CommonCfg.CollectionReplicateEnable.GetAsBool()
-	ttMsgEnabled := paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool()
-
-	// replicate message can be use in two ways, otherwise return error
-	// 1. collectionReplicateEnable is false and ttMsgEnabled is false, active/standby mode
-	// 2. collectionReplicateEnable is true and ttMsgEnabled is true, data migration mode
-	if (!collectionReplicateEnable && ttMsgEnabled) || (collectionReplicateEnable && !ttMsgEnabled) {
-		return &milvuspb.ReplicateMessageResponse{
-			Status: merr.Status(merr.ErrDenyReplicateMessage),
-		}, nil
-	}
-
 	var err error
 	if req.GetChannelName() == "" {
 		log.Ctx(ctx).Warn("channel name is empty")
@@ -6552,6 +6540,18 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 		return &milvuspb.ReplicateMessageResponse{
 			Status:   merr.Status(nil),
 			Position: base64.StdEncoding.EncodeToString(positionBytes),
+		}, nil
+	}
+
+	collectionReplicateEnable := paramtable.Get().CommonCfg.CollectionReplicateEnable.GetAsBool()
+	ttMsgEnabled := paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool()
+
+	// replicate message can be use in two ways, otherwise return error
+	// 1. collectionReplicateEnable is false and ttMsgEnabled is false, active/standby mode
+	// 2. collectionReplicateEnable is true and ttMsgEnabled is true, data migration mode
+	if (!collectionReplicateEnable && ttMsgEnabled) || (collectionReplicateEnable && !ttMsgEnabled) {
+		return &milvuspb.ReplicateMessageResponse{
+			Status: merr.Status(merr.ErrDenyReplicateMessage),
 		}, nil
 	}
 
