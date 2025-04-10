@@ -17,6 +17,7 @@ package proxy
 
 import (
 	"context"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -32,25 +33,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-type executeFunc func(context.Context, UniqueID, types.QueryNodeClient, string) error
+type executeFunc func(context.Context, UniqueID, types.QueryNodeClient, string, float64) error
 
 type ChannelWorkload struct {
-	db             string
-	collectionName string
-	collectionID   int64
-	channel        string
-	shardLeaders   []nodeInfo
-	nq             int64
-	exec           executeFunc
-	retryTimes     uint
+	db                             string
+	collectionName                 string
+	collectionID                   int64
+	channel                        string
+	shardLeaders                   []nodeInfo
+	nq                             int64
+	exec                           executeFunc
+	retryTimes                     uint
+	partialResultRequiredDataRatio float64
 }
 
 type CollectionWorkLoad struct {
-	db             string
-	collectionName string
-	collectionID   int64
-	nq             int64
-	exec           executeFunc
+	db                             string
+	collectionName                 string
+	collectionID                   int64
+	nq                             int64
+	exec                           executeFunc
+	partialResultRequiredDataRatio float64
 }
 
 type LBPolicy interface {
@@ -120,63 +123,91 @@ func (lb *LBPolicyImpl) GetShardLeaders(ctx context.Context, dbName string, coll
 
 // try to select the best node from the available nodes
 func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes typeutil.UniqueSet) (nodeInfo, error) {
-	filterDelegator := func(nodes []nodeInfo) map[int64]nodeInfo {
-		ret := make(map[int64]nodeInfo)
+	// Select node using specified nodes
+	trySelectNode := func(nodes []nodeInfo) (nodeInfo, error) {
+		availableNodes := make(map[int64]nodeInfo)
+		serviceableNodes := make(map[int64]nodeInfo, 0)
+		// Filter nodes based on excludeNodes and serviceability
 		for _, node := range nodes {
-			if !excludeNodes.Contain(node.nodeID) {
-				ret[node.nodeID] = node
+			if excludeNodes.Contain(node.nodeID) {
+				continue
+			}
+
+			availableNodes[node.nodeID] = node
+			if node.serviceable {
+				serviceableNodes[node.nodeID] = node
 			}
 		}
-		return ret
-	}
 
-	availableNodes := filterDelegator(workload.shardLeaders)
-	balancer.RegisterNodeInfo(lo.Values(availableNodes))
-	targetNode, err := balancer.SelectNode(ctx, lo.Keys(availableNodes), workload.nq)
+		candidateNodes := availableNodes
+		if workload.partialResultRequiredDataRatio == 1 || len(serviceableNodes) > 0 {
+			// if partial result is disabled, only select serviceable nodes
+			// if there are serviceable nodes, select from serviceable nodes
+			candidateNodes = serviceableNodes
+		}
+
+		if len(candidateNodes) == 0 {
+			return nodeInfo{}, merr.WrapErrChannelNotAvailable(workload.channel)
+		}
+
+		balancer.RegisterNodeInfo(lo.Values(candidateNodes))
+		targetNodeID, err := balancer.SelectNode(ctx, lo.Keys(candidateNodes), workload.nq)
+		if err != nil {
+			return nodeInfo{}, err
+		}
+
+		if _, ok := candidateNodes[targetNodeID]; !ok {
+			return nodeInfo{}, merr.WrapErrChannelNotAvailable(workload.channel)
+		}
+
+		return candidateNodes[targetNodeID], nil
+	}
+	log := log.Ctx(ctx)
+
+	// First attempt with current shard leaders
+	targetNode, err := trySelectNode(workload.shardLeaders)
+	// If failed, refresh cache and retry
 	if err != nil {
-		log := log.Ctx(ctx)
+		candidatesInStr := lo.Map(workload.shardLeaders, func(node nodeInfo, _ int) string {
+			return node.String()
+		})
 		globalMetaCache.DeprecateShardCache(workload.db, workload.collectionName)
 		shardLeaders, err := lb.GetShardLeaders(ctx, workload.db, workload.collectionName, workload.collectionID, false)
 		if err != nil {
 			log.Warn("failed to get shard delegator",
 				zap.Int64("collectionID", workload.collectionID),
 				zap.String("channelName", workload.channel),
+				zap.Int64s("excluded", excludeNodes.Collect()),
+				zap.String("candidates", strings.Join(candidatesInStr, ", ")),
 				zap.Error(err))
 			return nodeInfo{}, err
 		}
 
-		availableNodes = filterDelegator(shardLeaders[workload.channel])
-		if len(availableNodes) == 0 {
-			log.Warn("no available shard delegator found",
-				zap.Int64("collectionID", workload.collectionID),
-				zap.String("channelName", workload.channel),
-				zap.Int64s("availableNodes", lo.Keys(availableNodes)),
-				zap.Int64s("excluded", excludeNodes.Collect()))
-			return nodeInfo{}, merr.WrapErrChannelNotAvailable("no available shard delegator found")
-		}
-
-		balancer.RegisterNodeInfo(lo.Values(availableNodes))
-		targetNode, err = balancer.SelectNode(ctx, lo.Keys(availableNodes), workload.nq)
+		workload.shardLeaders = shardLeaders[workload.channel]
+		// Second attempt with fresh shard leaders
+		targetNode, err = trySelectNode(workload.shardLeaders)
 		if err != nil {
+			candidatesInStr := lo.Map(workload.shardLeaders, func(node nodeInfo, _ int) string {
+				return node.String()
+			})
 			log.Warn("failed to select shard",
 				zap.Int64("collectionID", workload.collectionID),
 				zap.String("channelName", workload.channel),
-				zap.Int64s("availableNodes", lo.Keys(availableNodes)),
 				zap.Int64s("excluded", excludeNodes.Collect()),
+				zap.String("candidates", strings.Join(candidatesInStr, ", ")),
 				zap.Error(err))
 			return nodeInfo{}, err
 		}
 	}
 
-	return availableNodes[targetNode], nil
+	return targetNode, nil
 }
 
 // ExecuteWithRetry will choose a qn to execute the workload, and retry if failed, until reach the max retryTimes.
 func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error {
-	excludeNodes := typeutil.NewUniqueSet()
-
 	var lastErr error
-	err := retry.Do(ctx, func() error {
+	excludeNodes := typeutil.NewUniqueSet()
+	tryExecute := func() error {
 		balancer := lb.getBalancer()
 		targetNode, err := lb.selectNode(ctx, balancer, workload, excludeNodes)
 		if err != nil {
@@ -207,7 +238,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			return lastErr
 		}
 
-		err = workload.exec(ctx, targetNode.nodeID, client, workload.channel)
+		err = workload.exec(ctx, targetNode.nodeID, client, workload.channel, workload.partialResultRequiredDataRatio)
 		if err != nil {
 			log.Warn("search/query channel failed",
 				zap.Int64("collectionID", workload.collectionID),
@@ -220,12 +251,36 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		}
 
 		return nil
-	}, retry.Attempts(workload.retryTimes))
+	}
+
+	var err error
+	partialResultRequiredDataRatio := workload.partialResultRequiredDataRatio
+	tryFullResultOnMultiReplica := len(workload.shardLeaders) > 1 && workload.partialResultRequiredDataRatio != 1
+	if tryFullResultOnMultiReplica {
+		// for multi replicas, try to skip partial result, this may cause some extra rpc to delegator,
+		// for example, send request to delegator which loadedDataRatio=0.8, then failed and retry another delegator which loadedDataRatio=0.2
+		workload.partialResultRequiredDataRatio = 1
+		err = retry.Do(ctx, tryExecute, retry.Attempts(workload.retryTimes))
+		if err != nil {
+			log.Ctx(ctx).Warn("failed to execute with full result",
+				zap.String("channel", workload.channel),
+				zap.Error(err))
+		}
+	}
+
+	// if failed, try to execute with partial result
+	workload.partialResultRequiredDataRatio = partialResultRequiredDataRatio
+	err = retry.Do(ctx, tryExecute, retry.Attempts(workload.retryTimes))
+	if err != nil {
+		log.Ctx(ctx).Warn("failed to execute with partial result",
+			zap.String("channel", workload.channel),
+			zap.Error(err))
+	}
 
 	return err
 }
 
-// Execute will execute collection workload in parallel
+// Execute will execute collection workload in parallel and log success ratio
 func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad) error {
 	dml2leaders, err := lb.GetShardLeaders(ctx, workload.db, workload.collectionName, workload.collectionID, true)
 	if err != nil {
@@ -233,8 +288,22 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		return err
 	}
 
-	// let every request could retry at least twice, which could retry after update shard leader cache
-	wg, ctx := errgroup.WithContext(ctx)
+	totalChannels := len(dml2leaders)
+	if totalChannels == 0 {
+		log.Ctx(ctx).Info("no shard leaders found", zap.Int64("collectionID", workload.collectionID))
+		return merr.WrapErrCollectionNotLoaded(workload.collectionID)
+	}
+
+	// Structure to hold the result of each channel execution
+	type channelResult struct {
+		channel string
+		err     error
+	}
+	// Buffered channel to collect resultCh from all goroutines
+	resultCh := make(chan channelResult, totalChannels)
+
+	wg, _ := errgroup.WithContext(ctx)
+	// Launch a goroutine for each channel
 	for k, v := range dml2leaders {
 		channel := k
 		nodes := v
@@ -243,20 +312,68 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 			channelRetryTimes *= len(nodes)
 		}
 		wg.Go(func() error {
-			return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-				db:             workload.db,
-				collectionName: workload.collectionName,
-				collectionID:   workload.collectionID,
-				channel:        channel,
-				shardLeaders:   nodes,
-				nq:             workload.nq,
-				exec:           workload.exec,
-				retryTimes:     uint(channelRetryTimes),
+			err := lb.ExecuteWithRetry(ctx, ChannelWorkload{
+				db:                             workload.db,
+				collectionName:                 workload.collectionName,
+				collectionID:                   workload.collectionID,
+				channel:                        channel,
+				shardLeaders:                   nodes,
+				nq:                             workload.nq,
+				exec:                           workload.exec,
+				retryTimes:                     uint(channelRetryTimes),
+				partialResultRequiredDataRatio: workload.partialResultRequiredDataRatio,
 			})
+
+			// Send result to the results channel
+			resultCh <- channelResult{channel: channel, err: err}
+			if err != nil {
+				// check if partial result is disabled, if so, let all sub tasks fail fast
+				if workload.partialResultRequiredDataRatio == 1 {
+					return err
+				}
+			}
+
+			// Return nil to prevent errgroup from canceling other goroutines
+			return nil
 		})
 	}
 
-	return wg.Wait()
+	// Wait for all goroutines to complete
+	wg.Wait()
+	close(resultCh)
+
+	// Collect statistics and errors
+	successCount := 0
+	failedChannels := make([]string, 0)
+	var errors []error
+
+	// Process all results
+	for result := range resultCh {
+		if result.err == nil {
+			successCount++
+		} else {
+			failedChannels = append(failedChannels, result.channel)
+			errors = append(errors, result.err)
+		}
+	}
+
+	accessDataRatio := float64(successCount) / float64(totalChannels)
+	if accessDataRatio < 1.0 {
+		log.Ctx(ctx).Info("partial result executed completed",
+			zap.Int64("collectionID", workload.collectionID),
+			zap.Float64("successRatio", accessDataRatio),
+			zap.Float64("partialResultRequiredDataRatio", workload.partialResultRequiredDataRatio),
+			zap.Strings("failedChannels", failedChannels),
+			zap.Errors("errors", errors),
+		)
+	}
+
+	if accessDataRatio >= workload.partialResultRequiredDataRatio {
+		return nil
+	}
+
+	// todo:  refine to a user friendly error
+	return merr.Combine(errors...)
 }
 
 func (lb *LBPolicyImpl) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {

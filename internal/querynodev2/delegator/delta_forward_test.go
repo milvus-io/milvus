@@ -155,7 +155,7 @@ func (s *StreamingForwardSuite) SetupTest() {
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
-	}, 10000, nil, s.chunkManager)
+	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 
 	sd, ok := delegator.(*shardDelegator)
@@ -185,7 +185,13 @@ func (s *StreamingForwardSuite) TestBFStreamingForward() {
 		PartitionID: 1,
 		SegmentID:   102,
 	})
-	delegator.distribution.SyncTargetVersion(1, []int64{1}, []int64{100}, []int64{101, 102}, nil)
+	delegator.distribution.SyncReadableChannelView(&querypb.SyncAction{
+		TargetVersion:   1,
+		GrowingInTarget: []int64{100},
+		SealedInTarget:  []int64{101, 102},
+		DroppedInTarget: nil,
+		Checkpoint:      nil,
+	}, []int64{1})
 
 	// Setup pk oracle
 	// empty bfs will not match
@@ -238,7 +244,13 @@ func (s *StreamingForwardSuite) TestDirectStreamingForward() {
 		PartitionID: 1,
 		SegmentID:   102,
 	})
-	delegator.distribution.SyncTargetVersion(1, []int64{1}, []int64{100}, []int64{101, 102}, nil)
+	delegator.distribution.SyncReadableChannelView(&querypb.SyncAction{
+		TargetVersion:   1,
+		GrowingInTarget: []int64{100},
+		SealedInTarget:  []int64{101, 102},
+		DroppedInTarget: nil,
+		Checkpoint:      nil,
+	}, []int64{1})
 
 	// Setup pk oracle
 	// empty bfs will not match
@@ -386,7 +398,7 @@ func (s *GrowingMergeL0Suite) SetupTest() {
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
-	}, 10000, nil, s.chunkManager)
+	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 
 	sd, ok := delegator.(*shardDelegator)

@@ -771,7 +771,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			plan: plan,
 		}
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn, "")
+			return workload.exec(ctx, 1, qn, "", 1.0)
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
@@ -820,7 +820,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		stream.EXPECT().Produce(mock.Anything, mock.Anything).Return(nil)
 
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn, "")
+			return workload.exec(ctx, 1, qn, "", 1.0)
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
@@ -885,7 +885,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			plan: plan,
 		}
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn, "")
+			return workload.exec(ctx, 1, qn, "", 1.0)
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
@@ -950,7 +950,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		mockMgr.EXPECT().getOrCreateDmlStream(mock.Anything, mock.Anything).Return(stream, nil)
 		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn, "")
+			return workload.exec(ctx, 1, qn, "", 1.0)
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
@@ -1016,7 +1016,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		mockMgr.EXPECT().getOrCreateDmlStream(mock.Anything, mock.Anything).Return(stream, nil)
 		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn, "")
+			return workload.exec(ctx, 1, qn, "", 1.0)
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
@@ -1092,7 +1092,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		mockMgr.EXPECT().getOrCreateDmlStream(mock.Anything, mock.Anything).Return(stream, nil)
 		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload CollectionWorkLoad) error {
-			return workload.exec(ctx, 1, qn, "")
+			return workload.exec(ctx, 1, qn, "", 1.0)
 		})
 
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(

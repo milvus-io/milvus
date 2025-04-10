@@ -100,8 +100,14 @@ func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64) erro
 	return nil
 }
 
-func GetShardLeadersWithChannels(ctx context.Context, m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager,
-	nodeMgr *session.NodeManager, collectionID int64, channels map[string]*meta.DmChannel,
+func GetShardLeadersWithChannels(
+	ctx context.Context,
+	m *meta.Meta,
+	dist *meta.DistributionManager,
+	nodeMgr *session.NodeManager,
+	collectionID int64,
+	channels map[string]*meta.DmChannel,
+	withUnserviceableShards bool,
 ) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
 
@@ -111,9 +117,10 @@ func GetShardLeadersWithChannels(ctx context.Context, m *meta.Meta, targetMgr me
 
 		ids := make([]int64, 0, len(replicas))
 		addrs := make([]string, 0, len(replicas))
+		serviceable := make([]bool, 0, len(replicas))
 		for _, replica := range replicas {
 			leader := dist.ChannelDistManager.GetShardLeader(channel.GetChannelName(), replica)
-			if leader == nil || !leader.IsServiceable() {
+			if leader == nil || (!withUnserviceableShards && !leader.IsServiceable()) {
 				log.WithRateGroup("util.GetShardLeaders", 1, 60).
 					Warn("leader is not available in replica", zap.String("channel", channel.GetChannelName()), zap.Int64("replicaID", replica.GetID()))
 				continue
@@ -122,11 +129,11 @@ func GetShardLeadersWithChannels(ctx context.Context, m *meta.Meta, targetMgr me
 			if info != nil {
 				ids = append(ids, info.ID())
 				addrs = append(addrs, info.Addr())
+				serviceable = append(serviceable, leader.IsServiceable())
 			}
 		}
 
-		// to avoid node down during GetShardLeaders
-		if len(ids) == 0 {
+		if len(ids) == 0 && !withUnserviceableShards {
 			err := merr.WrapErrChannelNotAvailable(channel.GetChannelName())
 			msg := fmt.Sprintf("channel %s is not available in any replica", channel.GetChannelName())
 			log.Warn(msg, zap.Error(err))
@@ -137,25 +144,36 @@ func GetShardLeadersWithChannels(ctx context.Context, m *meta.Meta, targetMgr me
 			ChannelName: channel.GetChannelName(),
 			NodeIds:     ids,
 			NodeAddrs:   addrs,
+			Serviceable: serviceable,
 		})
 	}
 
 	return ret, nil
 }
 
-func GetShardLeaders(ctx context.Context, m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager, nodeMgr *session.NodeManager, collectionID int64) ([]*querypb.ShardLeadersList, error) {
-	if err := checkLoadStatus(ctx, m, collectionID); err != nil {
-		return nil, err
+func GetShardLeaders(ctx context.Context,
+	m *meta.Meta,
+	targetMgr meta.TargetManagerInterface,
+	dist *meta.DistributionManager,
+	nodeMgr *session.NodeManager,
+	collectionID int64,
+	withUnserviceableShards bool,
+) ([]*querypb.ShardLeadersList, error) {
+	if !withUnserviceableShards {
+		// skip check load status if withUnserviceableShards is true
+		if err := checkLoadStatus(ctx, m, collectionID); err != nil {
+			return nil, err
+		}
 	}
 
-	channels := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
-	if len(channels) == 0 {
+	channels := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTargetFirst)
+	if !withUnserviceableShards && len(channels) == 0 {
 		msg := "loaded collection do not found any channel in target, may be in recovery"
 		err := merr.WrapErrCollectionOnRecovering(collectionID, msg)
 		log.Ctx(ctx).Warn("failed to get channels", zap.Error(err))
 		return nil, err
 	}
-	return GetShardLeadersWithChannels(ctx, m, targetMgr, dist, nodeMgr, collectionID, channels)
+	return GetShardLeadersWithChannels(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards)
 }
 
 // CheckCollectionsQueryable check all channels are watched and all segments are loaded for this collection
@@ -194,7 +212,7 @@ func checkCollectionQueryable(ctx context.Context, m *meta.Meta, targetMgr meta.
 		return err
 	}
 
-	shardList, err := GetShardLeadersWithChannels(ctx, m, targetMgr, dist, nodeMgr, collectionID, channels)
+	shardList, err := GetShardLeadersWithChannels(ctx, m, dist, nodeMgr, collectionID, channels, false)
 	if err != nil {
 		return err
 	}

@@ -8,8 +8,6 @@ import (
 	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	mock "github.com/stretchr/testify/mock"
 
-	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-
 	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -244,19 +242,19 @@ func (_c *MockShardDelegator_GetPartitionStatsVersions_Call) RunAndReturn(run fu
 }
 
 // GetQueryView provides a mock function with given fields:
-func (_m *MockShardDelegator) GetQueryView() *QueryView {
+func (_m *MockShardDelegator) GetQueryView() *channelQueryView {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetQueryView")
 	}
 
-	var r0 *QueryView
-	if rf, ok := ret.Get(0).(func() *QueryView); ok {
+	var r0 *channelQueryView
+	if rf, ok := ret.Get(0).(func() *channelQueryView); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*QueryView)
+			r0 = ret.Get(0).(*channelQueryView)
 		}
 	}
 
@@ -280,12 +278,12 @@ func (_c *MockShardDelegator_GetQueryView_Call) Run(run func()) *MockShardDelega
 	return _c
 }
 
-func (_c *MockShardDelegator_GetQueryView_Call) Return(_a0 *QueryView) *MockShardDelegator_GetQueryView_Call {
+func (_c *MockShardDelegator_GetQueryView_Call) Return(_a0 *channelQueryView) *MockShardDelegator_GetQueryView_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockShardDelegator_GetQueryView_Call) RunAndReturn(run func() *QueryView) *MockShardDelegator_GetQueryView_Call {
+func (_c *MockShardDelegator_GetQueryView_Call) RunAndReturn(run func() *channelQueryView) *MockShardDelegator_GetQueryView_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -713,7 +711,7 @@ func (_c *MockShardDelegator_ProcessInsert_Call) RunAndReturn(run func(map[int64
 }
 
 // Query provides a mock function with given fields: ctx, req
-func (_m *MockShardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
+func (_m *MockShardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, float64, error) {
 	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
@@ -721,8 +719,9 @@ func (_m *MockShardDelegator) Query(ctx context.Context, req *querypb.QueryReque
 	}
 
 	var r0 []*internalpb.RetrieveResults
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)); ok {
+	var r1 float64
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) ([]*internalpb.RetrieveResults, float64, error)); ok {
 		return rf(ctx, req)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) []*internalpb.RetrieveResults); ok {
@@ -733,13 +732,19 @@ func (_m *MockShardDelegator) Query(ctx context.Context, req *querypb.QueryReque
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *querypb.QueryRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.QueryRequest) float64); ok {
 		r1 = rf(ctx, req)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(float64)
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(context.Context, *querypb.QueryRequest) error); ok {
+		r2 = rf(ctx, req)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // MockShardDelegator_Query_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Query'
@@ -761,12 +766,12 @@ func (_c *MockShardDelegator_Query_Call) Run(run func(ctx context.Context, req *
 	return _c
 }
 
-func (_c *MockShardDelegator_Query_Call) Return(_a0 []*internalpb.RetrieveResults, _a1 error) *MockShardDelegator_Query_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockShardDelegator_Query_Call) Return(_a0 []*internalpb.RetrieveResults, _a1 float64, _a2 error) *MockShardDelegator_Query_Call {
+	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *MockShardDelegator_Query_Call) RunAndReturn(run func(context.Context, *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)) *MockShardDelegator_Query_Call {
+func (_c *MockShardDelegator_Query_Call) RunAndReturn(run func(context.Context, *querypb.QueryRequest) ([]*internalpb.RetrieveResults, float64, error)) *MockShardDelegator_Query_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -868,7 +873,7 @@ func (_c *MockShardDelegator_ReleaseSegments_Call) RunAndReturn(run func(context
 }
 
 // Search provides a mock function with given fields: ctx, req
-func (_m *MockShardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
+func (_m *MockShardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, float64, error) {
 	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
@@ -876,8 +881,9 @@ func (_m *MockShardDelegator) Search(ctx context.Context, req *querypb.SearchReq
 	}
 
 	var r0 []*internalpb.SearchResults
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SearchRequest) ([]*internalpb.SearchResults, error)); ok {
+	var r1 float64
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SearchRequest) ([]*internalpb.SearchResults, float64, error)); ok {
 		return rf(ctx, req)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SearchRequest) []*internalpb.SearchResults); ok {
@@ -888,13 +894,19 @@ func (_m *MockShardDelegator) Search(ctx context.Context, req *querypb.SearchReq
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *querypb.SearchRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.SearchRequest) float64); ok {
 		r1 = rf(ctx, req)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(float64)
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(context.Context, *querypb.SearchRequest) error); ok {
+		r2 = rf(ctx, req)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // MockShardDelegator_Search_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Search'
@@ -916,12 +928,12 @@ func (_c *MockShardDelegator_Search_Call) Run(run func(ctx context.Context, req 
 	return _c
 }
 
-func (_c *MockShardDelegator_Search_Call) Return(_a0 []*internalpb.SearchResults, _a1 error) *MockShardDelegator_Search_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockShardDelegator_Search_Call) Return(_a0 []*internalpb.SearchResults, _a1 float64, _a2 error) *MockShardDelegator_Search_Call {
+	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *MockShardDelegator_Search_Call) RunAndReturn(run func(context.Context, *querypb.SearchRequest) ([]*internalpb.SearchResults, error)) *MockShardDelegator_Search_Call {
+func (_c *MockShardDelegator_Search_Call) RunAndReturn(run func(context.Context, *querypb.SearchRequest) ([]*internalpb.SearchResults, float64, error)) *MockShardDelegator_Search_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1085,42 +1097,42 @@ func (_c *MockShardDelegator_SyncPartitionStats_Call) RunAndReturn(run func(cont
 	return _c
 }
 
-// SyncTargetVersion provides a mock function with given fields: newVersion, partitions, growingInTarget, sealedInTarget, droppedInTarget, checkpoint, deleteSeekPos
-func (_m *MockShardDelegator) SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition, deleteSeekPos *msgpb.MsgPosition) {
-	_m.Called(newVersion, partitions, growingInTarget, sealedInTarget, droppedInTarget, checkpoint, deleteSeekPos)
+// SyncReadableTarget provides a mock function with given fields: action, partitions
+func (_m *MockShardDelegator) SyncReadableTarget(action *querypb.SyncAction, partitions []int64) {
+	_m.Called(action, partitions)
 }
 
-// MockShardDelegator_SyncTargetVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncTargetVersion'
-type MockShardDelegator_SyncTargetVersion_Call struct {
+// MockShardDelegator_SyncReadableTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncReadableTarget'
+type MockShardDelegator_SyncReadableTarget_Call struct {
 	*mock.Call
 }
 
-// SyncTargetVersion is a helper method to define mock.On call
-//   - newVersion int64
+// SyncReadableTarget is a helper method to define mock.On call
+//   - action *querypb.SyncAction
 //   - partitions []int64
-//   - growingInTarget []int64
-//   - sealedInTarget []int64
-//   - droppedInTarget []int64
-//   - checkpoint *msgpb.MsgPosition
-//   - deleteSeekPos *msgpb.MsgPosition
-func (_e *MockShardDelegator_Expecter) SyncTargetVersion(newVersion interface{}, partitions interface{}, growingInTarget interface{}, sealedInTarget interface{}, droppedInTarget interface{}, checkpoint interface{}, deleteSeekPos interface{}) *MockShardDelegator_SyncTargetVersion_Call {
-	return &MockShardDelegator_SyncTargetVersion_Call{Call: _e.mock.On("SyncTargetVersion", newVersion, partitions, growingInTarget, sealedInTarget, droppedInTarget, checkpoint, deleteSeekPos)}
+func (_e *MockShardDelegator_Expecter) SyncReadableTarget(action interface{}, partitions interface{}) *MockShardDelegator_SyncReadableTarget_Call {
+	return &MockShardDelegator_SyncReadableTarget_Call{Call: _e.mock.On("SyncReadableTarget", action, partitions)}
 }
 
-func (_c *MockShardDelegator_SyncTargetVersion_Call) Run(run func(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition, deleteSeekPos *msgpb.MsgPosition)) *MockShardDelegator_SyncTargetVersion_Call {
+func (_c *MockShardDelegator_SyncReadableTarget_Call) Run(run func(action *querypb.SyncAction, partitions []int64)) *MockShardDelegator_SyncReadableTarget_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].([]int64), args[2].([]int64), args[3].([]int64), args[4].([]int64), args[5].(*msgpb.MsgPosition), args[6].(*msgpb.MsgPosition))
+		run(args[0].(*querypb.SyncAction), args[1].([]int64))
 	})
 	return _c
 }
 
-func (_c *MockShardDelegator_SyncTargetVersion_Call) Return() *MockShardDelegator_SyncTargetVersion_Call {
+func (_c *MockShardDelegator_SyncReadableTarget_Call) Return() *MockShardDelegator_SyncReadableTarget_Call {
 	_c.Call.Return()
 	return _c
 }
 
+<<<<<<< HEAD
 func (_c *MockShardDelegator_SyncTargetVersion_Call) RunAndReturn(run func(int64, []int64, []int64, []int64, []int64, *msgpb.MsgPosition, *msgpb.MsgPosition)) *MockShardDelegator_SyncTargetVersion_Call {
 	_c.Run(run)
+=======
+func (_c *MockShardDelegator_SyncReadableTarget_Call) RunAndReturn(run func(*querypb.SyncAction, []int64)) *MockShardDelegator_SyncReadableTarget_Call {
+	_c.Call.Return(run)
+>>>>>>> d4ef0b8558 (enable partial result on delegator before all segment is loaded)
 	return _c
 }
 

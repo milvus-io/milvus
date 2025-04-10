@@ -119,8 +119,9 @@ func TestQueryTask_all(t *testing.T) {
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
 				},
-				CollectionID:   collectionID,
-				OutputFieldsId: make([]int64, len(fieldName2Types)),
+				CollectionID:                   collectionID,
+				OutputFieldsId:                 make([]int64, len(fieldName2Types)),
+				PartialResultRequiredDataRatio: 1.0,
 			},
 			ctx: ctx,
 			result: &milvuspb.QueryResults{

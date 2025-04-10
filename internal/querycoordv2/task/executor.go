@@ -384,6 +384,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		return merr.WrapErrServiceInternal(fmt.Sprintf("failed to get partitions for collection=%d", task.CollectionID()))
 	}
 
+	version := ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst)
 	req := packSubChannelRequest(
 		task,
 		action,
@@ -392,6 +393,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		dmChannel,
 		indexInfo,
 		partitions,
+		version,
 	)
 	err = fillSubChannelRequest(ctx, req, ex.broker, ex.shouldIncludeFlushedSegmentInfo(action.Node()))
 	if err != nil {

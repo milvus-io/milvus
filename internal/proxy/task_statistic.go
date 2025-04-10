@@ -259,11 +259,12 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 		g.resultBuf = typeutil.NewConcurrentSet[*internalpb.GetStatisticsResponse]()
 	}
 	err := g.lb.Execute(ctx, CollectionWorkLoad{
-		db:             g.request.GetDbName(),
-		collectionID:   g.GetStatisticsRequest.CollectionID,
-		collectionName: g.collectionName,
-		nq:             1,
-		exec:           g.getStatisticsShard,
+		db:                             g.request.GetDbName(),
+		collectionID:                   g.GetStatisticsRequest.CollectionID,
+		collectionName:                 g.collectionName,
+		nq:                             1,
+		exec:                           g.getStatisticsShard,
+		partialResultRequiredDataRatio: 1.0, // disable partial result on statistic request
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to statistic")
@@ -272,7 +273,7 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	return nil
 }
 
-func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 	nodeReq := proto.Clone(g.GetStatisticsRequest).(*internalpb.GetStatisticsRequest)
 	nodeReq.Base.TargetID = nodeID
 	req := &querypb.GetStatisticsRequest{

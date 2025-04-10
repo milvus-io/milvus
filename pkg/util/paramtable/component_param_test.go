@@ -232,6 +232,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
 		params.Save("proxy.maxPasswordLength", "-10")
 		assert.Equal(t, 72, Params.MaxPasswordLength.GetAsInt())
+
+		assert.Equal(t, 1.0, Params.PartialResultRequiredDataRatio.GetAsFloat())
+		params.Save("proxy.partialResultRequiredDataRatio", "0.8")
+		assert.Equal(t, 0.8, Params.PartialResultRequiredDataRatio.GetAsFloat())
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {

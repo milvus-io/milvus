@@ -2950,6 +2950,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil
@@ -2981,8 +2982,9 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 				MsgType:  commonpb.MsgType_Retrieve,
 				SourceID: paramtable.GetNodeID(),
 			},
-			CollectionID:   collectionID,
-			OutputFieldsId: make([]int64, len(fieldName2Types)),
+			CollectionID:                   collectionID,
+			OutputFieldsId:                 make([]int64, len(fieldName2Types)),
+			PartialResultRequiredDataRatio: 1.0,
 		},
 		ctx: ctx,
 		result: &milvuspb.SearchResults{
@@ -3626,7 +3628,7 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		lb := NewMockLBPolicy(t)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
-			err = workload.exec(ctx, 0, qn, "")
+			err = workload.exec(ctx, 0, qn, "", 1.0)
 			assert.NoError(t, err)
 		}).Return(nil)
 		lb.EXPECT().UpdateCostMetrics(mock.Anything, mock.Anything).Return()
@@ -3708,7 +3710,7 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		lb := NewMockLBPolicy(t)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
-			_ = workload.exec(ctx, 0, qn, "")
+			_ = workload.exec(ctx, 0, qn, "", 1.0)
 		}).Return(errors.New("mock err 1"))
 		node.lbPolicy = lb
 
@@ -3743,7 +3745,7 @@ func TestSearchTask_Requery(t *testing.T) {
 
 		lb := NewMockLBPolicy(t)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
-			_ = workload.exec(ctx, 0, qn, "")
+			_ = workload.exec(ctx, 0, qn, "", 1.0)
 		}).Return(errors.New("mock err 1"))
 		node.lbPolicy = lb
 
