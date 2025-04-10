@@ -53,6 +53,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) SetupTest() {
 	paramtable.Get().Save("common.storageType", "local")
 	paramtable.Get().Save("common.storage.enableV2", "true")
 	initcore.InitStorageV2FileSystem(paramtable.Get())
+	refreshPlanParams(s.plan)
 }
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TearDownTest() {
@@ -143,6 +144,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2ToV1Format() {
 	paramtable.Get().Save("common.storage.enableV2", "false")
+	refreshPlanParams(s.plan)
 
 	var segmentID int64 = 1001
 
@@ -220,6 +222,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestCompactionWithBM25Function(
 	// writer will automatically flush after 1024 rows.
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "45000")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
+	refreshPlanParams(s.plan)
 	s.prepareCompactionWithBM25FunctionTask()
 	compactionResult, err := s.task.Compact()
 	s.Require().NoError(err)
@@ -242,6 +245,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormalByMem
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key)
+	refreshPlanParams(s.plan)
 
 	compactionResult, err := s.task.Compact()
 	s.Require().NoError(err)
