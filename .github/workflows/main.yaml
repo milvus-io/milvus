@@ -44,7 +44,7 @@ concurrency:
 jobs:
   Build:
     name: Build and test AMD64 Ubuntu 22.04
-    runs-on: ubuntu-latest
+    runs-on: [ubuntu-latest, self-runner]
     steps:
       - name: 'Setup $HOME'
         # hot fix
@@ -168,7 +168,7 @@ jobs:
   UT-Go:
     name: UT for Go
     needs: Build
-    runs-on: ubuntu-latest
+    runs-on: [ubuntu-latest, self-runner]
     timeout-minutes: 90
     steps:
       - name: Maximize build space
