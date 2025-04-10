@@ -58,11 +58,18 @@ JsonKeyStatsInvertedIndex::AddJSONEncodeValue(
 void
 JsonKeyStatsInvertedIndex::AddInvertedRecord(
     std::map<std::string, std::vector<int64_t>>& mp) {
+    std::vector<uintptr_t> json_offsets_lens;
+    std::vector<const char*> keys;
+    std::vector<const int64_t*> json_offsets;
     for (auto& iter : mp) {
-        for (auto value : iter.second) {
-            wrapper_->add_array_data<std::string>(&iter.first, 1, value);
-        }
+        keys.push_back(iter.first.c_str());
+        json_offsets.push_back(iter.second.data());
+        json_offsets_lens.push_back(iter.second.size());
     }
+    wrapper_->add_json_key_stats_data_by_batch(keys.data(),
+                                               json_offsets.data(),
+                                               json_offsets_lens.data(),
+                                               keys.size());
 }
 
 void
@@ -307,6 +314,20 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
 IndexStatsPtr
 JsonKeyStatsInvertedIndex::Upload(const Config& config) {
     finish();
+
+    index_build_timestamps_.index_build_done_ =
+        std::chrono::system_clock::now();
+    LOG_INFO(
+        "build json key index done for field id:{}, json parse duration: {}s, "
+        "tantivy document add schedule duration : {}s, "
+        "tantivy total duration : {}s, "
+        "total duration : {}s",
+        field_id_,
+        index_build_timestamps_.getJsonParsingDuration(),
+        index_build_timestamps_.getTantivyAddSchedulingDuration(),
+        index_build_timestamps_.getTantivyTotalDuration(),
+        index_build_timestamps_.getIndexBuildTotalDuration());
+
     boost::filesystem::path p(path_);
     boost::filesystem::directory_iterator end_iter;
 
@@ -386,6 +407,8 @@ JsonKeyStatsInvertedIndex::BuildWithFieldData(
     const std::vector<FieldDataPtr>& field_datas, bool nullable) {
     int64_t offset = 0;
     std::map<std::string, std::vector<int64_t>> mp;
+    index_build_timestamps_.index_build_begin_ =
+        std::chrono::system_clock::now();
     if (nullable) {
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
@@ -412,8 +435,13 @@ JsonKeyStatsInvertedIndex::BuildWithFieldData(
             }
         }
     }
+    index_build_timestamps_.tantivy_build_begin_ =
+        std::chrono::system_clock::now();
+
+    // Schedule all document add operations to tantivy.
     AddInvertedRecord(mp);
-    LOG_INFO("build json key index done for field id:{}", field_id_);
+    index_build_timestamps_.tantivy_add_schedule_end_ =
+        std::chrono::system_clock::now();
 }
 
 void

@@ -302,6 +302,49 @@ impl IndexWriterWrapperImpl {
         Ok(())
     }
 
+    pub fn add_json_key_stats(
+        &mut self,
+        keys: &[*const i8],
+        json_offsets: &[*const i64],
+        json_offsets_len: &[usize],
+    ) -> Result<()> {
+        let writer = self.index_writer.as_ref().left().unwrap();
+        let id_field = self.id_field.unwrap();
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+        keys.iter()
+            .zip(json_offsets.iter())
+            .zip(json_offsets_len.iter())
+            .try_for_each(|((key, json_offsets), json_offsets_len)| -> Result<()> {
+                let key = unsafe { CStr::from_ptr(*key) }
+                    .to_str()
+                    .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+                let json_offsets =
+                    unsafe { std::slice::from_raw_parts(*json_offsets, *json_offsets_len) };
+
+                for offset in json_offsets {
+                    batch.push(UserOperation::Add(doc!(
+                        id_field => *offset,
+                        self.field => key,
+                    )));
+
+                    if batch.len() >= BATCH_SIZE {
+                        writer.run(std::mem::replace(
+                            &mut batch,
+                            Vec::with_capacity(BATCH_SIZE),
+                        ))?;
+                    }
+                }
+
+                Ok(())
+            })?;
+
+        if !batch.is_empty() {
+            writer.run(batch)?;
+        }
+
+        Ok(())
+    }
+
     pub fn manual_merge(&mut self) -> Result<()> {
         let index_writer = self.index_writer.as_mut().left().unwrap();
         let metas = index_writer.index().searchable_segment_metas()?;
