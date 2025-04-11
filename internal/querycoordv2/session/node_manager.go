@@ -31,6 +31,7 @@ import (
 type Manager interface {
 	Add(node *NodeInfo)
 	Stopping(nodeID int64)
+	IsStoppingNode(nodeID int64) (bool, error)
 	Remove(nodeID int64)
 	Get(nodeID int64) *NodeInfo
 	GetAll() []*NodeInfo
@@ -38,6 +39,8 @@ type Manager interface {
 	Suspend(nodeID int64) error
 	Resume(nodeID int64) error
 }
+
+var _ Manager = &NodeManager{}
 
 type NodeManager struct {
 	mu    sync.RWMutex
@@ -64,6 +67,30 @@ func (m *NodeManager) Stopping(nodeID int64) {
 	if nodeInfo, ok := m.nodes[nodeID]; ok {
 		nodeInfo.SetState(NodeStateStopping)
 	}
+}
+
+func (m *NodeManager) Suspend(nodeID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if nodeInfo, ok := m.nodes[nodeID]; ok {
+		if state := nodeInfo.GetState(); state == NodeStateStopping {
+			return fmt.Errorf("nodeID[%d] is stopping", nodeID)
+		}
+		nodeInfo.SetState(NodeStateSuspend)
+	}
+	return nil
+}
+
+func (m *NodeManager) Resume(nodeID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if nodeInfo, ok := m.nodes[nodeID]; ok {
+		if state := nodeInfo.GetState(); state == NodeStateStopping {
+			return fmt.Errorf("nodeID[%d] is stopping", nodeID)
+		}
+		nodeInfo.SetState(NodeStateNormal)
+	}
+	return nil
 }
 
 func (m *NodeManager) IsStoppingNode(nodeID int64) (bool, error) {
@@ -118,11 +145,13 @@ type ImmutableNodeInfo struct {
 const (
 	NodeStateNormal State = iota
 	NodeStateStopping
+	NodeStateSuspend
 )
 
 var stateNameMap = map[State]string{
 	NodeStateNormal:   NormalStateName,
 	NodeStateStopping: StoppingStateName,
+	NodeStateSuspend:  SuspendStateName,
 }
 
 func (s State) String() string {
