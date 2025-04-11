@@ -46,6 +46,7 @@ impl Collector for MilvusIdCollector {
 impl SegmentCollector for MilvusIdChildCollector {
     type Fruit = Vec<u32>;
 
+    #[inline]
     fn collect_block(&mut self, docs: &[DocId]) {
         self.milvus_doc_ids.extend(docs);
     }
@@ -55,6 +56,7 @@ impl SegmentCollector for MilvusIdChildCollector {
         self.collect_block(&[doc]);
     }
 
+    #[inline]
     fn harvest(self) -> Self::Fruit {
         self.milvus_doc_ids
     }
