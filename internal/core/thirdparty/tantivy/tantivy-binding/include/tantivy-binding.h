@@ -103,6 +103,13 @@ void hashmap_set_value(void *map, const char *key, const char *value);
 
 void free_hashmap(void *map);
 
+RustResult tantivy_create_json_key_stats_writer(const char *field_name,
+                                                const char *path,
+                                                uint32_t tantivy_index_version,
+                                                uintptr_t num_threads,
+                                                uintptr_t overall_memory_budget_in_bytes,
+                                                bool in_ram);
+
 RustResult tantivy_load_index(const char *path);
 
 void tantivy_free_index_reader(void *ptr);
@@ -182,8 +189,7 @@ RustResult tantivy_create_index(const char *field_name,
                                 const char *path,
                                 uint32_t tantivy_index_version,
                                 uintptr_t num_threads,
-                                uintptr_t overall_memory_budget_in_bytes,
-                                bool in_ram);
+                                uintptr_t overall_memory_budget_in_bytes);
 
 RustResult tantivy_create_index_with_single_segment(const char *field_name,
                                                     TantivyDataType data_type,

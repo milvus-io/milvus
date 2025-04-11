@@ -1,3 +1,4 @@
+use log::info;
 use std::sync::Arc;
 
 use either::Either;
@@ -5,7 +6,6 @@ use tantivy_5::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, Tex
 use tantivy_5::Index;
 
 use crate::error::Result;
-use crate::log::init_log;
 
 use super::analyzer::create_analyzer;
 use super::IndexWriterWrapperImpl;
@@ -32,7 +32,10 @@ impl IndexWriterWrapperImpl {
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
     ) -> Result<IndexWriterWrapperImpl> {
-        init_log();
+        info!(
+            "create text index writer, field_name: {}, tantivy_index_version 5",
+            field_name
+        );
 
         let tokenizer = create_analyzer(tokenizer_params)?;
 
