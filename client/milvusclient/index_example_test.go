@@ -49,6 +49,32 @@ func ExampleClient_CreateIndex() {
 	}
 }
 
+func ExampleClient_CreateIndex_jsonPathIndex_dynamicField() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		// handle err
+	}
+
+	jsonPathIndex := index.NewJSONPathIndex(index.Inverted,
+		"varchar", // cast type
+		"color",   // json path
+	)
+	indexTask, err := cli.CreateIndex(ctx, milvusclient.NewCreateIndexOption("my_dynamic_collection", "color", jsonPathIndex))
+	if err != nil {
+		// handler err
+	}
+
+	err = indexTask.Await(ctx)
+	if err != nil {
+		// handler err
+	}
+}
+
 func ExampleClient_DescribeIndex() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

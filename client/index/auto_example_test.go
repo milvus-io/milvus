@@ -14,9 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package common
+// nolint
+package index_test
 
-const (
-	// SDKVersion const value for current version
-	SDKVersion = `2.5.2`
+import (
+	"log"
+
+	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v2/index"
 )
+
+func ExampleNewAutoIndex() {
+	index := index.NewAutoIndex(entity.L2)
+	log.Println(index)
+}
