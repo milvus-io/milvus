@@ -1385,21 +1385,55 @@ func TestMetaCache_GetShards(t *testing.T) {
 		assert.Error(t, err)
 		assert.Empty(t, shards)
 	})
+
+	t.Run("without shardLeaders in collection info", func(t *testing.T) {
+		rootCoord.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
+			return &querypb.GetShardLeadersResponse{
+				Status: merr.Success(),
+				Shards: []*querypb.ShardLeadersList{
+					{
+						ChannelName: "channel-1",
+						NodeIds:     []int64{1, 2, 3},
+						NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					},
+				},
+			}, nil
+		}
+
+		shards, err := globalMetaCache.GetShards(ctx, true, dbName, collectionName, collectionID)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, shards)
+		assert.Equal(t, 1, len(shards))
+		assert.Equal(t, 3, len(shards["channel-1"]))
+
+		// get from cache
+
+		rootCoord.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
+			return &querypb.GetShardLeadersResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "not implemented",
+				},
+			}, nil
+		}
+
+		shards, err = globalMetaCache.GetShards(ctx, true, dbName, collectionName, collectionID)
+
+		assert.NoError(t, err)
+		assert.NotEmpty(t, shards)
+		assert.Equal(t, 1, len(shards))
+		assert.Equal(t, 3, len(shards["channel-1"]))
+	})
 }
 
 func TestMetaCache_ClearShards(t *testing.T) {
 	var (
 		ctx            = context.TODO()
 		collectionName = "collection1"
+		collectionID   = int64(1)
 	)
 
-	qc := getMixCoordClient()
-	qc.EXPECT().ListPolicy(ctx, mock.Anything).Return(&internalpb.ListPolicyResponse{
-		Status: merr.Success(),
-	}, nil).Maybe()
-	qc.EXPECT().DescribeCollection(ctx, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status: merr.Success(),
-	}, nil)
+	qc := &MockMixCoordClientInterface{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, qc, mgr)
 	require.Nil(t, err)
@@ -1410,6 +1444,42 @@ func TestMetaCache_ClearShards(t *testing.T) {
 
 	t.Run("Clear valid collection empty cache", func(t *testing.T) {
 		globalMetaCache.DeprecateShardCache(dbName, collectionName)
+	})
+
+	t.Run("Clear valid collection valid cache", func(t *testing.T) {
+		qc.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
+			return &querypb.GetShardLeadersResponse{
+				Status: merr.Success(),
+				Shards: []*querypb.ShardLeadersList{
+					{
+						ChannelName: "channel-1",
+						NodeIds:     []int64{1, 2, 3},
+						NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					},
+				},
+			}, nil
+		}
+
+		shards, err := globalMetaCache.GetShards(ctx, true, dbName, collectionName, collectionID)
+		require.NoError(t, err)
+		require.NotEmpty(t, shards)
+		require.Equal(t, 1, len(shards))
+		require.Equal(t, 3, len(shards["channel-1"]))
+
+		globalMetaCache.DeprecateShardCache(dbName, collectionName)
+
+		qc.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
+			return &querypb.GetShardLeadersResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "not implemented",
+				},
+			}, nil
+		}
+
+		shards, err = globalMetaCache.GetShards(ctx, true, dbName, collectionName, collectionID)
+		assert.Error(t, err)
+		assert.Empty(t, shards)
 	})
 }
 
