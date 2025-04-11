@@ -19,9 +19,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
-func NewMockRootCoordClient(t *testing.T) *mocks.MockRootCoordClient {
+func NewMockRootCoordClient(t *testing.T) *mocks.MockMixCoordClient {
 	counter := atomic.NewUint64(1)
-	client := mocks.NewMockRootCoordClient(t)
+	client := mocks.NewMockMixCoordClient(t)
 	lastAllocate := atomic.NewInt64(0)
 	client.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, atr *rootcoordpb.AllocTimestampRequest, co ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {

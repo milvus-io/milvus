@@ -22,9 +22,9 @@ type createDatabaseTask struct {
 	baseTask
 	Condition
 	*milvuspb.CreateDatabaseRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *commonpb.Status
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *commonpb.Status
 
 	replicateMsgStream msgstream.MsgStream
 }
@@ -76,7 +76,7 @@ func (cdt *createDatabaseTask) PreExecute(ctx context.Context) error {
 
 func (cdt *createDatabaseTask) Execute(ctx context.Context) error {
 	var err error
-	cdt.result, err = cdt.rootCoord.CreateDatabase(ctx, cdt.CreateDatabaseRequest)
+	cdt.result, err = cdt.mixCoord.CreateDatabase(ctx, cdt.CreateDatabaseRequest)
 	err = merr.CheckRPCCall(cdt.result, err)
 	if err == nil {
 		SendReplicateMessagePack(ctx, cdt.replicateMsgStream, cdt.CreateDatabaseRequest)
@@ -92,9 +92,9 @@ type dropDatabaseTask struct {
 	baseTask
 	Condition
 	*milvuspb.DropDatabaseRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *commonpb.Status
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *commonpb.Status
 
 	replicateMsgStream msgstream.MsgStream
 }
@@ -146,7 +146,7 @@ func (ddt *dropDatabaseTask) PreExecute(ctx context.Context) error {
 
 func (ddt *dropDatabaseTask) Execute(ctx context.Context) error {
 	var err error
-	ddt.result, err = ddt.rootCoord.DropDatabase(ctx, ddt.DropDatabaseRequest)
+	ddt.result, err = ddt.mixCoord.DropDatabase(ctx, ddt.DropDatabaseRequest)
 
 	err = merr.CheckRPCCall(ddt.result, err)
 	if err == nil {
@@ -164,9 +164,9 @@ type listDatabaseTask struct {
 	baseTask
 	Condition
 	*milvuspb.ListDatabasesRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *milvuspb.ListDatabasesResponse
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.ListDatabasesResponse
 }
 
 func (ldt *listDatabaseTask) TraceCtx() context.Context {
@@ -215,7 +215,7 @@ func (ldt *listDatabaseTask) PreExecute(ctx context.Context) error {
 func (ldt *listDatabaseTask) Execute(ctx context.Context) error {
 	var err error
 	ctx = AppendUserInfoForRPC(ctx)
-	ldt.result, err = ldt.rootCoord.ListDatabases(ctx, ldt.ListDatabasesRequest)
+	ldt.result, err = ldt.mixCoord.ListDatabases(ctx, ldt.ListDatabasesRequest)
 	return merr.CheckRPCCall(ldt.result, err)
 }
 
@@ -227,9 +227,9 @@ type alterDatabaseTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterDatabaseRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *commonpb.Status
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *commonpb.Status
 
 	replicateMsgStream msgstream.MsgStream
 }
@@ -292,7 +292,7 @@ func (t *alterDatabaseTask) PreExecute(ctx context.Context) error {
 	if !oldReplicateEnable { // old replicate enable is false
 		return merr.WrapErrParameterInvalidMsg("can't set the replicate end ts property in alter database request when db replicate is disabled")
 	}
-	allocResp, err := t.rootCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
+	allocResp, err := t.mixCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
 		Count:          1,
 		BlockTimestamp: endTS,
 	})
@@ -318,7 +318,7 @@ func (t *alterDatabaseTask) Execute(ctx context.Context) error {
 		DeleteKeys: t.AlterDatabaseRequest.GetDeleteKeys(),
 	}
 
-	ret, err := t.rootCoord.AlterDatabase(ctx, req)
+	ret, err := t.mixCoord.AlterDatabase(ctx, req)
 	err = merr.CheckRPCCall(ret, err)
 	if err != nil {
 		return err
@@ -337,9 +337,9 @@ type describeDatabaseTask struct {
 	baseTask
 	Condition
 	*milvuspb.DescribeDatabaseRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *milvuspb.DescribeDatabaseResponse
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.DescribeDatabaseResponse
 }
 
 func (t *describeDatabaseTask) TraceCtx() context.Context {
@@ -392,7 +392,7 @@ func (t *describeDatabaseTask) Execute(ctx context.Context) error {
 		Base:   t.DescribeDatabaseRequest.GetBase(),
 		DbName: t.DescribeDatabaseRequest.GetDbName(),
 	}
-	ret, err := t.rootCoord.DescribeDatabase(ctx, req)
+	ret, err := t.mixCoord.DescribeDatabase(ctx, req)
 	if err != nil {
 		log.Ctx(ctx).Warn("DescribeDatabase failed", zap.Error(err))
 		return err

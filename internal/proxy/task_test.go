@@ -669,7 +669,7 @@ func TestTranslateOutputFields(t *testing.T) {
 }
 
 func TestAddFieldTask(t *testing.T) {
-	rc := NewRootCoordMock()
+	rc := NewMixCoordMock()
 	ctx := context.Background()
 	prefix := "TestAddFieldTask"
 	dbName := ""
@@ -717,7 +717,7 @@ func TestAddFieldTask(t *testing.T) {
 			Schema:         bytes,
 		},
 		ctx:       ctx,
-		rootCoord: rc,
+		mixCoord:  rc,
 		result:    nil,
 		oldSchema: schema,
 	}
@@ -920,7 +920,7 @@ func TestAddFieldTask(t *testing.T) {
 }
 
 func TestCreateCollectionTask(t *testing.T) {
-	rc := NewRootCoordMock()
+	mix := NewMixCoordMock()
 	ctx := context.Background()
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestCreateCollectionTask"
@@ -948,10 +948,10 @@ func TestCreateCollectionTask(t *testing.T) {
 			Schema:         marshaledSchema,
 			ShardsNum:      shardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
-		schema:    nil,
+		ctx:      ctx,
+		mixCoord: mix,
+		result:   nil,
+		schema:   nil,
 	}
 
 	t.Run("on enqueue", func(t *testing.T) {
@@ -1285,10 +1285,10 @@ func TestCreateCollectionTask(t *testing.T) {
 				Schema:         marshaledSchema,
 				ShardsNum:      shardsNum,
 			},
-			ctx:       ctx,
-			rootCoord: rc,
-			result:    nil,
-			schema:    nil,
+			ctx:      ctx,
+			mixCoord: mix,
+			result:   nil,
+			schema:   nil,
 		}
 
 		err = task2.OnEnqueue()
@@ -1329,10 +1329,10 @@ func TestCreateCollectionTask(t *testing.T) {
 				Schema:         marshaledSchema,
 				ShardsNum:      shardsNum,
 			},
-			ctx:       ctx,
-			rootCoord: rc,
-			result:    nil,
-			schema:    nil,
+			ctx:      ctx,
+			mixCoord: mix,
+			result:   nil,
+			schema:   nil,
 		}
 
 		err = task2.OnEnqueue()
@@ -1344,15 +1344,11 @@ func TestCreateCollectionTask(t *testing.T) {
 }
 
 func TestHasCollectionTask(t *testing.T) {
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-
+	mixc := NewMixCoordMock()
+	defer mixc.Close()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, qc, mgr)
+	InitMetaCache(ctx, mixc, mgr)
 	prefix := "TestHasCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1390,9 +1386,9 @@ func TestHasCollectionTask(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collectionName,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
+		ctx:      ctx,
+		mixCoord: mixc,
+		result:   nil,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -1407,7 +1403,7 @@ func TestHasCollectionTask(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, false, task.result.Value)
 	// createIsoCollection in RootCood and fill GlobalMetaCache
-	rc.CreateCollection(ctx, createColReq)
+	mixc.CreateCollection(ctx, createColReq)
 	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 
 	// success to drop collection
@@ -1426,7 +1422,7 @@ func TestHasCollectionTask(t *testing.T) {
 	globalMetaCache.RemoveCollection(ctx, dbName, collectionName)
 
 	// rc return collection not found error
-	rc.describeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	mixc.describeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 		return nil, merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
 	}
 	err = task.PreExecute(ctx)
@@ -1437,7 +1433,7 @@ func TestHasCollectionTask(t *testing.T) {
 	assert.NotNil(t, task.result.GetStatus())
 
 	// rootcoord failed to get response
-	rc.updateState(commonpb.StateCode_Abnormal)
+	mixc.updateState(commonpb.StateCode_Abnormal)
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
 	err = task.Execute(ctx)
@@ -1445,14 +1441,11 @@ func TestHasCollectionTask(t *testing.T) {
 }
 
 func TestDescribeCollectionTask(t *testing.T) {
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
-	qc := getQueryCoordClient()
-
+	mixc := NewMixCoordMock()
+	defer mixc.Close()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, qc, mgr)
+	InitMetaCache(ctx, mixc, mgr)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1469,9 +1462,9 @@ func TestDescribeCollectionTask(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collectionName,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
+		ctx:      ctx,
+		mixCoord: mixc,
+		result:   nil,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -1496,7 +1489,6 @@ func TestDescribeCollectionTask(t *testing.T) {
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
 
-	rc.Close()
 	task.CollectionID = 0
 	task.CollectionName = collectionName
 	err = task.PreExecute(ctx)
@@ -1507,15 +1499,11 @@ func TestDescribeCollectionTask(t *testing.T) {
 }
 
 func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	mix := NewMixCoordMock()
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, qc, mgr)
+	InitMetaCache(ctx, mix, mgr)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1541,7 +1529,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 		ShardsNum:      shardsNum,
 	}
 
-	rc.CreateCollection(ctx, createColReq)
+	mix.CreateCollection(ctx, createColReq)
 	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 
 	// CreateCollection
@@ -1556,9 +1544,9 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collectionName,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
+		ctx:      ctx,
+		mixCoord: mix,
+		result:   nil,
 	}
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
@@ -1571,13 +1559,10 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 }
 
 func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
-	rc := NewRootCoordMock()
-	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	mix := NewMixCoordMock()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, qc, mgr)
+	InitMetaCache(ctx, mix, mgr)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1603,7 +1588,7 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 		ShardsNum:      shardsNum,
 	}
 
-	rc.CreateCollection(ctx, createColReq)
+	mix.CreateCollection(ctx, createColReq)
 	globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
 
 	// CreateCollection
@@ -1618,9 +1603,9 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collectionName,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
+		ctx:      ctx,
+		mixCoord: mix,
+		result:   nil,
 	}
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
@@ -1634,15 +1619,10 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 }
 
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-
+	mix := NewMixCoordMock()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, qc, mgr)
+	InitMetaCache(ctx, mix, mgr)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1666,7 +1646,7 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 		Schema:         marshaledSchema,
 	}
 
-	rc.CreateCollection(ctx, createColReq)
+	mix.CreateCollection(ctx, createColReq)
 	globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 
 	// CreateCollection
@@ -1681,9 +1661,9 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collectionName,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
+		ctx:      ctx,
+		mixCoord: mix,
+		result:   nil,
 	}
 	task.PreExecute(ctx)
 
@@ -1696,12 +1676,10 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
 	assert.Equal(t, common.DefaultShardsNum, task.result.ShardsNum)
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
-	rc.Close()
 }
 
 func TestCreatePartitionTask(t *testing.T) {
-	rc := mocks.NewMockRootCoordClient(t)
-	qc := mocks.NewMockQueryCoordClient(t)
+	rc := mocks.NewMockMixCoordClient(t)
 
 	mockCache := NewMockCache(t)
 	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(&schemapb.CollectionSchema{
@@ -1731,10 +1709,9 @@ func TestCreatePartitionTask(t *testing.T) {
 			CollectionName: collectionName,
 			PartitionName:  partitionName,
 		},
-		ctx:        ctx,
-		rootCoord:  rc,
-		queryCoord: qc,
-		result:     nil,
+		ctx:      ctx,
+		mixCoord: rc,
+		result:   nil,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -1749,7 +1726,7 @@ func TestCreatePartitionTask(t *testing.T) {
 	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(100, nil).Once()
 	mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(1000, nil).Once()
 	rc.EXPECT().CreatePartition(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
-	qc.EXPECT().SyncNewCreatedPartition(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+	rc.EXPECT().SyncNewCreatedPartition(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
 
@@ -1764,23 +1741,12 @@ func TestCreatePartitionTask(t *testing.T) {
 }
 
 func TestDropPartitionTask(t *testing.T) {
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
 	ctx := context.Background()
 	prefix := "TestDropPartitionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 	partitionName := prefix + funcutil.GenRandomStr()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status:       merr.Success(),
-		PartitionIDs: []int64{},
-	}, nil)
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: merr.Success(),
-	}, nil)
-
+	mixc := NewMixCoordMock()
 	mockCache := NewMockCache(t)
 	mockCache.On("GetCollectionID",
 		mock.Anything, // context.Context
@@ -1813,10 +1779,9 @@ func TestDropPartitionTask(t *testing.T) {
 			CollectionName: collectionName,
 			PartitionName:  partitionName,
 		},
-		ctx:        ctx,
-		rootCoord:  rc,
-		queryCoord: qc,
-		result:     nil,
+		ctx:      ctx,
+		mixCoord: mixc,
+		result:   nil,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -1911,7 +1876,7 @@ func TestDropPartitionTask(t *testing.T) {
 }
 
 func TestHasPartitionTask(t *testing.T) {
-	rc := NewRootCoordMock()
+	rc := NewMixCoordMock()
 
 	defer rc.Close()
 	ctx := context.Background()
@@ -1932,9 +1897,9 @@ func TestHasPartitionTask(t *testing.T) {
 			CollectionName: collectionName,
 			PartitionName:  partitionName,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
+		ctx:      ctx,
+		mixCoord: rc,
+		result:   nil,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -1958,9 +1923,9 @@ func TestHasPartitionTask(t *testing.T) {
 }
 
 func TestShowPartitionsTask(t *testing.T) {
-	rc := NewRootCoordMock()
+	mixc := NewMixCoordMock()
 
-	defer rc.Close()
+	defer mixc.Close()
 	ctx := context.Background()
 	prefix := "TestShowPartitionsTask"
 	dbName := ""
@@ -1980,9 +1945,9 @@ func TestShowPartitionsTask(t *testing.T) {
 			PartitionNames: []string{partitionName},
 			Type:           milvuspb.ShowType_All,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
+		ctx:      ctx,
+		mixCoord: mixc,
+		result:   nil,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -2015,16 +1980,11 @@ func TestShowPartitionsTask(t *testing.T) {
 func TestTask_Int64PrimaryKey(t *testing.T) {
 	var err error
 
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-
+	qc := NewMixCoordMock()
 	ctx := context.Background()
 
 	mgr := newShardClientMgr()
-	err = InitMetaCache(ctx, rc, qc, mgr)
+	err = InitMetaCache(ctx, qc, mgr)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)
@@ -2059,10 +2019,10 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			Schema:         marshaledSchema,
 			ShardsNum:      shardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
-		schema:    nil,
+		ctx:      ctx,
+		mixCoord: qc,
+		result:   nil,
+		schema:   nil,
 	}
 
 	assert.NoError(t, createColT.OnEnqueue())
@@ -2070,7 +2030,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	assert.NoError(t, createColT.Execute(ctx))
 	assert.NoError(t, createColT.PostExecute(ctx))
 
-	_, _ = rc.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+	_, _ = qc.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_CreatePartition,
 			MsgID:     0,
@@ -2085,7 +2045,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
 	assert.NoError(t, err)
 
-	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
+	dmlChannelsFunc := getDmlChannelsFunc(ctx, qc)
 	factory := newSimpleMockMsgStreamFactory()
 	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
 	defer chMgr.removeAllDMLStream()
@@ -2102,7 +2062,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	_ = ticker.start()
 	defer ticker.close()
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
+	idAllocator, err := allocator.NewIDAllocator(ctx, qc, paramtable.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
@@ -2204,7 +2164,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 }
 
 func TestIndexType(t *testing.T) {
-	rc := NewRootCoordMock()
+	rc := NewMixCoordMock()
 	defer rc.Close()
 
 	ctx := context.Background()
@@ -2250,8 +2210,8 @@ func TestIndexType(t *testing.T) {
 				Schema:         marshaledSchema,
 				ShardsNum:      shardsNum,
 			},
-			ctx:       ctx,
-			rootCoord: rc,
+			ctx:      ctx,
+			mixCoord: rc,
 		}
 		assert.NoError(t, createColT.OnEnqueue())
 		assert.Error(t, createColT.PreExecute(ctx))
@@ -2260,17 +2220,12 @@ func TestIndexType(t *testing.T) {
 
 func TestTask_VarCharPrimaryKey(t *testing.T) {
 	var err error
-
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	mixc := NewMixCoordMock()
 
 	ctx := context.Background()
 
 	mgr := newShardClientMgr()
-	err = InitMetaCache(ctx, rc, qc, mgr)
+	err = InitMetaCache(ctx, mixc, mgr)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)
@@ -2306,10 +2261,10 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			Schema:         marshaledSchema,
 			ShardsNum:      shardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
-		schema:    nil,
+		ctx:      ctx,
+		mixCoord: mixc,
+		result:   nil,
+		schema:   nil,
 	}
 
 	assert.NoError(t, createColT.OnEnqueue())
@@ -2317,7 +2272,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	assert.NoError(t, createColT.Execute(ctx))
 	assert.NoError(t, createColT.PostExecute(ctx))
 
-	_, _ = rc.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+	_, _ = mixc.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_CreatePartition,
 			MsgID:     0,
@@ -2332,7 +2287,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
 	assert.NoError(t, err)
 
-	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
+	dmlChannelsFunc := getDmlChannelsFunc(ctx, mixc)
 	factory := newSimpleMockMsgStreamFactory()
 	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
 	defer chMgr.removeAllDMLStream()
@@ -2349,7 +2304,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	_ = ticker.start()
 	defer ticker.close()
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
+	idAllocator, err := allocator.NewIDAllocator(ctx, mixc, paramtable.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
@@ -2857,7 +2812,7 @@ func Test_dropCollectionTask_PreExecute(t *testing.T) {
 }
 
 func Test_dropCollectionTask_Execute(t *testing.T) {
-	mockRC := mocks.NewMockRootCoordClient(t)
+	mockRC := mocks.NewMockMixCoordClient(t)
 	mockRC.On("DropCollection",
 		mock.Anything, // context.Context
 		mock.Anything, // *milvuspb.DropCollectionRequest
@@ -2875,7 +2830,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 
 	ctx := context.Background()
 
-	dct := &dropCollectionTask{rootCoord: mockRC, DropCollectionRequest: &milvuspb.DropCollectionRequest{CollectionName: "normal"}}
+	dct := &dropCollectionTask{mixCoord: mockRC, DropCollectionRequest: &milvuspb.DropCollectionRequest{CollectionName: "normal"}}
 	err := dct.Execute(ctx)
 	assert.NoError(t, err)
 
@@ -2895,17 +2850,7 @@ func Test_dropCollectionTask_PostExecute(t *testing.T) {
 }
 
 func Test_loadCollectionTask_Execute(t *testing.T) {
-	rc := newMockRootCoord()
-	dc := NewDataCoordMock()
-
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status:       merr.Success(),
-		PartitionIDs: []int64{},
-	}, nil)
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: merr.Success(),
-	}, nil)
+	rc := NewMixCoordMock()
 
 	dbName := funcutil.GenRandomStr()
 	collectionName := funcutil.GenRandomStr()
@@ -2917,7 +2862,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 
 	shardMgr := newShardClientMgr()
 	// failed to get collection id.
-	_ = InitMetaCache(ctx, rc, qc, shardMgr)
+	_ = InitMetaCache(ctx, rc, shardMgr)
 
 	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
@@ -2942,8 +2887,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 			ReplicaNumber:  1,
 		},
 		ctx:          ctx,
-		queryCoord:   qc,
-		datacoord:    dc,
+		mixCoord:     rc,
 		result:       nil,
 		collectionID: 0,
 	}
@@ -2954,7 +2898,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("indexcoord describe index not success", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+		rc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2968,7 +2912,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("no vector index", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+		rc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
 				Status: merr.Success(),
 				IndexInfos: []*indexpb.IndexInfo{
@@ -3004,7 +2948,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 
 		assert.GreaterOrEqual(t, len(vecFields), 2)
 
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+		rc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
 				Status: merr.Success(),
 				IndexInfos: []*indexpb.IndexInfo{
@@ -3032,17 +2976,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 }
 
 func Test_loadPartitionTask_Execute(t *testing.T) {
-	rc := newMockRootCoord()
-	dc := NewDataCoordMock()
-
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status:       merr.Success(),
-		PartitionIDs: []int64{},
-	}, nil)
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: merr.Success(),
-	}, nil)
+	qc := NewMixCoordMock()
 
 	dbName := funcutil.GenRandomStr()
 	collectionName := funcutil.GenRandomStr()
@@ -3054,9 +2988,9 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 
 	shardMgr := newShardClientMgr()
 	// failed to get collection id.
-	_ = InitMetaCache(ctx, rc, qc, shardMgr)
+	_ = InitMetaCache(ctx, qc, shardMgr)
 
-	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+	qc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
 			Status:         merr.Success(),
 			Schema:         newTestSchema(),
@@ -3079,8 +3013,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 			ReplicaNumber:  1,
 		},
 		ctx:          ctx,
-		queryCoord:   qc,
-		datacoord:    dc,
+		mixCoord:     qc,
 		result:       nil,
 		collectionID: 0,
 	}
@@ -3091,7 +3024,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("indexcoord describe index not success", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+		qc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -3105,7 +3038,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("no vector index", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+		qc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
 				Status: merr.Success(),
 				IndexInfos: []*indexpb.IndexInfo{
@@ -3133,16 +3066,13 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 }
 
 func TestCreateResourceGroupTask(t *testing.T) {
-	rc := NewRootCoordMock()
+	mixc := NewMixCoordMock()
 
-	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	qc.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	defer mixc.Close()
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, qc, mgr)
+	InitMetaCache(ctx, mixc, mgr)
 
 	createRGReq := &milvuspb.CreateResourceGroupRequest{
 		Base: &commonpb.MsgBase{
@@ -3156,7 +3086,7 @@ func TestCreateResourceGroupTask(t *testing.T) {
 	task := &CreateResourceGroupTask{
 		CreateResourceGroupRequest: createRGReq,
 		ctx:                        ctx,
-		queryCoord:                 qc,
+		mixCoord:                   mixc,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -3174,16 +3104,13 @@ func TestCreateResourceGroupTask(t *testing.T) {
 }
 
 func TestDropResourceGroupTask(t *testing.T) {
-	rc := NewRootCoordMock()
+	mixc := NewMixCoordMock()
 
-	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	qc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	defer mixc.Close()
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, qc, mgr)
+	InitMetaCache(ctx, mixc, mgr)
 
 	dropRGReq := &milvuspb.DropResourceGroupRequest{
 		Base: &commonpb.MsgBase{
@@ -3197,7 +3124,7 @@ func TestDropResourceGroupTask(t *testing.T) {
 	task := &DropResourceGroupTask{
 		DropResourceGroupRequest: dropRGReq,
 		ctx:                      ctx,
-		queryCoord:               qc,
+		mixCoord:                 mixc,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -3215,16 +3142,12 @@ func TestDropResourceGroupTask(t *testing.T) {
 }
 
 func TestTransferNodeTask(t *testing.T) {
-	rc := NewRootCoordMock()
+	mixc := NewMixCoordMock()
 
-	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	qc.EXPECT().TransferNode(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-
+	defer mixc.Close()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, qc, mgr)
+	InitMetaCache(ctx, mixc, mgr)
 
 	req := &milvuspb.TransferNodeRequest{
 		Base: &commonpb.MsgBase{
@@ -3240,7 +3163,7 @@ func TestTransferNodeTask(t *testing.T) {
 	task := &TransferNodeTask{
 		TransferNodeRequest: req,
 		ctx:                 ctx,
-		queryCoord:          qc,
+		mixCoord:            mixc,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -3258,14 +3181,11 @@ func TestTransferNodeTask(t *testing.T) {
 }
 
 func TestTransferReplicaTask(t *testing.T) {
-	rc := &MockRootCoordClientInterface{}
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	qc.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	rc := &MockMixCoordClientInterface{}
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, qc, mgr)
+	InitMetaCache(ctx, rc, mgr)
 	// make it avoid remote call on rc
 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
 
@@ -3284,7 +3204,7 @@ func TestTransferReplicaTask(t *testing.T) {
 	task := &TransferReplicaTask{
 		TransferReplicaRequest: req,
 		ctx:                    ctx,
-		queryCoord:             qc,
+		mixCoord:               rc,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -3302,17 +3222,18 @@ func TestTransferReplicaTask(t *testing.T) {
 }
 
 func TestListResourceGroupsTask(t *testing.T) {
-	rc := &MockRootCoordClientInterface{}
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	qc.EXPECT().ListResourceGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListResourceGroupsResponse{
-		Status:         merr.Success(),
-		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
-	}, nil)
+	rc := &MockMixCoordClientInterface{}
+
+	rc.listResourceGroups = func(ctx context.Context, request *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
+		return &milvuspb.ListResourceGroupsResponse{
+			Status:         merr.Success(),
+			ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
+		}, nil
+	}
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, qc, mgr)
+	InitMetaCache(ctx, rc, mgr)
 
 	req := &milvuspb.ListResourceGroupsRequest{
 		Base: &commonpb.MsgBase{
@@ -3325,7 +3246,7 @@ func TestListResourceGroupsTask(t *testing.T) {
 	task := &ListResourceGroupsTask{
 		ListResourceGroupsRequest: req,
 		ctx:                       ctx,
-		queryCoord:                qc,
+		mixCoord:                  rc,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -3346,23 +3267,23 @@ func TestListResourceGroupsTask(t *testing.T) {
 }
 
 func TestDescribeResourceGroupTask(t *testing.T) {
-	rc := &MockRootCoordClientInterface{}
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
-		Status: merr.Success(),
-		ResourceGroup: &querypb.ResourceGroupInfo{
-			Name:             "rg",
-			Capacity:         2,
-			NumAvailableNode: 1,
-			NumOutgoingNode:  map[int64]int32{1: 1},
-			NumIncomingNode:  map[int64]int32{2: 2},
-		},
-	}, nil)
+	rc := &MockMixCoordClientInterface{}
+	rc.describeResourceGroup = func(ctx context.Context, request *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+		return &querypb.DescribeResourceGroupResponse{
+			Status: merr.Success(),
+			ResourceGroup: &querypb.ResourceGroupInfo{
+				Name:             "rg",
+				Capacity:         2,
+				NumAvailableNode: 1,
+				NumOutgoingNode:  map[int64]int32{1: 1},
+				NumIncomingNode:  map[int64]int32{2: 2},
+			},
+		}, nil
+	}
 
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, qc, mgr)
+	InitMetaCache(ctx, rc, mgr)
 	// make it avoid remote call on rc
 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
@@ -3379,7 +3300,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 	task := &DescribeResourceGroupTask{
 		DescribeResourceGroupRequest: req,
 		ctx:                          ctx,
-		queryCoord:                   qc,
+		mixCoord:                     rc,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -3402,15 +3323,17 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 }
 
 func TestDescribeResourceGroupTaskFailed(t *testing.T) {
-	rc := &MockRootCoordClientInterface{}
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
-	}, nil)
+	rc := &MockMixCoordClientInterface{}
+
+	rc.describeResourceGroup = func(ctx context.Context, request *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+		return &querypb.DescribeResourceGroupResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+		}, nil
+	}
+
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(ctx, rc, qc, mgr)
+	InitMetaCache(ctx, rc, mgr)
 	// make it avoid remote call on rc
 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection1")
 	globalMetaCache.GetCollectionSchema(context.Background(), GetCurDBNameFromContextOrDefault(ctx), "collection2")
@@ -3427,7 +3350,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	task := &DescribeResourceGroupTask{
 		DescribeResourceGroupRequest: req,
 		ctx:                          ctx,
-		queryCoord:                   qc,
+		mixCoord:                     rc,
 	}
 	task.OnEnqueue()
 	task.PreExecute(ctx)
@@ -3443,17 +3366,19 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.GetStatus().GetErrorCode())
 
-	qc.ExpectedCalls = nil
-	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
-		Status: merr.Success(),
-		ResourceGroup: &querypb.ResourceGroupInfo{
-			Name:             "rg",
-			Capacity:         2,
-			NumAvailableNode: 1,
-			NumOutgoingNode:  map[int64]int32{3: 1},
-			NumIncomingNode:  map[int64]int32{4: 2},
-		},
-	}, nil)
+	rc.describeResourceGroup = func(ctx context.Context, request *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+		return &querypb.DescribeResourceGroupResponse{
+			Status: merr.Success(),
+			ResourceGroup: &querypb.ResourceGroupInfo{
+				Name:             "rg",
+				Capacity:         2,
+				NumAvailableNode: 1,
+				NumOutgoingNode:  map[int64]int32{3: 1},
+				NumIncomingNode:  map[int64]int32{4: 2},
+			},
+		}, nil
+	}
+
 	err = task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Len(t, task.result.ResourceGroup.NumOutgoingNode, 0)
@@ -3461,7 +3386,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 }
 
 func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
-	rc := NewRootCoordMock()
+	rc := NewMixCoordMock()
 	paramtable.Init()
 
 	defer rc.Close()
@@ -3529,10 +3454,10 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 			Schema:         marshaledSchema,
 			ShardsNum:      shardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
-		schema:    nil,
+		ctx:      ctx,
+		mixCoord: rc,
+		result:   nil,
+		schema:   nil,
 	}
 
 	t.Run("PreExecute", func(t *testing.T) {
@@ -3650,11 +3575,8 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 
-		qc := getQueryCoordClient()
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-
 		// check default partitions
-		err = InitMetaCache(ctx, rc, qc, nil)
+		err = InitMetaCache(ctx, rc, nil)
 		assert.NoError(t, err)
 		partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, "", task.CollectionName)
 		assert.NoError(t, err)
@@ -3671,8 +3593,8 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 				CollectionName: collectionName,
 				PartitionName:  "new_partition",
 			},
-			ctx:       ctx,
-			rootCoord: rc,
+			ctx:      ctx,
+			mixCoord: rc,
 		}
 		err = createPartitionTask.PreExecute(ctx)
 		assert.Error(t, err)
@@ -3688,8 +3610,8 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 				CollectionName: collectionName,
 				PartitionName:  "new_partition",
 			},
-			ctx:       ctx,
-			rootCoord: rc,
+			ctx:      ctx,
+			mixCoord: rc,
 		}
 		err = dropPartitionTask.PreExecute(ctx)
 		assert.Error(t, err)
@@ -3729,16 +3651,12 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 }
 
 func TestPartitionKey(t *testing.T) {
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-
+	qc := NewMixCoordMock()
+	defer qc.Close()
 	ctx := context.Background()
 
 	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rc, qc, mgr)
+	err := InitMetaCache(ctx, qc, mgr)
 	assert.NoError(t, err)
 
 	shardsNum := common.DefaultShardsNum
@@ -3773,10 +3691,10 @@ func TestPartitionKey(t *testing.T) {
 			ShardsNum:      shardsNum,
 			NumPartitions:  common.DefaultPartitionsWithPartitionKey,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
-		schema:    nil,
+		ctx:      ctx,
+		mixCoord: qc,
+		result:   nil,
+		schema:   nil,
 	}
 	err = createCollectionTask.PreExecute(ctx)
 	assert.NoError(t, err)
@@ -3786,7 +3704,7 @@ func TestPartitionKey(t *testing.T) {
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
-	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
+	dmlChannelsFunc := getDmlChannelsFunc(ctx, qc)
 	factory := newSimpleMockMsgStreamFactory()
 	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
 	defer chMgr.removeAllDMLStream()
@@ -3803,7 +3721,7 @@ func TestPartitionKey(t *testing.T) {
 	_ = ticker.start()
 	defer ticker.close()
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
+	idAllocator, err := allocator.NewIDAllocator(ctx, qc, paramtable.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
@@ -3953,8 +3871,8 @@ func TestPartitionKey(t *testing.T) {
 				CollectionName: collectionName,
 				Nq:             1,
 			},
-			qc: qc,
-			tr: timerecord.NewTimeRecorder("test-search"),
+			mixCoord: qc,
+			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 
 		// don't support specify partition name if use partition key
@@ -3972,7 +3890,7 @@ func TestPartitionKey(t *testing.T) {
 			request: &milvuspb.QueryRequest{
 				CollectionName: collectionName,
 			},
-			qc: qc,
+			mixCoord: qc,
 		}
 
 		// don't support specify partition name if use partition key
@@ -3983,16 +3901,11 @@ func TestPartitionKey(t *testing.T) {
 }
 
 func TestDefaultPartition(t *testing.T) {
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-
+	qc := NewMixCoordMock()
 	ctx := context.Background()
 
 	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rc, qc, mgr)
+	err := InitMetaCache(ctx, qc, mgr)
 	assert.NoError(t, err)
 
 	shardsNum := common.DefaultShardsNum
@@ -4020,10 +3933,10 @@ func TestDefaultPartition(t *testing.T) {
 				Schema:         marshaledSchema,
 				ShardsNum:      shardsNum,
 			},
-			ctx:       ctx,
-			rootCoord: rc,
-			result:    nil,
-			schema:    nil,
+			ctx:      ctx,
+			mixCoord: qc,
+			result:   nil,
+			schema:   nil,
 		}
 		err = createCollectionTask.PreExecute(ctx)
 		assert.NoError(t, err)
@@ -4034,7 +3947,7 @@ func TestDefaultPartition(t *testing.T) {
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
-	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
+	dmlChannelsFunc := getDmlChannelsFunc(ctx, qc)
 	factory := newSimpleMockMsgStreamFactory()
 	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
 	defer chMgr.removeAllDMLStream()
@@ -4051,7 +3964,7 @@ func TestDefaultPartition(t *testing.T) {
 	_ = ticker.start()
 	defer ticker.close()
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
+	idAllocator, err := allocator.NewIDAllocator(ctx, qc, paramtable.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
@@ -4181,16 +4094,12 @@ func TestDefaultPartition(t *testing.T) {
 }
 
 func TestClusteringKey(t *testing.T) {
-	rc := NewRootCoordMock()
-
-	defer rc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	qc := NewMixCoordMock()
 
 	ctx := context.Background()
 
 	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rc, qc, mgr)
+	err := InitMetaCache(ctx, qc, mgr)
 	assert.NoError(t, err)
 
 	shardsNum := common.DefaultShardsNum
@@ -4235,10 +4144,10 @@ func TestClusteringKey(t *testing.T) {
 				Schema:         marshaledSchema,
 				ShardsNum:      shardsNum,
 			},
-			ctx:       ctx,
-			rootCoord: rc,
-			result:    nil,
-			schema:    nil,
+			ctx:      ctx,
+			mixCoord: qc,
+			result:   nil,
+			schema:   nil,
 		}
 		err = createCollectionTask.PreExecute(ctx)
 		assert.NoError(t, err)
@@ -4279,10 +4188,10 @@ func TestClusteringKey(t *testing.T) {
 				Schema:         marshaledSchema,
 				ShardsNum:      shardsNum,
 			},
-			ctx:       ctx,
-			rootCoord: rc,
-			result:    nil,
-			schema:    nil,
+			ctx:      ctx,
+			mixCoord: qc,
+			result:   nil,
+			schema:   nil,
 		}
 		err = createCollectionTask.PreExecute(ctx)
 		assert.Error(t, err)
@@ -4314,10 +4223,10 @@ func TestClusteringKey(t *testing.T) {
 				Schema:         marshaledSchema,
 				ShardsNum:      shardsNum,
 			},
-			ctx:       ctx,
-			rootCoord: rc,
-			result:    nil,
-			schema:    nil,
+			ctx:      ctx,
+			mixCoord: qc,
+			result:   nil,
+			schema:   nil,
 		}
 		err = createCollectionTask.PreExecute(ctx)
 		assert.Error(t, err)
@@ -4325,10 +4234,8 @@ func TestClusteringKey(t *testing.T) {
 }
 
 func TestAlterCollectionCheckLoaded(t *testing.T) {
-	rc := NewRootCoordMock()
-	rc.state.Store(commonpb.StateCode_Healthy)
-	qc := &mocks.MockQueryCoordClient{}
-	InitMetaCache(context.Background(), rc, qc, nil)
+	qc := NewMixCoordMock()
+	InitMetaCache(context.Background(), qc, nil)
 	collectionName := "test_alter_collection_check_loaded"
 	createColReq := &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -4341,38 +4248,37 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 		Schema:         nil,
 		ShardsNum:      1,
 	}
-	rc.CreateCollection(context.Background(), createColReq)
-	resp, err := rc.DescribeCollection(context.Background(), &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	qc.CreateCollection(context.Background(), createColReq)
+	resp, err := qc.DescribeCollection(context.Background(), &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	assert.NoError(t, err)
 
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		CollectionIDs:       []int64{resp.CollectionID},
-		InMemoryPercentages: []int64{100},
-	}, nil)
+	qc.ShowLoadCollectionsFunc = func(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
+		return &querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			CollectionIDs:       []int64{resp.CollectionID},
+			InMemoryPercentages: []int64{100},
+		}, nil
+	}
+
 	task := &alterCollectionTask{
 		AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
 			Properties:     []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
 		},
-		queryCoord: qc,
+		mixCoord: qc,
 	}
 	err = task.PreExecute(context.Background())
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
 }
 
 func TestTaskPartitionKeyIsolation(t *testing.T) {
-	rc := NewRootCoordMock()
-	defer rc.Close()
-	dc := NewDataCoordMock()
-	defer dc.Close()
-	qc := getQueryCoordClient()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	defer qc.Close()
+	qc := NewMixCoordMock()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rc, qc, mgr)
+	err := InitMetaCache(ctx, qc, mgr)
 	assert.NoError(t, err)
 	shardsNum := common.DefaultShardsNum
 	prefix := "TestPartitionKeyIsolation"
@@ -4415,10 +4321,10 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 				ShardsNum:      shardsNum,
 				Properties:     []*commonpb.KeyValuePair{{Key: common.PartitionKeyIsolationKey, Value: isoStr}},
 			},
-			ctx:       ctx,
-			rootCoord: rc,
-			result:    nil,
-			schema:    nil,
+			ctx:      ctx,
+			mixCoord: qc,
+			result:   nil,
+			schema:   nil,
 		}
 	}
 
@@ -4446,7 +4352,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 			createColReq.Properties = nil
 		}
 
-		stats, err := rc.CreateCollection(ctx, createColReq)
+		stats, err := qc.CreateCollection(ctx, createColReq)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, stats.ErrorCode)
 	}
@@ -4463,8 +4369,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 				CollectionName: colName,
 				Properties:     []*commonpb.KeyValuePair{{Key: common.PartitionKeyIsolationKey, Value: isoStr}},
 			},
-			queryCoord: qc,
-			dataCoord:  dc,
+			mixCoord: qc,
 		}
 	}
 
@@ -4532,7 +4437,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 				CollectionName: colName,
 				Properties:     nil,
 			},
-			queryCoord: qc,
+			mixCoord: qc,
 		}
 		err := alterTask.PreExecute(ctx)
 		assert.NoError(t, err)
@@ -4558,7 +4463,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		colName := collectionName + "AlterVecIndex"
 		createIsoCollection(colName, true, true, false)
-		resp, err := rc.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: dbName, CollectionName: colName})
+		resp, err := qc.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: dbName, CollectionName: colName})
 		assert.NoError(t, err)
 		var vecFieldID int64 = 0
 		for _, field := range resp.Schema.Fields {
@@ -4568,7 +4473,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 			}
 		}
 		assert.NotEqual(t, vecFieldID, int64(0))
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+		qc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
 			return &indexpb.DescribeIndexResponse{
 				Status: merr.Success(),
 				IndexInfos: []*indexpb.IndexInfo{
@@ -4595,7 +4500,7 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{}, nil).Maybe()
 	globalMetaCache = mockCache
 	ctx := context.Background()
-	mockRootcoord := mocks.NewMockRootCoordClient(t)
+	mockRootcoord := mocks.NewMockMixCoordClient(t)
 	t.Run("invalid replicate id", func(t *testing.T) {
 		task := &alterCollectionTask{
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
@@ -4606,7 +4511,7 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 					},
 				},
 			},
-			rootCoord: mockRootcoord,
+			mixCoord: mockRootcoord,
 		}
 
 		err := task.PreExecute(ctx)
@@ -4624,7 +4529,7 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 					},
 				},
 			},
-			rootCoord: mockRootcoord,
+			mixCoord: mockRootcoord,
 		}
 
 		err := task.PreExecute(ctx)
@@ -4642,7 +4547,7 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 					},
 				},
 			},
-			rootCoord: mockRootcoord,
+			mixCoord: mockRootcoord,
 		}
 
 		mockRootcoord.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(nil, errors.New("err")).Once()
@@ -4661,7 +4566,7 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 					},
 				},
 			},
-			rootCoord: mockRootcoord,
+			mixCoord: mockRootcoord,
 		}
 
 		mockRootcoord.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{

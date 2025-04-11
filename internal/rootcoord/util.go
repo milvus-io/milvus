@@ -233,13 +233,13 @@ func getRateLimitConfig(properties map[string]string, configKey string, configVa
 	return configValue
 }
 
-func getQueryCoordMetrics(ctx context.Context, queryCoord types.QueryCoordClient) (*metricsinfo.QueryCoordTopology, error) {
+func getQueryCoordMetrics(ctx context.Context, mixCoord types.MixCoord) (*metricsinfo.QueryCoordTopology, error) {
 	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	if err != nil {
 		return nil, err
 	}
 
-	rsp, err := queryCoord.GetMetrics(ctx, req)
+	rsp, err := mixCoord.GetQcMetrics(ctx, req)
 	if err = merr.CheckRPCCall(rsp, err); err != nil {
 		return nil, err
 	}
@@ -251,13 +251,13 @@ func getQueryCoordMetrics(ctx context.Context, queryCoord types.QueryCoordClient
 	return queryCoordTopology, nil
 }
 
-func getDataCoordMetrics(ctx context.Context, dataCoord types.DataCoordClient) (*metricsinfo.DataCoordTopology, error) {
+func getDataCoordMetrics(ctx context.Context, mixCoord types.MixCoord) (*metricsinfo.DataCoordTopology, error) {
 	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	if err != nil {
 		return nil, err
 	}
 
-	rsp, err := dataCoord.GetMetrics(ctx, req)
+	rsp, err := mixCoord.GetDcMetrics(ctx, req)
 	if err = merr.CheckRPCCall(rsp, err); err != nil {
 		return nil, err
 	}
@@ -288,7 +288,7 @@ func getProxyMetrics(ctx context.Context, proxies proxyutil.ProxyClientManagerIn
 	return ret, nil
 }
 
-func CheckTimeTickLagExceeded(ctx context.Context, queryCoord types.QueryCoordClient, dataCoord types.DataCoordClient, maxDelay time.Duration) error {
+func CheckTimeTickLagExceeded(ctx context.Context, mixcoord types.MixCoord, maxDelay time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, GetMetricsTimeout)
 	defer cancel()
 
@@ -298,7 +298,7 @@ func CheckTimeTickLagExceeded(ctx context.Context, queryCoord types.QueryCoordCl
 	dataNodeTTDelay := typeutil.NewConcurrentMap[string, time.Duration]()
 
 	group.Go(func() error {
-		queryCoordTopology, err := getQueryCoordMetrics(ctx, queryCoord)
+		queryCoordTopology, err := getQueryCoordMetrics(ctx, mixcoord)
 		if err != nil {
 			return err
 		}
@@ -321,7 +321,7 @@ func CheckTimeTickLagExceeded(ctx context.Context, queryCoord types.QueryCoordCl
 
 	// get Data cluster metrics
 	group.Go(func() error {
-		dataCoordTopology, err := getDataCoordMetrics(ctx, dataCoord)
+		dataCoordTopology, err := getDataCoordMetrics(ctx, mixcoord)
 		if err != nil {
 			return err
 		}

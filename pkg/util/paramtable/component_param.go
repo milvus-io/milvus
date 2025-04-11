@@ -72,6 +72,7 @@ type ComponentParam struct {
 	TraceCfg        traceConfig
 	HolmesCfg       holmesConfig
 
+	MixCoordCfg    mixCoordConfig
 	RootCoordCfg   rootCoordConfig
 	ProxyCfg       proxyConfig
 	QueryCoordCfg  queryCoordConfig
@@ -127,6 +128,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.HolmesCfg.init(bt)
 
 	p.RootCoordCfg.init(bt)
+	p.MixCoordCfg.init(bt)
 	p.ProxyCfg.init(bt)
 	p.QueryCoordCfg.init(bt)
 	p.QueryNodeCfg.init(bt)
@@ -1320,6 +1322,23 @@ Set this parameter as the path that you have permission to write.`,
 		Export:       true,
 	}
 	l.GrpcLogLevel.Init(base.mgr)
+}
+
+// /////////////////////////////////////////////////////////////////////////////
+// --- mixcoord ---
+type mixCoordConfig struct {
+	EnableActiveStandby ParamItem `refreshable:"false"`
+}
+
+func (p *mixCoordConfig) init(base *BaseTable) {
+	p.EnableActiveStandby = ParamItem{
+		Key:          "mixCoord.enableActiveStandby",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Export:       true,
+		FallbackKeys: []string{"rootCoord.enableActiveStandby"},
+	}
+	p.EnableActiveStandby.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

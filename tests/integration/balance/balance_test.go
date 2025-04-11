@@ -300,7 +300,7 @@ func (s *BalanceTestSuit) TestNodeDown() {
 
 	// expect all delegator will recover to healthy
 	s.Eventually(func() bool {
-		resp, err := s.Cluster.QueryCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		resp, err := s.Cluster.MixCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
 			Base:         commonpbutil.NewMsgBase(),
 			CollectionID: collectionID,
 		})
