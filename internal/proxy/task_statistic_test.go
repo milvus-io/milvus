@@ -17,10 +17,12 @@ package proxy
 
 import (
 	"context"
+	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -53,28 +55,27 @@ func (s *StatisticTaskSuite) SetupSuite() {
 
 func (s *StatisticTaskSuite) SetupTest() {
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	mixc := mocks.NewMockMixCoordClient(s.T())
-	mixc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
-	mixc.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
-		Status: &successStatus,
-	}, nil).Maybe()
-	mixc.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(&successStatus, nil).Maybe()
-	mixc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: merr.Success()}, nil).Maybe()
-	mixc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
-		Status: &successStatus,
-		Shards: []*querypb.ShardLeadersList{
-			{
-				ChannelName: "channel-1",
-				NodeIds:     []int64{1, 2, 3},
-				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+	mixc := NewMixCoordMock()
+
+	mixc.GetShardLeadersFunc = func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+		return &querypb.GetShardLeadersResponse{
+			Status: &successStatus,
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+				},
 			},
-		},
-	}, nil).Maybe()
-	mixc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	mixc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status:       merr.Success(),
-		PartitionIDs: []int64{1, 2, 3},
-	}, nil).Maybe()
+		}, nil
+	}
+
+	mixc.ShowLoadPartitionsFunc = func(ctx context.Context, req *querypb.ShowPartitionsRequest, opts ...grpc.CallOption) (*querypb.ShowPartitionsResponse, error) {
+		return &querypb.ShowPartitionsResponse{
+			Status:       &successStatus,
+			PartitionIDs: []int64{1, 2, 3},
+		}, nil
+	}
 
 	s.mixc = mixc
 	s.qn = mocks.NewMockQueryNodeClient(s.T())
@@ -181,23 +182,23 @@ func (s *StatisticTaskSuite) getStatisticsTask(ctx context.Context) *getStatisti
 	}
 }
 
-// func (s *StatisticTaskSuite) TestStatisticTask_NotShardLeader() {
-// 	ctx := context.Background()
-// 	task := s.getStatisticsTask(ctx)
+func (s *StatisticTaskSuite) TestStatisticTask_NotShardLeader() {
+	ctx := context.Background()
+	task := s.getStatisticsTask(ctx)
 
-// 	s.NoError(task.OnEnqueue())
+	s.NoError(task.OnEnqueue())
 
-// 	task.fromQueryNode = true
-// 	s.qn.EXPECT().GetStatistics(mock.Anything, mock.Anything).Return(&internalpb.GetStatisticsResponse{
-// 		Status: &commonpb.Status{
-// 			ErrorCode: commonpb.ErrorCode_NotShardLeader,
-// 			Reason:    "error",
-// 		},
-// 	}, nil)
-// 	s.NoError(task.PreExecute(ctx))
-// 	s.Error(task.Execute(ctx))
-// 	s.NoError(task.PostExecute(ctx))
-// }
+	task.fromQueryNode = true
+	s.qn.EXPECT().GetStatistics(mock.Anything, mock.Anything).Return(&internalpb.GetStatisticsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NotShardLeader,
+			Reason:    "error",
+		},
+	}, nil)
+	s.NoError(task.PreExecute(ctx))
+	s.Error(task.Execute(ctx))
+	s.NoError(task.PostExecute(ctx))
+}
 
 func (s *StatisticTaskSuite) TestStatisticTask_UnexpectedError() {
 	ctx := context.Background()
@@ -216,19 +217,19 @@ func (s *StatisticTaskSuite) TestStatisticTask_UnexpectedError() {
 	s.NoError(task.PostExecute(ctx))
 }
 
-// func (s *StatisticTaskSuite) TestStatisticTask_Success() {
-// 	ctx := context.Background()
-// 	task := s.getStatisticsTask(ctx)
+func (s *StatisticTaskSuite) TestStatisticTask_Success() {
+	ctx := context.Background()
+	task := s.getStatisticsTask(ctx)
 
-// 	s.NoError(task.OnEnqueue())
-// 	s.qn.EXPECT().GetStatistics(mock.Anything, mock.Anything).Return(nil, nil)
-// 	s.NoError(task.PreExecute(ctx))
-// 	task.fromQueryNode = true
-// 	task.fromDataCoord = false
-// 	s.NoError(task.Execute(ctx))
-// 	s.NoError(task.PostExecute(ctx))
-// }
+	s.NoError(task.OnEnqueue())
+	s.qn.EXPECT().GetStatistics(mock.Anything, mock.Anything).Return(nil, nil)
+	s.NoError(task.PreExecute(ctx))
+	task.fromQueryNode = true
+	task.fromDataCoord = false
+	s.NoError(task.Execute(ctx))
+	s.NoError(task.PostExecute(ctx))
+}
 
-// func TestStatisticTaskSuite(t *testing.T) {
-// 	suite.Run(t, new(StatisticTaskSuite))
-// }
+func TestStatisticTaskSuite(t *testing.T) {
+	suite.Run(t, new(StatisticTaskSuite))
+}
