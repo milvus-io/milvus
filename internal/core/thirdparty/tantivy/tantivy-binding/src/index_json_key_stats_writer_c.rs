@@ -26,7 +26,7 @@ pub extern "C" fn tantivy_create_json_key_stats_writer(
         Err(e) => return RustResult::from_error(e.to_string()),
     };
 
-    match IndexWriterWrapper::new_json_key_stats_writer(
+    match IndexWriterWrapper::create_json_key_stats_writer(
         field_name_str,
         path_str,
         num_threads,

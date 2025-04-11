@@ -3,7 +3,7 @@ use crate::index_writer::IndexWriterWrapper;
 use crate::{index_writer_v5, index_writer_v7, TantivyIndexVersion};
 
 impl IndexWriterWrapper {
-    pub fn new_json_key_stats_writer(
+    pub fn create_json_key_stats_writer(
         field_name: &str,
         path: &str,
         num_threads: usize,

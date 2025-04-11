@@ -128,6 +128,24 @@ impl IndexWriterWrapper {
         }
     }
 
+    pub fn add_json_key_stats(
+        &mut self,
+        keys: &[*const i8],
+        json_offsets: &[*const i64],
+        json_offsets_len: &[usize],
+    ) -> Result<()> {
+        assert!(keys.len() == json_offsets.len());
+        assert!(keys.len() == json_offsets_len.len());
+        match self {
+            IndexWriterWrapper::V5(writer) => {
+                writer.add_json_key_stats(keys, json_offsets, json_offsets_len)
+            }
+            IndexWriterWrapper::V7(writer) => {
+                writer.add_json_key_stats(keys, json_offsets, json_offsets_len)
+            }
+        }
+    }
+
     #[allow(dead_code)]
     pub fn manual_merge(&mut self) -> Result<()> {
         match self {
@@ -155,6 +173,7 @@ impl IndexWriterWrapper {
 
 #[cfg(test)]
 mod tests {
+    use rand::Rng;
     use std::ffi::CString;
     use std::ops::Bound;
     use tantivy_5::{query, Index, ReloadPolicy};
@@ -289,6 +308,50 @@ mod tests {
             .search(&query, &collector::TopDocs::with_limit(10))
             .unwrap();
         assert_eq!(res.len(), 10);
+    }
+
+    #[test]
+    pub fn test_add_json_key_stats() {
+        use crate::index_writer::IndexWriterWrapper;
+
+        let temp_dir = tempdir().unwrap();
+        let mut index_writer = IndexWriterWrapper::create_json_key_stats_writer(
+            "test",
+            temp_dir.path().to_str().unwrap(),
+            1,
+            15 * 1024 * 1024,
+            TantivyIndexVersion::V7,
+            false,
+        )
+        .unwrap();
+
+        let keys = (0..100).map(|i| format!("key{:05}", i)).collect::<Vec<_>>();
+        let mut total_count = 0;
+        let mut rng = rand::thread_rng();
+        let json_offsets = (0..100)
+            .map(|_| {
+                let count = rng.gen_range(0, 1000);
+                total_count += count;
+                (0..count)
+                    .map(|_| rng.gen_range(0, i64::MAX))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let json_offsets_len = json_offsets
+            .iter()
+            .map(|offsets| offsets.len())
+            .collect::<Vec<_>>();
+        let json_offsets = json_offsets.iter().map(|x| x.as_ptr()).collect::<Vec<_>>();
+        let c_keys: Vec<CString> = keys.into_iter().map(|k| CString::new(k).unwrap()).collect();
+        let key_ptrs: Vec<*const libc::c_char> = c_keys.iter().map(|cs| cs.as_ptr()).collect();
+
+        index_writer
+            .add_json_key_stats(&key_ptrs, &json_offsets, &json_offsets_len)
+            .unwrap();
+
+        index_writer.commit().unwrap();
+        let count = index_writer.create_reader().unwrap().count().unwrap();
+        assert_eq!(count, total_count);
     }
 
     #[test]

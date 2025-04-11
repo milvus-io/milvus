@@ -315,6 +315,25 @@ pub extern "C" fn tantivy_index_add_strings_by_single_segment_writer(
         .into()
 }
 
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_json_key_stats_data_by_batch(
+    ptr: *mut c_void,
+    keys: *const *const c_char,
+    json_offsets: *const *const i64,
+    json_offsets_len: *const usize,
+    len: usize,
+) -> RustResult {
+    let real = ptr as *mut IndexWriterWrapper;
+    let json_offsets_len = unsafe { slice::from_raw_parts(json_offsets_len, len) };
+    let json_offsets = unsafe { slice::from_raw_parts(json_offsets, len) };
+    let keys = unsafe { slice::from_raw_parts(keys, len) };
+    unsafe {
+        (*real)
+            .add_json_key_stats(keys, json_offsets, json_offsets_len)
+            .into()
+    }
+}
+
 // --------------------------------------------- array ------------------------------------------
 
 #[no_mangle]

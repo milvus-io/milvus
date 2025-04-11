@@ -4,6 +4,7 @@ use std::sync::Arc;
 use futures::executor::block_on;
 use libc::c_char;
 use log::info;
+use tantivy::indexer::UserOperation;
 use tantivy::schema::{
     Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, INDEXED,
 };
@@ -212,6 +213,49 @@ impl IndexWriterWrapperImpl {
 
         if !batch.is_empty() {
             self.index_writer.add_documents_with_doc_id(offset, batch)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn add_json_key_stats(
+        &mut self,
+        keys: &[*const i8],
+        json_offsets: &[*const i64],
+        json_offsets_len: &[usize],
+    ) -> Result<()> {
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+        let id_field = self
+            .index_writer
+            .index()
+            .schema()
+            .get_field("doc_id")
+            .unwrap();
+        for i in 0..keys.len() {
+            let key = unsafe { CStr::from_ptr(keys[i]) }
+                .to_str()
+                .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+
+            let offsets =
+                unsafe { std::slice::from_raw_parts(json_offsets[i], json_offsets_len[i]) };
+
+            for offset in offsets {
+                batch.push(UserOperation::Add(doc!(
+                    id_field => *offset,
+                    self.field => key,
+                )));
+
+                if batch.len() >= BATCH_SIZE {
+                    self.index_writer.run(std::mem::replace(
+                        &mut batch,
+                        Vec::with_capacity(BATCH_SIZE),
+                    ))?;
+                }
+            }
+        }
+
+        if !batch.is_empty() {
+            self.index_writer.run(batch)?;
         }
 
         Ok(())
