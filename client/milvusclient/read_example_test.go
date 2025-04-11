@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v2/index"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
@@ -201,6 +202,75 @@ func ExampleClient_Search_offsetLimit() {
 	}
 }
 
+func ExampleClient_Search_jsonExpr() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		log.Fatal("failed to connect to milvus server: ", err.Error())
+	}
+
+	defer cli.Close(ctx)
+
+	queryVector := []float32{0.3, -0.6, -0.1}
+
+	annParam := index.NewCustomAnnParam()
+	annParam.WithExtraParam("nprobe", 10)
+	resultSets, err := cli.Search(ctx, milvusclient.NewSearchOption(
+		"my_json_collection", // collectionName
+		5,                    // limit
+		[]entity.Vector{entity.FloatVector(queryVector)},
+	).WithOutputFields("metadata").WithAnnParam(annParam))
+	if err != nil {
+		log.Fatal("failed to perform basic ANN search collection: ", err.Error())
+	}
+
+	for _, resultSet := range resultSets {
+		log.Println("IDs: ", resultSet.IDs)
+		log.Println("Scores: ", resultSet.Scores)
+	}
+}
+
+func ExampleClient_Search_binaryVector() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	milvusAddr := "127.0.0.1:19530"
+	token := "root:Milvus"
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+		APIKey:  token,
+	})
+	if err != nil {
+		log.Fatal("failed to connect to milvus server: ", err.Error())
+	}
+
+	defer cli.Close(ctx)
+
+	queryVector := []byte{0b10011011, 0b01010100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+
+	annSearchParams := index.NewCustomAnnParam()
+	annSearchParams.WithExtraParam("nprobe", 10)
+	resultSets, err := cli.Search(ctx, milvusclient.NewSearchOption(
+		"my_binary_collection", // collectionName
+		5,                      // limit
+		[]entity.Vector{entity.BinaryVector(queryVector)},
+	).WithOutputFields("pk").WithAnnParam(annSearchParams))
+	if err != nil {
+		log.Fatal("failed to perform basic ANN search collection: ", err.Error())
+	}
+
+	for _, resultSet := range resultSets {
+		log.Println("IDs: ", resultSet.IDs)
+		log.Println("Scores: ", resultSet.Scores)
+		log.Println("Pks: ", resultSet.GetColumn("pk"))
+	}
+}
+
 func ExampleClient_Get() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -248,6 +318,54 @@ func ExampleClient_Query() {
 	}
 
 	fmt.Println(rs.GetColumn("id"))
+}
+
+func ExampleClient_Query_jsonExpr_notnull() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		log.Fatal("failed to connect to milvus server: ", err.Error())
+	}
+
+	defer cli.Close(ctx)
+
+	rs, err := cli.Query(ctx, milvusclient.NewQueryOption("my_json_collection").
+		WithFilter("metadata is not null").
+		WithOutputFields("metadata", "pk"))
+	if err != nil {
+		// handle error
+	}
+
+	fmt.Println(rs.GetColumn("pk"))
+	fmt.Println(rs.GetColumn("metadata"))
+}
+
+func ExampleClient_Query_jsonExpr_leafChild() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		log.Fatal("failed to connect to milvus server: ", err.Error())
+	}
+
+	defer cli.Close(ctx)
+
+	rs, err := cli.Query(ctx, milvusclient.NewQueryOption("my_json_collection").
+		WithFilter(`metadata["product_info"]["category"] == "electronics"`).
+		WithOutputFields("metadata", "pk"))
+	if err != nil {
+		// handle error
+	}
+
+	fmt.Println(rs.GetColumn("pk"))
+	fmt.Println(rs.GetColumn("metadata"))
 }
 
 func ExampleClient_HybridSearch() {

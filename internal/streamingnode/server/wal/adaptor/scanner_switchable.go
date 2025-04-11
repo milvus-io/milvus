@@ -145,7 +145,8 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 				return nil, err
 			}
 			if msg.MessageType() != message.MessageTypeTimeTick || s.writeAheadBuffer == nil {
-				// If there's no write ahead buffer, we cannot switch into tailing mode, so skip the checking.
+				// Only timetick message is keep the same order with the write ahead buffer.
+				// So we can only use the timetick message to catchup the write ahead buffer.
 				continue
 			}
 			// Here's a timetick message from the scanner, make tailing read if we catch up the writeahead buffer.

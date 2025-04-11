@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
@@ -53,6 +54,73 @@ func ExampleClient_Insert_columnbase() {
 			{0.5718280481994695, 0.24070317428066512, -0.3737913482606834, -0.06726932177492717, -0.6980531615588608},
 		}),
 	)
+	if err != nil {
+		// handle err
+	}
+	fmt.Println(resp)
+}
+
+func ExampleClient_Insert_binaryVector() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		// handle error
+	}
+
+	defer cli.Close(ctx)
+
+	resp, err := cli.Insert(ctx, milvusclient.NewColumnBasedInsertOption("quick_setup").
+		WithBinaryVectorColumn("binary_vector", 128, [][]byte{
+			{0b10011011, 0b01010100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+			{0b10011011, 0b01010101, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		}))
+	if err != nil {
+		// handle err
+	}
+	fmt.Println(resp)
+}
+
+func ExampleClient_Insert_jsonData() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		// handle error
+	}
+
+	defer cli.Close(ctx)
+
+	resp, err := cli.Insert(ctx, milvusclient.NewColumnBasedInsertOption("my_json_collection").
+		WithInt64Column("pk", []int64{1, 2, 3, 4}).
+		WithFloatVectorColumn("embedding", 3, [][]float32{
+			{0.12, 0.34, 0.56},
+			{0.56, 0.78, 0.90},
+			{0.91, 0.18, 0.23},
+			{0.56, 0.38, 0.21},
+		}).WithColumns(
+		column.NewColumnJSONBytes("metadata", [][]byte{
+			[]byte(`{
+            "product_info": {"category": "electronics", "brand": "BrandA"},
+            "price": 99.99,
+            "in_stock": True,
+            "tags": ["summer_sale"]
+        }`),
+			[]byte(`null`),
+			[]byte(`null`),
+			[]byte(`"metadata": {
+            "product_info": {"category": None, "brand": "BrandB"},
+            "price": 59.99,
+            "in_stock": None
+        }`),
+		}),
+	))
 	if err != nil {
 		// handle err
 	}

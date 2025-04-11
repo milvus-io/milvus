@@ -146,6 +146,24 @@ impl IndexWriterWrapper {
         }
     }
 
+    pub fn add_json_key_stats(
+        &mut self,
+        keys: &[*const i8],
+        json_offsets: &[*const i64],
+        json_offsets_len: &[usize],
+    ) -> Result<()> {
+        assert!(keys.len() == json_offsets.len());
+        assert!(keys.len() == json_offsets_len.len());
+        match self {
+            IndexWriterWrapper::V5(writer) => {
+                writer.add_json_key_stats(keys, json_offsets, json_offsets_len)
+            }
+            IndexWriterWrapper::V7(writer) => {
+                writer.add_json_key_stats(keys, json_offsets, json_offsets_len)
+            }
+        }
+    }
+
     #[allow(dead_code)]
     pub fn manual_merge(&mut self) -> Result<()> {
         match self {
@@ -174,8 +192,7 @@ impl IndexWriterWrapper {
 #[cfg(test)]
 mod tests {
     use rand::Rng;
-    use std::ffi::CString;
-    use std::ops::Bound;
+    use std::{ffi::CString, ops::Bound};
     use tantivy_5::{query, Index, ReloadPolicy};
     use tempfile::{tempdir, TempDir};
 
@@ -197,6 +214,7 @@ mod tests {
                 1,
                 50_000_000,
                 TantivyIndexVersion::V5,
+                false,
             )
             .unwrap();
 
