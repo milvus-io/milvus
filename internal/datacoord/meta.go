@@ -1930,7 +1930,8 @@ func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo
 		return isSegmentHealthy(segment) &&
 			isFlush(segment) && // sealed segment
 			!segment.isCompacting && // not compacting now
-			!segment.GetIsImporting() // not importing now
+			!segment.GetIsImporting() && // not importing now
+			!segment.IsInvisible // not invisible
 	}))
 
 	ret := make(map[int64][]*SegmentInfo)
