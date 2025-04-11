@@ -302,6 +302,45 @@ impl IndexWriterWrapperImpl {
         Ok(())
     }
 
+    pub fn add_json_key_stats(
+        &mut self,
+        keys: &[*const i8],
+        json_offsets: &[*const i64],
+        json_offsets_len: &[usize],
+    ) -> Result<()> {
+        let writer = self.index_writer.as_ref().left().unwrap();
+        let id_field = self.id_field.unwrap();
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+        for i in 0..keys.len() {
+            let key = unsafe { CStr::from_ptr(keys[i]) }
+                .to_str()
+                .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+
+            let offsets =
+                unsafe { std::slice::from_raw_parts(json_offsets[i], json_offsets_len[i]) };
+
+            for offset in offsets {
+                batch.push(UserOperation::Add(doc!(
+                    id_field => *offset,
+                    self.field => key,
+                )));
+
+                if batch.len() >= BATCH_SIZE {
+                    writer.run(std::mem::replace(
+                        &mut batch,
+                        Vec::with_capacity(BATCH_SIZE),
+                    ))?;
+                }
+            }
+        }
+
+        if !batch.is_empty() {
+            writer.run(batch)?;
+        }
+
+        Ok(())
+    }
+
     pub fn manual_merge(&mut self) -> Result<()> {
         let index_writer = self.index_writer.as_mut().left().unwrap();
         let metas = index_writer.index().searchable_segment_metas()?;

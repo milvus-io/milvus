@@ -219,7 +219,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
     std::vector<std::string> null_offset_files;
     std::shared_ptr<FieldDataBase> null_offset_data;
 
-    auto find_file = [&](const std::string& target) -> auto {
+    auto find_file = [&](const std::string& target) -> auto{
         return std::find_if(inverted_index_files.begin(),
                             inverted_index_files.end(),
                             [&](const std::string& filename) {
