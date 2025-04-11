@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/symbolizer"
 	_ "github.com/milvus-io/milvus/pkg/v2/util/symbolizer" // support symbolizer and crash dump
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -69,6 +70,7 @@ func init() {
 	metrics.RegisterMetaMetrics(Registry.GoRegistry)
 	metrics.RegisterMsgStreamMetrics(Registry.GoRegistry)
 	metrics.RegisterStorageMetrics(Registry.GoRegistry)
+	symbolizer.RegisterJemallocStatsMetrics("milvus", Registry.GoRegistry)
 }
 
 func stopRocksmq() {
