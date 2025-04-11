@@ -42,48 +42,56 @@ pub(crate) fn schema_builder_add_field(
 }
 
 impl TantivyValue<TantivyDocument> for i8 {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_i64(Field::from_field_id(field), *self as i64);
     }
 }
 
 impl TantivyValue<TantivyDocument> for i16 {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_i64(Field::from_field_id(field), *self as i64);
     }
 }
 
 impl TantivyValue<TantivyDocument> for i32 {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_i64(Field::from_field_id(field), *self as i64);
     }
 }
 
 impl TantivyValue<TantivyDocument> for i64 {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_i64(Field::from_field_id(field), *self);
     }
 }
 
 impl TantivyValue<TantivyDocument> for f32 {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_f64(Field::from_field_id(field), *self as f64);
     }
 }
 
 impl TantivyValue<TantivyDocument> for f64 {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_f64(Field::from_field_id(field), *self);
     }
 }
 
 impl TantivyValue<TantivyDocument> for &str {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_text(Field::from_field_id(field), *self);
     }
 }
 
 impl TantivyValue<TantivyDocument> for bool {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_bool(Field::from_field_id(field), *self);
     }
