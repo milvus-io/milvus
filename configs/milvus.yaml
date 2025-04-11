@@ -247,6 +247,10 @@ natsmq:
       maxBytes:  # How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size
       maxMsgs:  # How many message the single P-channel may contain. Removing oldest messages if the P-channel exceeds this limit
 
+# Related configuration of mixCoord
+mixCoord:
+  enableActiveStandby: false
+
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
   dmlChannelNum: 16 # The number of DML-Channels to create at the root coord startup.
