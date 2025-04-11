@@ -6,7 +6,7 @@ use libc::c_char;
 use log::info;
 use tantivy::indexer::UserOperation;
 use tantivy::schema::{
-    Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, INDEXED,
+    Field, IndexRecordOption, NumericOptions, Schema, SchemaBuilder, TextFieldIndexing, TextOptions,
 };
 use tantivy::{doc, Index, IndexWriter, TantivyDocument};
 
@@ -25,9 +25,15 @@ pub(crate) fn schema_builder_add_field(
     data_type: TantivyDataType,
 ) -> Field {
     match data_type {
-        TantivyDataType::I64 => schema_builder.add_i64_field(field_name, INDEXED),
-        TantivyDataType::F64 => schema_builder.add_f64_field(field_name, INDEXED),
-        TantivyDataType::Bool => schema_builder.add_bool_field(field_name, INDEXED),
+        TantivyDataType::I64 => {
+            schema_builder.add_i64_field(field_name, NumericOptions::default().set_indexed())
+        }
+        TantivyDataType::F64 => {
+            schema_builder.add_f64_field(field_name, NumericOptions::default().set_indexed())
+        }
+        TantivyDataType::Bool => {
+            schema_builder.add_bool_field(field_name, NumericOptions::default().set_indexed())
+        }
         TantivyDataType::Keyword => {
             let text_field_indexing = TextFieldIndexing::default()
                 .set_tokenizer("raw")
@@ -242,43 +248,6 @@ impl IndexWriterWrapperImpl {
             for offset in offsets {
                 batch.push(UserOperation::Add(doc!(
                     id_field => *offset,
-                    self.field => key,
-                )));
-
-                if batch.len() >= BATCH_SIZE {
-                    self.index_writer.run(std::mem::replace(
-                        &mut batch,
-                        Vec::with_capacity(BATCH_SIZE),
-                    ))?;
-                }
-            }
-        }
-
-        if !batch.is_empty() {
-            self.index_writer.run(batch)?;
-        }
-
-        Ok(())
-    }
-
-    pub fn add_json_key_stats(
-        &mut self,
-        keys: &[*const i8],
-        json_offsets: &[*const i64],
-        json_offsets_len: &[usize],
-    ) -> Result<()> {
-        let mut batch = Vec::with_capacity(BATCH_SIZE);
-        for i in 0..keys.len() {
-            let key = unsafe { CStr::from_ptr(keys[i]) }
-                .to_str()
-                .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
-
-            let offsets =
-                unsafe { std::slice::from_raw_parts(json_offsets[i], json_offsets_len[i]) };
-
-            for offset in offsets {
-                batch.push(UserOperation::Add(doc!(
-                    self.id_field => *offset,
                     self.field => key,
                 )));
 
