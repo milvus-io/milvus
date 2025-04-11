@@ -984,9 +984,6 @@ struct fmt::formatter<SegmentType> : fmt::formatter<std::string> {
             case Indexing:
                 name = "Indexing";
                 break;
-            case ChunkedSealed:
-                name = "ChunkedSealed";
-                break;
             default:
                 name = "Unknown";
         }

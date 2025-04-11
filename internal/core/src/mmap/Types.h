@@ -27,51 +27,16 @@ namespace milvus {
 
 struct FieldDataInfo {
     FieldDataInfo() {
-        channel = std::make_shared<FieldDataChannel>();
         arrow_reader_channel = std::make_shared<ArrowReaderChannel>();
     }
 
     FieldDataInfo(int64_t field_id,
                   size_t row_count,
-                  std::string mmap_dir_path = "",
-                  bool growing = true)
+                  std::string mmap_dir_path = "")
         : field_id(field_id),
           row_count(row_count),
           mmap_dir_path(std::move(mmap_dir_path)) {
-        if (growing) {
-            channel = std::make_shared<FieldDataChannel>();
-        } else {
-            arrow_reader_channel = std::make_shared<ArrowReaderChannel>();
-        }
-    }
-
-    FieldDataInfo(int64_t field_id,
-                  size_t row_count,
-                  FieldDataChannelPtr channel)
-        : field_id(field_id),
-          row_count(row_count),
-          channel(std::move(channel)) {
-    }
-
-    FieldDataInfo(int64_t field_id,
-                  size_t row_count,
-                  std::string mmap_dir_path,
-                  FieldDataChannelPtr channel)
-        : field_id(field_id),
-          row_count(row_count),
-          mmap_dir_path(std::move(mmap_dir_path)),
-          channel(std::move(channel)) {
-    }
-
-    FieldDataInfo(int64_t field_id,
-                  size_t row_count,
-                  const std::vector<FieldDataPtr>& batch)
-        : field_id(field_id), row_count(row_count) {
-        channel = std::make_shared<FieldDataChannel>();
-        for (auto& data : batch) {
-            channel->push(data);
-        }
-        channel->close();
+        arrow_reader_channel = std::make_shared<ArrowReaderChannel>();
     }
 
     FieldDataInfo(
@@ -86,24 +51,9 @@ struct FieldDataInfo {
         arrow_reader_channel->close();
     }
 
-    FieldDataInfo(int64_t field_id,
-                  size_t row_count,
-                  std::string mmap_dir_path,
-                  const std::vector<FieldDataPtr>& batch)
-        : field_id(field_id),
-          row_count(row_count),
-          mmap_dir_path(std::move(mmap_dir_path)) {
-        channel = std::make_shared<FieldDataChannel>();
-        for (auto& data : batch) {
-            channel->push(data);
-        }
-        channel->close();
-    }
-
     int64_t field_id;
     size_t row_count;
     std::string mmap_dir_path;
-    FieldDataChannelPtr channel;
     std::shared_ptr<ArrowReaderChannel> arrow_reader_channel;
 };
 }  // namespace milvus
