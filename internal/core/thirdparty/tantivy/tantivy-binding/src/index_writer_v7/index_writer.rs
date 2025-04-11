@@ -13,7 +13,7 @@ use tantivy::{doc, Index, IndexWriter, TantivyDocument};
 use crate::data_type::TantivyDataType;
 
 use crate::error::{Result, TantivyBindingError};
-use crate::index_reader::IndexReaderWrapper;
+use crate::index_reader::{IndexReaderWrapper, SetBitsetFn};
 use crate::index_writer::TantivyValue;
 
 const BATCH_SIZE: usize = 4096;
@@ -129,8 +129,8 @@ impl IndexWriterWrapperImpl {
         })
     }
 
-    pub fn create_reader(&self) -> Result<IndexReaderWrapper> {
-        IndexReaderWrapper::from_index(self.index.clone())
+    pub fn create_reader(&self, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
+        IndexReaderWrapper::from_index(self.index.clone(), set_bitset)
     }
 
     #[inline]
@@ -287,7 +287,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::TantivyIndexVersion;
+    use crate::{util::set_bitset, TantivyIndexVersion};
 
     #[test]
     pub fn test_add_json_key_stats() {
@@ -317,7 +317,7 @@ mod tests {
             .add_string_by_batch(&key_ptrs, Some(0))
             .unwrap();
         index_writer.commit().unwrap();
-        let reader = index_writer.create_reader().unwrap();
+        let reader = index_writer.create_reader(set_bitset).unwrap();
         let count: u32 = reader.count().unwrap();
         assert_eq!(count, 10000);
     }

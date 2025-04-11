@@ -71,6 +71,8 @@ struct RustResult {
   const char *error;
 };
 
+using SetBitsetFn = void(*)(void*, uint32_t);
+
 struct TantivyToken {
   const char *token;
   int64_t start_offset;
@@ -103,7 +105,7 @@ void hashmap_set_value(void *map, const char *key, const char *value);
 
 void free_hashmap(void *map);
 
-RustResult tantivy_load_index(const char *path);
+RustResult tantivy_load_index(const char *path, SetBitsetFn set_bitset);
 
 void tantivy_free_index_reader(void *ptr);
 
@@ -111,67 +113,91 @@ RustResult tantivy_reload_index(void *ptr);
 
 RustResult tantivy_index_count(void *ptr);
 
-RustResult tantivy_term_query_i64(void *ptr, int64_t term);
+RustResult tantivy_term_query_i64(void *ptr, int64_t term, void *bitset);
 
-RustResult tantivy_lower_bound_range_query_i64(void *ptr, int64_t lower_bound, bool inclusive);
+RustResult tantivy_lower_bound_range_query_i64(void *ptr,
+                                               int64_t lower_bound,
+                                               bool inclusive,
+                                               void *bitset);
 
-RustResult tantivy_lower_bound_range_query_bool(void *ptr, bool lower_bound, bool inclusive);
+RustResult tantivy_lower_bound_range_query_bool(void *ptr,
+                                                bool lower_bound,
+                                                bool inclusive,
+                                                void *bitset);
 
-RustResult tantivy_upper_bound_range_query_i64(void *ptr, int64_t upper_bound, bool inclusive);
+RustResult tantivy_upper_bound_range_query_i64(void *ptr,
+                                               int64_t upper_bound,
+                                               bool inclusive,
+                                               void *bitset);
 
-RustResult tantivy_upper_bound_range_query_bool(void *ptr, bool upper_bound, bool inclusive);
+RustResult tantivy_upper_bound_range_query_bool(void *ptr,
+                                                bool upper_bound,
+                                                bool inclusive,
+                                                void *bitset);
 
 RustResult tantivy_range_query_i64(void *ptr,
                                    int64_t lower_bound,
                                    int64_t upper_bound,
                                    bool lb_inclusive,
-                                   bool ub_inclusive);
+                                   bool ub_inclusive,
+                                   void *bitset);
 
 RustResult tantivy_range_query_bool(void *ptr,
                                     bool lower_bound,
                                     bool upper_bound,
                                     bool lb_inclusive,
-                                    bool ub_inclusive);
+                                    bool ub_inclusive,
+                                    void *bitset);
 
-RustResult tantivy_term_query_f64(void *ptr, double term);
+RustResult tantivy_term_query_f64(void *ptr, double term, void *bitset);
 
-RustResult tantivy_lower_bound_range_query_f64(void *ptr, double lower_bound, bool inclusive);
+RustResult tantivy_lower_bound_range_query_f64(void *ptr,
+                                               double lower_bound,
+                                               bool inclusive,
+                                               void *bitset);
 
-RustResult tantivy_upper_bound_range_query_f64(void *ptr, double upper_bound, bool inclusive);
+RustResult tantivy_upper_bound_range_query_f64(void *ptr,
+                                               double upper_bound,
+                                               bool inclusive,
+                                               void *bitset);
 
 RustResult tantivy_range_query_f64(void *ptr,
                                    double lower_bound,
                                    double upper_bound,
                                    bool lb_inclusive,
-                                   bool ub_inclusive);
+                                   bool ub_inclusive,
+                                   void *bitset);
 
-RustResult tantivy_term_query_bool(void *ptr, bool term);
+RustResult tantivy_term_query_bool(void *ptr, bool term, void *bitset);
 
-RustResult tantivy_term_query_keyword(void *ptr, const char *term);
+RustResult tantivy_term_query_keyword(void *ptr, const char *term, void *bitset);
 
 RustResult tantivy_term_query_keyword_i64(void *ptr, const char *term);
 
 RustResult tantivy_lower_bound_range_query_keyword(void *ptr,
                                                    const char *lower_bound,
-                                                   bool inclusive);
+                                                   bool inclusive,
+                                                   void *bitset);
 
 RustResult tantivy_upper_bound_range_query_keyword(void *ptr,
                                                    const char *upper_bound,
-                                                   bool inclusive);
+                                                   bool inclusive,
+                                                   void *bitset);
 
 RustResult tantivy_range_query_keyword(void *ptr,
                                        const char *lower_bound,
                                        const char *upper_bound,
                                        bool lb_inclusive,
-                                       bool ub_inclusive);
+                                       bool ub_inclusive,
+                                       void *bitset);
 
-RustResult tantivy_prefix_query_keyword(void *ptr, const char *prefix);
+RustResult tantivy_prefix_query_keyword(void *ptr, const char *prefix, void *bitset);
 
-RustResult tantivy_regex_query(void *ptr, const char *pattern);
+RustResult tantivy_regex_query(void *ptr, const char *pattern, void *bitset);
 
-RustResult tantivy_match_query(void *ptr, const char *query);
+RustResult tantivy_match_query(void *ptr, const char *query, void *bitset);
 
-RustResult tantivy_phrase_match_query(void *ptr, const char *query, uint32_t slop);
+RustResult tantivy_phrase_match_query(void *ptr, const char *query, uint32_t slop, void *bitset);
 
 RustResult tantivy_register_tokenizer(void *ptr,
                                       const char *tokenizer_name,
@@ -195,7 +221,7 @@ RustResult tantivy_finish_index(void *ptr);
 
 RustResult tantivy_commit_index(void *ptr);
 
-RustResult tantivy_create_reader_from_writer(void *ptr);
+RustResult tantivy_create_reader_from_writer(void *ptr, SetBitsetFn set_bitset);
 
 RustResult tantivy_index_add_int8s(void *ptr,
                                    const int8_t *array,

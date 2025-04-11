@@ -2,6 +2,7 @@ use error::TantivyBindingError;
 
 mod analyzer;
 mod array;
+mod bitset_wrapper;
 mod data_type;
 mod demo_c;
 mod docid_collector;
