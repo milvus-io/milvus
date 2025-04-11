@@ -12,15 +12,6 @@
 #pragma once
 
 namespace milvus::index {
-inline void
-apply_hits(milvus::TargetBitmap& bitset,
-           const milvus::index::RustArrayWrapper& w,
-           bool v) {
-    for (size_t j = 0; j < w.array_.len; j++) {
-        bitset[w.array_.array[j]] = v;
-    }
-}
-
 inline size_t
 should_allocate_bitset_size(const milvus::index::RustArrayWrapper& w) {
     if (w.array_.len == 0) {
@@ -35,20 +26,24 @@ should_allocate_bitset_size(const milvus::index::RustArrayWrapper& w) {
 
 inline void
 apply_hits_with_filter(milvus::TargetBitmap& bitset,
-                       const milvus::index::RustArrayWrapper& w,
                        const std::function<bool(size_t /* offset */)>& filter) {
-    for (size_t j = 0; j < w.array_.len; j++) {
-        auto the_offset = w.array_.array[j];
-        bitset[the_offset] = filter(the_offset);
+    std::optional<size_t> result = bitset.find_first();
+    while (result.has_value()) {
+        size_t offset = result.value();
+        bitset[offset] = filter(offset);
+        result = bitset.find_next(offset);
     }
 }
 
 inline void
 apply_hits_with_callback(
-    const milvus::index::RustArrayWrapper& w,
+    milvus::TargetBitmap& bitset,
     const std::function<void(size_t /* offset */)>& callback) {
-    for (size_t j = 0; j < w.array_.len; j++) {
-        callback(w.array_.array[j]);
+    std::optional<size_t> result = bitset.find_first();
+    while (result.has_value()) {
+        size_t offset = result.value();
+        callback(offset);
+        result = bitset.find_next(offset);
     }
 }
 }  // namespace milvus::index

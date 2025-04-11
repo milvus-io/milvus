@@ -8,10 +8,14 @@ use crate::{
 };
 
 #[no_mangle]
-pub extern "C" fn tantivy_match_query(ptr: *mut c_void, query: *const c_char) -> RustResult {
+pub extern "C" fn tantivy_match_query(
+    ptr: *mut c_void,
+    query: *const c_char,
+    bitset: *mut c_void,
+) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     let query = cstr_to_str!(query);
-    unsafe { (*real).match_query(query).into() }
+    unsafe { (*real).match_query(query, bitset).into() }
 }
 
 #[no_mangle]
@@ -19,10 +23,11 @@ pub extern "C" fn tantivy_phrase_match_query(
     ptr: *mut c_void,
     query: *const c_char,
     slop: u32,
+    bitset: *mut c_void,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     let query = cstr_to_str!(query);
-    unsafe { (*real).phrase_match_query(query, slop).into() }
+    unsafe { (*real).phrase_match_query(query, slop, bitset).into() }
 }
 
 #[no_mangle]

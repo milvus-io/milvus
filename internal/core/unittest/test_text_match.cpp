@@ -155,7 +155,7 @@ TEST(TextMatch, Index) {
                                          "unique_id",
                                          "milvus_tokenizer",
                                          "{}");
-    index->CreateReader();
+    index->CreateReader(index::SetBitset);
     index->AddText("football, basketball, pingpang", true, 0);
     index->AddText("", false, 1);
     index->AddText("swimming, football", true, 2);
@@ -177,7 +177,10 @@ TEST(TextMatch, Index) {
         ASSERT_FALSE(res2[1]);
         ASSERT_TRUE(res2[2]);
         res = index->MatchQuery("nothing");
-        ASSERT_EQ(res.size(), 0);
+        ASSERT_EQ(res.size(), 3);
+        ASSERT_FALSE(res[0]);
+        ASSERT_FALSE(res[1]);
+        ASSERT_FALSE(res[2]);
     }
 
     {
@@ -194,10 +197,16 @@ TEST(TextMatch, Index) {
         ASSERT_TRUE(res1[2]);
 
         auto res2 = index->PhraseMatchQuery("football swimming", 0);
-        ASSERT_EQ(res2.size(), 0);
+        ASSERT_EQ(res2.size(), 3);
+        ASSERT_FALSE(res2[0]);
+        ASSERT_FALSE(res2[1]);
+        ASSERT_FALSE(res2[2]);
 
         auto res3 = index->PhraseMatchQuery("football swimming", 1);
-        ASSERT_EQ(res3.size(), 0);
+        ASSERT_EQ(res3.size(), 3);
+        ASSERT_FALSE(res3[0]);
+        ASSERT_FALSE(res3[1]);
+        ASSERT_FALSE(res3[2]);
 
         auto res4 = index->PhraseMatchQuery("football swimming", 2);
         ASSERT_EQ(res4.size(), 3);

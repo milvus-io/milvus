@@ -27,3 +27,9 @@ pub fn free_binding<T>(ptr: *mut c_void) {
         drop(Box::from_raw(real));
     }
 }
+
+#[cfg(test)]
+pub extern "C" fn set_bitset(bitset: *mut c_void, doc_id: u32) {
+    let bitset = unsafe { &mut *(bitset as *mut Vec<u32>) };
+    bitset.push(doc_id);
+}

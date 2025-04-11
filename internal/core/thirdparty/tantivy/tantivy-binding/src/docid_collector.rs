@@ -4,19 +4,18 @@ use tantivy::{
     DocId, Score, SegmentOrdinal, SegmentReader,
 };
 
-#[derive(Default)]
-pub(crate) struct DocIdCollector<T> {
-    _phantom: std::marker::PhantomData<T>,
+use crate::bitset_wrapper::BitsetWrapper;
+
+// "warning": bitset_wrapper has no guarantee for thread safety, so `DocIdChildCollector`
+// should be handled serializely which means we should only use single thread
+// for executing query.
+pub(crate) struct DocIdCollector {
+    pub(crate) bitset_wrapper: BitsetWrapper,
 }
 
-pub(crate) struct DocIdChildCollector<T> {
-    milvus_doc_ids: Vec<T>,
-    column: Column<i64>,
-}
-
-impl Collector for DocIdCollector<u32> {
-    type Fruit = Vec<u32>;
-    type Child = DocIdChildCollector<u32>;
+impl Collector for DocIdCollector {
+    type Fruit = ();
+    type Child = DocIdChildCollector;
 
     fn for_segment(
         &self,
@@ -24,40 +23,38 @@ impl Collector for DocIdCollector<u32> {
         segment: &SegmentReader,
     ) -> tantivy::Result<Self::Child> {
         Ok(DocIdChildCollector {
-            milvus_doc_ids: Vec::new(),
+            bitset_wrapper: self.bitset_wrapper.clone(),
             column: segment.fast_fields().i64("doc_id").unwrap(),
         })
     }
 
+    #[inline]
     fn requires_scoring(&self) -> bool {
         false
     }
 
+    #[inline]
     fn merge_fruits(
         &self,
-        segment_fruits: Vec<<Self::Child as SegmentCollector>::Fruit>,
+        _: Vec<<Self::Child as SegmentCollector>::Fruit>,
     ) -> tantivy::Result<Self::Fruit> {
-        let len: usize = segment_fruits.iter().map(|docset| docset.len()).sum();
-        let mut result = Vec::with_capacity(len);
-        for docs in segment_fruits {
-            for doc in docs {
-                result.push(doc);
-            }
-        }
-        Ok(result)
+        Ok(())
     }
 }
 
-impl SegmentCollector for DocIdChildCollector<u32> {
-    type Fruit = Vec<u32>;
+pub(crate) struct DocIdChildCollector {
+    bitset_wrapper: BitsetWrapper,
+    column: Column<i64>,
+}
 
+impl SegmentCollector for DocIdChildCollector {
+    type Fruit = ();
+
+    #[inline]
     fn collect_block(&mut self, docs: &[DocId]) {
-        self.milvus_doc_ids.extend(
-            self.column
-                .values_for_docs_flatten(docs)
-                .into_iter()
-                .map(|val| val as u32),
-        );
+        for doc_id in self.column.values_for_docs_flatten(docs).into_iter() {
+            self.bitset_wrapper.set(doc_id as u32);
+        }
     }
 
     fn collect(&mut self, doc: DocId, _score: Score) {
@@ -65,21 +62,23 @@ impl SegmentCollector for DocIdChildCollector<u32> {
         self.collect_block(&[doc]);
     }
 
-    fn harvest(self) -> Self::Fruit {
-        self.milvus_doc_ids
-    }
+    #[inline]
+    fn harvest(self) -> Self::Fruit {}
 }
 
-impl Collector for DocIdCollector<i64> {
+#[derive(Default)]
+pub(crate) struct DocIdCollectorI64;
+
+impl Collector for DocIdCollectorI64 {
     type Fruit = Vec<i64>;
-    type Child = DocIdChildCollector<i64>;
+    type Child = DocIdChildCollectorI64;
 
     fn for_segment(
         &self,
         _segment_local_id: SegmentOrdinal,
         segment: &SegmentReader,
     ) -> tantivy::Result<Self::Child> {
-        Ok(DocIdChildCollector {
+        Ok(DocIdChildCollectorI64 {
             milvus_doc_ids: Vec::new(),
             column: segment.fast_fields().i64("doc_id").unwrap(),
         })
@@ -104,7 +103,12 @@ impl Collector for DocIdCollector<i64> {
     }
 }
 
-impl SegmentCollector for DocIdChildCollector<i64> {
+pub(crate) struct DocIdChildCollectorI64 {
+    milvus_doc_ids: Vec<i64>,
+    column: Column<i64>,
+}
+
+impl SegmentCollector for DocIdChildCollectorI64 {
     type Fruit = Vec<i64>;
 
     fn collect_block(&mut self, docs: &[DocId]) {
