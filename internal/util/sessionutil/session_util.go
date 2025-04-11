@@ -1126,35 +1126,8 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 		if registered {
 			break
 		}
-		ctx, cancel := context.WithCancel(s.ctx)
-		if errors.Is(err, merr.ErrOldSessionExists) {
-			log.Info("old session exists, start to watch old sessions")
-			oldWatchChans := make([]clientv3.WatchChan, len(oldRoles))
-			for i, role := range oldRoles {
-				oldWatchChans[i] = s.etcdCli.Watch(ctx, path.Join(s.metaRoot, DefaultServiceRoot, role), clientv3.WithPrevKV())
-			}
-
-			for _, oldWatchChan := range oldWatchChans {
-				select {
-				case wresp, ok := <-oldWatchChan:
-					if !ok {
-						continue
-					}
-					if wresp.Err() != nil {
-						continue
-					}
-					for _, event := range wresp.Events {
-						if event.Type == mvccpb.DELETE {
-							log.Debug("old session deleted", zap.String("key", string(event.Kv.Key)))
-							cancel()
-						}
-					}
-				default:
-				}
-			}
-		}
-
 		log.Info(fmt.Sprintf("%s start to watch ACTIVE key %s", s.ServerName, s.activeKey))
+		ctx, cancel := context.WithCancel(s.ctx)
 		watchChan := s.etcdCli.Watch(ctx, s.activeKey, clientv3.WithPrevKV(), clientv3.WithRev(revision))
 		select {
 		case <-ctx.Done():
