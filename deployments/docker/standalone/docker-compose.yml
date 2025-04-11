@@ -18,7 +18,7 @@ services:
 
   minio:
     container_name: milvus-minio
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    image: minio/minio:RELEASE.2025-04-08T15-41-24Z
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -60,11 +60,6 @@ services:
       MINIO_ADDRESS: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-      COMMON_STORAGETYPE: remote
-      DATA_FLUSH_TIMEOUT: 30s
-      DATACOORD_ENABLECOMPACTION: "false"
-      DATACOORD_ENABLEGARBAGECOLLECTION: "false"
-      DATACOORD_SEGMENT_MAXSIZE: "512"
       MINIO_BUCKET_NAME: milvus
     volumes:
       - milvus-data:/var/lib/milvus
