@@ -294,7 +294,7 @@ func TestUpsertAutoID(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 	_, insertRes := prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(nb))
 
-	// upsert autoID collection with existed pks -> actually delete passed pks and auto generate new pks ? So weired
+	// upsert autoID collection with existed pks -> actually delete passed pks and auto generate new pks
 	vecColumn := hp.GenColumnData(nb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
 	upsertRes, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(insertRes.IDs, vecColumn))
 	common.CheckErr(t, err, true)
@@ -313,11 +313,13 @@ func TestUpsertAutoID(t *testing.T) {
 	common.CheckErr(t, err, true)
 	common.EqualColumn(t, vecColumn, resSet1.GetColumn(common.DefaultFloatVecFieldName))
 
-	// upsert with not existing pks -> actually auto generate id ?? so weired
+	// upsert with not existing pks -> actually auto generate id
 	pkColumn := hp.GenColumnData(100, entity.FieldTypeInt64, *hp.TNewDataOption())
 	upsertRes, err1 := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(pkColumn, vecColumn))
 	common.CheckErr(t, err1, true)
 	require.EqualValues(t, nb, upsertRes.UpsertCount)
+	// actual pk is auto-generated not passed
+	require.NotContains(t, upsertRes.IDs.(*column.ColumnInt64).Data(), 0)
 
 	// query and verify upsert result
 	upsertPks := upsertRes.IDs.(*column.ColumnInt64).Data()
@@ -329,6 +331,77 @@ func TestUpsertAutoID(t *testing.T) {
 	// upsert without pks -> error
 	vecColumn = hp.GenColumnData(nb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
 	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn))
+	common.CheckErr(t, err, false, "has no corresponding fieldData pass in: invalid parameter")
+}
+
+// test upsert autoId collection
+func TestUpsertAutoIDRows(t *testing.T) {
+	t.Skip("https://github.com/milvus-io/milvus/issues/40816")
+	/*
+		prepare autoID collection
+		upsert not exist pk -> error
+		upsert exist pk -> error ? autoID not supported upsert
+	*/
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	nb := 100
+
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption().TWithAutoID(true), hp.TNewSchemaOption())
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+	_, insertRes := prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema).TWithIsRows(true), hp.TNewDataOption().TWithNb(nb))
+
+	// upsert autoID collection with existed pks -> actually delete passed pks and auto generate new pks
+	vecFloatValues := make([][]float32, 0, nb)
+	for i := 0; i < nb; i++ {
+		vec := common.GenFloatVector(common.DefaultDim)
+		vecFloatValues = append(vecFloatValues, vec)
+	}
+	vecColumn := column.NewColumnFloatVector(common.DefaultFloatVecFieldName, common.DefaultDim, vecFloatValues)
+	rows := make([]interface{}, 0, nb)
+	for i := 0; i < nb; i++ {
+		idValue, _ := insertRes.IDs.GetAsInt64(i)
+		baseRow := hp.BaseRow{
+			Int64:    idValue,
+			FloatVec: vecFloatValues[i],
+		}
+		rows = append(rows, &baseRow)
+	}
+	upsertRes, err := mc.Upsert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
+	common.CheckErr(t, err, true)
+	log.Debug("upsertRes", zap.Any("len", upsertRes.IDs.(*column.ColumnInt64).Data()))
+
+	// insertRes pks were deleted
+	expr := fmt.Sprintf("%s <= %d", common.DefaultInt64FieldName, insertRes.IDs.(*column.ColumnInt64).Data()[nb-1])
+	log.Debug("expr", zap.String("expr", expr))
+	resSet, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithOutputFields(common.DefaultFloatVecFieldName).WithFilter(expr))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 0, resSet.ResultCount)
+
+	exprUpsert := fmt.Sprintf("%s <= %d", common.DefaultInt64FieldName, upsertRes.IDs.(*column.ColumnInt64).Data()[nb-1])
+	log.Debug("expr", zap.String("expr", expr))
+	resSet1, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithOutputFields(common.DefaultFloatVecFieldName).WithFilter(exprUpsert))
+	common.CheckErr(t, err, true)
+	common.EqualColumn(t, vecColumn, resSet1.GetColumn(common.DefaultFloatVecFieldName))
+
+	// upsert with not existing pks -> actually auto generate id
+	rowsWithPk := hp.GenInt64VecRows(nb, false, false, *hp.TNewDataOption().TWithStart(0))
+	upsertRes, err1 := mc.Upsert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rowsWithPk...))
+	common.CheckErr(t, err1, true)
+	require.EqualValues(t, nb, upsertRes.UpsertCount)
+	// actual pk is auto-generated not passed
+	require.NotContains(t, upsertRes.IDs.(*column.ColumnInt64).Data(), 0)
+
+	// query and verify upsert result
+	upsertPks := upsertRes.IDs.(*column.ColumnInt64).Data()
+	resSet, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithConsistencyLevel(entity.ClStrong).WithOutputFields(common.DefaultFloatVecFieldName).
+		WithFilter(fmt.Sprintf("%d <= %s", upsertPks[0], common.DefaultInt64FieldName)))
+	common.CheckErr(t, err, true)
+	common.EqualColumn(t, vecColumn, resSet.GetColumn(common.DefaultFloatVecFieldName))
+
+	// upsert without pks -> error
+	rowsWithoutPk := hp.GenInt64VecRows(nb, false, true, *hp.TNewDataOption())
+	_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rowsWithoutPk...))
 	common.CheckErr(t, err, false, "has no corresponding fieldData pass in: invalid parameter")
 }
 
