@@ -19,6 +19,9 @@ var (
 // Balancer is a local component, it should promise all channel can be assigned, and reach the final consistency.
 // Balancer should be thread safe.
 type Balancer interface {
+	// GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
+	GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool)
+
 	// WatchChannelAssignments watches the balance result.
 	WatchChannelAssignments(ctx context.Context, cb func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error) error
 

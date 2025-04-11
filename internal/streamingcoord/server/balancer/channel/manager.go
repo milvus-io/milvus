@@ -196,6 +196,21 @@ func (cm *ChannelManager) updatePChannelMeta(ctx context.Context, pChannelMetas 
 	return nil
 }
 
+// GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
+func (cm *ChannelManager) GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool) {
+	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
+
+	pChannelMeta, ok := cm.channels[types.ChannelID{Name: pchannel}]
+	if !ok {
+		return 0, false
+	}
+	if pChannelMeta.IsAssigned() {
+		return pChannelMeta.CurrentServerID(), true
+	}
+	return 0, false
+}
+
 func (cm *ChannelManager) WatchAssignmentResult(ctx context.Context, cb func(version typeutil.VersionInt64Pair, assignments []types.PChannelInfoAssigned) error) error {
 	// push the first balance result to watcher callback function if balance result is ready.
 	version, err := cm.applyAssignments(cb)

@@ -65,6 +65,11 @@ type balancerImpl struct {
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}] // backgroundTaskNotifier is used to conmunicate with the background task.
 }
 
+// GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
+func (b *balancerImpl) GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool) {
+	return b.channelMetaManager.GetLatestWALLocated(ctx, pchannel)
+}
+
 // WatchChannelAssignments watches the balance result.
 func (b *balancerImpl) WatchChannelAssignments(ctx context.Context, cb func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error) error {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
