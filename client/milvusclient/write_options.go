@@ -145,19 +145,9 @@ func (opt *columnBasedDataOption) mergeDynamicColumns(dynamicName string, rowSiz
 	values := make([][]byte, 0, rowSize)
 	for i := 0; i < rowSize; i++ {
 		m := make(map[string]interface{})
-		for _, col := range columns {
-			if col.Type() == entity.FieldTypeJSON {
-
-				colJson := col.(*column.ColumnJSONBytes)
-				raw, _ := colJson.Get(i)
-				row := make(map[string]any)
-				json.Unmarshal(raw.([]byte), &row)
-				m[col.Name()] = row
-				// jsonCol := column.NewColumnJSONBytes
-			} else {
-				// range guaranteed
-				m[col.Name()], _ = col.Get(i)
-			}
+		for _, column := range columns {
+			// range guaranteed
+			m[column.Name()], _ = column.Get(i)
 		}
 		bs, err := json.Marshal(m)
 		if err != nil {
