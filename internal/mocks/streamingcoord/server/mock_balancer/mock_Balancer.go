@@ -56,6 +56,63 @@ func (_c *MockBalancer_Close_Call) RunAndReturn(run func()) *MockBalancer_Close_
 	return _c
 }
 
+// GetLatestWALLocated provides a mock function with given fields: ctx, pchannel
+func (_m *MockBalancer) GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool) {
+	ret := _m.Called(ctx, pchannel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLatestWALLocated")
+	}
+
+	var r0 int64
+	var r1 bool
+	if rf, ok := ret.Get(0).(func(context.Context, string) (int64, bool)); ok {
+		return rf(ctx, pchannel)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) int64); ok {
+		r0 = rf(ctx, pchannel)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) bool); ok {
+		r1 = rf(ctx, pchannel)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	return r0, r1
+}
+
+// MockBalancer_GetLatestWALLocated_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLatestWALLocated'
+type MockBalancer_GetLatestWALLocated_Call struct {
+	*mock.Call
+}
+
+// GetLatestWALLocated is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannel string
+func (_e *MockBalancer_Expecter) GetLatestWALLocated(ctx interface{}, pchannel interface{}) *MockBalancer_GetLatestWALLocated_Call {
+	return &MockBalancer_GetLatestWALLocated_Call{Call: _e.mock.On("GetLatestWALLocated", ctx, pchannel)}
+}
+
+func (_c *MockBalancer_GetLatestWALLocated_Call) Run(run func(ctx context.Context, pchannel string)) *MockBalancer_GetLatestWALLocated_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_GetLatestWALLocated_Call) Return(_a0 int64, _a1 bool) *MockBalancer_GetLatestWALLocated_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBalancer_GetLatestWALLocated_Call) RunAndReturn(run func(context.Context, string) (int64, bool)) *MockBalancer_GetLatestWALLocated_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MarkAsUnavailable provides a mock function with given fields: ctx, pChannels
 func (_m *MockBalancer) MarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo) error {
 	ret := _m.Called(ctx, pChannels)

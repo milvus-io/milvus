@@ -17,6 +17,7 @@ import (
 
 var StaticStreamingNodeManager = newStreamingNodeManager()
 
+// TODO: can be removed after streaming service fully manage all growing data.
 func newStreamingNodeManager() *StreamingNodeManager {
 	snm := &StreamingNodeManager{
 		notifier:            syncutil.NewAsyncTaskNotifier[struct{}](),
@@ -40,6 +41,21 @@ type StreamingNodeManager struct {
 	latestAssignments   map[string]types.PChannelInfoAssigned // The latest assignments info got from streaming coord balance module.
 	streamingNodes      typeutil.UniqueSet
 	nodeChangedNotifier *syncutil.VersionedNotifier // used to notify that node in streaming node manager has been changed.
+}
+
+// GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
+// Return -1 and error if the vchannel is not found or context is canceled.
+func (s *StreamingNodeManager) GetLatestWALLocated(ctx context.Context, vchannel string) (int64, error) {
+	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	balancer, err := s.balancer.GetWithContext(ctx)
+	if err != nil {
+		return -1, err
+	}
+	serverID, ok := balancer.GetLatestWALLocated(ctx, pchannel)
+	if !ok {
+		return -1, errors.Errorf("channel: %s not found", vchannel)
+	}
+	return serverID, nil
 }
 
 // GetWALLocated returns the server id of the node that the wal of the vChannel is located.
