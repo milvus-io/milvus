@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -26,7 +27,11 @@ func buildNewPartitionManagers(
 	rawMetas []*streamingpb.SegmentAssignmentMeta,
 	collectionInfos []*rootcoordpb.CollectionInfoOnPChannel,
 	metrics *metricsutil.SegmentAssignMetrics,
-) (*partitionSegmentManagers, []*segmentAllocManager) {
+) (partitionManager *partitionSegmentManagers,
+	growingBelongs []stats.SegmentBelongs,
+	growingStats []*stats.SegmentStats,
+	waitForSealed []*segmentAllocManager,
+) {
 	// create a map to check if the partition exists.
 	partitionExist := make(map[int64]struct{}, len(collectionInfos))
 	// collectionMap is a map from collectionID to collectionInfo.
@@ -39,15 +44,31 @@ func buildNewPartitionManagers(
 	}
 
 	// recover the segment infos from the streaming node segment assignment meta storage
-	waitForSealed := make([]*segmentAllocManager, 0)
 	metaMaps := make(map[int64][]*segmentAllocManager)
 	for _, rawMeta := range rawMetas {
-		m := newSegmentAllocManagerFromProto(pchannel, rawMeta, metrics)
+		m, stat := newSegmentAllocManagerFromProto(pchannel, rawMeta, metrics)
 		if _, ok := partitionExist[rawMeta.GetPartitionId()]; !ok {
 			// related collection or partition is not exist.
 			// should be sealed right now.
-			waitForSealed = append(waitForSealed, m.WithSealPolicy(policy.PolicyNamePartitionNotFound))
+			waitForSealed = append(waitForSealed, m.WithSealPolicy(policy.PolicyParitionNotFound()))
 			continue
+		}
+		if m.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED {
+			// The segment is already marked as sealed, but not finish, may be recovered from crash.
+			waitForSealed = append(waitForSealed, m.WithSealPolicy(policy.PolicyRecover()))
+			continue
+		}
+
+		// The stats of growing segment should be managed by global stats manager.
+		if m.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
+			growingBelongs = append(growingBelongs, stats.SegmentBelongs{
+				PChannel:     pchannel.Name,
+				VChannel:     m.GetVChannel(),
+				CollectionID: rawMeta.GetCollectionId(),
+				PartitionID:  rawMeta.GetPartitionId(),
+				SegmentID:    m.GetSegmentID(),
+			})
+			growingStats = append(growingStats, stat)
 		}
 		if _, ok := metaMaps[rawMeta.GetPartitionId()]; !ok {
 			metaMaps[rawMeta.GetPartitionId()] = make([]*segmentAllocManager, 0, 2)
@@ -92,7 +113,7 @@ func buildNewPartitionManagers(
 		metrics:         metrics,
 	}
 	m.updateMetrics()
-	return m, waitForSealed
+	return m, growingBelongs, growingStats, waitForSealed
 }
 
 // partitionSegmentManagers is a collection of partition managers.
@@ -208,7 +229,7 @@ func (m *partitionSegmentManagers) RemoveCollection(collectionID int64) []*segme
 	for _, partition := range collectionInfo.Partitions {
 		pm, ok := m.managers.Get(partition.PartitionId)
 		if ok {
-			segments := pm.CollectAllCanBeSealedAndClear(policy.PolicyNameCollectionRemoved)
+			segments := pm.CollectAllCanBeSealedAndClear(policy.PolicyCollectionRemoved())
 			partitionIDs = append(partitionIDs, partition.PartitionId)
 			for _, segment := range segments {
 				segmentIDs = append(segmentIDs, segment.GetSegmentID())
@@ -252,7 +273,7 @@ func (m *partitionSegmentManagers) RemovePartition(collectionID int64, partition
 			zap.Int64("partitionID", partitionID))
 		return nil
 	}
-	segments := pm.CollectAllCanBeSealedAndClear(policy.PolicyNamePartitionRemoved)
+	segments := pm.CollectAllCanBeSealedAndClear(policy.PolicyPartitionRemoved())
 	segmentIDs := make([]int64, 0, len(segments))
 	for _, segment := range segments {
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())

@@ -1,4 +1,4 @@
-package policy
+package manager
 
 import (
 	"math/rand"
@@ -6,14 +6,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-// GetSegmentLimitationPolicy returns the segment limitation policy.
-func GetSegmentLimitationPolicy() SegmentLimitationPolicy {
+// getSegmentLimitationPolicy returns the segment limitation policy.
+func getSegmentLimitationPolicy() SegmentLimitationPolicy {
 	// TODO: dynamic policy can be applied here in future.
 	return jitterSegmentLimitationPolicy{}
 }
 
-// SegmentLimitation is the limitation of the segment.
-type SegmentLimitation struct {
+// segmentLimitation is the limitation of the segment.
+type segmentLimitation struct {
 	PolicyName  string
 	SegmentSize uint64
 	ExtraInfo   interface{}
@@ -22,7 +22,7 @@ type SegmentLimitation struct {
 // SegmentLimitationPolicy is the interface to generate the limitation of the segment.
 type SegmentLimitationPolicy interface {
 	// GenerateLimitation generates the limitation of the segment.
-	GenerateLimitation() SegmentLimitation
+	GenerateLimitation() segmentLimitation
 }
 
 // jitterSegmentLimitationPolicyExtraInfo is the extra info of the jitter segment limitation policy.
@@ -38,7 +38,7 @@ type jitterSegmentLimitationPolicyExtraInfo struct {
 type jitterSegmentLimitationPolicy struct{}
 
 // GenerateLimitation generates the limitation of the segment.
-func (p jitterSegmentLimitationPolicy) GenerateLimitation() SegmentLimitation {
+func (p jitterSegmentLimitationPolicy) GenerateLimitation() segmentLimitation {
 	// TODO: It's weird to set such a parameter into datacoord configuration.
 	// Refactor it in the future
 	jitter := paramtable.Get().DataCoordCfg.SegmentSealProportionJitter.GetAsFloat()
@@ -49,7 +49,7 @@ func (p jitterSegmentLimitationPolicy) GenerateLimitation() SegmentLimitation {
 	maxSegmentSize := uint64(paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024)
 	proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
 	segmentSize := uint64(jitterRatio * float64(maxSegmentSize) * proportion)
-	return SegmentLimitation{
+	return segmentLimitation{
 		PolicyName:  "jitter_segment_limitation",
 		SegmentSize: segmentSize,
 		ExtraInfo: jitterSegmentLimitationPolicyExtraInfo{
