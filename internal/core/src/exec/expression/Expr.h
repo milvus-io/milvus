@@ -31,7 +31,7 @@
 #include "expr/ITypeExpr.h"
 #include "log/Log.h"
 #include "query/PlanProto.h"
-#include "segcore/SegmentSealedImpl.h"
+#include "segcore/SegmentSealed.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentGrowingImpl.h"
 namespace milvus {
