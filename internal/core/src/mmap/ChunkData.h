@@ -214,9 +214,7 @@ VariableLengthChunk<Array>::set(
     size_t total_size = 0;
     for (auto i = 0; i < length; i++) {
         total_size += src[i].byte_size();
-    }
-    if (length > 0 && IsVariableDataType(src[0].get_element_type())) {
-        for (auto i = 0; i < length; i++) {
+        if (IsVariableDataType(src[i].get_element_type())) {
             total_size += (src[i].length() * sizeof(uint32_t));
         }
     }
