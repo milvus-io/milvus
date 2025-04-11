@@ -2762,6 +2762,38 @@ class TestQueryString(TestcaseBase):
         output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
         collection_w.query(expression, output_fields=output_fields,
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+        
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_string_expr_with_suffix(self):
+        """
+        target: test query with prefix string expression
+        method: specify string is primary field, use prefix string expr
+        expected: verify query successfully
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
+                                                             primary_field=ct.default_string_field_name)[0:2]
+        expression = 'varchar like "%0"'
+        filtered_data = vectors[0][vectors[0][default_string_field_name].str.endswith('0')]
+        res = filtered_data.iloc[:, :3].to_dict('records')
+        output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
+        collection_w.query(expression, output_fields=output_fields,
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_string_expr_with_inner_match(self):
+        """
+        target: test query with prefix string expression
+        method: specify string is primary field, use prefix string expr
+        expected: verify query successfully
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
+                                                             primary_field=ct.default_string_field_name)[0:2]
+        expression = 'varchar like "%0%"'
+        filtered_data = vectors[0][vectors[0][default_string_field_name].str.contains('0')]
+        res = filtered_data.iloc[:, :3].to_dict('records')
+        output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
+        collection_w.query(expression, output_fields=output_fields,
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_bitmap_alter_offset_cache_param(self):
@@ -2798,9 +2830,10 @@ class TestQueryString(TestcaseBase):
         collection_w.release()
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_string_expr_with_prefixes_auto_index(self):
+    @pytest.mark.parametrize("expression", ['varchar like "0%"', 'varchar like "%0"','varchar like "%0%"'])
+    def test_query_string_expr_with_like_auto_index(self, expression):
         """
-        target: test query with prefix string expression and indexed with auto index
+        target: test query with like string expression and indexed with auto index
         expected: verify query successfully
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=False,
@@ -2810,8 +2843,7 @@ class TestQueryString(TestcaseBase):
                                   index_name="query_expr_pre_index")
         collection_w.create_index("varchar", index_name="varchar_auto_index")
         time.sleep(1)
-        collection_w.load()
-        expression = 'varchar like "0%"'
+        collection_w.load()        
         result, _ = collection_w.query(expression, output_fields=['varchar'])
         res_len = len(result)
         collection_w.release()
@@ -2822,7 +2854,8 @@ class TestQueryString(TestcaseBase):
         assert res_len_1 == res_len
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_string_expr_with_prefixes_bitmap(self):
+    @pytest.mark.parametrize("expression", ['varchar like "0%"', 'varchar like "%0"','varchar like "%0%"'])
+    def test_query_string_expr_with_prefixes_bitmap(self, expression):
         """
         target: test query with prefix string expression and indexed with bitmap
         expected: verify query successfully
@@ -2835,7 +2868,6 @@ class TestQueryString(TestcaseBase):
         collection_w.create_index("varchar", index_name="bitmap_auto_index", index_params={"index_type": "BITMAP"})
         time.sleep(1)
         collection_w.load()
-        expression = 'varchar like "0%"'
         result, _ = collection_w.query(expression, output_fields=['varchar'])
         res_len = len(result)
         collection_w.release()
@@ -2846,7 +2878,8 @@ class TestQueryString(TestcaseBase):
         assert res_len_1 == res_len
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_string_expr_with_match_auto_index(self):
+    @pytest.mark.parametrize("expression", ['varchar like "0%"', 'varchar like "%0"','varchar like "%0%"'])
+    def test_query_string_expr_with_match_auto_index(self, expression):
         """
         target: test query with match string expression and indexed with auto index
         expected: verify query successfully
@@ -2859,7 +2892,6 @@ class TestQueryString(TestcaseBase):
         collection_w.create_index("varchar", index_name="varchar_auto_index")
         time.sleep(1)
         collection_w.load()
-        expression = 'varchar like "%0%"'
         result, _ = collection_w.query(expression, output_fields=['varchar'])
         res_len = len(result)
         collection_w.release()
@@ -3163,6 +3195,80 @@ class TestQueryArray(TestcaseBase):
             for i in range(len(res)):
                 assert res[i]["id"] == ground_truth[i]
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("use_index", [True, False])
+    @pytest.mark.parametrize("index_type", ["INVERTED", "BITMAP"])
+    def test_query_array_with_prefix_like(self, use_index, index_type):
+        # 1. create a collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data
+        string_field_value = [[str(j) for j in range(i, i + 3)] for i in range(ct.default_nb)]
+        data = cf.gen_array_dataframe_data()
+        data[ct.default_string_array_field_name] = string_field_value
+        collection_w.insert(data)
+        collection_w.create_index(ct.default_float_vec_field_name, {})
+        if use_index:
+            collection_w.create_index(ct.default_string_array_field_name, {"index_type": index_type})
+
+        # 3. query
+        collection_w.load()
+        expression = 'string_array[0] like "0%"'
+        res = collection_w.query(limit=ct.default_nb, expr=expression)[0]
+        log.info(res)
+        filter_data = [row for row in string_field_value if row[0].startswith('0')]
+        assert len(res) == len(filter_data)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("use_index", [True, False])
+    @pytest.mark.parametrize("index_type", ["INVERTED", "BITMAP"])
+    def test_query_array_with_suffix_like(self, use_index, index_type):
+        # 1. create a collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data
+        string_field_value = [[str(j) for j in range(i, i + 3)] for i in range(ct.default_nb)]
+        data = cf.gen_array_dataframe_data()
+        data[ct.default_string_array_field_name] = string_field_value
+        collection_w.insert(data)
+        collection_w.create_index(ct.default_float_vec_field_name, {})
+        if use_index:
+            collection_w.create_index(ct.default_string_array_field_name, {"index_type": index_type})
+
+        # 3. query
+        collection_w.load()
+        expression = 'string_array[0] like "%0"'
+        res = collection_w.query(limit=ct.default_nb, expr=expression)[0]
+        log.info(res)
+        filter_data = [row for row in string_field_value if row[0].endswith('0')]
+        assert len(res) == len(filter_data)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("use_index", [True, False])
+    @pytest.mark.parametrize("index_type", ["INVERTED", "BITMAP"])
+    def test_query_array_with_inner_like(self, use_index, index_type):
+        # 1. create a collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data
+        string_field_value = [[str(j) for j in range(i, i + 3)] for i in range(ct.default_nb)]
+        data = cf.gen_array_dataframe_data()
+        data[ct.default_string_array_field_name] = string_field_value
+        collection_w.insert(data)
+        collection_w.create_index(ct.default_float_vec_field_name, {})
+        if use_index:
+            collection_w.create_index(ct.default_string_array_field_name, {"index_type": index_type})
+
+        # 3. query
+        collection_w.load()
+        expression = 'string_array[0] like "%0%"'
+        res = collection_w.query(limit=ct.default_nb, expr=expression)[0]
+        log.info(res)
+        filter_data = [row for row in string_field_value if '0' in row[0]]
+        assert len(res) == len(filter_data) 
 
 class TestQueryCount(TestcaseBase):
     """

@@ -188,10 +188,32 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     Query(const DatasetPtr& dataset) override;
 
     const TargetBitmap
-    PatternMatch(const std::string& pattern) override {
-        PatternMatchTranslator translator;
-        auto regex_pattern = translator(pattern);
-        return RegexQuery(regex_pattern);
+    PatternMatch(const std::string& pattern, proto::plan::OpType op) override {
+        switch (op) {
+            case proto::plan::OpType::PrefixMatch: {
+                return PrefixMatch(pattern);
+            }
+            case proto::plan::OpType::PostfixMatch: {
+                PatternMatchTranslator translator;
+                auto regex_pattern = translator(fmt::format("%{}", pattern));
+                return RegexQuery(regex_pattern);
+            }
+            case proto::plan::OpType::InnerMatch: {
+                PatternMatchTranslator translator;
+                auto regex_pattern = translator(fmt::format("%{}%", pattern));
+                return RegexQuery(regex_pattern);
+            }
+            case proto::plan::OpType::Match: {
+                PatternMatchTranslator translator;
+                auto regex_pattern = translator(pattern);
+                return RegexQuery(regex_pattern);
+            }
+            default:
+                PanicInfo(
+                    ErrorCode::OpTypeInvalid,
+                    "not supported op type: {} for inverted index PatternMatch",
+                    op);
+        }
     }
 
     bool

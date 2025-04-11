@@ -25,7 +25,7 @@ constexpr const char* LOWER_BOUND_VALUE = "lower_bound_value";
 constexpr const char* LOWER_BOUND_INCLUSIVE = "lower_bound_inclusive";
 constexpr const char* UPPER_BOUND_VALUE = "upper_bound_value";
 constexpr const char* UPPER_BOUND_INCLUSIVE = "upper_bound_inclusive";
-constexpr const char* PREFIX_VALUE = "prefix_value";
+constexpr const char* MATCH_VALUE = "match_value";
 // below configurations will be persistent, do not edit them.
 constexpr const char* MARISA_TRIE_INDEX = "marisa_trie_index";
 constexpr const char* MARISA_STR_IDS = "marisa_trie_str_ids";
