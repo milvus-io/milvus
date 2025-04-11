@@ -246,12 +246,12 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		// update version after check
 		TaskVersion:               statsMeta.GetVersion() + 1,
 		BinlogMaxSize:             Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
-		StorageVersion:            segment.StorageVersion,
-		TaskSlot:                  st.taskSlot,
 		EnableJsonKeyStats:        Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
 		JsonKeyStatsTantivyMemory: Params.DataCoordCfg.JSONKeyStatsMemoryBudgetInTantivy.GetAsInt64(),
 		JsonKeyStatsDataFormat:    1,
 		EnableJsonKeyStatsInSort:  Params.DataCoordCfg.EnabledJSONKeyStatsInSort.GetAsBool(),
+		TaskSlot:                  st.taskSlot,
+		StorageVersion:            segment.StorageVersion,
 	}
 
 	log.Info("stats task pre check successfully", zap.String("subJobType", st.subJobType.String()),
