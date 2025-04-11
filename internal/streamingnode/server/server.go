@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
@@ -64,6 +65,7 @@ func (s *Server) initBasicComponent() {
 	var err error
 	s.walManager, err = walmanager.OpenManager()
 	if err != nil {
+		log.Error("open wal manager failed", zap.Error(err))
 		panic("open wal manager failed")
 	}
 	// Register the wal manager to the local registry.
