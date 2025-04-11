@@ -34,21 +34,6 @@ services:
       timeout: 20s
       retries: 3
 
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      until /usr/bin/mc config host add myminio http://minio:9000 minioadmin minioadmin; do
-        echo 'Waiting for MinIO to be available...'
-        sleep 1
-      done;
-      /usr/bin/mc mb myminio/milvus --ignore-existing;
-      /usr/bin/mc policy set public myminio/milvus;
-      echo 'MinIO initialized successfully'
-      "
-
   standalone:
     container_name: milvus-standalone
     image: milvusdb/milvus:v2.5.8
@@ -56,6 +41,7 @@ services:
     security_opt:
       - seccomp:unconfined
     environment:
+      MINIO_REGION: us-east-1
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
       MINIO_ACCESS_KEY: minioadmin
