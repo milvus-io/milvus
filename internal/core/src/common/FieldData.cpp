@@ -17,6 +17,7 @@
 #include "common/FieldData.h"
 
 #include "arrow/array/array_binary.h"
+#include "arrow/chunked_array.h"
 #include "common/Array.h"
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
@@ -89,6 +90,20 @@ GetDataInfoFromArray(const std::shared_ptr<arrow::Array> array) {
     auto element_count = array->length();
 
     return std::make_pair(typed_array->raw_values(), element_count);
+}
+
+template <typename Type, bool is_type_entire_row>
+void
+FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
+    const std::shared_ptr<arrow::ChunkedArray> arrays) {
+    AssertInfo(arrays != nullptr, "null arrow chunked array");
+    auto element_count = arrays->length();
+    if (element_count == 0) {
+        return;
+    }
+    for (const auto& array : arrays->chunks()) {
+        FillFieldData(array);
+    }
 }
 
 template <typename Type, bool is_type_entire_row>

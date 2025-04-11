@@ -36,6 +36,8 @@
 #include <variant>
 #include <vector>
 
+#include "arrow/type.h"
+#include "arrow/type_fwd.h"
 #include "fmt/core.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
@@ -144,6 +146,50 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
                 DataTypeInvalid,
                 fmt::format("failed to get data type size, invalid type {}",
                             data_type));
+        }
+    }
+}
+
+inline std::shared_ptr<arrow::DataType>
+GetArrowDataType(DataType data_type, int dim = 1) {
+    switch (data_type) {
+        case DataType::BOOL:
+            return arrow::boolean();
+        case DataType::INT8:
+            return arrow::int8();
+        case DataType::INT16:
+            return arrow::int16();
+        case DataType::INT32:
+            return arrow::int32();
+        case DataType::INT64:
+            return arrow::int64();
+        case DataType::FLOAT:
+            return arrow::float32();
+        case DataType::DOUBLE:
+            return arrow::float64();
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            return arrow::utf8();
+        case DataType::ARRAY:
+        case DataType::JSON:
+            return arrow::binary();
+        case DataType::VECTOR_FLOAT:
+            return arrow::fixed_size_binary(dim * 4);
+        case DataType::VECTOR_BINARY: {
+            return arrow::fixed_size_binary((dim + 7) / 8);
+        }
+        case DataType::VECTOR_FLOAT16:
+        case DataType::VECTOR_BFLOAT16:
+            return arrow::fixed_size_binary(dim * 2);
+        case DataType::VECTOR_SPARSE_FLOAT:
+            return arrow::binary();
+        case DataType::VECTOR_INT8:
+            return arrow::fixed_size_binary(dim);
+        default: {
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("failed to get data type, invalid type {}",
+                                  data_type));
         }
     }
 }
