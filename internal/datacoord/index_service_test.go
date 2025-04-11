@@ -111,7 +111,7 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
-	b := mocks.NewMockRootCoordClient(t)
+	b := mocks.NewMixCoord(t)
 
 	t.Run("get field name failed", func(t *testing.T) {
 		b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
@@ -2629,7 +2629,7 @@ func TestJsonIndex(t *testing.T) {
 	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
 	mock0Allocator := newMockAllocator(t)
 	indexMeta := newSegmentIndexMeta(catalog)
-	b := mocks.NewMockRootCoordClient(t)
+	b := mocks.NewMixCoord(t)
 	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: 0,

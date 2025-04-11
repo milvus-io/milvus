@@ -48,11 +48,10 @@ func RemoveRootUserFromAdminRole() {
 func InitEmptyGlobalCache() {
 	var err error
 	emptyMock := common.NewEmptyMockT()
-	rootcoord := mocks.NewMockRootCoordClient(emptyMock)
-	rootcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("collection not found"))
-	querycoord := mocks.NewMockQueryCoordClient(emptyMock)
+	mixcoord := mocks.NewMockMixCoordClient(emptyMock)
+	mixcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("collection not found"))
 	mgr := newShardClientMgr()
-	globalMetaCache, err = NewMetaCache(rootcoord, querycoord, mgr)
+	globalMetaCache, err = NewMetaCache(mixcoord, mgr)
 	if err != nil {
 		panic(err)
 	}

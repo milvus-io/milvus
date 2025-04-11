@@ -43,8 +43,8 @@ func Test_NewServer(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
-	mockRootCoord := mocks.NewMockRootCoordClient(t)
-	mockRootCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+	mockMixCoord := mocks.NewMockMixCoordClient(t)
+	mockMixCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},
@@ -55,32 +55,15 @@ func Test_NewServer(t *testing.T) {
 			},
 		},
 	}, nil)
-	server.newRootCoordClient = func() (types.RootCoordClient, error) {
-		return mockRootCoord, nil
-	}
-
-	mockDataCoord := mocks.NewMockDataCoordClient(t)
-	mockDataCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
-		State: &milvuspb.ComponentInfo{
-			StateCode: commonpb.StateCode_Healthy,
-		},
-		Status: merr.Success(),
-		SubcomponentStates: []*milvuspb.ComponentInfo{
-			{
-				StateCode: commonpb.StateCode_Healthy,
-			},
-		},
-	}, nil)
-	server.newDataCoordClient = func() (types.DataCoordClient, error) {
-		return mockDataCoord, nil
+	server.mixCoordClient = func() (types.MixCoordClient, error) {
+		return mockMixCoord, nil
 	}
 
 	t.Run("Run", func(t *testing.T) {
 		datanode := mocks.NewMockDataNode(t)
 		datanode.EXPECT().SetEtcdClient(mock.Anything).Return()
 		datanode.EXPECT().SetAddress(mock.Anything).Return()
-		datanode.EXPECT().SetRootCoordClient(mock.Anything).Return(nil)
-		datanode.EXPECT().SetDataCoordClient(mock.Anything).Return(nil)
+		datanode.EXPECT().SetMixCoordClient(mock.Anything).Return(nil)
 		datanode.EXPECT().UpdateStateCode(mock.Anything).Return()
 		datanode.EXPECT().Register().Return(nil)
 		datanode.EXPECT().Init().Return(nil)
@@ -208,7 +191,7 @@ func Test_Run(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
-	mockRootCoord := mocks.NewMockRootCoordClient(t)
+	mockRootCoord := mocks.NewMockMixCoordClient(t)
 	mockRootCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
@@ -220,31 +203,14 @@ func Test_Run(t *testing.T) {
 			},
 		},
 	}, nil)
-	server.newRootCoordClient = func() (types.RootCoordClient, error) {
+	server.mixCoordClient = func() (types.MixCoordClient, error) {
 		return mockRootCoord, nil
-	}
-
-	mockDataCoord := mocks.NewMockDataCoordClient(t)
-	mockDataCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
-		State: &milvuspb.ComponentInfo{
-			StateCode: commonpb.StateCode_Healthy,
-		},
-		Status: merr.Success(),
-		SubcomponentStates: []*milvuspb.ComponentInfo{
-			{
-				StateCode: commonpb.StateCode_Healthy,
-			},
-		},
-	}, nil)
-	server.newDataCoordClient = func() (types.DataCoordClient, error) {
-		return mockDataCoord, nil
 	}
 
 	datanode := mocks.NewMockDataNode(t)
 	datanode.EXPECT().SetEtcdClient(mock.Anything).Return()
 	datanode.EXPECT().SetAddress(mock.Anything).Return()
-	datanode.EXPECT().SetRootCoordClient(mock.Anything).Return(nil)
-	datanode.EXPECT().SetDataCoordClient(mock.Anything).Return(nil)
+	datanode.EXPECT().SetMixCoordClient(mock.Anything).Return(nil)
 	datanode.EXPECT().UpdateStateCode(mock.Anything).Return()
 	datanode.EXPECT().Init().Return(fmt.Errorf("mock err"))
 	server.datanode = datanode
@@ -257,8 +223,7 @@ func Test_Run(t *testing.T) {
 	datanode = mocks.NewMockDataNode(t)
 	datanode.EXPECT().SetEtcdClient(mock.Anything).Return()
 	datanode.EXPECT().SetAddress(mock.Anything).Return()
-	datanode.EXPECT().SetRootCoordClient(mock.Anything).Return(nil)
-	datanode.EXPECT().SetDataCoordClient(mock.Anything).Return(nil)
+	datanode.EXPECT().SetMixCoordClient(mock.Anything).Return(nil)
 	datanode.EXPECT().UpdateStateCode(mock.Anything).Return()
 	datanode.EXPECT().Register().Return(nil)
 	datanode.EXPECT().Init().Return(nil)
@@ -277,7 +242,7 @@ func TestIndexService(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, server)
 
-	mockRootCoord := mocks.NewMockRootCoordClient(t)
+	mockRootCoord := mocks.NewMockMixCoordClient(t)
 	mockRootCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
@@ -289,31 +254,14 @@ func TestIndexService(t *testing.T) {
 			},
 		},
 	}, nil)
-	server.newRootCoordClient = func() (types.RootCoordClient, error) {
+	server.mixCoordClient = func() (types.MixCoordClient, error) {
 		return mockRootCoord, nil
-	}
-
-	mockDataCoord := mocks.NewMockDataCoordClient(t)
-	mockDataCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
-		State: &milvuspb.ComponentInfo{
-			StateCode: commonpb.StateCode_Healthy,
-		},
-		Status: merr.Success(),
-		SubcomponentStates: []*milvuspb.ComponentInfo{
-			{
-				StateCode: commonpb.StateCode_Healthy,
-			},
-		},
-	}, nil)
-	server.newDataCoordClient = func() (types.DataCoordClient, error) {
-		return mockDataCoord, nil
 	}
 
 	dn := mocks.NewMockDataNode(t)
 	dn.EXPECT().SetEtcdClient(mock.Anything).Return()
 	dn.EXPECT().SetAddress(mock.Anything).Return()
-	dn.EXPECT().SetRootCoordClient(mock.Anything).Return(nil)
-	dn.EXPECT().SetDataCoordClient(mock.Anything).Return(nil)
+	dn.EXPECT().SetMixCoordClient(mock.Anything).Return(nil)
 	dn.EXPECT().UpdateStateCode(mock.Anything).Return()
 	dn.EXPECT().Register().Return(nil)
 	dn.EXPECT().Init().Return(nil)

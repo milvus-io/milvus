@@ -104,6 +104,7 @@ impl IndexWriterWrapperImpl {
         path: String,
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
+        in_ram: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!(
             "create index writer, field_name: {}, data_type: {:?}, tantivy_index_version 5",
@@ -114,7 +115,11 @@ impl IndexWriterWrapperImpl {
         // We cannot build direct connection from rows in multi-segments to milvus row data. So we have this doc_id field.
         let id_field = schema_builder.add_i64_field("doc_id", FAST);
         let schema = schema_builder.build();
-        let index = Index::create_in_dir(path.clone(), schema)?;
+        let index = if in_ram {
+            Index::create_in_ram(schema)
+        } else {
+            Index::create_in_dir(path.clone(), schema)?
+        };
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
         Ok(IndexWriterWrapperImpl {
@@ -294,6 +299,45 @@ impl IndexWriterWrapperImpl {
                 .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
             writer.add_document(doc!(self.field => key))?;
         }
+        Ok(())
+    }
+
+    pub fn add_json_key_stats(
+        &mut self,
+        keys: &[*const i8],
+        json_offsets: &[*const i64],
+        json_offsets_len: &[usize],
+    ) -> Result<()> {
+        let writer = self.index_writer.as_ref().left().unwrap();
+        let id_field = self.id_field.unwrap();
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+        for i in 0..keys.len() {
+            let key = unsafe { CStr::from_ptr(keys[i]) }
+                .to_str()
+                .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+
+            let offsets =
+                unsafe { std::slice::from_raw_parts(json_offsets[i], json_offsets_len[i]) };
+
+            for offset in offsets {
+                batch.push(UserOperation::Add(doc!(
+                    id_field => *offset,
+                    self.field => key,
+                )));
+
+                if batch.len() >= BATCH_SIZE {
+                    writer.run(std::mem::replace(
+                        &mut batch,
+                        Vec::with_capacity(BATCH_SIZE),
+                    ))?;
+                }
+            }
+        }
+
+        if !batch.is_empty() {
+            writer.run(batch)?;
+        }
+
         Ok(())
     }
 

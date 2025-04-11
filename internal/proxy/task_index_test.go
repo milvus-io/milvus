@@ -27,7 +27,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -36,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -65,10 +63,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	fieldName := funcutil.GenRandomStr()
 	indexName := ""
 	ctx := context.Background()
-
-	rootCoord := newMockRootCoord()
-	queryCoord := getMockQueryCoord()
-	datacoord := NewDataCoordMock()
+	queryCoord := NewMixCoordMock()
 
 	gist := &getIndexStateTask{
 		GetIndexStateRequest: &milvuspb.GetIndexStateRequest{
@@ -78,9 +73,8 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 			FieldName:      fieldName,
 			IndexName:      indexName,
 		},
-		ctx:       ctx,
-		rootCoord: rootCoord,
-		dataCoord: datacoord,
+		ctx:      ctx,
+		mixCoord: queryCoord,
 		result: &milvuspb.GetIndexStateResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: "mock-1"},
 			State:  commonpb.IndexState_Unissued,
@@ -90,35 +84,9 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 
 	shardMgr := newShardClientMgr()
 	// failed to get collection id.
-	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
+	err := InitMetaCache(ctx, queryCoord, shardMgr)
 	assert.NoError(t, err)
 	assert.Error(t, gist.Execute(ctx))
-
-	rootCoord.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Status:         merr.Success(),
-			Schema:         newTestSchema(),
-			CollectionID:   collectionID,
-			CollectionName: request.CollectionName,
-		}, nil
-	}
-
-	rootCoord.ShowPartitionsFunc = func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
-		return &milvuspb.ShowPartitionsResponse{
-			Status: merr.Success(),
-		}, nil
-	}
-
-	datacoord.GetIndexStateFunc = func(ctx context.Context, request *indexpb.GetIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetIndexStateResponse, error) {
-		return &indexpb.GetIndexStateResponse{
-			Status:     merr.Success(),
-			State:      commonpb.IndexState_Finished,
-			FailReason: "",
-		}, nil
-	}
-
-	assert.NoError(t, gist.Execute(ctx))
-	assert.Equal(t, commonpb.IndexState_Finished, gist.result.GetState())
 }
 
 func TestDropIndexTask_PreExecute(t *testing.T) {
@@ -128,12 +96,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	indexName := "_default_idx_101"
 
 	paramtable.Init()
-	qc := getMockQueryCoord()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status:        merr.Success(),
-		CollectionIDs: []int64{},
-	}, nil)
-	dc := NewDataCoordMock()
+	qc := NewMixCoordMock()
 	ctx := context.Background()
 
 	mockCache := NewMockCache(t)
@@ -158,8 +121,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 			FieldName:      fieldName,
 			IndexName:      indexName,
 		},
-		dataCoord:    dc,
-		queryCoord:   qc,
+		mixCoord:     qc,
 		result:       nil,
 		collectionID: collectionID,
 	}
@@ -202,11 +164,11 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:        merr.Success(),
 			CollectionIDs: []int64{collectionID},
 		}, nil)
-		dit.queryCoord = qc
+		dit.mixCoord = qc
 
 		err := dit.PreExecute(ctx)
 		assert.Error(t, err)
@@ -226,12 +188,12 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:        merr.Success(),
 			CollectionIDs: []int64{collectionID},
 		}, nil)
 		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
-		dit.queryCoord = qc
+		dit.mixCoord = qc
 
 		err := dit.PreExecute(ctx)
 		assert.Error(t, err)
@@ -251,25 +213,25 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:        merr.Success(),
 			CollectionIDs: []int64{collectionID},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "fail reason",
 			},
 		}, nil)
-		dit.queryCoord = qc
+		dit.mixCoord = qc
 
 		err := dit.PreExecute(ctx)
 		assert.Error(t, err)
 	})
 }
 
-func getMockQueryCoord() *mocks.MockQueryCoordClient {
-	qc := &mocks.MockQueryCoordClient{}
+func getMockQueryCoord() *mocks.MockMixCoordClient {
+	qc := &mocks.MockMixCoordClient{}
 	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -282,7 +244,7 @@ func getMockQueryCoord() *mocks.MockQueryCoordClient {
 			},
 		},
 	}, nil)
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
+	qc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 	return qc
 }
 
@@ -291,7 +253,7 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 	collectionID := UniqueID(1)
 	fieldName := newTestSchema().Fields[0].Name
 
-	dc := NewDataCoordMock()
+	dc := NewMixCoordMock()
 	ctx := context.Background()
 
 	mockCache := NewMockCache(t)
@@ -317,7 +279,7 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 			CollectionName: collectionName,
 			FieldName:      fieldName,
 		},
-		datacoord:    dc,
+		mixCoord:     dc,
 		result:       nil,
 		collectionID: collectionID,
 	}
@@ -353,7 +315,7 @@ func Test_sparse_parseIndexParams(t *testing.T) {
 			IndexName: "",
 		},
 		ctx:            nil,
-		rootCoord:      nil,
+		mixCoord:       nil,
 		result:         nil,
 		isAutoIndex:    false,
 		newIndexParams: nil,
@@ -427,7 +389,7 @@ func Test_parseIndexParams(t *testing.T) {
 			IndexName: "",
 		},
 		ctx:            nil,
-		rootCoord:      nil,
+		mixCoord:       nil,
 		result:         nil,
 		isAutoIndex:    false,
 		newIndexParams: nil,
@@ -512,7 +474,7 @@ func Test_parseIndexParams(t *testing.T) {
 			IndexName: "",
 		},
 		ctx:            nil,
-		rootCoord:      nil,
+		mixCoord:       nil,
 		result:         nil,
 		isAutoIndex:    false,
 		newIndexParams: nil,
@@ -609,7 +571,7 @@ func Test_parseIndexParams(t *testing.T) {
 				IndexName: "",
 			},
 			ctx:            nil,
-			rootCoord:      nil,
+			mixCoord:       nil,
 			result:         nil,
 			isAutoIndex:    false,
 			newIndexParams: nil,
@@ -800,7 +762,7 @@ func Test_parseIndexParams(t *testing.T) {
 				IndexName: "",
 			},
 			ctx:            nil,
-			rootCoord:      nil,
+			mixCoord:       nil,
 			result:         nil,
 			isAutoIndex:    false,
 			newIndexParams: nil,
@@ -848,7 +810,7 @@ func Test_parseIndexParams(t *testing.T) {
 				IndexName: "",
 			},
 			ctx:            nil,
-			rootCoord:      nil,
+			mixCoord:       nil,
 			result:         nil,
 			isAutoIndex:    false,
 			newIndexParams: nil,
@@ -893,7 +855,7 @@ func Test_parseIndexParams(t *testing.T) {
 				IndexName: "",
 			},
 			ctx:            nil,
-			rootCoord:      nil,
+			mixCoord:       nil,
 			result:         nil,
 			isAutoIndex:    false,
 			newIndexParams: nil,

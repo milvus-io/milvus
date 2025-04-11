@@ -1240,3 +1240,11 @@ func WrapErrDuplicatedCompactionTask(msg ...string) error {
 	}
 	return err
 }
+
+func WrapErrOldSessionExists(msg ...string) error {
+	err := error(ErrOldSessionExists)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}

@@ -928,15 +928,15 @@ func TestPasswordVerify(t *testing.T) {
 	credCache := make(map[string]*internalpb.CredentialInfo, 0)
 	invokedCount := 0
 
-	mockedRootCoord := newMockRootCoord()
+	mockedRootCoord := NewMixCoordMock()
 	mockedRootCoord.GetGetCredentialFunc = func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
 		invokedCount++
 		return nil, fmt.Errorf("get cred not found credential")
 	}
 
 	metaCache := &MetaCache{
-		credMap:   credCache,
-		rootCoord: mockedRootCoord,
+		credMap:  credCache,
+		mixCoord: mockedRootCoord,
 	}
 	ret, ok := credCache[username]
 	assert.False(t, ok)
@@ -968,10 +968,10 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 	ctx := context.Background()
 	t.Run("normal", func(t *testing.T) {
 		collID := int64(1)
-		qc := &mocks.MockQueryCoordClient{}
+		mixc := &mocks.MockMixCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
-		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		mixc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+		mixc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 			Status: successStatus,
 			Shards: []*querypb.ShardLeadersList{
 				{
@@ -981,21 +981,21 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		mixc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:        successStatus,
 			CollectionIDs: []int64{collID, 10, 100},
 		}, nil)
-		loaded, err := isCollectionLoaded(ctx, qc, collID)
+		loaded, err := isCollectionLoaded(ctx, mixc, collID)
 		assert.NoError(t, err)
 		assert.True(t, loaded)
 	})
 
 	t.Run("error", func(t *testing.T) {
 		collID := int64(1)
-		qc := &mocks.MockQueryCoordClient{}
+		mixc := &mocks.MockMixCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
-		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		mixc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+		mixc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 			Status: successStatus,
 			Shards: []*querypb.ShardLeadersList{
 				{
@@ -1005,21 +1005,21 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		mixc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:        successStatus,
 			CollectionIDs: []int64{collID},
 		}, errors.New("error"))
-		loaded, err := isCollectionLoaded(ctx, qc, collID)
+		loaded, err := isCollectionLoaded(ctx, mixc, collID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		collID := int64(1)
-		qc := &mocks.MockQueryCoordClient{}
+		mixc := &mocks.MockMixCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
-		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		mixc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+		mixc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 			Status: successStatus,
 			Shards: []*querypb.ShardLeadersList{
 				{
@@ -1029,14 +1029,14 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		mixc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "fail reason",
 			},
 			CollectionIDs: []int64{collID},
 		}, nil)
-		loaded, err := isCollectionLoaded(ctx, qc, collID)
+		loaded, err := isCollectionLoaded(ctx, mixc, collID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})
@@ -1047,10 +1047,10 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		qc := &mocks.MockQueryCoordClient{}
+		mixc := &mocks.MockMixCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
-		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		mixc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+		mixc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 			Status: successStatus,
 			Shards: []*querypb.ShardLeadersList{
 				{
@@ -1060,11 +1060,11 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+		mixc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, nil)
-		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
+		loaded, err := isPartitionLoaded(ctx, mixc, collID, partID)
 		assert.NoError(t, err)
 		assert.True(t, loaded)
 	})
@@ -1072,10 +1072,10 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("error", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		qc := &mocks.MockQueryCoordClient{}
+		mixCoord := &mocks.MockMixCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
-		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		mixCoord.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+		mixCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 			Status: successStatus,
 			Shards: []*querypb.ShardLeadersList{
 				{
@@ -1085,11 +1085,11 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+		mixCoord.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 			Status:       merr.Success(),
 			PartitionIDs: []int64{partID},
 		}, errors.New("error"))
-		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
+		loaded, err := isPartitionLoaded(ctx, mixCoord, collID, partID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})
@@ -1097,10 +1097,10 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("fail", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		qc := &mocks.MockQueryCoordClient{}
+		mixCoord := &mocks.MockMixCoordClient{}
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
-		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		mixCoord.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+		mixCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 			Status: successStatus,
 			Shards: []*querypb.ShardLeadersList{
 				{
@@ -1110,14 +1110,14 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 				},
 			},
 		}, nil)
-		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+		mixCoord.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "fail reason",
 			},
 			PartitionIDs: []int64{partID},
 		}, nil)
-		loaded, err := isPartitionLoaded(ctx, qc, collID, partID)
+		loaded, err := isPartitionLoaded(ctx, mixCoord, collID, partID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})
@@ -2196,7 +2196,7 @@ func Test_MaxQueryResultWindow(t *testing.T) {
 
 func Test_GetPartitionProgressFailed(t *testing.T) {
 	qc := mocks.NewMockQueryCoordClient(t)
-	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+	qc.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "Unexpected error",

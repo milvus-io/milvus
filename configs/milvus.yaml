@@ -414,6 +414,7 @@ queryNode:
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Enable multiple chunked search
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
+    jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -636,6 +637,10 @@ dataCoord:
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
+  jsonStatsTriggerCount: 10 # jsonkey stats task count per trigger
+  jsonStatsTriggerInterval: 10 # jsonkey task interval per trigger
+  enabledJSONKeyStatsInSort: false # Indicates whether to enable JSON key stats task with sort
+  jsonKeyStatsMemoryBudgetInTantivy: 16777216 # the memory budget for the JSON index In Tantivy, the unit is bytes
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
@@ -891,6 +896,8 @@ common:
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
+  enabledJSONKeyStats: false # Indicates sealedsegment whether to enable JSON key stats
+  enabledGrowingSegmentJSONKeyStats: false # Indicates growingsegment whether to enable JSON key stats
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

@@ -23,6 +23,7 @@
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <cstddef>
+#include <type_traits>
 #include <vector>
 #include "InvertedIndexTantivy.h"
 
@@ -605,6 +606,10 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::build_index_for_array(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    using ElementType = std::conditional_t<std::is_same<T, int8_t>::value ||
+                                               std::is_same<T, int16_t>::value,
+                                           int32_t,
+                                           T>;
     int64_t offset = 0;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
@@ -617,12 +622,16 @@ InvertedIndexTantivy<T>::build_index_for_array(
             auto length = data->is_valid(i) ? array_column[i].length() : 0;
             if (!inverted_index_single_segment_) {
                 wrapper_->template add_array_data(
-                    reinterpret_cast<const T*>(array_column[i].data()),
+                    reinterpret_cast<const ElementType*>(
+                        array_column[i].data()),
                     length,
                     offset++);
             } else {
                 wrapper_->template add_array_data_by_single_segment_writer(
-                    reinterpret_cast<const T*>(array_column[i].data()), length);
+                    reinterpret_cast<const ElementType*>(
+                        array_column[i].data()),
+                    length);
+                offset++;
             }
         }
     }

@@ -363,6 +363,53 @@ func (_c *MockSegment_GetBM25Stats_Call) RunAndReturn(run func() map[int64]*stor
 	return _c
 }
 
+// GetFieldJSONIndexStats provides a mock function with given fields:
+func (_m *MockSegment) GetFieldJSONIndexStats() []int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFieldJSONIndexStats")
+	}
+
+	var r0 []int64
+	if rf, ok := ret.Get(0).(func() []int64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]int64)
+		}
+	}
+
+	return r0
+}
+
+// MockSegment_GetFieldJSONIndexStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFieldJSONIndexStats'
+type MockSegment_GetFieldJSONIndexStats_Call struct {
+	*mock.Call
+}
+
+// GetFieldJSONIndexStats is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) GetFieldJSONIndexStats() *MockSegment_GetFieldJSONIndexStats_Call {
+	return &MockSegment_GetFieldJSONIndexStats_Call{Call: _e.mock.On("GetFieldJSONIndexStats")}
+}
+
+func (_c *MockSegment_GetFieldJSONIndexStats_Call) Run(run func()) *MockSegment_GetFieldJSONIndexStats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_GetFieldJSONIndexStats_Call) Return(_a0 []int64) *MockSegment_GetFieldJSONIndexStats_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_GetFieldJSONIndexStats_Call) RunAndReturn(run func() []int64) *MockSegment_GetFieldJSONIndexStats_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetIndex provides a mock function with given fields: fieldID
 func (_m *MockSegment) GetIndex(fieldID int64) []*IndexedFieldInfo {
 	ret := _m.Called(fieldID)

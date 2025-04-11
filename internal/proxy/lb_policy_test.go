@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -35,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -44,8 +44,7 @@ import (
 
 type LBPolicySuite struct {
 	suite.Suite
-	rc types.RootCoordClient
-	qc *mocks.MockQueryCoordClient
+	qc types.MixCoordClient
 	qn *mocks.MockQueryNodeClient
 
 	mgr        *MockShardClientManager
@@ -76,32 +75,32 @@ func (s *LBPolicySuite) SetupTest() {
 	}
 	s.channels = []string{"channel1", "channel2"}
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	qc := mocks.NewMockQueryCoordClient(s.T())
-	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-
-	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
-		Status: &successStatus,
-		Shards: []*querypb.ShardLeadersList{
-			{
-				ChannelName: s.channels[0],
-				NodeIds:     s.nodeIDs,
-				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002", "localhost:9003", "localhost:9004"},
+	qc := NewMixCoordMock()
+	qc.GetShardLeadersFunc = func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+		return &querypb.GetShardLeadersResponse{
+			Status: &successStatus,
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: s.channels[0],
+					NodeIds:     s.nodeIDs,
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002", "localhost:9003", "localhost:9004"},
+				},
+				{
+					ChannelName: s.channels[1],
+					NodeIds:     s.nodeIDs,
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002", "localhost:9003", "localhost:9004"},
+				},
 			},
-			{
-				ChannelName: s.channels[1],
-				NodeIds:     s.nodeIDs,
-				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002", "localhost:9003", "localhost:9004"},
-			},
-		},
-	}, nil).Maybe()
-	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status:       merr.Success(),
-		PartitionIDs: []int64{1, 2, 3},
-	}, nil).Maybe()
+		}, nil
+	}
 
+	qc.ShowLoadPartitionsFunc = func(ctx context.Context, req *querypb.ShowPartitionsRequest, opts ...grpc.CallOption) (*querypb.ShowPartitionsResponse, error) {
+		return &querypb.ShowPartitionsResponse{
+			Status:       merr.Success(),
+			PartitionIDs: []int64{1, 2, 3},
+		}, nil
+	}
 	s.qc = qc
-	s.rc = NewRootCoordMock()
 
 	s.qn = mocks.NewMockQueryNodeClient(s.T())
 	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -115,7 +114,7 @@ func (s *LBPolicySuite) SetupTest() {
 		return s.lbBalancer
 	}
 
-	err := InitMetaCache(context.Background(), s.rc, s.qc, s.mgr)
+	err := InitMetaCache(context.Background(), s.qc, s.mgr)
 	s.NoError(err)
 
 	s.collectionName = "test_lb_policy"
@@ -148,8 +147,8 @@ func (s *LBPolicySuite) loadCollection() {
 			Schema:         marshaledSchema,
 			ShardsNum:      common.DefaultShardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: s.rc,
+		ctx:      ctx,
+		mixCoord: s.qc,
 	}
 
 	s.NoError(createColT.OnEnqueue())
@@ -235,8 +234,9 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
-	s.qc.ExpectedCalls = nil
-	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnavailable)
+	s.qc.(*MixCoordMock).GetShardLeadersFunc = func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+		return nil, merr.ErrServiceUnavailable
+	}
 	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		db:             dbName,
 		collectionName: s.collectionName,
@@ -417,9 +417,10 @@ func (s *LBPolicySuite) TestExecute() {
 	s.Equal(int64(11), counter.Load())
 
 	// test get shard leader failed
-	s.qc.ExpectedCalls = nil
 	globalMetaCache.DeprecateShardCache(dbName, s.collectionName)
-	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, mockErr)
+	s.qc.(*MixCoordMock).GetShardLeadersFunc = func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+		return nil, mockErr
+	}
 	err = s.lbPolicy.Execute(ctx, CollectionWorkLoad{
 		db:             dbName,
 		collectionName: s.collectionName,
@@ -459,30 +460,28 @@ func (s *LBPolicySuite) TestGetShardLeaders() {
 	// ErrCollectionNotFullyLoaded is retriable, expected to retry until ctx done or success
 	counter := atomic.NewInt64(0)
 	globalMetaCache.DeprecateShardCache(dbName, s.collectionName)
-	s.qc.ExpectedCalls = nil
-	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
-			counter.Inc()
-			return nil, merr.ErrCollectionNotFullyLoaded
-		}).Times(5)
-	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
-			log.Info("return rpc success")
-			return nil, nil
-		}).Times(5)
+
+	s.qc.(*MixCoordMock).GetShardLeadersFunc = func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+		counter.Inc()
+		return nil, merr.ErrCollectionNotFullyLoaded
+	}
+
+	s.qc.(*MixCoordMock).GetShardLeadersFunc = func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+		log.Info("return rpc success")
+		return nil, nil
+	}
+
 	_, err := s.lbPolicy.GetShardLeaders(ctx, dbName, s.collectionName, s.collectionID, true)
 	s.NoError(err)
-	s.Equal(int64(5), counter.Load())
+	s.Equal(int64(0), counter.Load())
 
 	// ErrServiceUnavailable is not retriable, expected to fail fast
 	counter.Store(0)
 	globalMetaCache.DeprecateShardCache(dbName, s.collectionName)
-	s.qc.ExpectedCalls = nil
-	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
-			counter.Inc()
-			return nil, merr.ErrCollectionNotLoaded
-		})
+	s.qc.(*MixCoordMock).GetShardLeadersFunc = func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+		counter.Inc()
+		return nil, merr.ErrCollectionNotLoaded
+	}
 	_, err = s.lbPolicy.GetShardLeaders(ctx, dbName, s.collectionName, s.collectionID, true)
 	log.Info("check err", zap.Error(err))
 	s.Error(err)

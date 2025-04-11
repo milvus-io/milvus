@@ -74,10 +74,10 @@ func newServerBroker(s *Core) *ServerBroker {
 func (b *ServerBroker) ReleaseCollection(ctx context.Context, collectionID UniqueID) error {
 	log.Ctx(ctx).Info("releasing collection", zap.Int64("collection", collectionID))
 
-	resp, err := b.s.queryCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
+	resp, err := b.s.mixCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
 		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleaseCollection)),
 		CollectionID: collectionID,
-		NodeID:       b.s.session.ServerID,
+		NodeID:       b.s.session.GetServerID(),
 	})
 	if err != nil {
 		return err
@@ -97,7 +97,7 @@ func (b *ServerBroker) ReleasePartitions(ctx context.Context, collectionID Uniqu
 	}
 	log := log.Ctx(ctx).With(zap.Int64("collection", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 	log.Info("releasing partitions")
-	resp, err := b.s.queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
+	resp, err := b.s.mixCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
 		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
 		CollectionID: collectionID,
 		PartitionIDs: partitionIDs,
@@ -117,7 +117,7 @@ func (b *ServerBroker) ReleasePartitions(ctx context.Context, collectionID Uniqu
 func (b *ServerBroker) SyncNewCreatedPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
 	log := log.Ctx(ctx).With(zap.Int64("collection", collectionID), zap.Int64("partitionID", partitionID))
 	log.Info("begin to sync new partition")
-	resp, err := b.s.queryCoord.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{
+	resp, err := b.s.mixCoord.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{
 		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
 		CollectionID: collectionID,
 		PartitionID:  partitionID,
@@ -135,10 +135,10 @@ func (b *ServerBroker) SyncNewCreatedPartition(ctx context.Context, collectionID
 }
 
 func (b *ServerBroker) GetQuerySegmentInfo(ctx context.Context, collectionID int64, segIDs []int64) (retResp *querypb.GetSegmentInfoResponse, retErr error) {
-	resp, err := b.s.queryCoord.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
+	resp, err := b.s.mixCoord.GetLoadSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_GetSegmentState),
-			commonpbutil.WithSourceID(b.s.session.ServerID),
+			commonpbutil.WithSourceID(b.s.session.GetServerID()),
 		),
 		CollectionID: collectionID,
 		SegmentIDs:   segIDs,
@@ -160,7 +160,7 @@ func toKeyDataPairs(m map[string][]byte) []*commonpb.KeyDataPair {
 func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error {
 	log.Ctx(ctx).Info("watching channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
 
-	resp, err := b.s.dataCoord.WatchChannels(ctx, &datapb.WatchChannelsRequest{
+	resp, err := b.s.mixCoord.WatchChannels(ctx, &datapb.WatchChannelsRequest{
 		CollectionID:    info.collectionID,
 		ChannelNames:    info.vChannels,
 		StartPositions:  info.startPositions,
@@ -186,13 +186,13 @@ func (b *ServerBroker) UnwatchChannels(ctx context.Context, info *watchInfo) err
 }
 
 func (b *ServerBroker) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
-	return b.s.dataCoord.GetSegmentStates(ctx, req)
+	return b.s.mixCoord.GetSegmentStates(ctx, req)
 }
 
 func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 	log.Ctx(ctx).Info("dropping collection index", zap.Int64("collection", collID), zap.Int64s("partitions", partIDs))
 
-	rsp, err := b.s.dataCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
+	rsp, err := b.s.mixCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: collID,
 		PartitionIDs: partIDs,
 		IndexName:    "",
@@ -211,7 +211,7 @@ func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID,
 }
 
 func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
-	resp, err := b.s.dataCoord.GetSegmentIndexState(ctx, &indexpb.GetSegmentIndexStateRequest{
+	resp, err := b.s.mixCoord.GetSegmentIndexState(ctx, &indexpb.GetSegmentIndexStateRequest{
 		CollectionID: collID,
 		IndexName:    indexName,
 		SegmentIDs:   segIDs,
@@ -263,7 +263,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 		VChannels:      colMeta.VirtualChannelNames,
 	}
 
-	resp, err := b.s.dataCoord.BroadcastAlteredCollection(ctx, dcReq)
+	resp, err := b.s.mixCoord.BroadcastAlteredCollection(ctx, dcReq)
 	if err != nil {
 		return err
 	}
@@ -281,7 +281,7 @@ func (b *ServerBroker) GcConfirm(ctx context.Context, collectionID, partitionID 
 	log.Info("confirming if gc is finished")
 
 	req := &datapb.GcConfirmRequest{CollectionId: collectionID, PartitionId: partitionID}
-	resp, err := b.s.dataCoord.GcConfirm(ctx, req)
+	resp, err := b.s.mixCoord.GcConfirm(ctx, req)
 	if err != nil {
 		log.Warn("gc is not finished", zap.Error(err))
 		return false

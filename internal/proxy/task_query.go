@@ -53,7 +53,7 @@ type queryTask struct {
 	ctx            context.Context
 	result         *milvuspb.QueryResults
 	request        *milvuspb.QueryRequest
-	qc             types.QueryCoordClient
+	mixCoord       types.MixCoordClient
 	ids            *schemapb.IDs
 	collectionName string
 	queryParams    *queryParams
@@ -599,7 +599,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 		retrieveReq.MvccTimestamp = mvccTs
 		retrieveReq.GuaranteeTimestamp = mvccTs
 	}
-
+	retrieveReq.ConsistencyLevel = t.ConsistencyLevel
 	req := &querypb.QueryRequest{
 		Req:         retrieveReq,
 		DmlChannels: []string{channel},

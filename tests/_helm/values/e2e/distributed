@@ -11,6 +11,7 @@ cluster:
 streaming:
   enabled: true
 dataCoordinator:
+  enabled: false
   resources:
     limits:
       cpu: "1"
@@ -234,6 +235,7 @@ pulsar:
       key: node-role.kubernetes.io/e2e
       operator: Exists
 queryCoordinator:
+  enabled: false
   resources:
     limits:
       cpu: "1"
@@ -264,6 +266,7 @@ mixCoordinator:
       cpu: "0.2"
       memory: 256Mi
 rootCoordinator:
+  enabled: false
   resources:
     limits:
       cpu: "1"

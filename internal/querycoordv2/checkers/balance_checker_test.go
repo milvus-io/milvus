@@ -758,6 +758,98 @@ func (suite *BalanceCheckerTestSuite) TestBalanceTriggerOrder() {
 	suite.Contains(replicas, replicaID1, "Stopping balance should prioritize collection with lowest ID")
 }
 
+func (suite *BalanceCheckerTestSuite) TestHasUnbalancedCollectionFlag() {
+	ctx := context.Background()
+
+	// Set up nodes
+	nodeID1, nodeID2 := int64(1), int64(2)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID1)
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID2)
+
+	// Create collection
+	cid1, replicaID1 := int64(1), int64(101)
+	collection1 := utils.CreateTestCollection(cid1, int32(replicaID1))
+	collection1.Status = querypb.LoadStatus_Loaded
+	replica1 := utils.CreateTestReplica(replicaID1, cid1, []int64{nodeID1, nodeID2})
+	suite.checker.meta.CollectionManager.PutCollection(ctx, collection1)
+	suite.checker.meta.ReplicaManager.Put(ctx, replica1)
+
+	// Mock the target manager
+	mockTargetManager := meta.NewMockTargetManager(suite.T())
+	suite.checker.targetMgr = mockTargetManager
+	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, mock.Anything, mock.Anything).Return(int64(100)).Maybe()
+
+	// 1. Test normal balance with auto balance disabled
+	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
+
+	// The collections set should be initially empty
+	suite.checker.normalBalanceCollectionsCurrentRound.Clear()
+	suite.Equal(0, suite.checker.normalBalanceCollectionsCurrentRound.Len())
+
+	// Get replicas - should return nil and keep the set empty
+	replicas := suite.checker.getReplicaForNormalBalance(ctx)
+	suite.Empty(replicas)
+	suite.Equal(0, suite.checker.normalBalanceCollectionsCurrentRound.Len(),
+		"normalBalanceCollectionsCurrentRound should remain empty when auto balance is disabled")
+
+	// 2. Test normal balance when targetMgr.IsCurrentTargetReady returns false
+	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
+	mockTargetManager.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
+	mockTargetManager.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(false).Maybe()
+
+	// The collections set should be initially empty
+	suite.checker.normalBalanceCollectionsCurrentRound.Clear()
+	suite.Equal(0, suite.checker.normalBalanceCollectionsCurrentRound.Len())
+
+	// Get replicas - should return nil and keep the set empty because of not ready targets
+	replicas = suite.checker.getReplicaForNormalBalance(ctx)
+	suite.Empty(replicas)
+	suite.Equal(0, suite.checker.normalBalanceCollectionsCurrentRound.Len(),
+		"normalBalanceCollectionsCurrentRound should remain empty when targets are not ready")
+
+	// 3. Test stopping balance when there are no RO nodes
+	paramtable.Get().Save(Params.QueryCoordCfg.EnableStoppingBalance.Key, "true")
+	mockTargetManager.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
+	mockTargetManager.EXPECT().IsCurrentTargetExist(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
+
+	// The collections set should be initially empty
+	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
+	suite.Equal(0, suite.checker.stoppingBalanceCollectionsCurrentRound.Len())
+
+	// Get replicas - should return nil and keep the set empty because there are no RO nodes
+	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
+	suite.Empty(replicas)
+	suite.Equal(0, suite.checker.stoppingBalanceCollectionsCurrentRound.Len(),
+		"stoppingBalanceCollectionsCurrentRound should remain empty when there are no RO nodes")
+
+	// 4. Test stopping balance with RO nodes
+	// Add a RO node to the replica
+	mr1 := replica1.CopyForWrite()
+	mr1.AddRONode(nodeID1)
+	suite.checker.meta.ReplicaManager.Put(ctx, mr1.IntoReplica())
+
+	// The collections set should be initially empty
+	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
+	suite.Equal(0, suite.checker.stoppingBalanceCollectionsCurrentRound.Len())
+
+	// Get replicas - should return the replica ID and add the collection to the set
+	replicas = suite.checker.getReplicaForStoppingBalance(ctx)
+	suite.Equal([]int64{replicaID1}, replicas)
+	suite.Equal(1, suite.checker.stoppingBalanceCollectionsCurrentRound.Len())
+	suite.True(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(cid1),
+		"stoppingBalanceCollectionsCurrentRound should contain the collection when it has RO nodes")
+}
+
 func TestBalanceCheckerSuite(t *testing.T) {
 	suite.Run(t, new(BalanceCheckerTestSuite))
 }

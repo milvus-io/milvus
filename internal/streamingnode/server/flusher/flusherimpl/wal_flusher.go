@@ -125,7 +125,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	}
 	impl.logger.Info("fetch recovery info done", zap.Int("recoveryInfoNum", len(recoverInfos)))
 
-	dc, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
+	mixc, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 	if err != nil {
 		impl.logger.Warn("flusher recovery is canceled before data coord client ready", zap.Error(err))
 		return nil, err
@@ -133,7 +133,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	impl.logger.Info("data coord client ready")
 
 	// build all components.
-	broker := broker.NewCoordBroker(dc, paramtable.GetNodeID())
+	broker := broker.NewCoordBroker(mixc, paramtable.GetNodeID())
 	chunkManager := resource.Resource().ChunkManager()
 
 	pm, err := recoverPChannelCheckpointManager(ctx, l.WALName(), l.Channel().Name, checkpoints)
@@ -177,7 +177,9 @@ func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL) (wal
 	}
 	if startMessageID := impl.flusherComponents.StartMessageID(); startMessageID != nil {
 		impl.logger.Info("wal start to scan from minimum checkpoint", zap.Stringer("startMessageID", startMessageID))
-		readOpt.DeliverPolicy = options.DeliverPolicyStartAfter(startMessageID)
+		// !!! we always set the deliver policy to start from the last confirmed message id.
+		// because the catchup scanner at the streamingnode server must see the last confirmed message id if it's the last timetick.
+		readOpt.DeliverPolicy = options.DeliverPolicyStartFrom(startMessageID)
 	}
 	impl.logger.Info("wal start to scan from the beginning")
 	return l.Read(ctx, readOpt)

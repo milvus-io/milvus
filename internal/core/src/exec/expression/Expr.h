@@ -31,7 +31,9 @@
 #include "expr/ITypeExpr.h"
 #include "log/Log.h"
 #include "query/PlanProto.h"
-
+#include "segcore/SegmentSealedImpl.h"
+#include "segcore/SegmentInterface.h"
+#include "segcore/SegmentGrowingImpl.h"
 namespace milvus {
 namespace exec {
 
@@ -138,7 +140,9 @@ class SegmentExpr : public Expr {
                 const DataType value_type,
                 int64_t active_count,
                 int64_t batch_size,
+                int32_t consistency_level,
                 bool allow_any_json_cast_type = false)
+
         : Expr(DataType::BOOL, std::move(input), name),
           segment_(segment),
           field_id_(field_id),
@@ -146,7 +150,8 @@ class SegmentExpr : public Expr {
           value_type_(value_type),
           allow_any_json_cast_type_(allow_any_json_cast_type),
           active_count_(active_count),
-          batch_size_(batch_size) {
+          batch_size_(batch_size),
+          consistency_level_(consistency_level) {
         size_per_chunk_ = segment_->size_per_chunk();
         AssertInfo(
             batch_size_ > 0,
@@ -1219,6 +1224,23 @@ class SegmentExpr : public Expr {
         use_index_ = false;
     }
 
+    bool
+    CanUseJsonKeyIndex(FieldId field_id) const {
+        if (segment_->type() == SegmentType::Sealed) {
+            auto sealed_seg =
+                dynamic_cast<const segcore::SegmentSealed*>(segment_);
+            Assert(sealed_seg != nullptr);
+            if (sealed_seg->GetJsonKeyIndex(field_id) != nullptr) {
+                return true;
+            }
+        } else if (segment_->type() == SegmentType ::Growing) {
+            if (segment_->GetJsonKeyIndex(field_id) != nullptr) {
+                return true;
+            }
+        }
+        return false;
+    }
+
  protected:
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
@@ -1255,6 +1277,7 @@ class SegmentExpr : public Expr {
 
     // Cache for text match.
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};
+    int32_t consistency_level_{0};
 };
 
 bool

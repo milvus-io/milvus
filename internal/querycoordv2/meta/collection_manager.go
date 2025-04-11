@@ -50,6 +50,7 @@ type Collection struct {
 	mut             sync.RWMutex
 	refreshNotifier chan struct{}
 	LoadSpan        trace.Span
+	Schema          *schemapb.CollectionSchema
 }
 
 func (collection *Collection) SetRefreshNotifier(notifier chan struct{}) {
@@ -85,6 +86,7 @@ func (collection *Collection) Clone() *Collection {
 		UpdatedAt:          collection.UpdatedAt,
 		refreshNotifier:    collection.refreshNotifier,
 		LoadSpan:           collection.LoadSpan,
+		Schema:             collection.Schema,
 	}
 }
 
@@ -238,6 +240,7 @@ func (m *CollectionManager) upgradeLoadFields(ctx context.Context, collection *q
 	err = m.putCollection(ctx, true, &Collection{
 		CollectionLoadInfo: collection,
 		LoadPercentage:     100,
+		Schema:             resp.GetSchema(),
 	})
 	if err != nil {
 		return err
@@ -251,6 +254,27 @@ func (m *CollectionManager) GetCollection(ctx context.Context, collectionID type
 	defer m.rwmutex.RUnlock()
 
 	return m.collections[collectionID]
+}
+
+func (m *CollectionManager) GetCollectionSchema(ctx context.Context, collectionID typeutil.UniqueID) *schemapb.CollectionSchema {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		return nil
+	}
+	return collection.Schema
+}
+
+func (m *CollectionManager) PutCollectionSchema(ctx context.Context, collectionID typeutil.UniqueID, schema *schemapb.CollectionSchema) {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		return
+	}
+	collection.Schema = schema
 }
 
 func (m *CollectionManager) GetPartition(ctx context.Context, partitionID typeutil.UniqueID) *Partition {
