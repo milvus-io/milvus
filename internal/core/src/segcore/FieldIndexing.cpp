@@ -42,11 +42,66 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
 }
 
 void
-VectorFieldIndexing::recreate_index() {
-    index_ = std::make_unique<index::VectorMemIndex<float>>(
-        config_->GetIndexType(),
-        config_->GetMetricType(),
-        knowhere::Version::GetCurrentVersion().VersionNumber());
+VectorFieldIndexing::recreate_index(DataType data_type,
+                                    const VectorBase* field_raw_data) {
+    if (IsSparseFloatVectorDataType(data_type)) {
+        index_ = std::make_unique<index::VectorMemIndex<float>>(
+            config_->GetIndexType(),
+            config_->GetMetricType(),
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false);
+    } else if (data_type == DataType::VECTOR_FLOAT) {
+        auto concurrent_fp32_vec =
+            reinterpret_cast<const ConcurrentVector<FloatVector>*>(
+                field_raw_data);
+        AssertInfo(concurrent_fp32_vec != nullptr,
+                   "Fail to generate a cocurrent vector when recreate_index in "
+                   "growing segment.");
+        knowhere::ViewDataOp view_data = [field_raw_data_ptr =
+                                              concurrent_fp32_vec](size_t id) {
+            return (const void*)field_raw_data_ptr->get_element(id);
+        };
+        index_ = std::make_unique<index::VectorMemIndex<float>>(
+            config_->GetIndexType(),
+            config_->GetMetricType(),
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false,
+            view_data);
+    } else if (data_type == DataType::VECTOR_FLOAT16) {
+        auto concurrent_fp16_vec =
+            reinterpret_cast<const ConcurrentVector<Float16Vector>*>(
+                field_raw_data);
+        AssertInfo(concurrent_fp16_vec != nullptr,
+                   "Fail to generate a cocurrent vector when    recreate_index "
+                   "in growing segment.");
+        knowhere::ViewDataOp view_data = [field_raw_data_ptr =
+                                              concurrent_fp16_vec](size_t id) {
+            return (const void*)field_raw_data_ptr->get_element(id);
+        };
+        index_ = std::make_unique<index::VectorMemIndex<float16>>(
+            config_->GetIndexType(),
+            config_->GetMetricType(),
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false,
+            view_data);
+    } else if (data_type == DataType::VECTOR_BFLOAT16) {
+        auto concurrent_bf16_vec =
+            reinterpret_cast<const ConcurrentVector<BFloat16Vector>*>(
+                field_raw_data);
+        AssertInfo(concurrent_bf16_vec != nullptr,
+                   "Fail to generate a cocurrent vector when    recreate_index "
+                   "in growing segment.");
+        knowhere::ViewDataOp view_data = [field_raw_data_ptr =
+                                              concurrent_bf16_vec](size_t id) {
+            return (const void*)field_raw_data_ptr->get_element(id);
+        };
+        index_ = std::make_unique<index::VectorMemIndex<bfloat16>>(
+            config_->GetIndexType(),
+            config_->GetMetricType(),
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false,
+            view_data);
+    }
 }
 
 void
@@ -65,13 +120,29 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
     auto conf = get_build_params();
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
-        const auto& chunk_data = source->get_chunk_data(chunk_id);
-        auto indexing = std::make_unique<index::VectorMemIndex<float>>(
-            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-            knowhere::metric::L2,
-            knowhere::Version::GetCurrentVersion().VersionNumber());
-        auto dataset =
-            knowhere::GenDataSet(source->get_size_per_chunk(), dim, chunk_data);
+        const auto& chunk_data = vec_base->get_chunk_data(chunk_id);
+        std::unique_ptr<index::VectorIndex> indexing = nullptr;
+        if (field_meta_.get_data_type() == DataType::VECTOR_FLOAT) {
+            indexing = std::make_unique<index::VectorMemIndex<float>>(
+                knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                knowhere::metric::L2,
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                false);
+        } else if (field_meta_.get_data_type() == DataType::VECTOR_FLOAT16) {
+            indexing = std::make_unique<index::VectorMemIndex<float16>>(
+                knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                knowhere::metric::L2,
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                false);
+        } else {
+            indexing = std::make_unique<index::VectorMemIndex<bfloat16>>(
+                knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                knowhere::metric::L2,
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                false);
+        }
+        auto dataset = knowhere::GenDataSet(
+            vec_base->get_size_per_chunk(), dim, chunk_data);
         indexing->BuildWithDataset(dataset, conf);
         data_[chunk_id] = std::move(indexing);
     }

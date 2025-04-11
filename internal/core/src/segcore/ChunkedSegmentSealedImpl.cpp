@@ -2077,6 +2077,49 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
             is_sparse
                 ? dynamic_cast<ChunkedSparseFloatColumn*>(vec_data.get())->Dim()
                 : field_meta.get_dim();
+        auto index_metric = field_binlog_config->GetMetricType();
+        std::unique_ptr<index::VectorIndex> vec_index = nullptr;
+        if (!is_sparse) {
+            knowhere::ViewDataOp view_data = [field_raw_data_ptr =
+                                                  vec_data](size_t id) {
+                return field_raw_data_ptr->ValueAt(id);
+            };
+            if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
+                vec_index = std::make_unique<index::VectorMemIndex<float>>(
+                    field_binlog_config->GetIndexType(),
+                    index_metric,
+                    knowhere::Version::GetCurrentVersion().VersionNumber(),
+                    false,
+                    view_data);
+            } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
+                vec_index =
+                    std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
+                        field_binlog_config->GetIndexType(),
+                        index_metric,
+                        knowhere::Version::GetCurrentVersion().VersionNumber(),
+                        false,
+                        view_data);
+            } else if (field_meta.get_data_type() ==
+                       DataType::VECTOR_BFLOAT16) {
+                vec_index =
+                    std::make_unique<index::VectorMemIndex<knowhere::bf16>>(
+                        field_binlog_config->GetIndexType(),
+                        index_metric,
+                        knowhere::Version::GetCurrentVersion().VersionNumber(),
+                        false,
+                        view_data);
+            }
+        } else {
+            vec_index = std::make_unique<index::VectorMemIndex<float>>(
+                field_binlog_config->GetIndexType(),
+                index_metric,
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                false);
+        }
+        if (vec_index == nullptr) {
+            LOG_INFO("fail to generate intermin index, invalid data type.");
+            return false;
+        }
 
         auto build_config = field_binlog_config->GetBuildBaseParams();
         build_config[knowhere::meta::DIM] = std::to_string(dim);
