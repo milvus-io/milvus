@@ -31,12 +31,13 @@ jobs:
         uses: easimon/maximize-build-space@master
         if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
         with:
-          root-reserve-mb: 20480
-          # overprovision-lvm: 'true'
-          swap-size-mb: 1024
+          root-reserve-mb: 30720 # 30GB for docker images, because build happens in docker
+          swap-size-mb: 512
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
       - name: Checkout
         uses: actions/checkout@v2
       - name: Get version from system time after release step
