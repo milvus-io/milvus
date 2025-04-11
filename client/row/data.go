@@ -119,7 +119,7 @@ func AnyToColumns(rows []interface{}, schemas ...*entity.Schema) ([]column.Colum
 			data := make([][]byte, 0, rowsLen)
 			col = column.NewColumnJSONBytes(field.Name, data)
 		case entity.FieldTypeArray:
-			col := NewArrayColumn(field)
+			col = NewArrayColumn(field)
 			if col == nil {
 				return nil, errors.Newf("unsupported element type %s for Array", field.ElementType.String())
 			}

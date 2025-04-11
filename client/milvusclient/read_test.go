@@ -223,8 +223,9 @@ func (s *ReadSuite) TestQuery() {
 			return &milvuspb.QueryResults{}, nil
 		}).Once()
 
-		_, err := s.client.Query(ctx, NewQueryOption(collectionName).WithPartitions(partitionName))
+		rs, err := s.client.Query(ctx, NewQueryOption(collectionName).WithPartitions(partitionName))
 		s.NoError(err)
+		s.NotNil(rs.sch)
 	})
 
 	s.Run("bad_request", func() {
