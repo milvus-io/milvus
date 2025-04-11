@@ -41,7 +41,9 @@ TEST(chunk, test_int64_field) {
         milvus::storage::CreateFieldData(storage::DataType::INT64);
     field_data->FillFieldData(data.data(), data.size());
     storage::InsertEventData event_data;
-    event_data.field_data = field_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
         ser_data.data() + 2 * sizeof(milvus::Timestamp),
@@ -80,7 +82,9 @@ TEST(chunk, test_variable_field) {
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertEventData event_data;
-    event_data.field_data = field_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
         ser_data.data() + 2 * sizeof(milvus::Timestamp),
@@ -122,7 +126,9 @@ TEST(chunk, test_variable_field_nullable) {
     delete[] valid_data;
 
     storage::InsertEventData event_data;
-    event_data.field_data = field_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
         ser_data.data() + 2 * sizeof(milvus::Timestamp),
@@ -168,7 +174,9 @@ TEST(chunk, test_json_field) {
     field_data->FillFieldData(data.data(), data.size());
 
     storage::InsertEventData event_data;
-    event_data.field_data = field_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
 
     auto get_record_batch_reader =
@@ -290,7 +298,9 @@ TEST(chunk, test_null_int64) {
     delete[] valid_data;
 
     storage::InsertEventData event_data;
-    event_data.field_data = field_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
         ser_data.data() + 2 * sizeof(milvus::Timestamp),
@@ -347,7 +357,9 @@ TEST(chunk, test_array) {
         milvus::storage::CreateFieldData(storage::DataType::ARRAY);
     field_data->FillFieldData(data.data(), data.size());
     storage::InsertEventData event_data;
-    event_data.field_data = field_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
         ser_data.data() + 2 * sizeof(milvus::Timestamp),
@@ -407,7 +419,9 @@ TEST(chunk, test_null_array) {
     delete[] valid_data;
 
     storage::InsertEventData event_data;
-    event_data.field_data = field_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
         ser_data.data() + 2 * sizeof(milvus::Timestamp),
@@ -478,7 +492,9 @@ TEST(chunk, test_array_views) {
         milvus::storage::CreateFieldData(storage::DataType::ARRAY);
     field_data->FillFieldData(data.data(), data.size());
     storage::InsertEventData event_data;
-    event_data.field_data = field_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
         ser_data.data() + 2 * sizeof(milvus::Timestamp),
@@ -562,7 +578,9 @@ TEST(chunk, test_sparse_float) {
     field_data->FillFieldData(vecs.get(), n_rows);
 
     storage::InsertEventData event_data;
-    event_data.field_data = field_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
         ser_data.data() + 2 * sizeof(milvus::Timestamp),
@@ -630,7 +648,9 @@ TEST(chunk, multiple_chunk_mmap) {
         milvus::storage::CreateFieldData(storage::DataType::INT64);
     field_data->FillFieldData(data.data(), data.size());
     storage::InsertEventData event_data;
-    event_data.field_data = field_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
     auto ser_data = event_data.Serialize();
     auto buffer = std::make_shared<arrow::io::BufferReader>(
         ser_data.data() + 2 * sizeof(milvus::Timestamp),

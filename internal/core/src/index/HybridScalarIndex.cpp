@@ -383,16 +383,8 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
     auto index_datas = mem_file_manager_->LoadIndexToMemory(
         std::vector<std::string>{index_type_file});
-    AssembleIndexDatas(index_datas);
     BinarySet binary_set;
-    for (auto& [key, data] : index_datas) {
-        auto size = data->DataSize();
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-        auto buf = std::shared_ptr<uint8_t[]>(
-            (uint8_t*)const_cast<void*>(data->Data()), deleter);
-        binary_set.Append(key, buf, size);
-    }
-
+    AssembleIndexDatas(index_datas, binary_set);
     DeserializeIndexType(binary_set);
 
     auto index = GetInternalIndex();
