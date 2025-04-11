@@ -1,0 +1,4 @@
+package symbolizer
+
+func RegisterJemallocStatsMetrics() {
+}

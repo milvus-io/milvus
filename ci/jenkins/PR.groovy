@@ -56,7 +56,7 @@ pipeline {
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
                                               suppress_suffix_of_image_tag: true,
-                                              make_cmd: 'make clean && make install USE_ASAN=ON use_disk_index=ON',
+                                              make_cmd: 'make clean && make install USE_ASAN=ON use_disk_index=ON JEMALLOC_ENABLE_STATS=ON',
                                               images: '["milvus","pytest","helm"]'
 
                         milvus_image_tag = tekton.query_result job_name, 'milvus-image-tag'
