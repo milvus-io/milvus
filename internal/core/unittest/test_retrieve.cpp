@@ -23,7 +23,7 @@ using namespace milvus::segcore;
 std::unique_ptr<proto::segcore::RetrieveResults>
 RetrieveUsingDefaultOutputSize(SegmentInterface* segment,
                                const query::RetrievePlan* plan,
-                               Timestamp timestamp) {
+                               milvus::Timestamp timestamp) {
     return segment->Retrieve(
         nullptr, plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false);
 }
@@ -523,7 +523,7 @@ TEST_P(RetrieveTest, Delete) {
         auto ids = std::make_unique<IdArray>();
         ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
 
-        std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
+        std::vector<milvus::Timestamp> timestamps{10, 10, 10, 10, 10};
 
         LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
         segment->LoadDeletedRecord(info);
@@ -540,7 +540,7 @@ TEST_P(RetrieveTest, Delete) {
     segment->Delete(reserved_offset,
                     new_count,
                     ids.get(),
-                    reinterpret_cast<const Timestamp*>(new_timestamps.data()));
+                    reinterpret_cast<const milvus::Timestamp*>(new_timestamps.data()));
 
     {
         auto retrieve_results =

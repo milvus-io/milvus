@@ -293,7 +293,7 @@ TEST_P(ChunkVectorTest, SearchWithMmap) {
             *schema, plan_str.data(), plan_str.size());
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        Timestamp timestamp = 1000000;
+        milvus::Timestamp timestamp = 1000000;
         auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
         EXPECT_EQ(sr->total_nq_, num_queries);
         EXPECT_EQ(sr->unity_topK_, top_k);
@@ -356,7 +356,7 @@ TEST_F(ChunkVectorTest, QueryWithMmap) {
         milvus::segcore::CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = milvus::query::ParsePlaceholderGroup(
         plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     int topk = 5;

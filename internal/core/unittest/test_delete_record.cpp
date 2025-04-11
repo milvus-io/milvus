@@ -47,14 +47,14 @@ TEST(DeleteMVCC, common_case) {
     auto& insert_record = segment->get_insert_record();
     DeletedRecord<true> delete_record(
         &insert_record,
-        [&insert_record](const PkType& pk, Timestamp timestamp) {
+        [&insert_record](const PkType& pk, milvus::Timestamp timestamp) {
             return insert_record.search_pk(pk, timestamp);
         },
         0);
     delete_record.set_sealed_row_count(c);
 
     // delete pk(1) at ts(10);
-    std::vector<Timestamp> delete_ts = {10};
+    std::vector<milvus::Timestamp> delete_ts = {10};
     std::vector<PkType> delete_pk = {1};
     delete_record.StreamPush(delete_pk, delete_ts.data());
     ASSERT_EQ(1, delete_record.size());
@@ -64,7 +64,7 @@ TEST(DeleteMVCC, common_case) {
         BitsetTypeView bitsets_view(bitsets);
         auto insert_barrier = c;
         // query at ts (10)
-        Timestamp query_timestamp = 10;
+        milvus::Timestamp query_timestamp = 10;
         delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 1, 0, 0, 0, 0, 0, 0, 0, 0};
         for (int i = 0; i < c; i++) {
@@ -76,7 +76,7 @@ TEST(DeleteMVCC, common_case) {
         BitsetTypeView bitsets_view(bitsets);
         auto insert_barrier = c;
         // query at ts (11)
-        Timestamp query_timestamp = 11;
+        milvus::Timestamp query_timestamp = 11;
         // query at ts (11)
         query_timestamp = 11;
         delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
@@ -97,7 +97,7 @@ TEST(DeleteMVCC, common_case) {
         BitsetTypeView bitsets_view(bitsets);
         auto insert_barrier = c;
         // query at ts (12)
-        Timestamp query_timestamp = 12;
+        milvus::Timestamp query_timestamp = 12;
         delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 1, 0, 0, 0, 1, 0, 0, 0, 0};
         for (int i = 0; i < c; i++) {
@@ -117,7 +117,7 @@ TEST(DeleteMVCC, common_case) {
         BitsetTypeView bitsets_view(bitsets);
         auto insert_barrier = c;
         // query at ts (14)
-        Timestamp query_timestamp = 14;
+        milvus::Timestamp query_timestamp = 14;
 
         delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 1, 0, 0, 0, 1, 0, 0, 0, 0};
@@ -139,7 +139,7 @@ TEST(DeleteMVCC, common_case) {
         BitsetTypeView bitsets_view(bitsets);
         auto insert_barrier = c;
         // query at ts (14)
-        Timestamp query_timestamp = 14;
+        milvus::Timestamp query_timestamp = 14;
         delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 1, 0, 0, 0, 1, 0, 0, 0, 0};
         for (int i = 0; i < c; i++) {
@@ -163,7 +163,7 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
     InsertRecord insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
-        [&insert_record](const PkType& pk, Timestamp timestamp) {
+        [&insert_record](const PkType& pk, milvus::Timestamp timestamp) {
             return insert_record.search_pk(pk, timestamp);
         },
         0);
@@ -171,7 +171,7 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
     // insert pk: (0, 1, 1, 2, 2, 3, 4, 3, 2, 5)
     // at ts:     (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
     std::vector<int64_t> age_data = {0, 1, 1, 2, 2, 3, 4, 3, 2, 5};
-    std::vector<Timestamp> tss(N);
+    std::vector<milvus::Timestamp> tss(N);
     for (int i = 0; i < N; ++i) {
         tss[i] = i;
         insert_record.insert_pk(age_data[i], i);
@@ -183,7 +183,7 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
     insert_record.ack_responder_.AddSegment(insert_offset, insert_offset + N);
 
     // delete pk(2) at ts(5)
-    std::vector<Timestamp> delete_ts = {5};
+    std::vector<milvus::Timestamp> delete_ts = {5};
     std::vector<PkType> delete_pk = {2};
     delete_record.StreamPush(delete_pk, delete_ts.data());
     ASSERT_EQ(2, delete_record.size());
@@ -193,7 +193,7 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
         BitsetTypeView bitsets_view(bitsets);
         int64_t insert_barrier = N;
         // query at ts (10)
-        Timestamp query_timestamp = 10;
+        milvus::Timestamp query_timestamp = 10;
         delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 0, 0, 1, 1, 0, 0, 0, 0, 0};
         // two pk 2  at ts(3, 4) was deleted
@@ -213,7 +213,7 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
         BitsetTypeView bitsets_view(bitsets);
         int64_t insert_barrier = N;
         // query at ts (10)
-        Timestamp query_timestamp = 10;
+        milvus::Timestamp query_timestamp = 10;
         delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 0, 0, 1, 1, 1, 0, 0, 0, 0};
         // one pk 3 in ts(5) was deleted
@@ -233,7 +233,7 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
         BitsetTypeView bitsets_view(bitsets);
         int64_t insert_barrier = N;
         // query at ts (10)
-        Timestamp query_timestamp = 10;
+        milvus::Timestamp query_timestamp = 10;
         delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 0, 0, 1, 1, 1, 0, 1, 0, 0};
         //  pk 3 in ts(7) was deleted
@@ -253,7 +253,7 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
         BitsetTypeView bitsets_view(bitsets);
         int64_t insert_barrier = N;
         // query at ts (10)
-        Timestamp query_timestamp = 10;
+        milvus::Timestamp query_timestamp = 10;
         delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 0, 0, 1, 1, 1, 0, 1, 1, 0};
         //  pk 2 in ts(8) was deleted
@@ -278,13 +278,13 @@ TEST(DeleteMVCC, snapshot) {
     InsertRecord insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
-        [&insert_record](const PkType& pk, Timestamp timestamp) {
+        [&insert_record](const PkType& pk, milvus::Timestamp timestamp) {
             return insert_record.search_pk(pk, timestamp);
         },
         0);
 
     std::vector<int64_t> age_data(N);
-    std::vector<Timestamp> tss(N);
+    std::vector<milvus::Timestamp> tss(N);
     for (int i = 0; i < N; ++i) {
         age_data[i] = i;
         tss[i] = i;
@@ -297,7 +297,7 @@ TEST(DeleteMVCC, snapshot) {
     insert_record.ack_responder_.AddSegment(insert_offset, insert_offset + N);
 
     auto DN = 40000;
-    std::vector<Timestamp> delete_ts(DN);
+    std::vector<milvus::Timestamp> delete_ts(DN);
     std::vector<PkType> delete_pk(DN);
     for (int i = 0; i < DN; ++i) {
         delete_pk[i] = age_data[i];
@@ -326,14 +326,14 @@ TEST(DeleteMVCC, insert_after_snapshot) {
     InsertRecord insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
-        [&insert_record](const PkType& pk, Timestamp timestamp) {
+        [&insert_record](const PkType& pk, milvus::Timestamp timestamp) {
             return insert_record.search_pk(pk, timestamp);
         },
         0);
 
     // insert (0, 0), (1, 1) .... (N - 1, N - 1)
     std::vector<int64_t> age_data(N);
-    std::vector<Timestamp> tss(N);
+    std::vector<milvus::Timestamp> tss(N);
     for (int i = 0; i < N; ++i) {
         age_data[i] = i;
         tss[i] = i;
@@ -347,7 +347,7 @@ TEST(DeleteMVCC, insert_after_snapshot) {
 
     // delete (0, 1), (1, 2) .... (DN, DN + 1)
     auto DN = 10100;
-    std::vector<Timestamp> delete_ts(DN);
+    std::vector<milvus::Timestamp> delete_ts(DN);
     std::vector<PkType> delete_pk(DN);
     for (int i = 0; i < DN; ++i) {
         delete_pk[i] = age_data[i];
@@ -365,7 +365,7 @@ TEST(DeleteMVCC, insert_after_snapshot) {
         BitsetType bitsets(N);
         BitsetTypeView bitsets_view(bitsets);
         int64_t insert_barrier = N;
-        Timestamp query_timestamp = N + 1;
+        milvus::Timestamp query_timestamp = N + 1;
         delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
         for (auto i = 0; i < DN; i++) {
             ASSERT_EQ(bitsets_view[i], true) << i;
@@ -378,7 +378,7 @@ TEST(DeleteMVCC, insert_after_snapshot) {
     // insert (N, N), (N + 1, N + 1).... (N + AN - 1, N + AN - 1) again
     auto AN = 1000;
     std::vector<int64_t> age_data_new(AN);
-    std::vector<Timestamp> tss_new(AN);
+    std::vector<milvus::Timestamp> tss_new(AN);
     for (int i = 0; i < AN; ++i) {
         age_data_new[i] = N + i;
         tss_new[i] = N + i;
@@ -395,7 +395,7 @@ TEST(DeleteMVCC, insert_after_snapshot) {
         BitsetType bitsets(N + AN);
         BitsetTypeView bitsets_view(bitsets);
         int64_t insert_barrier = N + AN;
-        Timestamp query_timestamp = N + AN + 1;
+        milvus::Timestamp query_timestamp = N + AN + 1;
         delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
         for (auto i = 0; i < DN; i++) {
             ASSERT_EQ(bitsets_view[i], true);
@@ -421,13 +421,13 @@ TEST(DeleteMVCC, perform) {
     InsertRecord insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
-        [&insert_record](const PkType& pk, Timestamp timestamp) {
+        [&insert_record](const PkType& pk, milvus::Timestamp timestamp) {
             return insert_record.search_pk(pk, timestamp);
         },
         0);
 
     std::vector<int64_t> age_data(N);
-    std::vector<Timestamp> tss(N);
+    std::vector<milvus::Timestamp> tss(N);
     for (int i = 0; i < N; ++i) {
         age_data[i] = i;
         tss[i] = i;
@@ -440,7 +440,7 @@ TEST(DeleteMVCC, perform) {
     insert_record.ack_responder_.AddSegment(insert_offset, insert_offset + N);
 
     auto DN = N / 2;
-    std::vector<Timestamp> delete_ts(DN);
+    std::vector<milvus::Timestamp> delete_ts(DN);
     std::vector<PkType> delete_pk(DN);
     for (int i = 0; i < DN; ++i) {
         delete_ts[i] = N + i;

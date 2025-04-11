@@ -122,7 +122,7 @@ TEST(Float16, ExecWithoutPredicateFlat) {
         CreatePlaceholderGroup<milvus::Float16Vector>(num_queries, 32, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     std::vector<std::vector<std::string>> results;
     auto json = SearchResultToJson(*sr);
@@ -360,7 +360,7 @@ TEST(BFloat16, ExecWithoutPredicateFlat) {
         CreatePlaceholderGroup<milvus::BFloat16Vector>(num_queries, 32, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
 
     std::vector<std::vector<std::string>> results;
@@ -517,7 +517,7 @@ TEST(BFloat16, ExecWithPredicate) {
         CreatePlaceholderGroup<milvus::BFloat16Vector>(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     int topk = 5;
 

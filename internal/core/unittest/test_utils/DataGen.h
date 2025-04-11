@@ -538,6 +538,17 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 insert_cols(data, N, field_meta, random_valid);
                 break;
             }
+            case DataType::TIMESTAMP: {
+                vector<int64_t> data(N);
+                for (int i = 0; i < N; i++) {
+                    if (random_val) {
+                        data[i] = random();
+                    } else {
+                        data[i] = i / repeat_count;
+                    }
+                }
+                insert_cols(data, N, field_meta, random_valid);
+            }
             case DataType::ARRAY: {
                 vector<ScalarArray> data(N);
                 switch (field_meta.get_element_type()) {
@@ -1128,6 +1139,16 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                     createFieldData(data_raw.data(), DataType::ARRAY, dim);
                 }
                 break;
+            }
+            case DataType::TIMESTAMP: {
+                auto raw_data = data->scalars().long_data().data().data();
+                if (field_meta.is_nullable()) {
+                    auto raw_valid_data = data->valid_data().data();
+                    createNullableFieldData(
+                        raw_data, raw_valid_data, DataType::TIMESTAMP, dim);
+                } else {
+                    createFieldData(raw_data, DataType::TIMESTAMP, dim);
+                }
             }
             default: {
                 PanicInfo(Unsupported, "unsupported");

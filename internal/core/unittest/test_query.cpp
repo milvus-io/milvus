@@ -103,7 +103,7 @@ TEST(Query, ExecWithPredicateLoader) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
 
@@ -186,7 +186,7 @@ TEST(Query, ExecWithPredicateSmallN) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
 
@@ -244,7 +244,7 @@ TEST(Query, ExecWithPredicate) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
 
@@ -324,7 +324,7 @@ TEST(Query, ExecTerm) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     int topk = 5;
@@ -358,7 +358,7 @@ TEST(Query, ExecEmpty) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     std::cout << SearchResultToJson(*sr);
     ASSERT_EQ(sr->unity_topK_, 0);
@@ -405,7 +405,7 @@ TEST(Query, ExecWithoutPredicateFlat) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     std::vector<std::vector<std::string>> results;
     auto json = SearchResultToJson(*sr);
@@ -446,7 +446,7 @@ TEST(Query, ExecWithoutPredicate) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     assert_order(*sr, "l2");
@@ -517,7 +517,7 @@ TEST(Query, InnerProduct) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    Timestamp ts = N * 2;
+    milvus::Timestamp ts = N * 2;
     auto sr = segment->Search(plan.get(), ph_group.get(), ts);
     assert_order(*sr, "ip");
 }
@@ -697,7 +697,7 @@ TEST(Query, FillSegment) {
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
     auto ph_proto = CreatePlaceholderGroup(10, 16, 443);
     auto ph = ParsePlaceholderGroup(plan.get(), ph_proto.SerializeAsString());
-    Timestamp ts = N * 2UL;
+    milvus::Timestamp ts = N * 2UL;
 
     auto topk = 5;
     auto num_queries = 10;
@@ -913,7 +913,7 @@ TEST(Query, ExecWithPredicateBinary) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
 
     query::Json json = SearchResultToJson(*sr);
