@@ -29,6 +29,7 @@
 #include "index/StringIndexSort.h"
 #include "index/VectorMemIndex.h"
 #include "segcore/Collection.h"
+#include "segcore/SegmentGrowingImpl.h"
 
 #include "segcore/Utils.h"
 #include "knowhere/comp/index_param.h"
@@ -37,9 +38,13 @@
 #include "segcore/collection_c.h"
 #include "segcore/SegmentSealed.h"
 #include "common/Types.h"
+#include "storage/BinlogReader.h"
+#include "storage/Event.h"
+#include "storage/PayloadWriter.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "storage/Util.h"
 #include "milvus-storage/common/constants.h"
+
 
 using boost::algorithm::starts_with;
 
