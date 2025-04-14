@@ -17052,8 +17052,11 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
     load_index_info.index_params = {{JSON_PATH, "/a"}};
     seg->LoadIndex(load_index_info);
 
-    auto json_field_data_info =
-        FieldDataInfo(json_fid.get(), json_strs.size(), {json_field});
+    auto json_field_data_info = FieldDataInfo(
+        json_fid.get(),
+        json_strs.size(),
+        {storage::ConvertFieldDataToArrowDataWrapper(json_field)});
+
     seg->LoadFieldData(json_fid, json_field_data_info);
 
     for (auto& [lower, upper, lower_inclusive, upper_inclusive, result] :
