@@ -207,11 +207,16 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		}
 	}
 
-	dim, err := storage.GetDimFromParams(field.GetTypeParams())
-	if err != nil {
-		log.Ctx(ctx).Warn("failed to get dim from field type params",
-			zap.String("field type", field.GetDataType().String()), zap.Error(err))
-		// don't return, maybe field is scalar field or sparseFloatVector
+	// Extract dim only for vector types to avoid unnecessary warnings
+	var dim int
+	if typeutil.IsVectorType(field.GetDataType()) {
+		if dimVal, err := storage.GetDimFromParams(field.GetTypeParams()); err != nil {
+			log.Ctx(ctx).Warn("failed to get dim from field type params",
+				zap.String("field type", field.GetDataType().String()), zap.Error(err))
+			// don't return, maybe field is scalar field or sparseFloatVector
+		} else {
+			dim = dimVal
+		}
 	}
 
 	// vector index build needs information of optional scalar fields data
