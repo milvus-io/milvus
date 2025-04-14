@@ -19,6 +19,7 @@ package index
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"strconv"
 	"time"
 
@@ -267,6 +268,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		st.req.GetInsertChannel(),
 		int64(numValidRows), insertLogs, statsLogs, bm25StatsLogs)
 
+	debug.FreeOSMemory()
 	log.Info("sort segment end",
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
