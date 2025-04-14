@@ -92,14 +92,20 @@ func (w *walAccesserImpl) Read(_ context.Context, opts ReadOption) Scanner {
 	}
 	defer w.lifetime.Done()
 
-	if opts.VChannel == "" {
-		return newErrScanner(status.NewInvaildArgument("vchannel is required"))
+	if opts.VChannel == "" && opts.PChannel == "" {
+		panic("pchannel is required if vchannel is not set")
 	}
 
+	if opts.VChannel != "" {
+		pchannel := funcutil.ToPhysicalChannel(opts.VChannel)
+		if opts.PChannel != "" && opts.PChannel != pchannel {
+			panic("pchannel is not match with vchannel")
+		}
+		opts.PChannel = pchannel
+	}
 	// TODO: optimize the consumer into pchannel level.
-	pchannel := funcutil.ToPhysicalChannel(opts.VChannel)
 	rc := consumer.NewResumableConsumer(w.handlerClient.CreateConsumer, &consumer.ConsumerOptions{
-		PChannel:       pchannel,
+		PChannel:       opts.PChannel,
 		VChannel:       opts.VChannel,
 		DeliverPolicy:  opts.DeliverPolicy,
 		DeliverFilters: opts.DeliverFilters,
@@ -176,6 +182,7 @@ func (w *walAccesserImpl) Close() {
 // newErrScanner creates a scanner that returns an error.
 func newErrScanner(err error) Scanner {
 	ch := make(chan struct{})
+	close(ch)
 	return errScanner{
 		closedCh: ch,
 		err:      err,
