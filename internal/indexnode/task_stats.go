@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	sio "io"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"time"
@@ -306,6 +307,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		writer.GetRowNum(), insertLogs, statsLogs, bm25StatsLogs)
+	debug.FreeOSMemory()
 
 	log.Ctx(ctx).Info("sort segment end",
 		zap.String("clusterID", st.req.GetClusterID()),
@@ -785,6 +787,7 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 		log.Info("create json key index failed dataformat invalid")
 		return nil
 	}
+
 	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
 		return binlog.GetFieldID()
 	})
