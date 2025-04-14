@@ -32,13 +32,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -48,9 +46,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -784,24 +779,7 @@ func (sd *shardDelegator) createStreamFromMsgStream(ctx context.Context, positio
 	return dispatcher.Chan(), dispatcher.Close, nil
 }
 
-func (sd *shardDelegator) createDeleteStreamFromStreamingService(ctx context.Context, position *msgpb.MsgPosition) (ch <-chan *msgstream.MsgPack, closer func(), err error) {
-	handler := adaptor.NewMsgPackAdaptorHandler()
-	s := streaming.WAL().Read(ctx, streaming.ReadOption{
-		VChannel: position.GetChannelName(),
-		DeliverPolicy: options.DeliverPolicyStartFrom(
-			adaptor.MustGetMessageIDFromMQWrapperIDBytes(streaming.WAL().WALName(), position.GetMsgID()),
-		),
-		DeliverFilters: []options.DeliverFilter{
-			// only deliver message which timestamp >= position.Timestamp
-			options.DeliverFilterTimeTickGTE(position.GetTimestamp()),
-			// only delete message
-			options.DeliverFilterMessageType(message.MessageTypeDelete),
-		},
-		MessageHandler: handler,
-	})
-	return handler.Chan(), s.Close, nil
-}
-
+// Only used in test.
 func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position *msgpb.MsgPosition, safeTs uint64, candidate *pkoracle.BloomFilterSet) (*storage.DeleteData, error) {
 	log := sd.getLogger(ctx).With(
 		zap.String("channel", position.ChannelName),
@@ -812,11 +790,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 	var ch <-chan *msgstream.MsgPack
 	var closer func()
 	var err error
-	if streamingutil.IsStreamingServiceEnabled() {
-		ch, closer, err = sd.createDeleteStreamFromStreamingService(ctx, position)
-	} else {
-		ch, closer, err = sd.createStreamFromMsgStream(ctx, position)
-	}
+	ch, closer, err = sd.createStreamFromMsgStream(ctx, position)
 	if closer != nil {
 		defer closer()
 	}

@@ -8,6 +8,7 @@ from common.common_type import CheckTasks
 from utils.util_log import test_log as log
 from common import common_func as cf
 from base.client_base import TestcaseBase
+import time
 
 prefix = "phrase_match"
 
@@ -74,6 +75,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         collection_w = self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),
             schema=init_collection_schema(dim, tokenizer, enable_partition_key),
+            consistency_level="Strong",
         )
 
         # Generate test data
@@ -166,6 +168,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         collection_w = self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),
             schema=init_collection_schema(dim, tokenizer, enable_partition_key),
+            consistency_level="Strong",
         )
 
         # Generate test data
@@ -243,6 +246,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         collection_w = self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),
             schema=init_collection_schema(dim, tokenizer, enable_partition_key),
+            consistency_level="Strong",
         )
 
         # Generate test data
@@ -319,7 +323,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         dim = 128
         collection_name = f"{prefix}_patterns"
         schema = init_collection_schema(dim, "standard", False)
-        collection = self.init_collection_wrap(name=collection_name, schema=schema)
+        collection = self.init_collection_wrap(name=collection_name, schema=schema, consistency_level="Strong")
 
         # Generate data with various patterns
         generator = PhraseMatchTestGenerator(language="en")
@@ -354,10 +358,11 @@ class TestQueryPhraseMatch(TestcaseBase):
             },
         )
         collection.load()
+        time.sleep(1)
 
         for pattern, slop in test_patterns:
             results, _ = collection.query(
-                expr=f'phrase_match(text, "{pattern}", {slop})', output_fields=["text"]
+                expr=f'phrase_match(text, "{pattern}", {slop})', output_fields=["text"],
             )
             log.info(
                 f"Pattern '{pattern}' with slop {slop} found {len(results)} matches"
@@ -383,7 +388,7 @@ class TestQueryPhraseMatchNegative(TestcaseBase):
         dim = 128
         collection_name = f"{prefix}_invalid_slop"
         schema = init_collection_schema(dim, "standard", False)
-        collection = self.init_collection_wrap(name=collection_name, schema=schema)
+        collection = self.init_collection_wrap(name=collection_name, schema=schema, consistency_level="Strong")
 
         # Insert some test data
         generator = PhraseMatchTestGenerator(language="en")

@@ -116,7 +116,8 @@ class TestPartitionKeyIsolation(TestcaseBase):
                 expr=expr,
                 param={"metric_type": "L2", "params": {"nprobe": 16}},
                 limit=10000,
-                output_fields=["scalar_3", "scalar_6", "scalar_12"]
+                output_fields=["scalar_3", "scalar_6", "scalar_12"],
+                consistency_level="Strong"
             )
             log.info(f"search res {res}")
             true_res = all_df.query(expr)
@@ -218,7 +219,8 @@ class TestPartitionKeyIsolation(TestcaseBase):
                     expr=expr,
                     param={"metric_type": "L2", "params": {"nprobe": 16}},
                     limit=10,
-                    output_fields=["scalar_6"]
+                    output_fields=["scalar_6"],
+                    consistency_level="Strong"
                 )
                 log.info(f"search with {expr} get res {res}")
                 false_result.append(expr)
@@ -348,7 +350,8 @@ class TestPartitionKeyIsolation(TestcaseBase):
             expr="scalar_6 == '1' and scalar_3 == '1'",
             param={"metric_type": "L2", "params": {"nprobe": 16}},
             limit=10,
-            output_fields=["scalar_6", "scalar_3"]
+            output_fields=["scalar_6", "scalar_3"],
+            consistency_level="Strong"
         )
         log.info(f"search res {res}")
         assert len(res[0]) > 0

@@ -36,18 +36,18 @@ func (d ChanMessageHandler) Close() {
 // NewMsgPackAdaptorHandler create a new message pack adaptor handler.
 func NewMsgPackAdaptorHandler() *MsgPackAdaptorHandler {
 	return &MsgPackAdaptorHandler{
-		channel: make(chan *msgstream.MsgPack),
+		channel: make(chan *msgstream.ConsumeMsgPack),
 		base:    NewBaseMsgPackAdaptorHandler(),
 	}
 }
 
 type MsgPackAdaptorHandler struct {
-	channel chan *msgstream.MsgPack
+	channel chan *msgstream.ConsumeMsgPack
 	base    *BaseMsgPackAdaptorHandler
 }
 
 // Chan is the channel for message.
-func (m *MsgPackAdaptorHandler) Chan() <-chan *msgstream.MsgPack {
+func (m *MsgPackAdaptorHandler) Chan() <-chan *msgstream.ConsumeMsgPack {
 	return m.channel
 }
 
@@ -61,7 +61,7 @@ func (m *MsgPackAdaptorHandler) Handle(param message.HandleParam) message.Handle
 	}
 
 	for {
-		var sendCh chan<- *msgstream.MsgPack
+		var sendCh chan<- *msgstream.ConsumeMsgPack
 		if m.base.PendingMsgPack.Len() != 0 {
 			sendCh = m.channel
 		}
@@ -100,15 +100,15 @@ func NewBaseMsgPackAdaptorHandler() *BaseMsgPackAdaptorHandler {
 	return &BaseMsgPackAdaptorHandler{
 		Logger:         log.With(),
 		Pendings:       make([]message.ImmutableMessage, 0),
-		PendingMsgPack: typeutil.NewMultipartQueue[*msgstream.MsgPack](),
+		PendingMsgPack: typeutil.NewMultipartQueue[*msgstream.ConsumeMsgPack](),
 	}
 }
 
 // BaseMsgPackAdaptorHandler is the handler for message pack.
 type BaseMsgPackAdaptorHandler struct {
 	Logger         *log.MLogger
-	Pendings       []message.ImmutableMessage                   // pendings hold the vOld message which has same time tick.
-	PendingMsgPack *typeutil.MultipartQueue[*msgstream.MsgPack] // pendingMsgPack hold unsent msgPack.
+	Pendings       []message.ImmutableMessage                          // pendings hold the vOld message which has same time tick.
+	PendingMsgPack *typeutil.MultipartQueue[*msgstream.ConsumeMsgPack] // pendingMsgPack hold unsent msgPack.
 }
 
 // GenerateMsgPack generate msgPack from message.
@@ -142,6 +142,6 @@ func (m *BaseMsgPackAdaptorHandler) addMsgPackIntoPending(msgs ...message.Immuta
 		m.Logger.Warn("failed to convert message to msgpack", zap.Error(err))
 	}
 	if newPack != nil {
-		m.PendingMsgPack.AddOne(newPack)
+		m.PendingMsgPack.AddOne(msgstream.BuildConsumeMsgPack(newPack))
 	}
 }

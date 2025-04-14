@@ -53,8 +53,13 @@ type TxnOption struct {
 }
 
 type ReadOption struct {
+	// PChannel is the target pchannel to read, if the pchannel is not set.
+	// It will be parsed from setted `VChannel`.
+	PChannel string
+
 	// VChannel is the target vchannel to read.
 	// It must be set to read message from a vchannel.
+	// If VChannel is empty, the PChannel must be set, and all message of pchannel will be read.
 	VChannel string
 
 	// DeliverPolicy is the deliver policy of the consumer.
