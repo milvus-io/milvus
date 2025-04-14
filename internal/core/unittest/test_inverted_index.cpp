@@ -161,7 +161,9 @@ test_run() {
         field_data->FillFieldData(data.data(), data.size());
     }
     // std::cout << "length:" << field_data->get_num_rows() << std::endl;
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
 
@@ -436,7 +438,9 @@ test_string() {
     } else {
         field_data->FillFieldData(data.data(), data.size());
     }
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
 
