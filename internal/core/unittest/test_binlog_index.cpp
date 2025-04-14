@@ -21,7 +21,7 @@
 #include "query/Plan.h"
 #include "segcore/segcore_init_c.h"
 #include "segcore/SegmentSealed.h"
-#include "segcore/SegmentSealedImpl.h"
+
 #include "test_utils/DataGen.h"
 
 using namespace milvus;
@@ -131,8 +131,12 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
         auto field_data = std::make_shared<milvus::FieldData<int64_t>>(
             DataType::INT64, false);
         field_data->FillFieldData(dataset.row_ids_.data(), data_n);
+        auto arrow_data_wrapper =
+            storage::ConvertFieldDataToArrowDataWrapper(field_data);
         auto field_data_info = FieldDataInfo{
-            RowFieldID.get(), data_n, std::vector<FieldDataPtr>{field_data}};
+            RowFieldID.get(),
+            data_n,
+            std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
         segment->LoadFieldData(RowFieldID, field_data_info);
         // load ts
         LoadFieldDataInfo ts_info;
@@ -144,9 +148,13 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
         field_data = std::make_shared<milvus::FieldData<int64_t>>(
             DataType::INT64, false);
         field_data->FillFieldData(dataset.timestamps_.data(), data_n);
-        field_data_info = FieldDataInfo{TimestampFieldID.get(),
-                                        data_n,
-                                        std::vector<FieldDataPtr>{field_data}};
+        auto arrow_data_wrapper2 =
+            storage::ConvertFieldDataToArrowDataWrapper(field_data);
+        field_data_info =
+            FieldDataInfo{TimestampFieldID.get(),
+                          data_n,
+                          std::vector<std::shared_ptr<ArrowDataWrapper>>{
+                              arrow_data_wrapper2}};
         segment->LoadFieldData(TimestampFieldID, field_data_info);
     }
 
@@ -188,8 +196,12 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
     segcore_config.set_enable_interim_segment_index(true);
     segcore_config.set_nprobe(32);
     // 1. load field data, and build binlog index for binlog data
+    auto arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(vec_field_data);
     auto field_data_info = FieldDataInfo{
-        vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
+        vec_field_id.get(),
+        data_n,
+        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
     segment->LoadFieldData(vec_field_id, field_data_info);
 
     //assert segment has been built binlog index
@@ -229,7 +241,7 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
         ph_group.get()};
     auto nlist = segcore_config.get_nlist();
     auto binlog_index_sr =
-        segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        segment->Search(plan.get(), ph_group.get(), 1L << 63, 0);
     ASSERT_EQ(binlog_index_sr->total_nq_, num_queries);
     EXPECT_EQ(binlog_index_sr->unity_topK_, topk);
     EXPECT_EQ(binlog_index_sr->distances_.size(), num_queries * topk);
@@ -262,7 +274,7 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
         EXPECT_TRUE(segment->HasIndex(vec_field_id));
         EXPECT_EQ(segment->get_row_count(), data_n);
         EXPECT_FALSE(segment->HasFieldData(vec_field_id));
-        auto ivf_sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        auto ivf_sr = segment->Search(plan.get(), ph_group.get(), 1L << 63, 0);
         auto similary = GetKnnSearchRecall(num_queries,
                                            binlog_index_sr->seg_offsets_.data(),
                                            topk,
@@ -286,8 +298,10 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
     field_data_info.field_id = vec_field_id.get();
     field_data_info.row_count = data_n;
     field_data_info.mmap_dir_path = "./data/mmap-test";
-    field_data_info.channel->push(vec_field_data);
-    field_data_info.channel->close();
+    auto arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(vec_field_data);
+    field_data_info.arrow_reader_channel->push(arrow_data_wrapper);
+    field_data_info.arrow_reader_channel->close();
     segment->MapFieldData(vec_field_id, field_data_info);
 
     //assert segment has been built binlog index
@@ -328,7 +342,7 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
         ph_group.get()};
     auto nlist = segcore_config.get_nlist();
     auto binlog_index_sr =
-        segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        segment->Search(plan.get(), ph_group.get(), 1L << 63, 0);
     ASSERT_EQ(binlog_index_sr->total_nq_, num_queries);
     EXPECT_EQ(binlog_index_sr->unity_topK_, topk);
     EXPECT_EQ(binlog_index_sr->distances_.size(), num_queries * topk);
@@ -378,8 +392,12 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
     LoadOtherFields();
     SegcoreSetEnableTempSegmentIndex(false);
 
+    auto arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(vec_field_data);
     auto field_data_info = FieldDataInfo{
-        vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
+        vec_field_id.get(),
+        data_n,
+        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
     segment->LoadFieldData(vec_field_id, field_data_info);
 
     EXPECT_FALSE(segment->HasIndex(vec_field_id));
@@ -422,8 +440,13 @@ TEST_P(BinlogIndexTest, LoadBingLogWihIDMAP) {
     segment = CreateSealedSegment(schema, collection_index_meta);
     LoadOtherFields();
 
+    auto arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(vec_field_data);
+
     auto field_data_info = FieldDataInfo{
-        vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
+        vec_field_id.get(),
+        data_n,
+        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
     segment->LoadFieldData(vec_field_id, field_data_info);
 
     EXPECT_FALSE(segment->HasIndex(vec_field_id));
@@ -438,8 +461,12 @@ TEST_P(BinlogIndexTest, LoadBinlogWithoutIndexMeta) {
     segment = CreateSealedSegment(schema, collection_index_meta);
     SegcoreSetEnableTempSegmentIndex(true);
 
+    auto arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(vec_field_data);
     auto field_data_info = FieldDataInfo{
-        vec_field_id.get(), data_n, std::vector<FieldDataPtr>{vec_field_data}};
+        vec_field_id.get(),
+        data_n,
+        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
     segment->LoadFieldData(vec_field_id, field_data_info);
 
     EXPECT_FALSE(segment->HasIndex(vec_field_id));

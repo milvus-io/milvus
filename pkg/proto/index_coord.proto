@@ -10,8 +10,6 @@ import "milvus.proto";
 import "schema.proto";
 
 service IndexCoord {
-    rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
-    rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
     rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
     rpc AlterIndex(AlterIndexRequest) returns (common.Status){}
     // Deprecated: use DescribeIndex instead
@@ -326,4 +324,5 @@ enum StatsSubJob {
     Sort = 1;
     TextIndexJob = 2;
     BM25Job=3;
+    JsonKeyIndexJob = 4;
 }

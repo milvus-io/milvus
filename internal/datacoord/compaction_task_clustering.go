@@ -191,7 +191,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	if err != nil {
 		return nil, err
 	}
-	compactionParams, err := compaction.GetJSONParams()
+	compactionParams, err := compaction.GenerateJSONParams()
 	if err != nil {
 		return nil, err
 	}

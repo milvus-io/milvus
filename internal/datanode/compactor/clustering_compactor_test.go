@@ -43,7 +43,7 @@ import (
 )
 
 func refreshPlanParams(plan *datapb.CompactionPlan) {
-	params, err := compaction.GetJSONParams()
+	params, err := compaction.GenerateJSONParams()
 	if err != nil {
 		panic(err)
 	}
@@ -90,7 +90,7 @@ func (s *ClusteringCompactionTaskSuite) setupTest() {
 	s.task = NewClusteringCompactionTask(context.Background(), s.mockBinlogIO, nil)
 
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EntityExpirationTTL.Key, "0")
-	params, err := compaction.GetJSONParams()
+	params, err := compaction.GenerateJSONParams()
 	if err != nil {
 		panic(err)
 	}

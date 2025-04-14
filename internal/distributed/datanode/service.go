@@ -32,8 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	dn "github.com/milvus-io/milvus/internal/datanode"
-	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
-	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -66,8 +65,7 @@ type Server struct {
 
 	serverID atomic.Int64
 
-	newRootCoordClient func() (types.RootCoordClient, error)
-	newDataCoordClient func() (types.DataCoordClient, error)
+	mixCoordClient func() (types.MixCoordClient, error)
 }
 
 // NewServer new DataNode grpc server
@@ -78,11 +76,8 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 		cancel:      cancel,
 		factory:     factory,
 		grpcErrChan: make(chan error),
-		newRootCoordClient: func() (types.RootCoordClient, error) {
-			return rcc.NewClient(ctx1)
-		},
-		newDataCoordClient: func() (types.DataCoordClient, error) {
-			return dcc.NewClient(ctx1)
+		mixCoordClient: func() (types.MixCoordClient, error) {
+			return mix.NewClient(ctx1)
 		},
 	}
 
@@ -177,12 +172,8 @@ func (s *Server) SetEtcdClient(client *clientv3.Client) {
 	s.datanode.SetEtcdClient(client)
 }
 
-func (s *Server) SetRootCoordInterface(ms types.RootCoordClient) error {
-	return s.datanode.SetRootCoordClient(ms)
-}
-
-func (s *Server) SetDataCoordInterface(ds types.DataCoordClient) error {
-	return s.datanode.SetDataCoordClient(ds)
+func (s *Server) SetMixCoordInterface(ms types.MixCoordClient) error {
+	return s.datanode.SetMixCoordClient(ms)
 }
 
 // Run initializes and starts Datanode's grpc service.
@@ -263,40 +254,21 @@ func (s *Server) init() error {
 		return err
 	}
 
-	// --- RootCoord Client ---
-	if s.newRootCoordClient != nil {
-		log.Info("initializing RootCoord client for DataNode")
-		rootCoordClient, err := s.newRootCoordClient()
+	// --- MixCoord Client ---
+	if s.mixCoordClient != nil {
+		log.Info("initializing MixCoord client for DataNode")
+		mixCoordClient, err := s.mixCoordClient()
 		if err != nil {
-			log.Error("failed to create new RootCoord client", zap.Error(err))
+			log.Error("failed to create new MixCoord client", zap.Error(err))
 			panic(err)
 		}
 
-		if err = componentutil.WaitForComponentHealthy(s.ctx, rootCoordClient, "RootCoord", 1000000, time.Millisecond*200); err != nil {
-			log.Error("failed to wait for RootCoord client to be ready", zap.Error(err))
+		if err = componentutil.WaitForComponentHealthy(s.ctx, mixCoordClient, "MixCoord", 1000000, time.Millisecond*200); err != nil {
+			log.Error("failed to wait for MixCoord client to be ready", zap.Error(err))
 			panic(err)
 		}
-		log.Info("RootCoord client is ready for DataNode")
-		if err = s.SetRootCoordInterface(rootCoordClient); err != nil {
-			panic(err)
-		}
-	}
-
-	// --- DataCoord Client ---
-	if s.newDataCoordClient != nil {
-		log.Debug("starting DataCoord client for DataNode")
-		dataCoordClient, err := s.newDataCoordClient()
-		if err != nil {
-			log.Error("failed to create new DataCoord client", zap.Error(err))
-			panic(err)
-		}
-
-		if err = componentutil.WaitForComponentInitOrHealthy(s.ctx, dataCoordClient, "DataCoord", 1000000, time.Millisecond*200); err != nil {
-			log.Error("failed to wait for DataCoord client to be ready", zap.Error(err))
-			panic(err)
-		}
-		log.Info("DataCoord client is ready for DataNode")
-		if err = s.SetDataCoordInterface(dataCoordClient); err != nil {
+		log.Info("MixCoord client is ready for DataNode")
+		if err = s.SetMixCoordInterface(mixCoordClient); err != nil {
 			panic(err)
 		}
 	}

@@ -43,9 +43,9 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 	rootCoordTopology := metricsinfo.RootCoordTopology{
 		Self: metricsinfo.RootCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
-				Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, c.session.ServerID),
+				Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, c.session.GetServerID()),
 				HardwareInfos: metricsinfo.HardwareMetrics{
-					IP:               c.session.Address,
+					IP:               c.session.GetAddress(),
 					CPUCoreCount:     hardware.GetCPUNum(),
 					CPUCoreUsage:     hardware.GetCPUUsage(),
 					Memory:           hardware.GetMemoryCount(),
@@ -58,14 +58,14 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 				CreatedTime: paramtable.GetCreateTime().String(),
 				UpdatedTime: paramtable.GetUpdateTime().String(),
 				Type:        typeutil.RootCoordRole,
-				ID:          c.session.ServerID,
+				ID:          c.session.GetServerID(),
 			},
 			SystemConfigurations: metricsinfo.RootCoordConfiguration{
 				MinSegmentSizeToEnableIndex: Params.RootCoordCfg.MinSegmentSizeToEnableIndex.GetAsInt64(),
 			},
 		},
 		Connections: metricsinfo.ConnTopology{
-			Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, c.session.ServerID),
+			Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, c.session.GetServerID()),
 			// TODO(dragondriver): fill ConnectedComponents if necessary
 			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},

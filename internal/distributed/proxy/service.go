@@ -46,10 +46,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
+	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
-	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
-	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy"
@@ -105,10 +103,8 @@ type Server struct {
 
 	serverID atomic.Int64
 
-	etcdCli          *clientv3.Client
-	rootCoordClient  types.RootCoordClient
-	dataCoordClient  types.DataCoordClient
-	queryCoordClient types.QueryCoordClient
+	etcdCli        *clientv3.Client
+	mixCoordClient types.MixCoordClient
 }
 
 // NewServer create a Proxy server.
@@ -471,71 +467,27 @@ func (s *Server) init() error {
 		}
 	}
 
-	if s.rootCoordClient == nil {
+	if s.mixCoordClient == nil {
 		var err error
-		log.Debug("create RootCoord client for Proxy")
-		s.rootCoordClient, err = rcc.NewClient(s.ctx)
+		log.Debug("create MixCoordClient client for Proxy")
+		s.mixCoordClient, err = mix.NewClient(s.ctx)
 		if err != nil {
-			log.Warn("failed to create RootCoord client for Proxy", zap.Error(err))
+			log.Warn("failed to create MixCoordClient client for Proxy", zap.Error(err))
 			return err
 		}
-		log.Debug("create RootCoord client for Proxy done")
+		log.Debug("create MixCoordClient client for Proxy done")
 	}
 
-	log.Debug("Proxy wait for RootCoord to be healthy")
-	if err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoordClient, "RootCoord", 1000000, time.Millisecond*200); err != nil {
-		log.Warn("Proxy failed to wait for RootCoord to be healthy", zap.Error(err))
+	log.Debug("Proxy wait for MixCoordClient to be healthy")
+	if err := componentutil.WaitForComponentHealthy(s.ctx, s.mixCoordClient, "MixCoord", 1000000, time.Millisecond*200); err != nil {
+		log.Warn("Proxy failed to wait for MixCoord to be healthy", zap.Error(err))
 		return err
 	}
-	log.Debug("Proxy wait for RootCoord to be healthy done")
+	log.Debug("Proxy wait for MixCoord to be healthy done")
 
-	log.Debug("set RootCoord client for Proxy")
-	s.proxy.SetRootCoordClient(s.rootCoordClient)
-	log.Debug("set RootCoord client for Proxy done")
-
-	if s.dataCoordClient == nil {
-		var err error
-		log.Debug("create DataCoord client for Proxy")
-		s.dataCoordClient, err = dcc.NewClient(s.ctx)
-		if err != nil {
-			log.Warn("failed to create DataCoord client for Proxy", zap.Error(err))
-			return err
-		}
-		log.Debug("create DataCoord client for Proxy done")
-	}
-
-	log.Debug("Proxy wait for DataCoord to be healthy")
-	if err := componentutil.WaitForComponentHealthy(s.ctx, s.dataCoordClient, "DataCoord", 1000000, time.Millisecond*200); err != nil {
-		log.Warn("Proxy failed to wait for DataCoord to be healthy", zap.Error(err))
-		return err
-	}
-	log.Debug("Proxy wait for DataCoord to be healthy done")
-
-	log.Debug("set DataCoord client for Proxy")
-	s.proxy.SetDataCoordClient(s.dataCoordClient)
-	log.Debug("set DataCoord client for Proxy done")
-
-	if s.queryCoordClient == nil {
-		var err error
-		log.Debug("create QueryCoord client for Proxy")
-		s.queryCoordClient, err = qcc.NewClient(s.ctx)
-		if err != nil {
-			log.Warn("failed to create QueryCoord client for Proxy", zap.Error(err))
-			return err
-		}
-		log.Debug("create QueryCoord client for Proxy done")
-	}
-
-	log.Debug("Proxy wait for QueryCoord to be healthy")
-	if err := componentutil.WaitForComponentHealthy(s.ctx, s.queryCoordClient, "QueryCoord", 1000000, time.Millisecond*200); err != nil {
-		log.Warn("Proxy failed to wait for QueryCoord to be healthy", zap.Error(err))
-		return err
-	}
-	log.Debug("Proxy wait for QueryCoord to be healthy done")
-
-	log.Debug("set QueryCoord client for Proxy")
-	s.proxy.SetQueryCoordClient(s.queryCoordClient)
-	log.Debug("set QueryCoord client for Proxy done")
+	log.Debug("set MixCoord client for Proxy")
+	s.proxy.SetMixCoordClient(s.mixCoordClient)
+	log.Debug("set MixCoord client for Proxy done")
 
 	if HTTPParams.Enabled.GetAsBool() {
 		registerHTTPHandlerOnce.Do(func() {

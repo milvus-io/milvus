@@ -221,6 +221,8 @@ var (
 
 	// General
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)
+
+	ErrOldSessionExists = newMilvusError("old session exists", 3001, false)
 )
 
 type errorOption func(*milvusError)

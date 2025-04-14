@@ -27,7 +27,7 @@ import (
 
 func TestGetJSONParams(t *testing.T) {
 	paramtable.Init()
-	jsonStr, err := GetJSONParams()
+	jsonStr, err := GenerateJSONParams()
 	assert.NoError(t, err)
 
 	var result Params
@@ -57,17 +57,17 @@ func TestGetParamsFromJSON(t *testing.T) {
 		MaxSegmentMergeSort: 2,
 	}
 
-	result, err := GetParamsFromJSON(input)
+	result, err := ParseParamsFromJSON(input)
 	assert.NoError(t, err)
 	assert.Equal(t, expected, result)
 }
 
 func TestGetParamsFromJSON_InvalidJSON(t *testing.T) {
 	invalidJSON := `{ this is not valid json }`
-	_, err := GetParamsFromJSON(invalidJSON)
+	_, err := ParseParamsFromJSON(invalidJSON)
 	assert.Error(t, err)
 
 	invalidJSON = ``
-	_, err = GetParamsFromJSON(invalidJSON)
+	_, err = ParseParamsFromJSON(invalidJSON)
 	assert.Error(t, err)
 }

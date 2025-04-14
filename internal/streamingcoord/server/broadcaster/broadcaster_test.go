@@ -69,9 +69,9 @@ func TestBroadcaster(t *testing.T) {
 		return nil
 	})
 	rc := idalloc.NewMockRootCoordClient(t)
-	f := syncutil.NewFuture[internaltypes.RootCoordClient]()
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	f.Set(rc)
-	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptRootCoordClient(f))
+	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 	fbc := syncutil.NewFuture[Broadcaster]()
 	operator, appended := createOpeartor(t, fbc)

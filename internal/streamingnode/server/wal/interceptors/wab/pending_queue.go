@@ -74,6 +74,11 @@ func (q *pendingQueue) Push(msgs []message.ImmutableMessage) {
 	q.evict(now)
 }
 
+// LastTimeTick returns the last time tick of the buffer.
+func (q *pendingQueue) LastTimeTick() uint64 {
+	return q.lastTimeTick
+}
+
 // Evict removes messages that have been in the buffer for longer than the keepAlive duration.
 func (q *pendingQueue) Evict() {
 	q.evict(time.Now())

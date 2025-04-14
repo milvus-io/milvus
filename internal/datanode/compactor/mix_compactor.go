@@ -143,7 +143,7 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	compactionParams, err := compaction.GetParamsFromJSON(t.plan.GetJsonParams())
+	compactionParams, err := compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +327,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, errors.New("illegal compaction plan")
 	}
 
-	compactionParams, err := compaction.GetParamsFromJSON(t.plan.GetJsonParams())
+	compactionParams, err := compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
 	if err != nil {
 		return nil, err
 	}

@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/datanode/msghandlerimpl"
-	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
@@ -87,9 +86,6 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 //	`rootCoord` is a grpc client of root coordinator.
 //	`dataCoord` is a grpc client of data service.
 //	`stateCode` is current statement of this data node, indicating whether it's healthy.
-//
-//	`clearSignal` is a signal channel for releasing the flowgraph resources.
-//	`segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
@@ -109,16 +105,14 @@ type DataNode struct {
 	taskScheduler  *index.TaskScheduler
 	taskManager    *index.TaskManager
 
-	segmentCache             *util.Cache
 	compactionExecutor       compactor.Executor
 	timeTickSender           *util2.TimeTickSender
 	channelCheckpointUpdater *util2.ChannelCheckpointUpdater
 
-	etcdCli   *clientv3.Client
-	address   string
-	rootCoord types.RootCoordClient
-	dataCoord types.DataCoordClient
-	broker    broker.Broker
+	etcdCli  *clientv3.Client
+	address  string
+	mixCoord types.MixCoordClient
+	broker   broker.Broker
 
 	// call once
 	initOnce     sync.Once
@@ -153,10 +147,8 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		Role:     typeutil.DataNodeRole,
 		lifetime: lifetime.NewLifetime(commonpb.StateCode_Abnormal),
 
-		rootCoord:              nil,
-		dataCoord:              nil,
+		mixCoord:               nil,
 		factory:                factory,
-		segmentCache:           util.NewCache(),
 		compactionExecutor:     compactor.NewExecutor(),
 		reportImportRetryTimes: 10,
 		metricsRequest:         metricsinfo.NewMetricsRequest(),
@@ -185,23 +177,12 @@ func (node *DataNode) SetEtcdClient(etcdCli *clientv3.Client) {
 }
 
 // SetRootCoordClient sets RootCoord's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetRootCoordClient(rc types.RootCoordClient) error {
+func (node *DataNode) SetMixCoordClient(mixc types.MixCoordClient) error {
 	switch {
-	case rc == nil, node.rootCoord != nil:
+	case mixc == nil, node.mixCoord != nil:
 		return errors.New("nil parameter or repeatedly set")
 	default:
-		node.rootCoord = rc
-		return nil
-	}
-}
-
-// SetDataCoordClient sets data service's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetDataCoordClient(ds types.DataCoordClient) error {
-	switch {
-	case ds == nil, node.dataCoord != nil:
-		return errors.New("nil parameter or repeatedly set")
-	default:
-		node.dataCoord = ds
+		node.mixCoord = mixc
 		return nil
 	}
 }
@@ -254,12 +235,12 @@ func (node *DataNode) Init() error {
 		serverID := node.GetNodeID()
 		log := log.Ctx(node.ctx).With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
 
-		node.broker = broker.NewCoordBroker(node.dataCoord, serverID)
+		node.broker = broker.NewCoordBroker(node.mixCoord, serverID)
 
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, serverID)
 		log.Info("DataNode server init dispatcher client done")
 
-		alloc, err := allocator.New(context.Background(), node.rootCoord, serverID)
+		alloc, err := allocator.New(context.Background(), node.mixCoord, serverID)
 		if err != nil {
 			log.Error("failed to create id allocator", zap.Error(err))
 			initError = err

@@ -41,7 +41,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	compactionParams, err := compaction.GetParamsFromJSON(plan.GetJsonParams())
+	compactionParams, err := compaction.ParseParamsFromJSON(plan.GetJsonParams())
 	if err != nil {
 		return nil, err
 	}

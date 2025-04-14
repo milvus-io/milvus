@@ -71,7 +71,7 @@ func (s *MixCompactionTaskSuite) setupTest() {
 	s.meta = genTestCollectionMeta()
 
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EntityExpirationTTL.Key, "0")
-	params, err := compaction.GetJSONParams()
+	params, err := compaction.GenerateJSONParams()
 	if err != nil {
 		panic(err)
 	}
@@ -103,7 +103,7 @@ func (s *MixCompactionTaskSuite) SetupTest() {
 func (s *MixCompactionTaskSuite) SetupBM25() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.meta = genTestCollectionMetaWithBM25()
-	params, err := compaction.GetJSONParams()
+	params, err := compaction.GenerateJSONParams()
 	if err != nil {
 		panic(err)
 	}

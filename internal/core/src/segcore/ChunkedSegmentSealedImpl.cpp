@@ -235,8 +235,8 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
                              std::stol(b.substr(b.find_last_of('/') + 1));
                   });
 
-        auto field_data_info = FieldDataInfo(
-            field_id.get(), num_rows, load_info.mmap_dir_path, false);
+        auto field_data_info =
+            FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
         LOG_INFO("segment {} loads field {} with num_rows {}",
                  this->get_segment_id(),
                  field_id.get(),

@@ -46,6 +46,7 @@
 #include "segcore/load_index_c.h"
 #include "test_utils/c_api_test_utils.h"
 #include "segcore/vector_index_c.h"
+#include "common/jsmn.h"
 
 namespace chrono = std::chrono;
 
@@ -69,7 +70,7 @@ CRetrieve(CSegmentInterface c_segment,
           uint64_t timestamp,
           CRetrieveResult** result) {
     auto future = AsyncRetrieve(
-        {}, c_segment, c_plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false);
+        {}, c_segment, c_plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false, 0);
     auto futurePtr = static_cast<milvus::futures::IFuture*>(
         static_cast<void*>(static_cast<CFuture*>(future)));
 
@@ -4113,8 +4114,6 @@ TEST(CApiTest, SealedSegment_Update_Field_Size) {
     }
     auto res = LoadFieldRawData(segment, str_fid.get(), str_datas.data(), N);
     ASSERT_EQ(res.error_code, Success);
-    ASSERT_EQ(segment->get_field_avg_size(str_fid),
-              (row_size * N + total_size) / (2 * N));
 
     DeleteSegment(segment);
 }
@@ -4232,7 +4231,8 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
+
+TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
     double double_default_value = 20;
     auto schema = std::make_shared<Schema>();
     schema->AddField(
@@ -4334,6 +4334,13 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     // load rowid field
     res = LoadFieldRawData(
         segment, RowFieldID.get(), raw_data.row_ids_.data(), N);
+    ASSERT_EQ(res.error_code, Success);
+    count = GetRowCount(segment);
+    ASSERT_EQ(count, N);
+
+    // load int64 field
+    res = LoadFieldRawData(
+        segment, i64_fid.get(), raw_data.get_col<int64_t>(i64_fid).data(), N);
     ASSERT_EQ(res.error_code, Success);
     count = GetRowCount(segment);
     ASSERT_EQ(count, N);

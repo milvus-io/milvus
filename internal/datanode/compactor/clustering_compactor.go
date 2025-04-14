@@ -316,7 +316,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 	}
 	buckets, containsNull := t.splitClusterByScalarValue(analyzeDict)
 	scalarToClusterBufferMap := make(map[interface{}]*ClusterBuffer, 0)
-	compactionParams, err := compaction.GetParamsFromJSON(t.plan.GetJsonParams())
+	compactionParams, err := compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
 	if err != nil {
 		return err
 	}
@@ -405,7 +405,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		fieldStats.SetVectorCentroids(centroidValues...)
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		compactionParams, err := compaction.GetParamsFromJSON(t.plan.GetJsonParams())
+		compactionParams, err := compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
 		if err != nil {
 			return err
 		}

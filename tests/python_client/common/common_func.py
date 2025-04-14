@@ -797,7 +797,7 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         gen_string_field(name="document", max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable),
         gen_string_field(name="text", max_length=2000, enable_analyzer=True, enable_match=True,
                          analyzer_params=analyzer_params),
-        gen_json_field(),
+        gen_json_field(nullable=nullable),
         gen_array_field(name="array_int", element_type=DataType.INT64),
         gen_array_field(name="array_float", element_type=DataType.FLOAT),
         gen_array_field(name="array_varchar", element_type=DataType.VARCHAR, max_length=200),
@@ -1887,6 +1887,16 @@ def get_scalar_field_name_list(schema=None):
             vec_fields.append(field.name)
     return vec_fields
 
+def get_json_field_name_list(schema=None):
+    json_fields = []
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.JSON:
+            json_fields.append(field.name)
+    return json_fields
+
 
 def get_binary_vec_field_name(schema=None):
     if schema is None:
@@ -1941,6 +1951,10 @@ def gen_varchar_data(length: int, nb: int, text_mode=False):
 
 def gen_data_by_collection_field(field, nb=None, start=None):
     # if nb is None, return one data, else return a list of data
+    nullable = field.nullable
+    if nullable is True:
+        if random.random() < 0.1:
+            return None
     data_type = field.dtype
     enable_analyzer = field.params.get("enable_analyzer", False)
     if data_type == DataType.BOOL:
@@ -1982,8 +1996,8 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         return gen_varchar_data(length=length, nb=nb, text_mode=enable_analyzer)
     if data_type == DataType.JSON:
         if nb is None:
-            return {"name": fake.name(), "address": fake.address()}
-        data = [{"name": str(i), "address": i} for i in range(nb)]
+            return {"name": fake.name(), "address": fake.address(), "count": random.randint(0, 100)}
+        data = [{"name": str(i), "address": i, "count": random.randint(0, 100)} for i in range(nb)]
         return data
     if data_type == DataType.FLOAT_VECTOR:
         dim = field.params['dim']

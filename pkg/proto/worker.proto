@@ -132,8 +132,12 @@ message CreateStatsRequest {
   uint64 current_ts = 17;
   int64 task_version = 18;
   uint64 binlogMaxSize = 19;
-  int64 storage_version = 20;
-  int64 task_slot = 21;
+  bool enable_json_key_stats = 20;
+  int64 json_key_stats_tantivy_memory = 21;
+  int64 json_key_stats_data_format = 22;
+  bool enable_json_key_stats_in_sort = 23;
+  int64 task_slot = 24;
+  int64 storage_version = 25;
 }
 
 message CreateJobV2Request {
@@ -193,6 +197,7 @@ message StatsResult {
   map<int64, data.TextIndexStats> text_stats_logs = 10;
   int64 num_rows = 11;
   repeated data.FieldBinlog bm25_logs = 12;
+  map<int64, data.JsonKeyStats> json_key_stats_logs = 13;
 }
 
 message StatsResults {

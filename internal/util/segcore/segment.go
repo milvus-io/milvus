@@ -38,11 +38,10 @@ type (
 
 // CreateCSegmentRequest is a request to create a segment.
 type CreateCSegmentRequest struct {
-	Collection    *CCollection
-	SegmentID     int64
-	SegmentType   SegmentType
-	IsSorted      bool
-	EnableChunked bool
+	Collection  *CCollection
+	SegmentID   int64
+	SegmentType SegmentType
+	IsSorted    bool
 }
 
 func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
@@ -51,10 +50,6 @@ func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
 	case SegmentTypeGrowing:
 		segmentType = C.Growing
 	case SegmentTypeSealed:
-		if req.EnableChunked {
-			segmentType = C.ChunkedSealed
-			break
-		}
 		segmentType = C.Sealed
 	default:
 		panic(fmt.Sprintf("invalid segment type: %d", req.SegmentType))
@@ -120,6 +115,7 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 				searchReq.plan.cSearchPlan,
 				searchReq.cPlaceholderGroup,
 				C.uint64_t(searchReq.mvccTimestamp),
+				C.int32_t(searchReq.consistencyLevel),
 			))
 		},
 		cgo.WithName("search"),
@@ -137,7 +133,6 @@ func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*Retri
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(plan)
-
 	future := cgo.Async(
 		ctx,
 		func() cgo.CFuturePtr {
@@ -148,6 +143,7 @@ func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*Retri
 				C.uint64_t(plan.Timestamp),
 				C.int64_t(plan.maxLimitSize),
 				C.bool(plan.ignoreNonPk),
+				C.int32_t(plan.consistencyLevel),
 			))
 		},
 		cgo.WithName("retrieve"),

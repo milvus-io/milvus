@@ -25,6 +25,7 @@
 #include "common/LoadInfo.h"
 #include "knowhere/comp/index_param.h"
 #include "parquet/schema.h"
+#include "storage/Event.h"
 #include "storage/PayloadStream.h"
 #include "storage/FileManager.h"
 #include "storage/BinlogReader.h"
@@ -91,6 +92,23 @@ GenTextIndexPathPrefix(ChunkManagerPtr cm,
                        int64_t index_version,
                        int64_t segment_id,
                        int64_t field_id);
+
+std::string
+GenJsonKeyIndexPathIdentifier(int64_t build_id,
+                              int64_t index_version,
+                              int64_t collection_id,
+                              int64_t partition_id,
+                              int64_t segment_id,
+                              int64_t field_id);
+
+std::string
+GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
+                          int64_t build_id,
+                          int64_t index_version,
+                          int64_t collection_id,
+                          int64_t partition_id,
+                          int64_t segment_id,
+                          int64_t field_id);
 
 std::string
 GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
@@ -188,6 +206,29 @@ SortByPath(std::vector<std::string>& paths) {
                   return std::stol(a.substr(a.find_last_of("/") + 1)) <
                          std::stol(b.substr(b.find_last_of("/") + 1));
               });
+}
+
+inline std::shared_ptr<ArrowDataWrapper>
+ConvertFieldDataToArrowDataWrapper(const FieldDataPtr& field_data) {
+    BaseEventData event_data;
+    event_data.field_data = field_data;
+    auto event_data_bytes = event_data.Serialize();
+
+    std::shared_ptr<uint8_t[]> file_data(new uint8_t[event_data_bytes.size()]);
+    std::memcpy(
+        file_data.get(), event_data_bytes.data(), event_data_bytes.size());
+
+    storage::BinlogReaderPtr reader = std::make_shared<storage::BinlogReader>(
+        file_data, event_data_bytes.size());
+    event_data = storage::BaseEventData(reader,
+                                        event_data_bytes.size(),
+                                        field_data->get_data_type(),
+                                        field_data->IsNullable(),
+                                        false);
+    return std::make_shared<ArrowDataWrapper>(
+        event_data.payload_reader->get_reader(),
+        event_data.payload_reader->get_file_reader(),
+        file_data);
 }
 
 }  // namespace milvus::storage

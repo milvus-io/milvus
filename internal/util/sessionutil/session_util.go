@@ -40,8 +40,10 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -1061,7 +1063,26 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 	//   1. doRegistered: if registered the active_key by this session or by other session
 	//   2. revision: revision of the active_key
 	//   3. err: etcd error, should retry
+
+	oldRoles := []string{
+		typeutil.RootCoordRole,
+		typeutil.DataCoordRole,
+		typeutil.QueryCoordRole,
+	}
+
 	registerActiveFn := func() (bool, int64, error) {
+		for _, role := range oldRoles {
+			sessions, _, err := s.GetSessions(role)
+			if err != nil {
+				log.Debug("failed to get old sessions", zap.String("role", role), zap.Error(err))
+				continue
+			}
+			if len(sessions) > 0 {
+				log.Info("old session exists", zap.String("role", role))
+				return false, -1, merr.ErrOldSessionExists
+			}
+		}
+
 		log.Info(fmt.Sprintf("try to register as ACTIVE %v service...", s.ServerName))
 		sessionJSON, err := json.Marshal(s)
 		if err != nil {

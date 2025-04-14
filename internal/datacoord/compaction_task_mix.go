@@ -307,7 +307,7 @@ func (t *mixCompactionTask) CheckCompactionContainsSegment(segmentID int64) bool
 }
 
 func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
-	compactionParams, err := compaction.GetJSONParams()
+	compactionParams, err := compaction.GenerateJSONParams()
 	if err != nil {
 		return nil, err
 	}

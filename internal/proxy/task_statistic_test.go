@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -39,9 +40,8 @@ import (
 
 type StatisticTaskSuite struct {
 	suite.Suite
-	rc types.RootCoordClient
-	qc types.QueryCoordClient
-	qn *mocks.MockQueryNodeClient
+	mixc types.MixCoordClient
+	qn   *mocks.MockQueryNodeClient
 
 	lb LBPolicy
 
@@ -55,27 +55,29 @@ func (s *StatisticTaskSuite) SetupSuite() {
 
 func (s *StatisticTaskSuite) SetupTest() {
 	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	qc := mocks.NewMockQueryCoordClient(s.T())
-	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
+	mixc := NewMixCoordMock()
 
-	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
-		Status: &successStatus,
-		Shards: []*querypb.ShardLeadersList{
-			{
-				ChannelName: "channel-1",
-				NodeIds:     []int64{1, 2, 3},
-				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+	mixc.GetShardLeadersFunc = func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+		return &querypb.GetShardLeadersResponse{
+			Status: &successStatus,
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+				},
 			},
-		},
-	}, nil).Maybe()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
-	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
-		Status:       merr.Success(),
-		PartitionIDs: []int64{1, 2, 3},
-	}, nil).Maybe()
+		}, nil
+	}
 
-	s.qc = qc
-	s.rc = NewRootCoordMock()
+	mixc.ShowLoadPartitionsFunc = func(ctx context.Context, req *querypb.ShowPartitionsRequest, opts ...grpc.CallOption) (*querypb.ShowPartitionsResponse, error) {
+		return &querypb.ShowPartitionsResponse{
+			Status:       &successStatus,
+			PartitionIDs: []int64{1, 2, 3},
+		}, nil
+	}
+
+	s.mixc = mixc
 	s.qn = mocks.NewMockQueryNodeClient(s.T())
 
 	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -83,7 +85,7 @@ func (s *StatisticTaskSuite) SetupTest() {
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil).Maybe()
 	s.lb = NewLBPolicyImpl(mgr)
 
-	err := InitMetaCache(context.Background(), s.rc, s.qc, mgr)
+	err := InitMetaCache(context.Background(), s.mixc, mgr)
 	s.NoError(err)
 
 	s.collectionName = "test_statistics_task"
@@ -115,8 +117,8 @@ func (s *StatisticTaskSuite) loadCollection() {
 			Schema:         marshaledSchema,
 			ShardsNum:      common.DefaultShardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: s.rc,
+		ctx:      ctx,
+		mixCoord: s.mixc,
 	}
 
 	s.NoError(createColT.OnEnqueue())
@@ -127,7 +129,7 @@ func (s *StatisticTaskSuite) loadCollection() {
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), s.collectionName)
 	s.NoError(err)
 
-	status, err := s.qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
+	status, err := s.mixc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_LoadCollection,
 			SourceID: paramtable.GetNodeID(),
@@ -140,7 +142,7 @@ func (s *StatisticTaskSuite) loadCollection() {
 }
 
 func (s *StatisticTaskSuite) TearDownSuite() {
-	s.rc.Close()
+	s.mixc.Close()
 }
 
 func (s *StatisticTaskSuite) TestStatisticTask_Timeout() {
@@ -175,8 +177,8 @@ func (s *StatisticTaskSuite) getStatisticsTask(ctx context.Context) *getStatisti
 			},
 			CollectionName: s.collectionName,
 		},
-		qc: s.qc,
-		lb: s.lb,
+		mixc: s.mixc,
+		lb:   s.lb,
 	}
 }
 

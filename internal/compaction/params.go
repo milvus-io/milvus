@@ -28,7 +28,7 @@ type Params struct {
 	MaxSegmentMergeSort int    `json:"max_segment_merge_sort,omitempty"`
 }
 
-func getParams() Params {
+func genParams() Params {
 	return Params{
 		EnableStorageV2:     paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool(),
 		BinLogMaxSize:       paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
@@ -37,8 +37,8 @@ func getParams() Params {
 	}
 }
 
-func GetJSONParams() (string, error) {
-	compactionParams := getParams()
+func GenerateJSONParams() (string, error) {
+	compactionParams := genParams()
 	params, err := json.Marshal(compactionParams)
 	if err != nil {
 		return "", err
@@ -46,8 +46,12 @@ func GetJSONParams() (string, error) {
 	return string(params), nil
 }
 
-func GetParamsFromJSON(jsonStr string) (Params, error) {
+func ParseParamsFromJSON(jsonStr string) (Params, error) {
 	var compactionParams Params
 	err := json.Unmarshal([]byte(jsonStr), &compactionParams)
+	if err != nil && jsonStr == "" {
+		// Ensure the compatibility with the legacy requests sent by the old datacoord.
+		return genParams(), nil
+	}
 	return compactionParams, err
 }

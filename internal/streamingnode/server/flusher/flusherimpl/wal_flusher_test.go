@@ -45,8 +45,8 @@ func TestWALFlusher(t *testing.T) {
 	streamingutil.SetStreamingServiceEnabled()
 	defer streamingutil.UnsetStreamingServiceEnabled()
 
-	rootCoord := mocks.NewMockRootCoordClient(t)
-	rootCoord.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{
+	mixcoord := newMockMixcoord(t, false)
+	mixcoord.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
@@ -64,16 +64,11 @@ func TestWALFlusher(t *testing.T) {
 	snMeta := mock_metastore.NewMockStreamingNodeCataLog(t)
 	snMeta.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil)
 	snMeta.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-
-	datacoord := newMockDatacoord(t, false)
-	fDatacoord := syncutil.NewFuture[internaltypes.DataCoordClient]()
-	fDatacoord.Set(datacoord)
-	fRootCoord := syncutil.NewFuture[internaltypes.RootCoordClient]()
-	fRootCoord.Set(rootCoord)
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
 	resource.InitForTest(
 		t,
-		resource.OptDataCoordClient(fDatacoord),
-		resource.OptRootCoordClient(fRootCoord),
+		resource.OptMixCoordClient(fMixcoord),
 		resource.OptStreamingNodeCatalog(snMeta),
 		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
 	)
@@ -91,13 +86,13 @@ func TestWALFlusher(t *testing.T) {
 	flusher.Close()
 }
 
-func newMockDatacoord(t *testing.T, maybe bool) *mocks.MockDataCoordClient {
-	datacoord := mocks.NewMockDataCoordClient(t)
+func newMockMixcoord(t *testing.T, maybe bool) *mocks.MockMixCoordClient {
+	mixcoord := mocks.NewMockMixCoordClient(t)
 	failureCnt := atomic.NewInt32(2)
-	datacoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
+	mixcoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 	}, nil)
-	expect := datacoord.EXPECT().GetChannelRecoveryInfo(mock.Anything, mock.Anything).RunAndReturn(
+	expect := mixcoord.EXPECT().GetChannelRecoveryInfo(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, request *datapb.GetChannelRecoveryInfoRequest, option ...grpc.CallOption,
 		) (*datapb.GetChannelRecoveryInfoResponse, error) {
 			if failureCnt.Dec() > 0 {
@@ -124,7 +119,7 @@ func newMockDatacoord(t *testing.T, maybe bool) *mocks.MockDataCoordClient {
 	if maybe {
 		expect.Maybe()
 	}
-	return datacoord
+	return mixcoord
 }
 
 func newMockWAL(t *testing.T, maybe bool) *mock_wal.MockWAL {

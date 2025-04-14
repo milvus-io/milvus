@@ -97,6 +97,31 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadTextIndex(FieldId field_id,
                   std::unique_ptr<index::TextMatchIndex> index) override;
+    void
+    LoadJsonKeyIndex(
+        FieldId field_id,
+        std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) override {
+        std::unique_lock lck(mutex_);
+        const auto& field_meta = schema_->operator[](field_id);
+        json_key_indexes_[field_id] = std::move(index);
+    }
+
+    index::JsonKeyStatsInvertedIndex*
+    GetJsonKeyIndex(FieldId field_id) const override {
+        std::shared_lock lck(mutex_);
+        auto iter = json_key_indexes_.find(field_id);
+        if (iter == json_key_indexes_.end()) {
+            return nullptr;
+        }
+        return iter->second.get();
+    }
+
+    std::pair<std::string_view, bool>
+    GetJsonData(FieldId field_id, size_t offset) const override {
+        auto column = fields_.at(field_id);
+        bool is_valid = column->IsValid(offset);
+        return std::make_pair(std::move(column->RawAt(offset)), is_valid);
+    }
 
  public:
     size_t
@@ -406,6 +431,26 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // whether the segment is sorted by the pk
     bool is_sorted_by_pk_ = false;
+    // used for json expr optimization
+    std::unordered_map<FieldId,
+                       std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
+        json_key_indexes_;
 };
 
+inline SegmentSealedUPtr
+CreateSealedSegment(
+    SchemaPtr schema,
+    IndexMetaPtr index_meta = nullptr,
+    int64_t segment_id = 0,
+    const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
+    bool TEST_skip_index_for_retrieve = false,
+    bool is_sorted_by_pk = false) {
+    return std::make_unique<ChunkedSegmentSealedImpl>(
+        schema,
+        index_meta,
+        segcore_config,
+        segment_id,
+        TEST_skip_index_for_retrieve,
+        is_sorted_by_pk);
+}
 }  // namespace milvus::segcore

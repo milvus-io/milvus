@@ -329,7 +329,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		zap.Int64s("signal.segmentIDs", signal.segmentIDs))
 
 	if !signal.isForce && t.compactionHandler.isFull() {
-		log.Warn("compaction plan skipped due to handler full")
+		log.Warn("skip to generate compaction plan due to handler full")
 		return merr.WrapErrServiceQuotaExceeded("compaction handler full")
 	}
 
@@ -345,12 +345,14 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 	}
 
 	for _, group := range groups {
-		log := log.With(zap.Int64("collectionID", group.collectionID),
-			zap.Int64("partitionID", group.partitionID),
-			zap.String("channel", group.channelName))
+		log := log.With(
+			zap.Int64("group.partitionID", group.partitionID),
+			zap.String("group.channel", group.channelName),
+		)
+
 		if !signal.isForce && t.compactionHandler.isFull() {
-			log.Warn("compaction plan skipped due to handler full")
-			break
+			log.Warn("skip to generate compaction plan due to handler full")
+			return merr.WrapErrServiceQuotaExceeded("compaction handler full")
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
@@ -378,13 +380,11 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		plans := t.generatePlans(group.segments, signal, ct, expectedSize)
 		for _, plan := range plans {
 			if !signal.isForce && t.compactionHandler.isFull() {
-				log.Warn("compaction plan skipped due to handler full")
-				break
+				log.Warn("skip to generate compaction plan due to handler full")
+				return merr.WrapErrServiceQuotaExceeded("compaction handler full")
 			}
 			totalRows, inputSegmentIDs := plan.A, plan.B
 
-			// TODO[GOOSE], 11 = 1 planID + 10 segmentID, this is a hack need to be removed.
-			// Any plan that output segment number greater than 10 will be marked as invalid plan for now.
 			n := 11 * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
 			startID, endID, err := t.allocator.AllocN(n)
 			if err != nil {
@@ -417,17 +417,16 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			err = t.compactionHandler.enqueueCompaction(task)
 			if err != nil {
 				log.Warn("failed to execute compaction task",
-					zap.Int64("collection", group.collectionID),
-					zap.Int64("triggerID", signal.id),
 					zap.Int64("planID", task.GetPlanID()),
 					zap.Int64s("inputSegments", inputSegmentIDs),
 					zap.Error(err))
 				continue
 			}
 
-			log.Info("time cost of generating global compaction",
+			log.Info("time cost of generating compaction",
+				zap.Int64("planID", task.GetPlanID()),
 				zap.Int64("time cost", time.Since(start).Milliseconds()),
-				zap.Int64s("segmentIDs", inputSegmentIDs))
+				zap.Int64s("inputSegments", inputSegmentIDs))
 		}
 	}
 	return nil

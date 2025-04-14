@@ -283,7 +283,7 @@ func (t *l0CompactionTask) PreparePlan() bool {
 }
 
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
-	compactionParams, err := compaction.GetJSONParams()
+	compactionParams, err := compaction.GenerateJSONParams()
 	if err != nil {
 		return nil, err
 	}

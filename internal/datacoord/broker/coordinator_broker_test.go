@@ -25,7 +25,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -36,8 +35,8 @@ import (
 type BrokerSuite struct {
 	suite.Suite
 
-	rootCoordClient *mocks.MockRootCoordClient
-	broker          *coordinatorBroker
+	mixCoord *mocks.MixCoord
+	broker   *coordinatorBroker
 }
 
 func (s *BrokerSuite) SetupSuite() {
@@ -45,15 +44,15 @@ func (s *BrokerSuite) SetupSuite() {
 }
 
 func (s *BrokerSuite) SetupTest() {
-	s.rootCoordClient = mocks.NewMockRootCoordClient(s.T())
-	s.broker = NewCoordinatorBroker(s.rootCoordClient)
+	s.mixCoord = mocks.NewMixCoord(s.T())
+	s.broker = NewCoordinatorBroker(s.mixCoord)
 }
 
 func (s *BrokerSuite) TearDownTest() {
-	if s.rootCoordClient != nil {
-		s.rootCoordClient.AssertExpectations(s.T())
+	if s.mixCoord != nil {
+		s.mixCoord.AssertExpectations(s.T())
 	}
-	s.rootCoordClient = nil
+	s.mixCoord = nil
 }
 
 func (s *BrokerSuite) TestDescribeCollectionInternal() {
@@ -62,7 +61,7 @@ func (s *BrokerSuite) TestDescribeCollectionInternal() {
 
 		collID := int64(1000 + rand.Intn(500))
 
-		s.rootCoordClient.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, options ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+		s.mixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 			s.Equal(collID, req.GetCollectionID())
 			return &milvuspb.DescribeCollectionResponse{
 				Status:         merr.Status(nil),
@@ -84,7 +83,7 @@ func (s *BrokerSuite) TestDescribeCollectionInternal() {
 
 		collID := int64(1000 + rand.Intn(500))
 
-		s.rootCoordClient.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, options ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+		s.mixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 			s.Equal(collID, req.GetCollectionID())
 			return nil, errors.New("mocked")
 		})
@@ -102,7 +101,7 @@ func (s *BrokerSuite) TestShowPartitionsInternal() {
 
 		collID := int64(1000 + rand.Intn(500))
 
-		s.rootCoordClient.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, options ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+		s.mixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 			s.Equal(collID, req.GetCollectionID())
 			return &milvuspb.ShowPartitionsResponse{
 				Status:            merr.Status(nil),
@@ -124,7 +123,7 @@ func (s *BrokerSuite) TestShowPartitionsInternal() {
 
 		collID := int64(1000 + rand.Intn(500))
 
-		s.rootCoordClient.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, options ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+		s.mixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 			s.Equal(collID, req.GetCollectionID())
 			return nil, errors.New("mocked")
 		})
@@ -142,7 +141,7 @@ func (s *BrokerSuite) TestShowCollections() {
 
 		dbName := fmt.Sprintf("db_%d", rand.Intn(100))
 
-		s.rootCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowCollectionsRequest, options ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
+		s.mixCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 			s.Equal(dbName, req.GetDbName())
 			return &milvuspb.ShowCollectionsResponse{
 				Status:            merr.Status(nil),
@@ -165,7 +164,7 @@ func (s *BrokerSuite) TestShowCollections() {
 
 		dbName := fmt.Sprintf("db_%d", rand.Intn(100))
 
-		s.rootCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowCollectionsRequest, options ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
+		s.mixCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 			s.Equal(dbName, req.GetDbName())
 
 			return nil, errors.New("mocked")
@@ -182,7 +181,7 @@ func (s *BrokerSuite) TestListDatabases() {
 	s.Run("return_success", func() {
 		s.SetupTest()
 
-		s.rootCoordClient.EXPECT().ListDatabases(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ListDatabasesRequest, options ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error) {
+		s.mixCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
 			return &milvuspb.ListDatabasesResponse{
 				Status:  merr.Status(nil),
 				DbNames: []string{"db_1", "db_2", "db_3"},
@@ -199,7 +198,7 @@ func (s *BrokerSuite) TestListDatabases() {
 	s.Run("return_error", func() {
 		s.SetupTest()
 
-		s.rootCoordClient.EXPECT().ListDatabases(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ListDatabasesRequest, options ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error) {
+		s.mixCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
 			return nil, errors.New("mocked")
 		})
 
@@ -216,7 +215,7 @@ func (s *BrokerSuite) TestHasCollection() {
 
 		collID := int64(1000 + rand.Intn(500))
 
-		s.rootCoordClient.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, options ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+		s.mixCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 			s.Equal(collID, req.GetCollectionID())
 			return &milvuspb.DescribeCollectionResponse{
 				Status:         merr.Status(nil),
@@ -237,7 +236,7 @@ func (s *BrokerSuite) TestHasCollection() {
 
 		collID := int64(1000 + rand.Intn(500))
 
-		s.rootCoordClient.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, options ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+		s.mixCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 			s.Equal(collID, req.GetCollectionID())
 			return &milvuspb.DescribeCollectionResponse{
 				Status: merr.Status(merr.WrapErrCollectionNotFound(collID)),
@@ -256,7 +255,7 @@ func (s *BrokerSuite) TestHasCollection() {
 
 		collID := int64(1000 + rand.Intn(500))
 
-		s.rootCoordClient.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, options ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+		s.mixCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 			s.Equal(collID, req.GetCollectionID())
 			return nil, errors.New("mocked")
 		})

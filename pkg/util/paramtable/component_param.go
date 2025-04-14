@@ -72,6 +72,7 @@ type ComponentParam struct {
 	TraceCfg        traceConfig
 	HolmesCfg       holmesConfig
 
+	MixCoordCfg    mixCoordConfig
 	RootCoordCfg   rootCoordConfig
 	ProxyCfg       proxyConfig
 	QueryCoordCfg  queryCoordConfig
@@ -127,6 +128,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.HolmesCfg.init(bt)
 
 	p.RootCoordCfg.init(bt)
+	p.MixCoordCfg.init(bt)
 	p.ProxyCfg.init(bt)
 	p.QueryCoordCfg.init(bt)
 	p.QueryNodeCfg.init(bt)
@@ -295,7 +297,9 @@ type commonConfig struct {
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 
-	EnabledOptimizeExpr ParamItem `refreshable:"true"`
+	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
+	EnabledJSONKeyStats               ParamItem `refreshable:"true"`
+	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1007,6 +1011,23 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnabledOptimizeExpr.Init(base.mgr)
+	p.EnabledJSONKeyStats = ParamItem{
+		Key:          "common.enabledJSONKeyStats",
+		Version:      "2.5.5",
+		DefaultValue: "false",
+		Doc:          "Indicates sealedsegment whether to enable JSON key stats",
+		Export:       true,
+	}
+	p.EnabledJSONKeyStats.Init(base.mgr)
+
+	p.EnabledGrowingSegmentJSONKeyStats = ParamItem{
+		Key:          "common.enabledGrowingSegmentJSONKeyStats",
+		Version:      "2.5.5",
+		DefaultValue: "false",
+		Doc:          "Indicates growingsegment whether to enable JSON key stats",
+		Export:       true,
+	}
+	p.EnabledGrowingSegmentJSONKeyStats.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -1301,6 +1322,23 @@ Set this parameter as the path that you have permission to write.`,
 		Export:       true,
 	}
 	l.GrpcLogLevel.Init(base.mgr)
+}
+
+// /////////////////////////////////////////////////////////////////////////////
+// --- mixcoord ---
+type mixCoordConfig struct {
+	EnableActiveStandby ParamItem `refreshable:"false"`
+}
+
+func (p *mixCoordConfig) init(base *BaseTable) {
+	p.EnableActiveStandby = ParamItem{
+		Key:          "mixCoord.enableActiveStandby",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Export:       true,
+		FallbackKeys: []string{"rootCoord.enableActiveStandby"},
+	}
+	p.EnableActiveStandby.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2645,7 +2683,7 @@ type queryNodeConfig struct {
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
-	MultipleChunkedEnable         ParamItem `refreshable:"false"`
+	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -2686,7 +2724,6 @@ type queryNodeConfig struct {
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
-	GroupEnabled          ParamItem `refreshable:"true"`
 	MaxReceiveChanSize    ParamItem `refreshable:"false"`
 	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
 	MaxReadConcurrency    ParamItem `refreshable:"true"`
@@ -2742,6 +2779,10 @@ type queryNodeConfig struct {
 
 	// worker
 	WorkerPoolingSize ParamItem `refreshable:"false"`
+
+	// Json Key Stats
+	JSONKeyStatsCommitInterval        ParamItem `refreshable:"false"`
+	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2865,7 +2906,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Key:          "queryNode.segcore.multipleChunkedEnable",
 		Version:      "2.0.0",
 		DefaultValue: "true",
-		Doc:          "Enable multiple chunked search",
+		Doc:          "Deprecated. Enable multiple chunked search",
 		Export:       true,
 	}
 	p.MultipleChunkedEnable.Init(base.mgr)
@@ -3117,14 +3158,6 @@ for a specific duration post-load, albeit accompanied by a concurrent increase i
 		Export: true,
 	}
 	p.ChunkCacheWarmingUp.Init(base.mgr)
-
-	p.GroupEnabled = ParamItem{
-		Key:          "queryNode.grouping.enabled",
-		Version:      "2.0.0",
-		DefaultValue: "true",
-		Export:       true,
-	}
-	p.GroupEnabled.Init(base.mgr)
 
 	p.MaxReceiveChanSize = ParamItem{
 		Key:          "queryNode.scheduler.receiveChanSize",
@@ -3410,6 +3443,15 @@ user-task-polling:
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
 
+	p.JSONKeyStatsCommitInterval = ParamItem{
+		Key:          "queryNode.segcore.jsonKeyStatsCommitInterval",
+		Version:      "2.5.0",
+		DefaultValue: "200",
+		Doc:          "the commit interval for the JSON key Stats to commit",
+		Export:       true,
+	}
+	p.JSONKeyStatsCommitInterval.Init(base.mgr)
+
 	p.CleanExcludeSegInterval = ParamItem{
 		Key:          "queryCoord.cleanExcludeSegmentInterval",
 		Version:      "2.4.0",
@@ -3625,9 +3667,13 @@ type dataCoordConfig struct {
 	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
 
-	EnableStatsTask       ParamItem `refreshable:"true"`
-	TaskCheckInterval     ParamItem `refreshable:"true"`
-	StatsTaskTriggerCount ParamItem `refreshable:"true"`
+	EnableStatsTask                   ParamItem `refreshable:"true"`
+	TaskCheckInterval                 ParamItem `refreshable:"true"`
+	StatsTaskTriggerCount             ParamItem `refreshable:"true"`
+	JSONStatsTriggerCount             ParamItem `refreshable:"true"`
+	JSONStatsTriggerInterval          ParamItem `refreshable:"true"`
+	EnabledJSONKeyStatsInSort         ParamItem `refreshable:"true"`
+	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
@@ -4572,6 +4618,36 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.TaskCheckInterval.Init(base.mgr)
 
+	p.StatsTaskTriggerCount = ParamItem{
+		Key:          "dataCoord.statsTaskTriggerCount",
+		Version:      "2.5.5",
+		Doc:          "stats task count per trigger",
+		DefaultValue: "100",
+		PanicIfEmpty: false,
+		Export:       false,
+	}
+	p.StatsTaskTriggerCount.Init(base.mgr)
+
+	p.JSONStatsTriggerCount = ParamItem{
+		Key:          "dataCoord.jsonStatsTriggerCount",
+		Version:      "2.5.5",
+		Doc:          "jsonkey stats task count per trigger",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.JSONStatsTriggerCount.Init(base.mgr)
+
+	p.JSONStatsTriggerInterval = ParamItem{
+		Key:          "dataCoord.jsonStatsTriggerInterval",
+		Version:      "2.5.5",
+		Doc:          "jsonkey task interval per trigger",
+		DefaultValue: "10",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.JSONStatsTriggerInterval.Init(base.mgr)
+
 	p.RequestTimeoutSeconds = ParamItem{
 		Key:          "dataCoord.requestTimeoutSeconds",
 		Version:      "2.5.5",
@@ -4591,6 +4667,23 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.StatsTaskTriggerCount.Init(base.mgr)
+	p.JSONKeyStatsMemoryBudgetInTantivy = ParamItem{
+		Key:          "dataCoord.jsonKeyStatsMemoryBudgetInTantivy",
+		Version:      "2.5.5",
+		DefaultValue: "16777216",
+		Doc:          "the memory budget for the JSON index In Tantivy, the unit is bytes",
+		Export:       true,
+	}
+	p.JSONKeyStatsMemoryBudgetInTantivy.Init(base.mgr)
+
+	p.EnabledJSONKeyStatsInSort = ParamItem{
+		Key:          "dataCoord.enabledJSONKeyStatsInSort",
+		Version:      "2.5.5",
+		DefaultValue: "false",
+		Doc:          "Indicates whether to enable JSON key stats task with sort",
+		Export:       true,
+	}
+	p.EnabledJSONKeyStatsInSort.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

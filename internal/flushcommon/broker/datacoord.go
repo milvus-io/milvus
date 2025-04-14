@@ -23,7 +23,7 @@ import (
 )
 
 type dataCoordBroker struct {
-	client   types.DataCoordClient
+	client   types.MixCoordClient
 	serverID int64
 }
 
