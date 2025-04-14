@@ -46,6 +46,8 @@ services:
       MINIO_REGION: us-east-1
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: minioadmin
+      MINIO_SECRET_ACCESS_KEY: minioadmin
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
     healthcheck:
