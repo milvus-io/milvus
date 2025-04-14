@@ -106,9 +106,10 @@ struct UnaryElementFunc {
                     res[i] = src[offset] >= val;
                 } else if constexpr (op == proto::plan::OpType::LessEqual) {
                     res[i] = src[offset] <= val;
-                } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
-                    res[i] = milvus::query::Match(
-                        src[offset], val, proto::plan::OpType::PrefixMatch);
+                } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
+                                     op == proto::plan::OpType::PostfixMatch ||
+                                     op == proto::plan::OpType::InnerMatch) {
+                    res[i] = milvus::query::Match(src[offset], val, op);
                 } else {
                     PanicInfo(
                         OpTypeInvalid,
@@ -119,12 +120,7 @@ struct UnaryElementFunc {
             return;
         }
 
-        if constexpr (op == proto::plan::OpType::PrefixMatch) {
-            for (int i = 0; i < size; ++i) {
-                res[i] = milvus::query::Match(
-                    src[i], val, proto::plan::OpType::PrefixMatch);
-            }
-        } else if constexpr (op == proto::plan::OpType::Equal) {
+        if constexpr (op == proto::plan::OpType::Equal) {
             res.inplace_compare_val<T, milvus::bitset::CompareOpType::EQ>(
                 src, size, val);
         } else if constexpr (op == proto::plan::OpType::NotEqual) {
@@ -225,7 +221,9 @@ struct UnaryElementFuncForArray {
                 UnaryArrayCompare(array_data >= val);
             } else if constexpr (op == proto::plan::OpType::LessEqual) {
                 UnaryArrayCompare(array_data <= val);
-            } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
+            } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
+                                 op == proto::plan::OpType::PostfixMatch ||
+                                 op == proto::plan::OpType::InnerMatch) {
                 UnaryArrayCompare(milvus::query::Match(array_data, val, op));
             } else if constexpr (op == proto::plan::OpType::Match) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
@@ -258,36 +256,57 @@ struct UnaryIndexFuncForMatch {
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
-    operator()(Index* index, IndexInnerType val) {
-        if constexpr (!std::is_same_v<T, std::string_view> &&
-                      !std::is_same_v<T, std::string>) {
-            PanicInfo(Unsupported, "regex query is only supported on string");
-        } else {
-            if (index->SupportRegexQuery()) {
-                return index->PatternMatch(val);
+    operator()(Index* index, IndexInnerType val, proto::plan::OpType op) {
+        AssertInfo(op == proto::plan::OpType::Match ||
+                       op == proto::plan::OpType::PostfixMatch ||
+                       op == proto::plan::OpType::InnerMatch ||
+                       op == proto::plan::OpType::PrefixMatch,
+                   "op must be one of the following: Match, PrefixMatch, "
+                   "PostfixMatch, InnerMatch");
+
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            if (index->SupportPatternMatch()) {
+                return index->PatternMatch(val, op);
             }
+
             if (!index->HasRawData()) {
                 PanicInfo(Unsupported,
                           "index don't support regex query and don't have "
                           "raw data");
             }
-
             // retrieve raw data to do brute force query, may be very slow.
             auto cnt = index->Count();
             TargetBitmap res(cnt);
-            PatternMatchTranslator translator;
-            auto regex_pattern = translator(val);
-            RegexMatcher matcher(regex_pattern);
-            for (int64_t i = 0; i < cnt; i++) {
-                auto raw = index->Reverse_Lookup(i);
-                if (!raw.has_value()) {
-                    res[i] = false;
-                    continue;
+            if (op == proto::plan::OpType::InnerMatch ||
+                op == proto::plan::OpType::PostfixMatch ||
+                op == proto::plan::OpType::PrefixMatch) {
+                for (int64_t i = 0; i < cnt; i++) {
+                    auto raw = index->Reverse_Lookup(i);
+                    if (!raw.has_value()) {
+                        res[i] = false;
+                        continue;
+                    }
+                    res[i] = milvus::query::Match(raw.value(), val, op);
                 }
-                res[i] = matcher(raw.value());
+                return res;
+            } else {
+                PatternMatchTranslator translator;
+                auto regex_pattern = translator(val);
+                RegexMatcher matcher(regex_pattern);
+                for (int64_t i = 0; i < cnt; i++) {
+                    auto raw = index->Reverse_Lookup(i);
+                    if (!raw.has_value()) {
+                        res[i] = false;
+                        continue;
+                    }
+                    res[i] = matcher(raw.value());
+                }
+                return res;
             }
-            return res;
         }
+        PanicInfo(ErrorCode::Unsupported,
+                  "UnaryIndexFuncForMatch is only supported on string types");
     }
 };
 
@@ -310,15 +329,12 @@ struct UnaryIndexFunc {
             return index->Range(val, OpType::GreaterEqual);
         } else if constexpr (op == proto::plan::OpType::LessEqual) {
             return index->Range(val, OpType::LessEqual);
-        } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
-            auto dataset = std::make_unique<Dataset>();
-            dataset->Set(milvus::index::OPERATOR_TYPE,
-                         proto::plan::OpType::PrefixMatch);
-            dataset->Set(milvus::index::PREFIX_VALUE, val);
-            return index->Query(std::move(dataset));
-        } else if constexpr (op == proto::plan::OpType::Match) {
+        } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
+                             op == proto::plan::OpType::Match ||
+                             op == proto::plan::OpType::PostfixMatch ||
+                             op == proto::plan::OpType::InnerMatch) {
             UnaryIndexFuncForMatch<T> func;
-            return func(index, val);
+            return func(index, val, op);
         } else {
             PanicInfo(
                 OpTypeInvalid,
