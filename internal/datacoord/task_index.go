@@ -213,7 +213,6 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		if dimVal, err := storage.GetDimFromParams(field.GetTypeParams()); err != nil {
 			log.Ctx(ctx).Warn("failed to get dim from field type params",
 				zap.String("field type", field.GetDataType().String()), zap.Error(err))
-			// don't return, maybe field is scalar field or sparseFloatVector
 		} else {
 			dim = dimVal
 		}
