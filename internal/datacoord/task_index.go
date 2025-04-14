@@ -208,7 +208,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 	}
 
 	// Extract dim only for vector types to avoid unnecessary warnings
-	var dim int
+	dim := -1
 	if typeutil.IsVectorType(field.GetDataType()) {
 		if dimVal, err := storage.GetDimFromParams(field.GetTypeParams()); err != nil {
 			log.Ctx(ctx).Warn("failed to get dim from field type params",
