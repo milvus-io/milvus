@@ -234,9 +234,9 @@ func (s *Server) startGrpcLoop() {
 
 	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("MixCoord"))
 	s.grpcServer = grpc.NewServer(grpcOpts...)
+	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	rootcoordpb.RegisterRootCoordServer(s.grpcServer, s)
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
-	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	s.mixCoord.RegisterStreamingCoordGRPCService(s.grpcServer)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
