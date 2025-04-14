@@ -2683,7 +2683,7 @@ type queryNodeConfig struct {
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
-	MultipleChunkedEnable         ParamItem `refreshable:"false"`
+	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -2724,7 +2724,6 @@ type queryNodeConfig struct {
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
-	GroupEnabled          ParamItem `refreshable:"true"`
 	MaxReceiveChanSize    ParamItem `refreshable:"false"`
 	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
 	MaxReadConcurrency    ParamItem `refreshable:"true"`
@@ -2907,7 +2906,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Key:          "queryNode.segcore.multipleChunkedEnable",
 		Version:      "2.0.0",
 		DefaultValue: "true",
-		Doc:          "Enable multiple chunked search",
+		Doc:          "Deprecated. Enable multiple chunked search",
 		Export:       true,
 	}
 	p.MultipleChunkedEnable.Init(base.mgr)
@@ -3159,14 +3158,6 @@ for a specific duration post-load, albeit accompanied by a concurrent increase i
 		Export: true,
 	}
 	p.ChunkCacheWarmingUp.Init(base.mgr)
-
-	p.GroupEnabled = ParamItem{
-		Key:          "queryNode.grouping.enabled",
-		Version:      "2.0.0",
-		DefaultValue: "true",
-		Export:       true,
-	}
-	p.GroupEnabled.Init(base.mgr)
 
 	p.MaxReceiveChanSize = ParamItem{
 		Key:          "queryNode.scheduler.receiveChanSize",

@@ -247,6 +247,10 @@ natsmq:
       maxBytes:  # How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size
       maxMsgs:  # How many message the single P-channel may contain. Removing oldest messages if the P-channel exceeds this limit
 
+# Related configuration of mixCoord
+mixCoord:
+  enableActiveStandby: false
+
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
   dmlChannelNum: 16 # The number of DML-Channels to create at the root coord startup.
@@ -412,7 +416,7 @@ queryNode:
       nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
-    multipleChunkedEnable: true # Enable multiple chunked search
+    multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
@@ -448,10 +452,6 @@ queryNode:
     maxRetryTimes: 1 # max retry times for lazy load, 1 by default
     maxEvictPerRetry: 1 # max evict count for lazy load, 1 by default
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
-  grouping:
-    enabled: true
-    maxNQ: 1000
-    topKMergeRatio: 20
   scheduler:
     receiveChanSize: 10240
     unsolvedQueueSize: 10240
@@ -475,6 +475,9 @@ queryNode:
       taskQueueExpire: 60 # Control how long (many seconds) that queue retains since queue is empty
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
+  grouping:
+    maxNQ: 1000
+    topKMergeRatio: 20
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure

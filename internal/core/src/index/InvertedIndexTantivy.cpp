@@ -464,27 +464,29 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
     if constexpr (std::is_same_v<std::string, T>) {
         schema_.set_data_type(proto::schema::DataType::VarChar);
     }
-    boost::uuids::random_generator generator;
-    auto uuid = generator();
-    auto prefix = boost::uuids::to_string(uuid);
-    path_ = fmt::format("/tmp/{}", prefix);
-    boost::filesystem::create_directories(path_);
-    d_type_ = get_tantivy_data_type(schema_);
-    std::string field = "test_inverted_index";
-    inverted_index_single_segment_ =
-        GetValueFromConfig<int32_t>(config,
-                                    milvus::index::SCALAR_INDEX_ENGINE_VERSION)
-            .value_or(1) == 0;
-    tantivy_index_version_ =
-        GetValueFromConfig<int32_t>(config,
-                                    milvus::index::TANTIVY_INDEX_VERSION)
-            .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
-    wrapper_ =
-        std::make_shared<TantivyIndexWrapper>(field.c_str(),
-                                              d_type_,
-                                              path_.c_str(),
-                                              tantivy_index_version_,
-                                              inverted_index_single_segment_);
+    if (!wrapper_) {
+        boost::uuids::random_generator generator;
+        auto uuid = generator();
+        auto prefix = boost::uuids::to_string(uuid);
+        path_ = fmt::format("/tmp/{}", prefix);
+        boost::filesystem::create_directories(path_);
+        d_type_ = get_tantivy_data_type(schema_);
+        std::string field = "test_inverted_index";
+        inverted_index_single_segment_ =
+            GetValueFromConfig<int32_t>(
+                config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+                .value_or(1) == 0;
+        tantivy_index_version_ =
+            GetValueFromConfig<int32_t>(config,
+                                        milvus::index::TANTIVY_INDEX_VERSION)
+                .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
+        wrapper_ = std::make_shared<TantivyIndexWrapper>(
+            field.c_str(),
+            d_type_,
+            path_.c_str(),
+            tantivy_index_version_,
+            inverted_index_single_segment_);
+    }
     if (!inverted_index_single_segment_) {
         if (config.find("is_array") != config.end()) {
             // only used in ut.

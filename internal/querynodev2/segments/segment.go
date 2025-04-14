@@ -343,11 +343,10 @@ func NewSegment(ctx context.Context,
 	if _, err := GetDynamicPool().Submit(func() (any, error) {
 		var err error
 		csegment, err = segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
-			Collection:    collection.ccollection,
-			SegmentID:     loadInfo.GetSegmentID(),
-			SegmentType:   segmentType,
-			IsSorted:      loadInfo.GetIsSorted(),
-			EnableChunked: paramtable.Get().QueryNodeCfg.MultipleChunkedEnable.GetAsBool(),
+			Collection:  collection.ccollection,
+			SegmentID:   loadInfo.GetSegmentID(),
+			SegmentType: segmentType,
+			IsSorted:    loadInfo.GetIsSorted(),
 		})
 		return nil, err
 	}).Await(); err != nil {
