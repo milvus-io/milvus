@@ -96,10 +96,10 @@ MemFileManagerImpl::LoadFile(const std::string& filename) noexcept {
     return true;
 }
 
-std::map<std::string, FieldDataPtr>
+std::map<std::string, std::unique_ptr<DataCodec>>
 MemFileManagerImpl::LoadIndexToMemory(
     const std::vector<std::string>& remote_files) {
-    std::map<std::string, FieldDataPtr> file_to_index_data;
+    std::map<std::string, std::unique_ptr<DataCodec>> file_to_index_data;
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::vector<std::string> batch_files;
@@ -109,8 +109,7 @@ MemFileManagerImpl::LoadIndexToMemory(
         for (size_t idx = 0; idx < batch_files.size(); ++idx) {
             auto file_name =
                 batch_files[idx].substr(batch_files[idx].find_last_of('/') + 1);
-            file_to_index_data[file_name] =
-                index_datas[idx].get()->GetFieldData();
+            file_to_index_data[file_name] = index_datas[idx].get();
         }
     };
 

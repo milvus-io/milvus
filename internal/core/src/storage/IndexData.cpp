@@ -50,10 +50,6 @@ std::vector<uint8_t>
 IndexData::serialize_to_remote_file() {
     AssertInfo(field_data_meta_.has_value(), "field data not exist");
     AssertInfo(index_meta_.has_value(), "index meta not exist");
-    AssertInfo(field_data_ != nullptr, "empty field data");
-
-    DataType data_type = field_data_->get_data_type();
-
     // create descriptor event
     DescriptorEvent descriptor_event;
     auto& des_event_data = descriptor_event.event_data;
@@ -64,7 +60,8 @@ IndexData::serialize_to_remote_file() {
     des_fix_part.field_id = field_data_meta_->field_id;
     des_fix_part.start_timestamp = time_range_.first;
     des_fix_part.end_timestamp = time_range_.second;
-    des_fix_part.data_type = milvus::proto::schema::DataType(data_type);
+    des_fix_part.data_type =
+        milvus::proto::schema::DataType(milvus::proto::schema::DataType::None);
     for (auto i = int8_t(EventType::DescriptorEvent);
          i < int8_t(EventType::EventTypeEnd);
          i++) {
@@ -72,14 +69,12 @@ IndexData::serialize_to_remote_file() {
             GetEventFixPartSize(EventType(i)));
     }
     des_event_data.extras[ORIGIN_SIZE_KEY] =
-        std::to_string(field_data_->Size());
+        std::to_string(payload_reader_->get_payload_size());
     des_event_data.extras[INDEX_BUILD_ID_KEY] =
         std::to_string(index_meta_->build_id);
-
     auto& des_event_header = descriptor_event.event_header;
     // TODO :: set timestamp
     des_event_header.timestamp_ = 0;
-
     // serialize descriptor event data
     auto des_event_bytes = descriptor_event.Serialize();
 
@@ -89,7 +84,7 @@ IndexData::serialize_to_remote_file() {
     auto& index_event_data = index_event.event_data;
     index_event_data.start_timestamp = time_range_.first;
     index_event_data.end_timestamp = time_range_.second;
-    index_event_data.field_data = field_data_;
+    index_event_data.payload_reader = payload_reader_;
 
     auto& index_event_header = index_event.event_header;
     index_event_header.event_type_ = EventType::IndexFileEvent;
@@ -98,11 +93,9 @@ IndexData::serialize_to_remote_file() {
 
     // serialize insert event
     auto index_event_bytes = index_event.Serialize();
-
     des_event_bytes.insert(des_event_bytes.end(),
                            index_event_bytes.begin(),
                            index_event_bytes.end());
-
     return des_event_bytes;
 }
 
@@ -110,7 +103,7 @@ IndexData::serialize_to_remote_file() {
 std::vector<uint8_t>
 IndexData::serialize_to_local_file() {
     LocalIndexEvent event;
-    event.field_data = field_data_;
+    event.field_data = GetFieldData();
 
     return event.Serialize();
 }

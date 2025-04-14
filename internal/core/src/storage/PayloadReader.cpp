@@ -25,69 +25,80 @@
 
 namespace milvus::storage {
 
+PayloadReader::PayloadReader(const milvus::FieldDataPtr& fieldData)
+    : column_type_(fieldData->get_data_type()),
+      nullable_(fieldData->IsNullable()) {
+    field_data_ = fieldData;
+}
+
 PayloadReader::PayloadReader(const uint8_t* data,
                              int length,
                              DataType data_type,
                              bool nullable,
                              bool is_field_data)
     : column_type_(data_type), nullable_(nullable) {
-    auto input = std::make_shared<arrow::io::BufferReader>(data, length);
-    init(input, is_field_data);
+    init(data, length, is_field_data);
 }
 
 void
-PayloadReader::init(std::shared_ptr<arrow::io::BufferReader> input,
-                    bool is_field_data) {
-    arrow::MemoryPool* pool = arrow::default_memory_pool();
-
-    // Configure general Parquet reader settings
-    auto reader_properties = parquet::ReaderProperties(pool);
-    reader_properties.set_buffer_size(4096 * 4);
-    // reader_properties.enable_buffered_stream();
-
-    // Configure Arrow-specific Parquet reader settings
-    auto arrow_reader_props = parquet::ArrowReaderProperties();
-    arrow_reader_props.set_batch_size(128 * 1024);  // default 64 * 1024
-    arrow_reader_props.set_pre_buffer(false);
-
-    parquet::arrow::FileReaderBuilder reader_builder;
-    auto st = reader_builder.Open(input, reader_properties);
-    AssertInfo(st.ok(), "file to read file");
-    reader_builder.memory_pool(pool);
-    reader_builder.properties(arrow_reader_props);
-
-    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-    st = reader_builder.Build(&arrow_reader);
-    AssertInfo(st.ok(), "build file reader");
-
-    int64_t column_index = 0;
-    auto file_meta = arrow_reader->parquet_reader()->metadata();
-
-    // dim is unused for sparse float vector
-    dim_ = (IsVectorDataType(column_type_) &&
-            !IsSparseFloatVectorDataType(column_type_))
-               ? GetDimensionFromFileMetaData(
-                     file_meta->schema()->Column(column_index), column_type_)
-               : 1;
-    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-    st = arrow_reader->GetRecordBatchReader(&rb_reader);
-    AssertInfo(st.ok(), "get record batch reader");
-
-    if (is_field_data) {
-        auto total_num_rows = file_meta->num_rows();
-        field_data_ =
-            CreateFieldData(column_type_, nullable_, dim_, total_num_rows);
-        for (arrow::Result<std::shared_ptr<arrow::RecordBatch>> maybe_batch :
-             *rb_reader) {
-            AssertInfo(maybe_batch.ok(), "get batch record success");
-            auto array = maybe_batch.ValueOrDie()->column(column_index);
-            // to read
-            field_data_->FillFieldData(array);
-        }
-        AssertInfo(field_data_->IsFull(), "field data hasn't been filled done");
+PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
+    if (column_type_ == DataType::NONE) {
+        payload_buf_ = std::make_shared<BytesBuf>(data, length);
     } else {
-        arrow_reader_ = std::move(arrow_reader);
-        record_batch_reader_ = std::move(rb_reader);
+        auto input = std::make_shared<arrow::io::BufferReader>(data, length);
+        arrow::MemoryPool* pool = arrow::default_memory_pool();
+        // Configure general Parquet reader settings
+        auto reader_properties = parquet::ReaderProperties(pool);
+        reader_properties.set_buffer_size(4096 * 4);
+        // reader_properties.enable_buffered_stream();
+
+        // Configure Arrow-specific Parquet reader settings
+        auto arrow_reader_props = parquet::ArrowReaderProperties();
+        arrow_reader_props.set_batch_size(128 * 1024);  // default 64 * 1024
+        arrow_reader_props.set_pre_buffer(false);
+
+        parquet::arrow::FileReaderBuilder reader_builder;
+        auto st = reader_builder.Open(input, reader_properties);
+        AssertInfo(st.ok(), "file to read file");
+        reader_builder.memory_pool(pool);
+        reader_builder.properties(arrow_reader_props);
+
+        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+        st = reader_builder.Build(&arrow_reader);
+        AssertInfo(st.ok(), "build file reader");
+
+        int64_t column_index = 0;
+        auto file_meta = arrow_reader->parquet_reader()->metadata();
+
+        // dim is unused for sparse float vector
+        dim_ =
+            (IsVectorDataType(column_type_) &&
+             !IsSparseFloatVectorDataType(column_type_))
+                ? GetDimensionFromFileMetaData(
+                      file_meta->schema()->Column(column_index), column_type_)
+                : 1;
+        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+        st = arrow_reader->GetRecordBatchReader(&rb_reader);
+        AssertInfo(st.ok(), "get record batch reader");
+
+        if (is_field_data) {
+            auto total_num_rows = file_meta->num_rows();
+            field_data_ =
+                CreateFieldData(column_type_, nullable_, dim_, total_num_rows);
+            for (arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+                     maybe_batch : *rb_reader) {
+                AssertInfo(maybe_batch.ok(), "get batch record success");
+                auto array = maybe_batch.ValueOrDie()->column(column_index);
+                // to read
+                field_data_->FillFieldData(array);
+            }
+
+            AssertInfo(field_data_->IsFull(),
+                       "field data hasn't been filled done");
+        } else {
+            arrow_reader_ = std::move(arrow_reader);
+            record_batch_reader_ = std::move(rb_reader);
+        }
     }
 }
 
