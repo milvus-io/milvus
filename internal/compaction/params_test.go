@@ -33,7 +33,6 @@ func TestGetJSONParams(t *testing.T) {
 	var result Params
 	err = json.Unmarshal([]byte(jsonStr), &result)
 	assert.NoError(t, err)
-
 	assert.Equal(t, Params{
 		EnableStorageV2:     paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool(),
 		BinLogMaxSize:       paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
@@ -66,8 +65,17 @@ func TestGetParamsFromJSON_InvalidJSON(t *testing.T) {
 	invalidJSON := `{ this is not valid json }`
 	_, err := ParseParamsFromJSON(invalidJSON)
 	assert.Error(t, err)
+}
 
-	invalidJSON = ``
-	_, err = ParseParamsFromJSON(invalidJSON)
-	assert.Error(t, err)
+func TestGetParamsFromJSON_EmptyJSON(t *testing.T) {
+	// Test compatibility
+	emptyJSON := ``
+	result, err := ParseParamsFromJSON(emptyJSON)
+	assert.NoError(t, err)
+	assert.Equal(t, Params{
+		EnableStorageV2:     paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool(),
+		BinLogMaxSize:       paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		UseMergeSort:        paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
+		MaxSegmentMergeSort: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
+	}, result)
 }
