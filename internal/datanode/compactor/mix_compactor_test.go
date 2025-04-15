@@ -71,6 +71,10 @@ func (s *MixCompactionTaskSuite) setupTest() {
 	s.meta = genTestCollectionMeta()
 
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EntityExpirationTTL.Key, "0")
+	params, err := compaction.GenerateJSONParams()
+	if err != nil {
+		panic(err)
+	}
 
 	plan := &datapb.CompactionPlan{
 		PlanID: 999,
@@ -86,6 +90,7 @@ func (s *MixCompactionTaskSuite) setupTest() {
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
 		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
 		MaxSize:                64 * 1024 * 1024,
+		JsonParams:             params,
 	}
 
 	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan)
@@ -98,6 +103,10 @@ func (s *MixCompactionTaskSuite) SetupTest() {
 func (s *MixCompactionTaskSuite) SetupBM25() {
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.meta = genTestCollectionMetaWithBM25()
+	params, err := compaction.GenerateJSONParams()
+	if err != nil {
+		panic(err)
+	}
 
 	plan := &datapb.CompactionPlan{
 		PlanID: 999,
@@ -113,6 +122,7 @@ func (s *MixCompactionTaskSuite) SetupBM25() {
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
 		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
 		MaxSize:                64 * 1024 * 1024,
+		JsonParams:             params,
 	}
 
 	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan)
@@ -325,6 +335,7 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
 	s.prepareCompactSortedSegment()
 	paramtable.Get().Save("dataNode.compaction.useMergeSort", "true")
 	defer paramtable.Get().Reset("dataNode.compaction.useMergeSort")
+	refreshPlanParams(s.task.plan)
 
 	result, err := s.task.Compact()
 	s.NoError(err)
@@ -404,6 +415,7 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegmentLackBinlog() {
 	s.prepareCompactSortedSegmentLackBinlog()
 	paramtable.Get().Save("dataNode.compaction.useMergeSort", "true")
 	defer paramtable.Get().Reset("dataNode.compaction.useMergeSort")
+	refreshPlanParams(s.task.plan)
 
 	result, err := s.task.Compact()
 	s.NoError(err)
