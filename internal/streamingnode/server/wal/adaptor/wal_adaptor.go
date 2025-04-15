@@ -112,8 +112,11 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	case <-w.available:
+		return nil, status.NewOnShutdownError("wal is on shutdown")
 	case <-w.interceptorBuildResult.Interceptor.Ready():
 	}
+
 	// Setup the term of wal.
 	msg = msg.WithWALTerm(w.Channel().Term)
 
@@ -184,13 +187,12 @@ func (w *walAdaptorImpl) Close() {
 	w.Logger().Info("wal begin to close, start graceful close...")
 	// graceful close the interceptors before wal closing.
 	w.interceptorBuildResult.GracefulCloseFunc()
-
 	w.Logger().Info("wal graceful close done, wait for operation to be finished...")
 
 	// begin to close the wal.
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
-	w.lifetime.Wait()
 	close(w.available)
+	w.lifetime.Wait()
 
 	w.Logger().Info("wal begin to close scanners...")
 
