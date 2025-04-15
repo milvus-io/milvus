@@ -90,7 +90,12 @@ func (nm *IndexNodeManager) RemoveNode(nodeID typeutil.UniqueID) {
 	log.Ctx(nm.ctx).Debug("remove IndexNode", zap.Int64("nodeID", nodeID))
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
-	delete(nm.nodeClients, nodeID)
+	if in, ok := nm.nodeClients[nodeID]; ok {
+		if err := in.Close(); err != nil {
+			log.Warn("Failed to close client connection", zap.Error(err))
+		}
+		delete(nm.nodeClients, nodeID)
+	}
 	delete(nm.stoppingNodes, nodeID)
 	metrics.IndexNodeNum.WithLabelValues().Set(float64(len(nm.nodeClients)))
 }
