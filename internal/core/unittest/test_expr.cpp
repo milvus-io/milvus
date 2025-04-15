@@ -1405,7 +1405,7 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
 
     {
         struct Testcase {
-            int64_t val;
+            double val;
             std::vector<std::string> nested_path;
         };
         std::vector<Testcase> testcases{{1.1, {"double"}},
