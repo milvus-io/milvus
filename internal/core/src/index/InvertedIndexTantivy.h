@@ -228,6 +228,12 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         return std::is_same_v<T, std::string>;
     }
 
+    bool
+    TryUseRegexQuery() const override {
+        // for inverted index, not use regex query to implement match
+        return false;
+    }
+
     const TargetBitmap
     RegexQuery(const std::string& regex_pattern) override;
 

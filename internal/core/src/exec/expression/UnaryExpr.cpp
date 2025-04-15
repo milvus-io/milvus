@@ -1828,17 +1828,26 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 template <typename T>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndex() {
-    bool res = is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_);
-    use_index_ = res;
-    return res;
+    use_index_ = is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_);
+    return use_index_;
 }
 
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
-    use_index_ =
+    auto has_index =
         segment_->HasIndex(field_id_,
                            milvus::Json::pointer(expr_->column_.nested_path_),
                            val_type);
+    switch (val_type) {
+        case DataType::STRING:
+            use_index_ = has_index &&
+                         expr_->op_type_ != proto::plan::OpType::Match &&
+                         expr_->op_type_ != proto::plan::OpType::PostfixMatch &&
+                         expr_->op_type_ != proto::plan::OpType::InnerMatch;
+            break;
+        default:
+            use_index_ = has_index;
+    }
     return use_index_;
 }
 

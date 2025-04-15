@@ -151,6 +151,11 @@ class ScalarIndex : public IndexBase {
         return false;
     }
 
+    virtual bool
+    TryUseRegexQuery() const {
+        return true;
+    }
+
     virtual const TargetBitmap
     RegexQuery(const std::string& pattern) {
         PanicInfo(Unsupported, "regex query is not supported");
