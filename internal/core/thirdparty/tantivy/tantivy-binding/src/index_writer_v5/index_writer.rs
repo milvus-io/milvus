@@ -27,7 +27,7 @@ pub(crate) struct IndexWriterWrapperImpl {
 }
 
 #[inline]
-fn schema_builder_add_field(
+pub(crate) fn schema_builder_add_field(
     schema_builder: &mut SchemaBuilder,
     field_name: &str,
     data_type: TantivyDataType,
@@ -50,48 +50,56 @@ fn schema_builder_add_field(
 }
 
 impl TantivyValue<TantivyDocument> for i8 {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_i64(Field::from_field_id(field), *self as i64);
     }
 }
 
 impl TantivyValue<TantivyDocument> for i16 {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_i64(Field::from_field_id(field), *self as i64);
     }
 }
 
 impl TantivyValue<TantivyDocument> for i32 {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_i64(Field::from_field_id(field), *self as i64);
     }
 }
 
 impl TantivyValue<TantivyDocument> for i64 {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_i64(Field::from_field_id(field), *self);
     }
 }
 
 impl TantivyValue<TantivyDocument> for f32 {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_f64(Field::from_field_id(field), *self as f64);
     }
 }
 
 impl TantivyValue<TantivyDocument> for f64 {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_f64(Field::from_field_id(field), *self);
     }
 }
 
 impl TantivyValue<TantivyDocument> for &str {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_text(Field::from_field_id(field), *self);
     }
 }
 
 impl TantivyValue<TantivyDocument> for bool {
+    #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_bool(Field::from_field_id(field), *self);
     }
@@ -104,7 +112,6 @@ impl IndexWriterWrapperImpl {
         path: String,
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
-        in_ram: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!(
             "create index writer, field_name: {}, data_type: {:?}, tantivy_index_version 5",
@@ -115,11 +122,7 @@ impl IndexWriterWrapperImpl {
         // We cannot build direct connection from rows in multi-segments to milvus row data. So we have this doc_id field.
         let id_field = schema_builder.add_i64_field("doc_id", FAST);
         let schema = schema_builder.build();
-        let index = if in_ram {
-            Index::create_in_ram(schema)
-        } else {
-            Index::create_in_dir(path.clone(), schema)?
-        };
+        let index = Index::create_in_dir(path.clone(), schema)?;
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
         Ok(IndexWriterWrapperImpl {
