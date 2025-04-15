@@ -1183,20 +1183,15 @@ class SegmentExpr : public Expr {
         }
 
         using Index = index::ScalarIndex<IndexInnerType>;
-        if (op == OpType::Match) {
-            for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-                const Index& index =
-                    segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-                // 1, index support regex query, then index handles the query;
-                // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
-                if (!index.SupportRegexQuery() && !index.HasRawData()) {
-                    return false;
-                }
-                // all chunks have same index.
-                return true;
-            }
+        if (op == OpType::Match || op == OpType::InnerMatch ||
+            op == OpType::PostfixMatch) {
+            const Index& index = segment_->chunk_scalar_index<IndexInnerType>(
+                field_id_, current_index_chunk_);
+            // 1, index support regex query and try use it, then index handles the query;
+            // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
+            return (index.TryUseRegexQuery() && index.SupportRegexQuery()) ||
+                   index.HasRawData();
         }
-
         return true;
     }
 
