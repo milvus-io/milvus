@@ -196,7 +196,9 @@ test_run() {
     }
     auto field_data = storage::CreateFieldData(dtype, false, dim);
     field_data->FillFieldData(data_gen.data(), data_gen.size() / dim);
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
     auto serialized_bytes = insert_data.Serialize(storage::Remote);

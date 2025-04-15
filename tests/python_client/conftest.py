@@ -230,6 +230,7 @@ def initialize_env(request):
     replica_num = request.config.getoption("--replica_num")
     uri = request.config.getoption("--uri")
     token = request.config.getoption("--token")
+    minio_bucket = request.config.getoption("--minio_bucket")
 
     """ params check """
     assert ip_check(host) and number_check(port)
@@ -242,7 +243,7 @@ def initialize_env(request):
 
     log.info("#" * 80)
     log.info("[initialize_milvus] Log cleaned up, start testing...")
-    param_info.prepare_param_info(host, port, handler, replica_num, user, password, secure, uri, token)
+    param_info.prepare_param_info(host, port, handler, replica_num, user, password, secure, uri, token, minio_bucket)
 
 
 # TODO: construct invalid index params for all index types

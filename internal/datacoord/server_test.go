@@ -2356,8 +2356,11 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 	svr.SetEtcdClient(etcdCli)
 	svr.SetTiKVClient(globalTestTikv)
 
+	dm := mocks.NewMockDataNodeClient(t)
+	dm.EXPECT().Close().Return(nil).Maybe()
+
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		return mocks.NewMockDataNodeClient(t), nil
+		return dm, nil
 	}
 	svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 		return newMockMixCoord(), nil

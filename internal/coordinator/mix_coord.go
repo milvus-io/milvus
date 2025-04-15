@@ -131,6 +131,7 @@ func (s *mixCoordImpl) Init() error {
 	}
 	s.factory.Init(Params)
 	s.initKVCreator()
+	s.initStreamingCoord()
 	if s.enableActiveStandBy {
 		s.activateFunc = func() error {
 			log.Info("mixCoord switch from standby to active, activating")
@@ -162,7 +163,6 @@ func (s *mixCoordImpl) Init() error {
 
 func (s *mixCoordImpl) initInternal() error {
 	log := log.Ctx(s.ctx)
-	s.initStreamingCoord()
 	s.rootcoordServer.SetMixCoord(s)
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)

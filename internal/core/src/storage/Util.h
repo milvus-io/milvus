@@ -211,7 +211,7 @@ SortByPath(std::vector<std::string>& paths) {
 inline std::shared_ptr<ArrowDataWrapper>
 ConvertFieldDataToArrowDataWrapper(const FieldDataPtr& field_data) {
     BaseEventData event_data;
-    event_data.field_data = field_data;
+    event_data.payload_reader = std::make_shared<PayloadReader>(field_data);
     auto event_data_bytes = event_data.Serialize();
 
     std::shared_ptr<uint8_t[]> file_data(new uint8_t[event_data_bytes.size()]);

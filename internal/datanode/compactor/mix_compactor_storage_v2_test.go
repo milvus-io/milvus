@@ -57,6 +57,7 @@ func (s *MixCompactionTaskStorageV2Suite) SetupTest() {
 	paramtable.Get().Save("common.storageType", "local")
 	paramtable.Get().Save("common.storage.enableV2", "true")
 	initcore.InitStorageV2FileSystem(paramtable.Get())
+	refreshPlanParams(s.task.plan)
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TearDownTest() {
@@ -177,6 +178,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_V2ToV2Format() {
 
 func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_V2ToV1Format() {
 	paramtable.Get().Save("common.storage.enableV2", "false")
+	refreshPlanParams(s.task.plan)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
 
@@ -241,6 +243,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactSortedSegment() {
 	s.prepareCompactSortedSegment()
 	paramtable.Get().Save("dataNode.compaction.useMergeSort", "true")
 	defer paramtable.Get().Reset("dataNode.compaction.useMergeSort")
+	refreshPlanParams(s.task.plan)
 
 	result, err := s.task.Compact()
 	s.NoError(err)
@@ -265,6 +268,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactSortedSegmentLackBinlog() {
 	s.prepareCompactSortedSegmentLackBinlog()
 	paramtable.Get().Save("dataNode.compaction.useMergeSort", "true")
 	defer paramtable.Get().Reset("dataNode.compaction.useMergeSort")
+	refreshPlanParams(s.task.plan)
 
 	result, err := s.task.Compact()
 	s.NoError(err)
