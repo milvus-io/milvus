@@ -432,6 +432,40 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                      offsets);
                 break;
             }
+            case proto::plan::PostfixMatch: {
+                UnaryElementFuncForArray<ValueType,
+                                         proto::plan::PostfixMatch,
+                                         filter_type>
+                    func;
+                func(data,
+                     valid_data,
+                     size,
+                     val,
+                     index,
+                     res,
+                     valid_res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
+            case proto::plan::InnerMatch: {
+                UnaryElementFuncForArray<ValueType,
+                                         proto::plan::InnerMatch,
+                                         filter_type>
+                    func;
+                func(data,
+                     valid_data,
+                     size,
+                     val,
+                     index,
+                     res,
+                     valid_res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
             case proto::plan::PrefixMatch: {
                 UnaryElementFuncForArray<ValueType,
                                          proto::plan::PrefixMatch,
@@ -829,6 +863,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                 }
                 break;
             }
+            case proto::plan::InnerMatch:
+            case proto::plan::PostfixMatch:
             case proto::plan::PrefixMatch: {
                 for (size_t i = 0; i < size; ++i) {
                     auto offset = i;
@@ -1515,6 +1551,16 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
                 res = std::move(func(index_ptr, val));
                 break;
             }
+            case proto::plan::PostfixMatch: {
+                UnaryIndexFunc<T, proto::plan::PostfixMatch> func;
+                res = std::move(func(index_ptr, val));
+                break;
+            }
+            case proto::plan::InnerMatch: {
+                UnaryIndexFunc<T, proto::plan::InnerMatch> func;
+                res = std::move(func(index_ptr, val));
+                break;
+            }
             case proto::plan::Match: {
                 UnaryIndexFunc<T, proto::plan::Match> func;
                 res = std::move(func(index_ptr, val));
@@ -1713,6 +1759,29 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             }
             case proto::plan::PrefixMatch: {
                 UnaryElementFunc<T, proto::plan::PrefixMatch, filter_type> func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
+            case proto::plan::PostfixMatch: {
+                UnaryElementFunc<T, proto::plan::PostfixMatch, filter_type>
+                    func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
+            case proto::plan::InnerMatch: {
+                UnaryElementFunc<T, proto::plan::InnerMatch, filter_type> func;
                 func(data,
                      size,
                      val,

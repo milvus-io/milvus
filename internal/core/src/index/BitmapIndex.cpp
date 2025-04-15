@@ -575,16 +575,8 @@ BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load bitmap index");
     auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
-    AssembleIndexDatas(index_datas);
     BinarySet binary_set;
-    for (auto& [key, data] : index_datas) {
-        auto size = data->DataSize();
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-        auto buf = std::shared_ptr<uint8_t[]>(
-            (uint8_t*)const_cast<void*>(data->Data()), deleter);
-        binary_set.Append(key, buf, size);
-    }
-
+    AssembleIndexDatas(index_datas, binary_set);
     LoadWithoutAssemble(binary_set, config);
 }
 
@@ -1228,45 +1220,39 @@ BitmapIndex<std::string>::Query(const DatasetPtr& dataset) {
     AssertInfo(is_built_, "index has not been built");
 
     auto op = dataset->Get<OpType>(OPERATOR_TYPE);
-    if (op == OpType::PrefixMatch) {
-        auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
-        TargetBitmap res(total_num_rows_, false);
-        if (is_mmap_) {
-            for (auto it = bitmap_info_map_.begin();
-                 it != bitmap_info_map_.end();
-                 ++it) {
-                const auto& key = it->first;
-                if (milvus::query::Match(key, prefix, op)) {
-                    for (const auto& v : it->second) {
-                        res.set(v);
-                    }
-                }
-            }
-            return res;
-        }
-        if (build_mode_ == BitmapIndexBuildMode::ROARING) {
-            for (auto it = data_.begin(); it != data_.end(); ++it) {
-                const auto& key = it->first;
-                if (milvus::query::Match(key, prefix, op)) {
-                    for (const auto& v : it->second) {
-                        res.set(v);
-                    }
-                }
-            }
-        } else {
-            for (auto it = bitsets_.begin(); it != bitsets_.end(); ++it) {
-                const auto& key = it->first;
-                if (milvus::query::Match(key, prefix, op)) {
-                    res |= it->second;
+    auto val = dataset->Get<std::string>(MATCH_VALUE);
+    TargetBitmap res(total_num_rows_, false);
+    if (is_mmap_) {
+        for (auto it = bitmap_info_map_.begin(); it != bitmap_info_map_.end();
+             ++it) {
+            const auto& key = it->first;
+            if (milvus::query::Match(key, val, op)) {
+                for (const auto& v : it->second) {
+                    res.set(v);
                 }
             }
         }
-
         return res;
-    } else {
-        PanicInfo(OpTypeInvalid,
-                  fmt::format("unsupported op_type:{} for bitmap query", op));
     }
+    if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+        for (auto it = data_.begin(); it != data_.end(); ++it) {
+            const auto& key = it->first;
+            if (milvus::query::Match(key, val, op)) {
+                for (const auto& v : it->second) {
+                    res.set(v);
+                }
+            }
+        }
+    } else {
+        for (auto it = bitsets_.begin(); it != bitsets_.end(); ++it) {
+            const auto& key = it->first;
+            if (milvus::query::Match(key, val, op)) {
+                res |= it->second;
+            }
+        }
+    }
+
+    return res;
 }
 
 template <typename T>

@@ -34,6 +34,7 @@
 #include "common/RangeSearchHelper.h"
 #include "index/IndexInfo.h"
 #include "storage/Types.h"
+#include "storage/DataCodec.h"
 
 namespace milvus::index {
 
@@ -148,8 +149,23 @@ Config
 ParseConfigFromIndexParams(
     const std::map<std::string, std::string>& index_params);
 
+struct IndexDataCodec {
+    std::list<std::unique_ptr<storage::DataCodec>> codecs_{};
+    int64_t size_{0};
+};
+
+std::map<std::string, IndexDataCodec>
+CompactIndexDatas(
+    std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas);
+
 void
-AssembleIndexDatas(std::map<std::string, FieldDataPtr>& index_datas);
+AssembleIndexDatas(
+    std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas,
+    BinarySet& index_binary_set);
+
+void
+AssembleIndexDatas(std::map<std::string, IndexDataCodec>& index_datas,
+                   BinarySet& index_binary_set);
 
 void
 AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
