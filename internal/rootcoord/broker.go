@@ -202,7 +202,7 @@ func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID,
 		return err
 	}
 	if rsp.ErrorCode != commonpb.ErrorCode_Success {
-		return fmt.Errorf(rsp.Reason)
+		return fmt.Errorf("%s", rsp.Reason)
 	}
 
 	log.Ctx(ctx).Info("done to drop collection index", zap.Int64("collection", collID), zap.Int64s("partitions", partIDs))

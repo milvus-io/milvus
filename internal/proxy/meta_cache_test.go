@@ -196,7 +196,7 @@ func (m *MockMixCoordClientInterface) GetCredential(ctx context.Context, req *ro
 		}, nil
 	}
 
-	err := fmt.Errorf("can't find credential: " + req.Username)
+	err := fmt.Errorf("can't find credential: %s", req.Username)
 	return nil, err
 }
 

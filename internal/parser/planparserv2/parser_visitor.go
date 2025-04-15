@@ -1132,7 +1132,7 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 	if field.GetDataType() != schemapb.DataType_JSON &&
 		field.GetDataType() != schemapb.DataType_Array {
 		errMsg := fmt.Sprintf("%s data type not supported accessed with []", field.GetDataType())
-		return nil, fmt.Errorf(errMsg)
+		return nil, fmt.Errorf("%s", errMsg)
 	}
 	if fieldName != field.Name {
 		nestedPath = append(nestedPath, fieldName)
