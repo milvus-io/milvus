@@ -106,7 +106,7 @@ func GetShardLeadersWithChannels(ctx context.Context, m *meta.Meta, targetMgr me
 ) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
 	for _, channel := range channels {
-		log := log.With(zap.String("channel", channel.GetChannelName()))
+		log := log.Ctx(ctx).With(zap.String("channel", channel.GetChannelName()))
 
 		var channelErr error
 		leaders := dist.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel.GetChannelName()))
