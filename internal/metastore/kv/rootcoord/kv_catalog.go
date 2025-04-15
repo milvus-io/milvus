@@ -655,8 +655,21 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 		return err
 	}
 	saves := map[string]string{newKey: string(value)}
+	// no default aliases will be created.
+	// save fields info to new path.
+	for _, field := range newColl.Fields {
+		k := BuildFieldKey(newColl.CollectionID, field.FieldID)
+		fieldInfo := model.MarshalFieldModel(field)
+		v, err := proto.Marshal(fieldInfo)
+		if err != nil {
+			return err
+		}
+		saves[k] = string(v)
+	}
 	if oldKey == newKey {
-		return kc.Snapshot.Save(ctx, newKey, string(value), ts)
+		return etcd.SaveByBatchWithLimit(saves, util.MaxEtcdTxnNum/2, func(partialKvs map[string]string) error {
+			return kc.Snapshot.MultiSave(ctx, partialKvs, ts)
+		})
 	}
 	return kc.Snapshot.MultiSaveAndRemove(ctx, saves, []string{oldKey}, ts)
 }
