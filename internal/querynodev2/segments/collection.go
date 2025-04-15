@@ -223,7 +223,7 @@ func (c *Collection) RemovePartition(partitionID int64) {
 	log.Info("remove partition", zap.Int64("collection", c.ID()), zap.Int64("partition", partitionID))
 }
 
-// getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition
+// getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition.
 func (c *Collection) GetLoadType() querypb.LoadType {
 	return c.loadType
 }
