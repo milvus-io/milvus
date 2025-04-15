@@ -307,6 +307,8 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		writer.GetRowNum(), insertLogs, statsLogs, bm25StatsLogs)
+	writer = nil
+	values = nil
 	debug.FreeOSMemory()
 
 	log.Ctx(ctx).Info("sort segment end",
