@@ -2,7 +2,6 @@ package planparserv2
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/antlr4-go/antlr/v4"
 )
@@ -18,7 +17,7 @@ type errorListenerImpl struct {
 }
 
 func (l *errorListenerImpl) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) {
-	l.err = fmt.Errorf("line " + strconv.Itoa(line) + ":" + strconv.Itoa(column) + " " + msg)
+	l.err = fmt.Errorf("line %d:%d %s", line, column, msg)
 }
 
 func (l *errorListenerImpl) Error() error {

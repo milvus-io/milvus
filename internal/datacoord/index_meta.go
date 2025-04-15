@@ -19,6 +19,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -398,7 +399,7 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 			// creating multiple indexes on same field is not supported
 			errMsg := "CreateIndex failed: creating multiple indexes on same field is not supported"
 			log.Warn(errMsg)
-			return 0, fmt.Errorf(errMsg)
+			return 0, errors.New(errMsg)
 		}
 	}
 	return 0, nil

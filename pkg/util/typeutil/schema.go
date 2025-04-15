@@ -400,7 +400,7 @@ func (helper *SchemaHelper) getDefaultJSONField(fieldName string) (*schemapb.Fie
 	}
 	errMsg := fmt.Sprintf("field %s not exist", fieldName)
 	log.Warn(errMsg)
-	return nil, fmt.Errorf(errMsg)
+	return nil, errors.New(errMsg)
 }
 
 // GetFieldFromID returns the schema of specified field

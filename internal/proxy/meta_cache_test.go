@@ -189,7 +189,7 @@ func (m *MockRootCoordClientInterface) GetCredential(ctx context.Context, req *r
 		}, nil
 	}
 
-	err := fmt.Errorf("can't find credential: " + req.Username)
+	err := fmt.Errorf("can't find credential: %s", req.Username)
 	return nil, err
 }
 
