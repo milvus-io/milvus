@@ -384,4 +384,41 @@ mod tests {
         let count: u32 = reader.count().unwrap();
         assert_eq!(count, 10000);
     }
+
+    #[test]
+    pub fn test_add_data_by_batch() {
+        use crate::data_type::TantivyDataType;
+        use crate::index_writer::IndexWriterWrapper;
+
+        let temp_dir = tempdir().unwrap();
+        let mut index_writer = IndexWriterWrapper::new(
+            "test",
+            TantivyDataType::I64,
+            temp_dir.path().to_str().unwrap().to_string(),
+            1,
+            15 * 1024 * 1024,
+            TantivyIndexVersion::V7,
+        )
+        .unwrap();
+
+        let keys = (0..10000).collect::<Vec<_>>();
+
+        let mut count = 0;
+        for i in keys {
+            index_writer
+                .add_data_by_batch::<i64>(&[i], Some(i as i64))
+                .unwrap();
+
+            count += 1;
+
+            if count % 1000 == 0 {
+                index_writer.commit().unwrap();
+            }
+        }
+
+        index_writer.commit().unwrap();
+        let reader = index_writer.create_reader().unwrap();
+        let count: u32 = reader.count().unwrap();
+        assert_eq!(count, 10000);
+    }
 }
