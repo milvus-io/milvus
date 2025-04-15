@@ -312,7 +312,7 @@ func (s *Server) initDataCoord() error {
 	s.initGarbageCollection(storageCli)
 
 	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta)
-	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.importMeta, s.jobManager, s.compactionTriggerManager)
+	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.importMeta, s.jobManager, s.compactionTriggerManager, s.compactionHandler)
 
 	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
 
