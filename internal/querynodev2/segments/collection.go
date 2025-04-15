@@ -223,14 +223,14 @@ func (c *Collection) RemovePartition(partitionID int64) {
 	log.Info("remove partition", zap.Int64("collection", c.ID()), zap.Int64("partition", partitionID))
 }
 
-// getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition
+// getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition.
 func (c *Collection) GetLoadType() querypb.LoadType {
 	return c.loadType
 }
 
 func (c *Collection) Ref(count uint32) uint32 {
 	refCount := c.refCount.Add(count)
-	log.Info("collection ref increment",
+	log.Debug("collection ref increment",
 		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.Int64("collectionID", c.ID()),
 		zap.Uint32("refCount", refCount),
@@ -240,7 +240,7 @@ func (c *Collection) Ref(count uint32) uint32 {
 
 func (c *Collection) Unref(count uint32) uint32 {
 	refCount := c.refCount.Sub(count)
-	log.Info("collection ref decrement",
+	log.Debug("collection ref decrement",
 		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.Int64("collectionID", c.ID()),
 		zap.Uint32("refCount", refCount),
