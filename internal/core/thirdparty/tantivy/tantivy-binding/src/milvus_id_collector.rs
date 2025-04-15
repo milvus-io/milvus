@@ -52,7 +52,7 @@ impl SegmentCollector for MilvusIdChildCollector {
     }
 
     fn collect(&mut self, doc: DocId, _score: Score) {
-        // Unreachable code actually.
+        // Unreachable code actually
         self.collect_block(&[doc]);
     }
 
