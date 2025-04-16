@@ -5646,9 +5646,12 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	if err != nil {
 		return merr.Status(err), nil
 	}
+	if req.Base == nil {
+		req.Base = &commonpb.MsgBase{}
+	}
+	req.Base.MsgType = commonpb.MsgType_OperatePrivilegeV2
 	req.Grantor.User = &milvuspb.UserEntity{Name: curUser}
 	request := &milvuspb.OperatePrivilegeRequest{
-		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_OperatePrivilegeV2},
 		Entity: &milvuspb.GrantEntity{
 			Role:       req.Role,
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
@@ -5659,7 +5662,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 		Type:    req.Type,
 		Version: "v2",
 	}
-	req.Grantor.User = &milvuspb.UserEntity{Name: curUser}
+	request.Base = req.Base
 	result, err := node.mixCoord.OperatePrivilege(ctx, request)
 	if err != nil {
 		log.Warn("fail to operate privilege", zap.Error(err))
