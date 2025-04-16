@@ -2195,6 +2195,11 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 			BaseMsg:                 getBaseMsg(ctx, ts),
 			OperatePrivilegeRequest: r,
 		}
+	case *milvuspb.OperatePrivilegeV2Request:
+		tsMsg = &msgstream.OperatePrivilegeV2Msg{
+			BaseMsg:                   getBaseMsg(ctx, ts),
+			OperatePrivilegeV2Request: r,
+		}
 	default:
 		log.Warn("unknown request", zap.Any("request", request))
 		return
