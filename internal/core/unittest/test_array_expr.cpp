@@ -1430,6 +1430,52 @@ TEST(Expr, TestArrayContains) {
     }
 }
 
+TEST(Expr, TestArrayContainsEmptyValuesPanic) {
+    auto schema = std::make_shared<Schema>();
+    auto int_array_fid =
+        schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT8);
+    auto long_array_fid =
+        schema->AddDebugField("long_array", DataType::ARRAY, DataType::INT64);
+    auto bool_array_fid =
+        schema->AddDebugField("bool_array", DataType::ARRAY, DataType::BOOL);
+    auto float_array_fid =
+        schema->AddDebugField("float_array", DataType::ARRAY, DataType::FLOAT);
+    auto double_array_fid =
+        schema->AddDebugField("double_array", DataType::ARRAY, DataType::DOUBLE);
+    auto string_array_fid =
+        schema->AddDebugField("string_array", DataType::ARRAY, DataType::VARCHAR);
+    schema->set_primary_field_id(schema->AddDebugField("id", DataType::INT64));
+
+    std::vector<FieldId> fields = {
+        int_array_fid,
+        long_array_fid,
+        bool_array_fid,
+        float_array_fid,
+        double_array_fid,
+        string_array_fid,
+    };
+
+    std::vector<proto::plan::GenericValue> empty_values;
+
+    for (auto field_id : fields) {
+        EXPECT_THROW(
+            {
+                auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+                    expr::ColumnInfo(field_id, DataType::ARRAY),
+                    proto::plan::JSONContainsExpr_JSONOp_Contains,
+                    true,
+                    empty_values);
+
+                auto dummy_seg = CreateGrowingSegment(schema, empty_index_meta);
+                auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(dummy_seg.get());
+                auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+                ExecuteQueryExpr(plan, seg_promote, 0, MAX_TIMESTAMP);
+            },
+            milvus::SegcoreError
+        );
+    }
+}
+
 TEST(Expr, TestArrayBinaryArith) {
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
