@@ -246,7 +246,7 @@ var (
 )
 
 // RegisterRootCoord registers RootCoord metrics
-func RegisterRootCoord(registry *prometheus.Registry) {
+func RegisterMixCoord(registry *prometheus.Registry) {
 	registry.Register(RootCoordProxyCounter)
 
 	// for time tick
@@ -286,6 +286,8 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DiskQuota)
 
 	RegisterStreamingServiceClient(registry)
+	RegisterQueryCoord(registry)
+	RegisterDataCoord(registry)
 }
 
 func CleanupRootCoordDBMetrics(dbName string) {

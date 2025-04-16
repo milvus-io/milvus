@@ -28,12 +28,10 @@ func TestRegisterMetrics(t *testing.T) {
 	assert.NotPanics(t, func() {
 		r := prometheus.NewRegistry()
 		// Make sure it doesn't panic.
-		RegisterRootCoord(r)
+		RegisterMixCoord(r)
 		RegisterDataNode(r)
-		RegisterDataCoord(r)
 		RegisterProxy(r)
 		RegisterQueryNode(r)
-		RegisterQueryCoord(r)
 		RegisterMetaMetrics(r)
 		RegisterStorageMetrics(r)
 		RegisterMsgStreamMetrics(r)
