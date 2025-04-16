@@ -213,6 +213,7 @@ const (
 	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
 	ReplicateIDKey             = "replicate.id"
 	ReplicateEndTSKey          = "replicate.endTS"
+	IndexNonEncoding           = "index.nonEncoding"
 )
 
 const (
