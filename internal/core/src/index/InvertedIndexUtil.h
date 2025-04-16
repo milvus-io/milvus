@@ -12,18 +12,6 @@
 #pragma once
 
 namespace milvus::index {
-inline size_t
-should_allocate_bitset_size(const milvus::index::RustArrayWrapper& w) {
-    if (w.array_.len == 0) {
-        return 0;
-    }
-    size_t cnt = 0;
-    for (size_t i = 0; i < w.array_.len; i++) {
-        cnt = std::max(cnt, static_cast<size_t>(w.array_.array[i]));
-    }
-    return cnt + 1;
-}
-
 inline void
 apply_hits_with_filter(milvus::TargetBitmap& bitset,
                        const std::function<bool(size_t /* offset */)>& filter) {

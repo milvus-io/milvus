@@ -728,7 +728,7 @@ struct TantivyIndexWrapper {
     }
 
     template <typename T>
-    RustArrayWrapper
+    void
     upper_bound_range_query(T upper_bound, bool inclusive, void* bitset) {
         auto array = [&]() {
             if constexpr (std::is_same_v<T, bool>) {
@@ -776,7 +776,7 @@ struct TantivyIndexWrapper {
     }
 
     template <typename T>
-    RustArrayWrapper
+    void
     range_query(T lower_bound,
                 T upper_bound,
                 bool lb_inclusive,
