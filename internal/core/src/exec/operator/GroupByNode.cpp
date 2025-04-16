@@ -16,7 +16,6 @@
 
 #include "GroupByNode.h"
 
-#include "common/Types.h"
 #include "exec/operator/groupby/SearchGroupByOperator.h"
 #include "monitor/prometheus_client.h"
 
