@@ -327,7 +327,7 @@ func (s *PartialSearchSuite) TestPartialSearch() {
 	// Partial search does not work yet.
 	c := s.Cluster
 	q1 := c.QueryNode
-	c.QueryCoord.StopCheckerForTestOnly()
+	c.MixCoord.StopCheckerForTestOnly()
 	collectionName := s.prefix + "_0"
 	nodeID := q1.GetServerIDForTestOnly()
 	collectionID, channels := s.describeCollection(collectionName)
@@ -339,7 +339,7 @@ func (s *PartialSearchSuite) TestPartialSearch() {
 	req := s.releaseSegmentsReq(collectionID, nodeID, segmentID, shard)
 	q1.ReleaseSegments(context.TODO(), req)
 	s.FailOnSearch(collectionName)
-	c.QueryCoord.StartCheckerForTestOnly()
+	c.MixCoord.StartCheckerForTestOnly()
 }
 
 func TestPartialSearchUtil(t *testing.T) {

@@ -74,6 +74,11 @@ func (q *pendingQueue) Push(msgs []message.ImmutableMessage) {
 	q.evict(now)
 }
 
+// LastTimeTick returns the last time tick of the buffer.
+func (q *pendingQueue) LastTimeTick() uint64 {
+	return q.lastTimeTick
+}
+
 // Evict removes messages that have been in the buffer for longer than the keepAlive duration.
 func (q *pendingQueue) Evict() {
 	q.evict(time.Now())
@@ -156,7 +161,12 @@ func (q *pendingQueue) evict(now time.Time) {
 	if q.size > q.capacity {
 		needRelease = q.size - q.capacity
 	}
-	for i := 0; i < len(q.buf); i++ {
+
+	// !!! NOTE: the evict operation should never release the last message, so i < len(q.buf)-1 here.
+	// we need to keep the last one wal-persisted message in write ahead buffer
+	// to make the catchup scanner works on underlying wal to catch up the write ahead buffer.
+	// so the catchup scanner can transform into tailing scanner to see the non-persisted timetick from write ahead buffer.
+	for i := 0; i < len(q.buf)-1; i++ {
 		if q.buf[i].Eviction.Before(now) || needRelease > 0 {
 			releaseUntilIdx = i
 			needRelease -= q.buf[i].Message.EstimateSize()

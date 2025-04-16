@@ -23,7 +23,7 @@
 
 #include "segcore/DeletedRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "segcore/SegmentSealedImpl.h"
+
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 

@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -696,11 +697,6 @@ func (s *ServerSuite) TestAssignSegmentID() {
 		s.SetupTest()
 		defer s.TearDownTest()
 
-		s.testServer.rootCoordClient = &mockRootCoord{
-			RootCoordClient: s.testServer.rootCoordClient,
-			collID:          collID,
-		}
-
 		schema := newTestSchema()
 		s.testServer.meta.AddCollection(&collectionInfo{
 			ID:         collID,
@@ -809,11 +805,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
-
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
 		}
@@ -852,8 +846,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -867,13 +861,11 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      0,
-			IndexName:    "",
-		})
+		}
+		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
 		assert.NoError(t, err)
 
 		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
@@ -959,11 +951,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("test get recovery of unflushed segments ", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
-
 		svr.meta.AddCollection(&collectionInfo{
 			ID:     0,
 			Schema: newTestSchema(),
@@ -1036,14 +1026,12 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("test get binlogs", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
+		}
 		svr.meta.AddCollection(&collectionInfo{
 			Schema: newTestSchema(),
 		})
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
-		}
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
 			SegmentID:    0,
@@ -1092,13 +1080,12 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
-			TenantID:     "",
+		indexReq := &indexpb.CreateIndexRequest{
 			CollectionID: 0,
 			FieldID:      2,
-			IndexID:      0,
-			IndexName:    "",
-		})
+		}
+
+		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
 		assert.NoError(t, err)
 		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: segment.ID,
@@ -1136,8 +1123,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -1180,9 +1167,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("with fake segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -1225,8 +1211,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-			return newMockRootCoordClient(), nil
+		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
+			return newMockMixCoord(), nil
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -1258,19 +1244,12 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
-			TenantID:        "",
-			CollectionID:    0,
-			FieldID:         2,
-			IndexID:         0,
-			IndexName:       "_default_idx_2",
-			IsDeleted:       false,
-			CreateTime:      0,
-			TypeParams:      nil,
-			IndexParams:     nil,
-			IsAutoIndex:     false,
-			UserIndexParams: nil,
-		})
+		indexReq := &indexpb.CreateIndexRequest{
+			CollectionID: 0,
+			FieldID:      2,
+			IndexName:    "_default_idx_2",
+		}
+		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
 		assert.NoError(t, err)
 		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:           seg4.ID,

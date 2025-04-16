@@ -182,7 +182,7 @@ class TestcaseBase(Base):
 
     def init_collection_wrap(self, name=None, schema=None, check_task=None, check_items=None,
                              enable_dynamic_field=False, with_json=True, **kwargs):
-        name = cf.gen_unique_str('coll_') if name is None else name
+        name = cf.gen_collection_name_by_testcase_name(2) if name is None else name
         schema = cf.gen_default_collection_schema(enable_dynamic_field=enable_dynamic_field, with_json=with_json) \
             if schema is None else schema
         if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
@@ -276,7 +276,7 @@ class TestcaseBase(Base):
         log.info("Test case of search interface: initialize before test case")
         if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
             self._connect()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name(2)
         if name is not None:
             collection_name = name
         if not isinstance(nullable_fields, dict):
@@ -363,7 +363,8 @@ class TestcaseBase(Base):
         :return: collection wrap and partition wrap
         """
         self._connect()
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_name = cf.gen_collection_name_by_testcase_name(2)
+        collection_w = self.init_collection_wrap(name=collection_name)
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
         # insert [0, half) into partition_w
         df_partition = cf.gen_default_dataframe_data(nb=half, start=0)
@@ -387,7 +388,8 @@ class TestcaseBase(Base):
         :param is_dup: whether the primary keys of each segment is duplicated
         :return: collection wrap and partition wrap
         """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(collection_prefix), shards_num=1)
+        collection_name = cf.gen_collection_name_by_testcase_name(2)
+        collection_w = self.init_collection_wrap(name=collection_name, shards_num=1)
 
         for i in range(num_of_segment):
             start = 0 if is_dup else i * nb_of_segment

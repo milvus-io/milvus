@@ -26,7 +26,6 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
     """ Test case of end-to-end interface """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="issue #40686")
     @pytest.mark.parametrize("flush_enable", [True, False])
     @pytest.mark.parametrize("scalar_index_enable", [True, False])
     def test_milvus_client_e2e_default(self, flush_enable, scalar_index_enable):
@@ -40,7 +39,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         client = self._client()
         
         # 1. Create collection with custom schema
-        collection_name = cf.gen_unique_str("test_e2e")
+        collection_name = cf.gen_collection_name_by_testcase_name()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         # Primary key and vector field
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
@@ -66,7 +65,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema)
 
         # 2. Insert data with null values for nullable fields
-        num_inserts = 3  # insert data for 3 times
+        num_inserts = 5  # insert data for 5 times
         total_rows = []
         for batch in range(num_inserts):
             vectors = cf.gen_vectors(default_nb, default_dim)
@@ -112,6 +111,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             t0 = time.time()
             self.insert(client, collection_name, rows)
             t1 = time.time()
+            time.sleep(0.5)
             log.info(f"Insert batch {batch + 1}: {default_nb} entities cost {t1 - t0:.4f} seconds")
 
         log.info(f"Total inserted {num_inserts * default_nb} entities")
@@ -135,6 +135,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             index_params.add_index(field_name="float_field", index_type="AUTOINDEX")
             index_params.add_index(field_name="double_field", index_type="AUTOINDEX")
             index_params.add_index(field_name="varchar_field", index_type="AUTOINDEX")
+            index_params.add_index(field_name="array_field", index_type="AUTOINDEX")
 
         # 3. create index
         self.create_index(client, collection_name, index_params)
@@ -142,8 +143,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         # Verify scalar indexes are created if enabled
         indexes = self.list_indexes(client, collection_name)[0]
         log.info(f"Created indexes: {indexes}")
-        expected_scalar_indexes = ["int8_field", "int16_field", "int32_field", "int64_field", 
-                                 "float_field", "double_field", "varchar_field"]
+        expected_scalar_indexes = ["int8_field", "int16_field", "int32_field", "int64_field",
+                                   "float_field", "double_field", "varchar_field", "array_field"]
         if scalar_index_enable:
             for field in expected_scalar_indexes:
                 assert field in indexes, f"Scalar index not created for field: {field}"

@@ -89,8 +89,11 @@ struct TantivyIndexWrapper {
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
         RustResultWrapper res;
         if (inverted_single_semgnent) {
+            AssertInfo(tantivy_index_version == 5,
+                       "TantivyIndexWrapper: inverted_single_semgnent only "
+                       "support tantivy 5");
             res = RustResultWrapper(tantivy_create_index_with_single_segment(
-                field_name, data_type, path, tantivy_index_version));
+                field_name, data_type, path));
         } else {
             res = RustResultWrapper(
                 tantivy_create_index(field_name,
@@ -137,6 +140,28 @@ struct TantivyIndexWrapper {
                                        num_threads,
                                        overall_memory_budget_in_bytes,
                                        in_ram));
+        AssertInfo(res.result_->success,
+                   "failed to create text writer: {}",
+                   res.result_->error);
+        writer_ = res.result_->value.ptr._0;
+        path_ = std::string(path);
+    }
+
+    // create index writer for json key stats
+    TantivyIndexWrapper(const char* field_name,
+                        const char* path,
+                        uint32_t tantivy_index_version,
+                        bool in_ram = false,
+                        uintptr_t num_threads = DEFAULT_NUM_THREADS,
+                        uintptr_t overall_memory_budget_in_bytes =
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+        auto res = RustResultWrapper(
+            tantivy_create_json_key_stats_writer(field_name,
+                                                 path,
+                                                 tantivy_index_version,
+                                                 num_threads,
+                                                 overall_memory_budget_in_bytes,
+                                                 in_ram));
         AssertInfo(res.result_->success,
                    "failed to create text writer: {}",
                    res.result_->error);
@@ -249,21 +274,36 @@ struct TantivyIndexWrapper {
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
-            // TODO: not very efficient, a lot of overhead due to rust-ffi call.
+            std::vector<const char*> views;
+            views.reserve(len);
             for (uintptr_t i = 0; i < len; i++) {
-                auto res = RustResultWrapper(tantivy_index_add_string(
-                    writer_,
-                    static_cast<const std::string*>(array)[i].c_str(),
-                    offset_begin + i));
-                AssertInfo(res.result_->success,
-                           "failed to add string: {}",
-                           res.result_->error);
+                views.push_back(
+                    static_cast<const std::string*>(array)[i].c_str());
             }
+            auto res = RustResultWrapper(tantivy_index_add_strings(
+                writer_, views.data(), len, offset_begin));
+            AssertInfo(res.result_->success,
+                       "failed to add string: {}",
+                       res.result_->error);
             return;
         }
 
         throw fmt::format("InvertedIndex.add_data: unsupported data type: {}",
                           typeid(T).name());
+    }
+
+    void
+    add_json_key_stats_data_by_batch(const char* const* keys,
+                                     const int64_t* const* json_offsets,
+                                     const uintptr_t* json_offsets_lens,
+                                     uintptr_t len_of_lens) {
+        assert(!finished_);
+        auto res =
+            RustResultWrapper(tantivy_index_add_json_key_stats_data_by_batch(
+                writer_, keys, json_offsets, json_offsets_lens, len_of_lens));
+        AssertInfo(res.result_->success,
+                   "failed to add json key stats: {}",
+                   res.result_->error);
     }
 
     template <typename T>
@@ -428,16 +468,18 @@ struct TantivyIndexWrapper {
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
-            // TODO: not very efficient, a lot of overhead due to rust-ffi call.
+            std::vector<const char*> views;
+            views.reserve(len);
             for (uintptr_t i = 0; i < len; i++) {
-                auto res = RustResultWrapper(
-                    tantivy_index_add_string_by_single_segment_writer(
-                        writer_,
-                        static_cast<const std::string*>(array)[i].c_str()));
-                AssertInfo(res.result_->success,
-                           "failed to add string: {}",
-                           res.result_->error);
+                views.push_back(
+                    static_cast<const std::string*>(array)[i].c_str());
             }
+            auto res = RustResultWrapper(
+                tantivy_index_add_strings_by_single_segment_writer(
+                    writer_, views.data(), len));
+            AssertInfo(res.result_->success,
+                       "failed to add string: {}",
+                       res.result_->error);
             return;
         }
 
@@ -618,6 +660,22 @@ struct TantivyIndexWrapper {
         AssertInfo(res.result_->value.tag == Value::Tag::RustArray,
                    "TantivyIndexWrapper.term_query: invalid result type");
         return RustArrayWrapper(std::move(res.result_->value.rust_array._0));
+    }
+
+    RustArrayI64Wrapper
+    term_query_i64(std::string term) {
+        auto array = [&]() {
+            return tantivy_term_query_keyword_i64(reader_, term.c_str());
+        }();
+
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.term_query_i64: {}",
+                   res.result_->error);
+        AssertInfo(res.result_->value.tag == Value::Tag::RustArrayI64,
+                   "TantivyIndexWrapper.term_query_i64: invalid result type");
+        return RustArrayI64Wrapper(
+            std::move(res.result_->value.rust_array_i64._0));
     }
 
     template <typename T>

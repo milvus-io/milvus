@@ -93,7 +93,7 @@ Search_GrowingIndex(benchmark::State& state) {
     milvus::Timestamp ts = 10000000;
 
     for (auto _ : state) {
-        auto qr = segment->Search(search_plan.get(), ph_group.get(), ts);
+        auto qr = segment->Search(search_plan.get(), ph_group.get(), ts, 0);
     }
 }
 
@@ -130,7 +130,7 @@ Search_Sealed(benchmark::State& state) {
     milvus::Timestamp ts = 10000000;
 
     for (auto _ : state) {
-        auto qr = segment->Search(search_plan.get(), ph_group.get(), ts);
+        auto qr = segment->Search(search_plan.get(), ph_group.get(), ts, 0);
     }
 }
 

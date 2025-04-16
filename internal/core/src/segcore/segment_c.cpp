@@ -28,12 +28,14 @@
 #include "segcore/Collection.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "segcore/SegmentSealedImpl.h"
 #include "segcore/Utils.h"
 #include "storage/Event.h"
 #include "storage/Util.h"
 #include "futures/Future.h"
 #include "futures/Executor.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "mmap/Types.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
@@ -61,18 +63,7 @@ NewSegment(CCollection collection,
                     segment_id,
                     milvus::segcore::SegcoreConfig::default_config(),
                     false,
-                    is_sorted_by_pk,
-                    false);
-                break;
-            case ChunkedSealed:
-                segment = milvus::segcore::CreateSealedSegment(
-                    col->get_schema(),
-                    col->get_index_meta(),
-                    segment_id,
-                    milvus::segcore::SegcoreConfig::default_config(),
-                    false,
-                    is_sorted_by_pk,
-                    true);
+                    is_sorted_by_pk);
                 break;
 
             default:
@@ -111,7 +102,8 @@ AsyncSearch(CTraceContext c_trace,
             CSegmentInterface c_segment,
             CSearchPlan c_plan,
             CPlaceholderGroup c_placeholder_group,
-            uint64_t timestamp) {
+            uint64_t timestamp,
+            int32_t consistency_level) {
     auto segment = (milvus::segcore::SegmentInterface*)c_segment;
     auto plan = (milvus::query::Plan*)c_plan;
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
@@ -120,7 +112,7 @@ AsyncSearch(CTraceContext c_trace,
     auto future = milvus::futures::Future<milvus::SearchResult>::async(
         milvus::futures::getGlobalCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
-        [c_trace, segment, plan, phg_ptr, timestamp](
+        [c_trace, segment, plan, phg_ptr, timestamp, consistency_level](
             milvus::futures::CancellationToken cancel_token) {
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
@@ -131,7 +123,8 @@ AsyncSearch(CTraceContext c_trace,
             auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
             milvus::tracer::SetRootSpan(span);
 
-            auto search_result = segment->Search(plan, phg_ptr, timestamp);
+            auto search_result =
+                segment->Search(plan, phg_ptr, timestamp, consistency_level);
             if (!milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {
                 for (auto& dis : search_result->distances_) {
@@ -179,21 +172,31 @@ AsyncRetrieve(CTraceContext c_trace,
               CRetrievePlan c_plan,
               uint64_t timestamp,
               int64_t limit_size,
-              bool ignore_non_pk) {
+              bool ignore_non_pk,
+              int32_t consistency_level) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
 
     auto future = milvus::futures::Future<CRetrieveResult>::async(
         milvus::futures::getGlobalCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
-        [c_trace, segment, plan, timestamp, limit_size, ignore_non_pk](
-            milvus::futures::CancellationToken cancel_token) {
+        [c_trace,
+         segment,
+         plan,
+         timestamp,
+         limit_size,
+         ignore_non_pk,
+         consistency_level](milvus::futures::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
 
-            auto retrieve_result = segment->Retrieve(
-                &trace_ctx, plan, timestamp, limit_size, ignore_non_pk);
+            auto retrieve_result = segment->Retrieve(&trace_ctx,
+                                                     plan,
+                                                     timestamp,
+                                                     limit_size,
+                                                     ignore_non_pk,
+                                                     consistency_level);
 
             return CreateLeakedCRetrieveResultFromProto(
                 std::move(retrieve_result));
@@ -377,12 +380,13 @@ LoadFieldRawData(CSegmentInterface c_segment,
         auto field_data =
             milvus::storage::CreateFieldData(data_type, false, dim);
         field_data->FillFieldData(data, row_count);
-        milvus::FieldDataChannelPtr channel =
-            std::make_shared<milvus::FieldDataChannel>();
-        channel->push(field_data);
-        channel->close();
-        auto field_data_info = milvus::FieldDataInfo(
-            field_id, static_cast<size_t>(row_count), channel);
+        auto arrow_data_wrapper =
+            milvus::storage::ConvertFieldDataToArrowDataWrapper(field_data);
+        auto field_data_info = milvus::FieldDataInfo{
+            field_id,
+            static_cast<size_t>(row_count),
+            std::vector<std::shared_ptr<milvus::ArrowDataWrapper>>{
+                arrow_data_wrapper}};
         segment->LoadFieldData(milvus::FieldId(field_id), field_data_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -472,6 +476,60 @@ LoadTextIndex(CSegmentInterface c_segment,
 
         segment->LoadTextIndex(milvus::FieldId(info_proto->fieldid()),
                                std::move(index));
+
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+LoadJsonKeyIndex(CTraceContext c_trace,
+                 CSegmentInterface c_segment,
+                 const uint8_t* serialized_load_json_key_index_info,
+                 const uint64_t len) {
+    try {
+        auto ctx = milvus::tracer::TraceContext{
+            c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment =
+            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+
+        auto info_proto =
+            std::make_unique<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>();
+        info_proto->ParseFromArray(serialized_load_json_key_index_info, len);
+
+        milvus::storage::FieldDataMeta field_meta{info_proto->collectionid(),
+                                                  info_proto->partitionid(),
+                                                  segment->get_segment_id(),
+                                                  info_proto->fieldid(),
+                                                  info_proto->schema()};
+        milvus::storage::IndexMeta index_meta{segment->get_segment_id(),
+                                              info_proto->fieldid(),
+                                              info_proto->buildid(),
+                                              info_proto->version()};
+        auto remote_chunk_manager =
+            milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                .GetRemoteChunkManager();
+
+        milvus::Config config;
+        std::vector<std::string> files;
+        for (const auto& f : info_proto->files()) {
+            files.push_back(f);
+        }
+        config["index_files"] = files;
+
+        milvus::storage::FileManagerContext file_ctx(
+            field_meta, index_meta, remote_chunk_manager);
+
+        auto index = std::make_unique<milvus::index::JsonKeyStatsInvertedIndex>(
+            file_ctx, true);
+        index->Load(ctx, config);
+
+        segment->LoadJsonKeyIndex(milvus::FieldId(info_proto->fieldid()),
+                                  std::move(index));
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

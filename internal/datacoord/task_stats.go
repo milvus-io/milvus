@@ -39,6 +39,8 @@ type statsTask struct {
 	nodeID          int64
 	taskInfo        *workerpb.StatsResult
 
+	taskSlot int64
+
 	queueTime time.Time
 	startTime time.Time
 	endTime   time.Time
@@ -50,7 +52,7 @@ type statsTask struct {
 
 var _ Task = (*statsTask)(nil)
 
-func newStatsTask(taskID int64, segmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob) *statsTask {
+func newStatsTask(taskID int64, segmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob, taskSlot int64) *statsTask {
 	return &statsTask{
 		taskID:          taskID,
 		segmentID:       segmentID,
@@ -60,6 +62,7 @@ func newStatsTask(taskID int64, segmentID, targetSegmentID int64, subJobType ind
 			State:  indexpb.JobState_JobStateInit,
 		},
 		subJobType: subJobType,
+		taskSlot:   taskSlot,
 	}
 }
 
@@ -76,9 +79,7 @@ func (st *statsTask) GetNodeID() int64 {
 }
 
 func (st *statsTask) ResetTask(mt *meta) {
-	st.nodeID = 0
 	// reset isCompacting
-
 	mt.SetSegmentsCompacting(context.TODO(), []UniqueID{st.segmentID}, false)
 	mt.SetSegmentStating(st.segmentID, false)
 }
@@ -127,6 +128,10 @@ func (st *statsTask) GetState() indexpb.JobState {
 
 func (st *statsTask) GetFailReason() string {
 	return st.taskInfo.GetFailReason()
+}
+
+func (st *statsTask) GetTaskSlot() int64 {
+	return st.taskSlot
 }
 
 func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
@@ -239,8 +244,14 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		CollectionTtl:   collTtl.Nanoseconds(),
 		CurrentTs:       tsoutil.GetCurrentTime(),
 		// update version after check
-		TaskVersion:   statsMeta.GetVersion() + 1,
-		BinlogMaxSize: Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		TaskVersion:               statsMeta.GetVersion() + 1,
+		BinlogMaxSize:             Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		EnableJsonKeyStats:        Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
+		JsonKeyStatsTantivyMemory: Params.DataCoordCfg.JSONKeyStatsMemoryBudgetInTantivy.GetAsInt64(),
+		JsonKeyStatsDataFormat:    1,
+		EnableJsonKeyStatsInSort:  Params.DataCoordCfg.EnabledJSONKeyStatsInSort.GetAsBool(),
+		TaskSlot:                  st.taskSlot,
+		StorageVersion:            segment.StorageVersion,
 	}
 
 	log.Info("stats task pre check successfully", zap.String("subJobType", st.subJobType.String()),
@@ -363,6 +374,13 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 			err := meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetTextIndexLogs(st.taskInfo.GetTextStatsLogs()))
 			if err != nil {
 				log.Warn("save text index stats result failed", zap.Int64("taskID", st.taskID),
+					zap.Int64("segmentID", st.segmentID), zap.Error(err))
+				return err
+			}
+		case indexpb.StatsSubJob_JsonKeyIndexJob:
+			err := meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetJsonKeyIndexLogs(st.taskInfo.GetJsonKeyStatsLogs()))
+			if err != nil {
+				log.Warn("save json key index stats result failed", zap.Int64("taskId", st.taskID),
 					zap.Int64("segmentID", st.segmentID), zap.Error(err))
 				return err
 			}

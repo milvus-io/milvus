@@ -141,9 +141,9 @@ func (s *IndexServiceSuite) SetupTest() {
 
 	s.in = NewDataNode(ctx, factory)
 
-	dc := mocks.NewMockDataCoordClient(s.T())
+	dc := mocks.NewMockMixCoordClient(s.T())
 	dc.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	s.in.dataCoord = dc
+	s.in.mixCoord = dc
 
 	err = s.in.Init()
 	s.NoError(err)
@@ -540,22 +540,23 @@ func (s *IndexServiceSuite) Test_CreateStatsTask() {
 	s.Run("normal case", func() {
 		taskID := int64(100)
 		req := &workerpb.CreateStatsRequest{
-			ClusterID:       "cluster2",
-			TaskID:          taskID,
-			CollectionID:    s.collID,
-			PartitionID:     s.partID,
-			InsertChannel:   "ch1",
-			SegmentID:       s.segID,
-			InsertLogs:      fieldBinlogs,
-			DeltaLogs:       nil,
-			StorageConfig:   s.storageConfig,
-			Schema:          generateTestSchema(),
-			TargetSegmentID: s.segID + 1,
-			StartLogID:      s.logID + 100,
-			EndLogID:        s.logID + 200,
-			NumRows:         s.numRows,
-			BinlogMaxSize:   131000,
-			SubJobType:      indexpb.StatsSubJob_Sort,
+			ClusterID:          "cluster2",
+			TaskID:             taskID,
+			CollectionID:       s.collID,
+			PartitionID:        s.partID,
+			InsertChannel:      "ch1",
+			SegmentID:          s.segID,
+			InsertLogs:         fieldBinlogs,
+			DeltaLogs:          nil,
+			StorageConfig:      s.storageConfig,
+			Schema:             generateTestSchema(),
+			TargetSegmentID:    s.segID + 1,
+			StartLogID:         s.logID + 100,
+			EndLogID:           s.logID + 200,
+			NumRows:            s.numRows,
+			BinlogMaxSize:      131000,
+			SubJobType:         indexpb.StatsSubJob_Sort,
+			EnableJsonKeyStats: false,
 		}
 
 		status, err := s.in.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
@@ -594,8 +595,6 @@ func (s *IndexServiceSuite) Test_CreateStatsTask() {
 		s.NoError(err)
 		err = merr.Error(slotResp.GetStatus())
 		s.NoError(err)
-
-		s.Equal(int64(1), slotResp.GetTaskSlots())
 
 		status, err = s.in.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 			ClusterID: "cluster2",
@@ -676,8 +675,6 @@ func (s *IndexServiceSuite) Test_CreateStatsTask() {
 		s.NoError(err)
 		err = merr.Error(slotResp.GetStatus())
 		s.NoError(err)
-
-		s.Equal(int64(1), slotResp.GetTaskSlots())
 
 		status, err = s.in.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
 			ClusterID: "cluster2",

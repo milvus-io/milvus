@@ -55,7 +55,7 @@ var (
 // ErrLoadWithDefaultRG           = errors.New("load operation can't use default resource group and other resource group together")
 )
 
-func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	log.Ctx(ctx).Debug("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to show collections"
@@ -128,7 +128,7 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 	return resp, nil
 }
 
-func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
@@ -537,7 +537,7 @@ func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 	}, nil
 }
 
-func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)

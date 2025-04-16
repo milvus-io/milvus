@@ -405,7 +405,6 @@ func TestComponentParam(t *testing.T) {
 		nprobe := Params.InterimIndexNProbe.GetAsInt64()
 		assert.Equal(t, int64(16), nprobe)
 
-		assert.Equal(t, true, Params.GroupEnabled.GetAsBool())
 		assert.Equal(t, int32(10240), Params.MaxReceiveChanSize.GetAsInt32())
 		assert.Equal(t, int32(10240), Params.MaxUnsolvedQueueSize.GetAsInt32())
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
@@ -688,9 +687,6 @@ func TestForbiddenItem(t *testing.T) {
 func TestCachedParam(t *testing.T) {
 	Init()
 	params := Get()
-
-	assert.True(t, params.DataNodeCfg.EnableDisk.GetAsBool())
-	assert.True(t, params.DataNodeCfg.EnableDisk.GetAsBool())
 
 	assert.Equal(t, 256*1024*1024, params.QueryCoordGrpcServerCfg.ServerMaxRecvSize.GetAsInt())
 	assert.Equal(t, 256*1024*1024, params.QueryCoordGrpcServerCfg.ServerMaxRecvSize.GetAsInt())

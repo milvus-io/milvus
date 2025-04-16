@@ -259,6 +259,10 @@ func WriteYaml(w io.Writer) {
 # more detail: https://docs.nats.io/running-a-nats-service/configuration`,
 		},
 		{
+			name:   "mixCoord",
+			header: "\n# Related configuration of mixCoord",
+		},
+		{
 			name:   "rootCoord",
 			header: "\n# Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests",
 		},

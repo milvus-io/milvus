@@ -25,6 +25,7 @@ namespace exec {
 
 void
 PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    context.set_apply_valid_data_after_flip(false);
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     switch (expr_->column_.data_type_) {
@@ -97,6 +98,9 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
+    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
+        return EvalJsonExistsForDataSegmentForIndex();
+    }
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -111,8 +115,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [&bitmap_input,
-         &processed_cursor]<FilterType filter_type = FilterType::sequential>(
+        [&bitmap_input, &
+         processed_cursor ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -120,23 +124,23 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer) {
-            bool has_bitmap_input = !bitmap_input.empty();
-            for (int i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                    continue;
-                }
-                res[i] = data[offset].exist(pointer);
+        bool has_bitmap_input = !bitmap_input.empty();
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
             }
-            processed_cursor += size;
-        };
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+            res[i] = data[offset].exist(pointer);
+        }
+        processed_cursor += size;
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -156,6 +160,50 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+VectorPtr
+PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
+    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
+                               ? active_count_ - current_data_chunk_pos_
+                               : batch_size_;
+    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    if (cached_index_chunk_id_ != 0) {
+        const segcore::SegmentInternalInterface* segment = nullptr;
+        if (segment_->type() == SegmentType::Growing) {
+            segment =
+                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
+        } else if (segment_->type() == SegmentType::Sealed) {
+            segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        }
+        auto field_id = expr_->column_.field_id_;
+        auto* index = segment->GetJsonKeyIndex(field_id);
+        Assert(index != nullptr);
+        auto filter_func = [segment, field_id, pointer](bool valid,
+                                                        uint8_t type,
+                                                        uint32_t row_id,
+                                                        uint16_t offset,
+                                                        uint16_t size,
+                                                        uint32_t value) {
+            return true;
+        };
+        bool is_growing = segment_->type() == SegmentType::Growing;
+        bool is_strong_consistency = consistency_level_ == 0;
+        cached_index_chunk_res_ = index
+                                      ->FilterByPath(pointer,
+                                                     active_count_,
+                                                     is_growing,
+                                                     is_strong_consistency,
+                                                     filter_func)
+                                      .clone();
+        cached_index_chunk_id_ = 0;
+    }
+    TargetBitmap result;
+    result.append(
+        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
+    current_data_chunk_pos_ += real_batch_size;
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
 }
 
 }  //namespace exec

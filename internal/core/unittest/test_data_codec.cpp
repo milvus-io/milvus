@@ -36,7 +36,9 @@ TEST(storage, InsertDataBool) {
         milvus::storage::CreateFieldData(storage::DataType::BOOL, false);
     field_data->FillFieldData(data.data(), data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -66,7 +68,9 @@ TEST(storage, InsertDataBoolNullable) {
 
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -99,7 +103,9 @@ TEST(storage, InsertDataInt8) {
         milvus::storage::CreateFieldData(storage::DataType::INT8, false);
     field_data->FillFieldData(data.data(), data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -128,7 +134,9 @@ TEST(storage, InsertDataInt8Nullable) {
     uint8_t* valid_data = new uint8_t[1]{0x13};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -159,7 +167,9 @@ TEST(storage, InsertDataInt16) {
         milvus::storage::CreateFieldData(storage::DataType::INT16, false);
     field_data->FillFieldData(data.data(), data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -188,7 +198,9 @@ TEST(storage, InsertDataInt16Nullable) {
     uint8_t* valid_data = new uint8_t[1]{0x13};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -219,7 +231,9 @@ TEST(storage, InsertDataInt32) {
         milvus::storage::CreateFieldData(storage::DataType::INT32, false);
     field_data->FillFieldData(data.data(), data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -248,7 +262,9 @@ TEST(storage, InsertDataInt32Nullable) {
     uint8_t* valid_data = new uint8_t[1]{0x13};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -279,7 +295,9 @@ TEST(storage, InsertDataInt64) {
         milvus::storage::CreateFieldData(storage::DataType::INT64, false);
     field_data->FillFieldData(data.data(), data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -308,7 +326,9 @@ TEST(storage, InsertDataInt64Nullable) {
     uint8_t* valid_data = new uint8_t[1]{0x13};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -340,7 +360,9 @@ TEST(storage, InsertDataString) {
         milvus::storage::CreateFieldData(storage::DataType::VARCHAR, false);
     field_data->FillFieldData(data.data(), data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -374,7 +396,9 @@ TEST(storage, InsertDataStringNullable) {
     uint8_t* valid_data = new uint8_t[1]{0x13};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -408,7 +432,9 @@ TEST(storage, InsertDataFloat) {
         milvus::storage::CreateFieldData(storage::DataType::FLOAT, false);
     field_data->FillFieldData(data.data(), data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -437,7 +463,9 @@ TEST(storage, InsertDataFloatNullable) {
     std::array<uint8_t, 1> valid_data = {0x13};
     field_data->FillFieldData(data.data(), valid_data.data(), data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -467,7 +495,9 @@ TEST(storage, InsertDataDouble) {
         milvus::storage::CreateFieldData(storage::DataType::DOUBLE, false);
     field_data->FillFieldData(data.data(), data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -496,7 +526,9 @@ TEST(storage, InsertDataDoubleNullable) {
     uint8_t* valid_data = new uint8_t[1]{0x13};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -528,7 +560,9 @@ TEST(storage, InsertDataFloatVector) {
         storage::DataType::VECTOR_FLOAT, false, DIM);
     field_data->FillFieldData(data.data(), data.size() / DIM);
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -560,7 +594,9 @@ TEST(storage, InsertDataSparseFloat) {
         storage::DataType::VECTOR_SPARSE_FLOAT, false, kTestSparseDim, n_rows);
     field_data->FillFieldData(vecs.get(), n_rows);
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -599,7 +635,9 @@ TEST(storage, InsertDataBinaryVector) {
         storage::DataType::VECTOR_BINARY, false, DIM);
     field_data->FillFieldData(data.data(), data.size() * 8 / DIM);
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -628,7 +666,9 @@ TEST(storage, InsertDataFloat16Vector) {
         storage::DataType::VECTOR_FLOAT16, false, DIM);
     field_data->FillFieldData(data.data(), data.size() / DIM);
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -654,11 +694,7 @@ TEST(storage, InsertDataFloat16Vector) {
 
 TEST(storage, IndexData) {
     std::vector<uint8_t> data = {1, 2, 3, 4, 5, 6, 7, 8};
-    auto field_data =
-        milvus::storage::CreateFieldData(storage::DataType::INT8, false);
-    field_data->FillFieldData(data.data(), data.size());
-
-    storage::IndexData index_data(field_data);
+    storage::IndexData index_data(data.data(), data.size());
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     index_data.SetFieldDataMeta(field_data_meta);
     index_data.SetTimestamps(0, 100);
@@ -673,11 +709,11 @@ TEST(storage, IndexData) {
     ASSERT_EQ(new_index_data->GetCodecType(), storage::IndexDataType);
     ASSERT_EQ(new_index_data->GetTimeRage(),
               std::make_pair(milvus::Timestamp(0), milvus::Timestamp(100)));
-    auto new_field_data = new_index_data->GetFieldData();
-    ASSERT_EQ(new_field_data->get_data_type(), storage::DataType::INT8);
-    ASSERT_EQ(new_field_data->Size(), data.size());
+    ASSERT_TRUE(new_index_data->HasBinaryPayload());
     std::vector<uint8_t> new_data(data.size());
-    memcpy(new_data.data(), new_field_data->Data(), new_field_data->DataSize());
+    memcpy(new_data.data(),
+           new_index_data->PayloadData(),
+           new_index_data->PayloadSize());
     ASSERT_EQ(data, new_data);
 }
 
@@ -694,7 +730,9 @@ TEST(storage, InsertDataStringArray) {
         milvus::storage::CreateFieldData(storage::DataType::ARRAY, false);
     field_data->FillFieldData(data.data(), data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -739,7 +777,9 @@ TEST(storage, InsertDataStringArrayNullable) {
     uint8_t* valid_data = new uint8_t[1]{0x01};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -775,7 +815,9 @@ TEST(storage, InsertDataJsonNullable) {
     uint8_t* valid_data = new uint8_t[1]{0x00};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);
@@ -803,7 +845,9 @@ TEST(storage, InsertDataJsonFillWithNull) {
     uint8_t* valid_data = new uint8_t[1]{0x00};
     field_data->FillFieldData(std::nullopt, size);
 
-    storage::InsertData insert_data(field_data);
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
     storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
     insert_data.SetFieldDataMeta(field_data_meta);
     insert_data.SetTimestamps(0, 100);

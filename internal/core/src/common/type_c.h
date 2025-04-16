@@ -28,7 +28,6 @@ enum SegmentType {
     Growing = 1,
     Sealed = 2,
     Indexing = 3,
-    ChunkedSealed = 4,
 };
 
 typedef enum SegmentType SegmentType;

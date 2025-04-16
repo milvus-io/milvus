@@ -33,19 +33,19 @@ const batchAllocateSize = 1000
 var _ Allocator = (*allocatorImpl)(nil)
 
 // NewTSOAllocator creates a new allocator.
-func NewTSOAllocator(rc *syncutil.Future[types.RootCoordClient]) Allocator {
+func NewTSOAllocator(mix *syncutil.Future[types.MixCoordClient]) Allocator {
 	return &allocatorImpl{
 		cond:            syncutil.NewContextCond(&sync.Mutex{}),
-		remoteAllocator: newTSOAllocator(rc),
+		remoteAllocator: newTSOAllocator(mix),
 		localAllocator:  newLocalAllocator(),
 	}
 }
 
 // NewIDAllocator creates a new allocator.
-func NewIDAllocator(rc *syncutil.Future[types.RootCoordClient]) Allocator {
+func NewIDAllocator(mix *syncutil.Future[types.MixCoordClient]) Allocator {
 	return &allocatorImpl{
 		cond:            syncutil.NewContextCond(&sync.Mutex{}),
-		remoteAllocator: newIDAllocator(rc),
+		remoteAllocator: newIDAllocator(mix),
 		localAllocator:  newLocalAllocator(),
 	}
 }

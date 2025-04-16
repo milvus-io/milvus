@@ -89,7 +89,9 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 		// Consume ordering is always time tick order now.
 		if rc.mh.lastConfirmedMessageID != nil {
 			// set the deliver policy start after the last message id.
-			deliverPolicy = options.DeliverPolicyStartAfter(rc.mh.lastConfirmedMessageID)
+			// !!! we always set the deliver policy to start from the last confirmed message id.
+			// because the catchup scanner at the streamingnode server must see the last confirmed message id if it's the last timetick.
+			deliverPolicy = options.DeliverPolicyStartFrom(rc.mh.lastConfirmedMessageID)
 			newDeliverFilters := make([]options.DeliverFilter, 0, len(deliverFilters)+1)
 			for _, filter := range deliverFilters {
 				if !options.IsDeliverFilterTimeTick(filter) {

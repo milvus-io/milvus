@@ -24,8 +24,9 @@ from collections import Counter
 import bm25s
 import jieba
 import re
+import inspect
 
-from pymilvus import CollectionSchema, DataType, FunctionType, Function
+from pymilvus import CollectionSchema, DataType, FunctionType, Function, MilvusException
 
 from bm25s.tokenization import Tokenizer
 
@@ -65,8 +66,9 @@ class ParamInfo:
         self.param_replica_num = ct.default_replica_num
         self.param_uri = ""
         self.param_token = ""
+        self.param_bucket_name = ""
 
-    def prepare_param_info(self, host, port, handler, replica_num, user, password, secure, uri, token):
+    def prepare_param_info(self, host, port, handler, replica_num, user, password, secure, uri, token, bucket_name):
         self.param_host = host
         self.param_port = port
         self.param_handler = handler
@@ -76,6 +78,7 @@ class ParamInfo:
         self.param_replica_num = replica_num
         self.param_uri = uri
         self.param_token = token
+        self.param_bucket_name = bucket_name
 
 
 param_info = ParamInfo()
@@ -796,7 +799,7 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         gen_string_field(name="document", max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable),
         gen_string_field(name="text", max_length=2000, enable_analyzer=True, enable_match=True,
                          analyzer_params=analyzer_params),
-        gen_json_field(),
+        gen_json_field(nullable=nullable),
         gen_array_field(name="array_int", element_type=DataType.INT64),
         gen_array_field(name="array_float", element_type=DataType.FLOAT),
         gen_array_field(name="array_varchar", element_type=DataType.VARCHAR, max_length=200),
@@ -1886,6 +1889,16 @@ def get_scalar_field_name_list(schema=None):
             vec_fields.append(field.name)
     return vec_fields
 
+def get_json_field_name_list(schema=None):
+    json_fields = []
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.JSON:
+            json_fields.append(field.name)
+    return json_fields
+
 
 def get_binary_vec_field_name(schema=None):
     if schema is None:
@@ -1940,6 +1953,10 @@ def gen_varchar_data(length: int, nb: int, text_mode=False):
 
 def gen_data_by_collection_field(field, nb=None, start=None):
     # if nb is None, return one data, else return a list of data
+    nullable = field.nullable
+    if nullable is True:
+        if random.random() < 0.1:
+            return None
     data_type = field.dtype
     enable_analyzer = field.params.get("enable_analyzer", False)
     if data_type == DataType.BOOL:
@@ -1981,8 +1998,8 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         return gen_varchar_data(length=length, nb=nb, text_mode=enable_analyzer)
     if data_type == DataType.JSON:
         if nb is None:
-            return {"name": fake.name(), "address": fake.address()}
-        data = [{"name": str(i), "address": i} for i in range(nb)]
+            return {"name": fake.name(), "address": fake.address(), "count": random.randint(0, 100)}
+        data = [{"name": str(i), "address": i, "count": random.randint(0, 100)} for i in range(nb)]
         return data
     if data_type == DataType.FLOAT_VECTOR:
         dim = field.params['dim']
@@ -2439,7 +2456,8 @@ def gen_json_field_expressions_all_single_operator():
                    "array_contains_all(json_field['a'], [1.0, 2])", "ARRAY_CONTAINS_ALL(json_field['a'], [1.0, 2])",
                    "array_contains_any(json_field['a'], [1.0, 2])", "ARRAY_CONTAINS_ANY(json_field['a'], [1.0, 2])",
                    "array_length(json_field['a']) < 10", "ARRAY_LENGTH(json_field['a']) < 10",
-                   "json_field is null", "json_field IS NULL", "json_field is not null", "json_field IS NOT NULL"
+                   "json_field is null", "json_field IS NULL", "json_field is not null", "json_field IS NOT NULL",
+                   "json_field['a'] is null", "json_field['a'] IS NULL", "json_field['a'] is not null", "json_field['a'] IS NOT NULL"
                    ]
     
     return expressions
@@ -3100,8 +3118,8 @@ def install_milvus_operator_specific_config(namespace, milvus_mode, release_name
     }
     mil = MilvusOperator()
     mil.install(data_config)
-    if mil.wait_for_healthy(release_name, NAMESPACE, timeout=TIMEOUT):
-        host = mic.endpoint(release_name, NAMESPACE).split(':')[0]
+    if mil.wait_for_healthy(release_name, namespace, timeout=1800):
+        host = mil.endpoint(release_name, namespace).split(':')[0]
     else:
         raise MilvusException(message=f'Milvus healthy timeout 1800s')
 
@@ -3403,3 +3421,12 @@ def iter_insert_list_data(data: list, batch: int, total_len: int):
     data_obj = [iter(d) for d in data]
     for n in nb_list:
         yield [[next(o) for _ in range(n)] for o in data_obj]
+
+
+def gen_collection_name_by_testcase_name(module_index=1):
+    """
+    Gen a unique collection name by testcase name
+    if calling from the test base class, module_index=2
+    if calling from the testcase, module_index=1
+    """
+    return inspect.stack()[module_index][3] + gen_unique_str("_")

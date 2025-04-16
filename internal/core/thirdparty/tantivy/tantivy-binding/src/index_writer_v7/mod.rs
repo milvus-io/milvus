@@ -3,6 +3,7 @@
 //! in most cases.
 
 pub(crate) mod index_writer;
+pub(crate) mod index_writer_json_key_stats;
 pub(crate) mod index_writer_text;
 
 pub(crate) use index_writer::IndexWriterWrapperImpl;

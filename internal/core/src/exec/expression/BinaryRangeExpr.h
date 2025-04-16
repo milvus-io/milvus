@@ -245,15 +245,17 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
         const std::string& name,
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
-        int64_t batch_size)
+        int64_t batch_size,
+        int32_t consistency_level)
         : SegmentExpr(std::move(input),
                       name,
                       segment,
                       expr->column_.field_id_,
                       expr->column_.nested_path_,
-                      DataType::NONE,
+                      FromValCase(expr->lower_val_.val_case()),
                       active_count,
-                      batch_size),
+                      batch_size,
+                      consistency_level),
           expr_(expr) {
     }
 
@@ -307,6 +309,10 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     template <typename ValueType>
     VectorPtr
     ExecRangeVisitorImplForJson(EvalCtx& context);
+
+    template <typename ValueType>
+    VectorPtr
+    ExecRangeVisitorImplForJsonForIndex();
 
     template <typename ValueType>
     VectorPtr

@@ -203,22 +203,19 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 	defer node.lifetime.Done()
 	unissued, active := node.taskScheduler.TaskQueue.GetTaskNum()
 
-	slots := 0
-	if node.taskScheduler.BuildParallel > unissued+active {
-		slots = node.taskScheduler.BuildParallel - unissued - active
-	}
+	slots := node.totalSlot - node.taskScheduler.TaskQueue.GetUsingSlot()
 	log.Ctx(ctx).Info("Get Index Job Stats",
 		zap.Int("unissued", unissued),
 		zap.Int("active", active),
-		zap.Int("slot", slots),
+		zap.Int64("slots", slots),
 	)
 	return &workerpb.GetJobStatsResponse{
 		Status:           merr.Success(),
 		TotalJobNum:      int64(active) + int64(unissued),
 		InProgressJobNum: int64(active),
 		EnqueueJobNum:    int64(unissued),
-		TaskSlots:        int64(slots),
-		EnableDisk:       paramtable.Get().DataNodeCfg.EnableDisk.GetAsBool(),
+		TotalSlots:       node.totalSlot,
+		AvailableSlots:   slots,
 	}, nil
 }
 
@@ -259,6 +256,7 @@ func (node *DataNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2
 			zap.Int64("fieldID", indexRequest.GetFieldID()),
 			zap.String("fieldType", indexRequest.GetFieldType().String()),
 			zap.Any("field", indexRequest.GetField()),
+			zap.Int64("taskSlot", indexRequest.GetTaskSlot()),
 		)
 		taskCtx, taskCancel := context.WithCancel(node.ctx)
 		if oldInfo := node.taskManager.LoadOrStoreIndexTask(indexRequest.GetClusterID(), indexRequest.GetBuildID(), &index.IndexTaskInfo{
@@ -305,7 +303,9 @@ func (node *DataNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2
 			zap.Int64("dim", analyzeRequest.GetDim()),
 			zap.Float64("trainSizeRatio", analyzeRequest.GetMaxTrainSizeRatio()),
 			zap.Int64("numClusters", analyzeRequest.GetNumClusters()),
+			zap.Int64("taskSlot", analyzeRequest.GetTaskSlot()),
 		)
+
 		taskCtx, taskCancel := context.WithCancel(node.ctx)
 		if oldInfo := node.taskManager.LoadOrStoreAnalyzeTask(analyzeRequest.GetClusterID(), analyzeRequest.GetTaskID(), &index.AnalyzeTaskInfo{
 			Cancel: taskCancel,
@@ -335,6 +335,7 @@ func (node *DataNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2
 			zap.String("subJobType", statsRequest.GetSubJobType().String()),
 			zap.Int64("startLogID", statsRequest.GetStartLogID()),
 			zap.Int64("endLogID", statsRequest.GetEndLogID()),
+			zap.Int64("taskSlot", statsRequest.GetTaskSlot()),
 		)
 
 		taskCtx, taskCancel := context.WithCancel(node.ctx)
@@ -461,18 +462,19 @@ func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2
 			info := node.taskManager.GetStatsTaskInfo(req.GetClusterID(), taskID)
 			if info != nil {
 				results = append(results, &workerpb.StatsResult{
-					TaskID:        taskID,
-					State:         info.State,
-					FailReason:    info.FailReason,
-					CollectionID:  info.CollID,
-					PartitionID:   info.PartID,
-					SegmentID:     info.SegID,
-					Channel:       info.InsertChannel,
-					InsertLogs:    info.InsertLogs,
-					StatsLogs:     info.StatsLogs,
-					TextStatsLogs: info.TextStatsLogs,
-					Bm25Logs:      info.Bm25Logs,
-					NumRows:       info.NumRows,
+					TaskID:           taskID,
+					State:            info.State,
+					FailReason:       info.FailReason,
+					CollectionID:     info.CollID,
+					PartitionID:      info.PartID,
+					SegmentID:        info.SegID,
+					Channel:          info.InsertChannel,
+					InsertLogs:       info.InsertLogs,
+					StatsLogs:        info.StatsLogs,
+					TextStatsLogs:    info.TextStatsLogs,
+					Bm25Logs:         info.Bm25Logs,
+					NumRows:          info.NumRows,
+					JsonKeyStatsLogs: info.JSONKeyStatsLogs,
 				})
 			}
 		}

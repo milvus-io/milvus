@@ -187,7 +187,7 @@ func executeAlterDatabaseTaskSteps(ctx context.Context,
 				return nil, nil
 			}
 
-			resp, err := core.queryCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
+			resp, err := core.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
 				CollectionIDs:  lo.Map(colls, func(coll *model.Collection, _ int) int64 { return coll.CollectionID }),
 				ReplicaNumber:  int32(newReplicaNumber),
 				ResourceGroups: newResourceGroups,

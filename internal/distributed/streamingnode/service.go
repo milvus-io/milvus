@@ -33,8 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
-	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	tikvkv "github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -85,8 +84,7 @@ type Server struct {
 	// component client
 	etcdCli        *clientv3.Client
 	tikvCli        *txnkv.Client
-	rootCoord      *syncutil.Future[types.RootCoordClient]
-	dataCoord      *syncutil.Future[types.DataCoordClient]
+	mixCoord       *syncutil.Future[types.MixCoordClient]
 	chunkManager   storage.ChunkManager
 	componentState *componentutil.ComponentStateService
 }
@@ -97,8 +95,7 @@ func NewServer(ctx context.Context, f dependency.Factory) (*Server, error) {
 	return &Server{
 		stopOnce:       sync.Once{},
 		factory:        f,
-		dataCoord:      syncutil.NewFuture[types.DataCoordClient](),
-		rootCoord:      syncutil.NewFuture[types.RootCoordClient](),
+		mixCoord:       syncutil.NewFuture[types.MixCoordClient](),
 		grpcServerChan: make(chan struct{}),
 		componentState: componentutil.NewComponentStateService(typeutil.StreamingNodeRole),
 		ctx:            ctx1,
@@ -169,17 +166,11 @@ func (s *Server) stop() {
 	s.session.Stop()
 
 	// Stop rootCoord client.
-	log.Info("streamingnode stop rootCoord client...")
-	if s.rootCoord.Ready() {
-		if err := s.rootCoord.Get().Close(); err != nil {
-			log.Warn("streamingnode stop rootCoord client failed", zap.Error(err))
-		}
-	}
+	log.Info("streamingnode stop mixCoord client...")
 
-	log.Info("streamingnode stop dataCoord client...")
-	if s.dataCoord.Ready() {
-		if err := s.dataCoord.Get().Close(); err != nil {
-			log.Warn("streamingnode stop dataCoord client failed", zap.Error(err))
+	if s.mixCoord.Ready() {
+		if err := s.mixCoord.Get().Close(); err != nil {
+			log.Warn("streamingnode stop mixCoord client failed", zap.Error(err))
 		}
 	}
 
@@ -230,17 +221,14 @@ func (s *Server) init() (err error) {
 		return err
 	}
 
-	s.initRootCoord()
-	s.initDataCoord()
+	s.initMixCoord()
 	s.initGRPCServer()
-
 	// Create StreamingNode service.
 	s.streamingnode = streamingnodeserver.NewServerBuilder().
 		WithETCD(s.etcdCli).
 		WithChunkManager(s.chunkManager).
 		WithGRPCServer(s.grpcServer).
-		WithRootCoordClient(s.rootCoord).
-		WithDataCoordClient(s.dataCoord).
+		WithMixCoordClient(s.mixCoord).
 		WithSession(s.session).
 		WithMetaKV(s.metaKV).
 		Build()
@@ -303,45 +291,23 @@ func (s *Server) initMeta() error {
 	return nil
 }
 
-func (s *Server) initRootCoord() {
+func (s *Server) initMixCoord() {
 	log := log.Ctx(s.ctx)
 	go func() {
 		retry.Do(s.ctx, func() error {
-			log.Info("StreamingNode connect to rootCoord...")
-			rootCoord, err := rcc.NewClient(s.ctx)
+			log.Info("StreamingNode connect to mixCoord...")
+			mixCoord, err := mix.NewClient(s.ctx)
 			if err != nil {
-				return errors.Wrap(err, "StreamingNode try to new RootCoord client failed")
+				return errors.Wrap(err, "StreamingNode try to new mixCoord client failed")
 			}
 
-			log.Info("StreamingNode try to wait for RootCoord ready")
-			err = componentutil.WaitForComponentHealthy(s.ctx, rootCoord, "RootCoord", 1000000, time.Millisecond*200)
+			log.Info("StreamingNode try to wait for mixCoord ready")
+			err = componentutil.WaitForComponentHealthy(s.ctx, mixCoord, "mixCoord", 1000000, time.Millisecond*200)
 			if err != nil {
-				return errors.Wrap(err, "StreamingNode wait for RootCoord ready failed")
+				return errors.Wrap(err, "StreamingNode wait for mixCoord ready failed")
 			}
-			log.Info("StreamingNode wait for RootCoord done")
-			s.rootCoord.Set(rootCoord)
-			return nil
-		}, retry.AttemptAlways())
-	}()
-}
-
-func (s *Server) initDataCoord() {
-	log := log.Ctx(s.ctx)
-	go func() {
-		retry.Do(s.ctx, func() error {
-			log.Info("StreamingNode connect to dataCoord...")
-			dataCoord, err := dcc.NewClient(s.ctx)
-			if err != nil {
-				return errors.Wrap(err, "StreamingNode try to new DataCoord client failed")
-			}
-
-			log.Info("StreamingNode try to wait for DataCoord ready")
-			err = componentutil.WaitForComponentHealthy(s.ctx, dataCoord, "DataCoord", 1000000, time.Millisecond*200)
-			if err != nil {
-				return errors.Wrap(err, "StreamingNode wait for DataCoord ready failed")
-			}
-			log.Info("StreamingNode wait for DataCoord ready")
-			s.dataCoord.Set(dataCoord)
+			log.Info("StreamingNode wait for mixCoord ready")
+			s.mixCoord.Set(mixCoord)
 			return nil
 		}, retry.AttemptAlways())
 	}()

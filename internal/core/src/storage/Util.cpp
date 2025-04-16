@@ -574,6 +574,37 @@ GenTextIndexPathPrefix(ChunkManagerPtr cm,
 }
 
 std::string
+GenJsonKeyIndexPathIdentifier(int64_t build_id,
+                              int64_t index_version,
+                              int64_t collection_id,
+                              int64_t partition_id,
+                              int64_t segment_id,
+                              int64_t field_id) {
+    return std::to_string(build_id) + "/" + std::to_string(index_version) +
+           "/" + std::to_string(collection_id) + "/" +
+           std::to_string(partition_id) + "/" + std::to_string(segment_id) +
+           "/" + std::to_string(field_id) + "/";
+}
+
+std::string
+GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
+                          int64_t build_id,
+                          int64_t index_version,
+                          int64_t collection_id,
+                          int64_t partition_id,
+                          int64_t segment_id,
+                          int64_t field_id) {
+    return cm->GetRootPath() + "/" + std::string(JSON_KEY_INDEX_LOG_ROOT_PATH) +
+           "/" +
+           GenJsonKeyIndexPathIdentifier(build_id,
+                                         index_version,
+                                         collection_id,
+                                         partition_id,
+                                         segment_id,
+                                         field_id);
+}
+
+std::string
 GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id) {
     boost::filesystem::path prefix = cm->GetRootPath();
     boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
@@ -604,12 +635,13 @@ std::unique_ptr<DataCodec>
 DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
                             const std::string& file,
                             bool is_field_data) {
+    // TODO remove this Size() cost
     auto fileSize = chunk_manager->Size(file);
     auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
     chunk_manager->Read(file, buf.get(), fileSize);
-
     auto res = DeserializeFileData(buf, fileSize, is_field_data);
     res->SetData(buf);
+    // DataCodec must keep the buf alive for zero-copy usage, otherwise segmentation violation will occur
     return res;
 }
 
@@ -621,9 +653,7 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           FieldDataMeta field_meta,
                           std::string object_key) {
     // index not use valid_data, so no need to set nullable==true
-    auto field_data = CreateFieldData(DataType::INT8, false);
-    field_data->FillFieldData(buf, batch_size);
-    auto indexData = std::make_shared<IndexData>(field_data);
+    auto indexData = std::make_shared<IndexData>(buf, batch_size);
     indexData->set_index_meta(index_meta);
     indexData->SetFieldDataMeta(field_meta);
     auto serialized_index_data = indexData->serialize_to_remote_file();
@@ -647,7 +677,8 @@ EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
     auto field_data =
         CreateFieldData(field_meta.get_data_type(), false, dim, 0);
     field_data->FillFieldData(buf, element_count);
-    auto insertData = std::make_shared<InsertData>(field_data);
+    auto payload_reader = std::make_shared<PayloadReader>(field_data);
+    auto insertData = std::make_shared<InsertData>(payload_reader);
     insertData->SetFieldDataMeta(field_data_meta);
     auto serialized_inserted_data = insertData->serialize_to_remote_file();
     auto serialized_inserted_data_size = serialized_inserted_data.size();

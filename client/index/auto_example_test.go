@@ -14,36 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package util
+// nolint
+package index_test
 
 import (
-	"os"
-	"testing"
+	"log"
 
-	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v2/index"
 )
 
-func TestMain(t *testing.M) {
-	paramtable.Init()
-	code := t.Run()
-	os.Exit(code)
-}
-
-func TestSegmentCache(t *testing.T) {
-	segCache := NewCache()
-
-	assert.False(t, segCache.checkIfCached(0))
-
-	segCache.Cache(typeutil.UniqueID(0))
-	assert.True(t, segCache.checkIfCached(0))
-
-	assert.False(t, segCache.checkOrCache(typeutil.UniqueID(1)))
-	assert.True(t, segCache.checkIfCached(1))
-	assert.True(t, segCache.checkOrCache(typeutil.UniqueID(1)))
-
-	segCache.Remove(typeutil.UniqueID(0))
-	assert.False(t, segCache.checkIfCached(0))
+func ExampleNewAutoIndex() {
+	index := index.NewAutoIndex(entity.L2)
+	log.Println(index)
 }

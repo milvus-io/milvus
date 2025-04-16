@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -112,7 +111,7 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
-	b := mocks.NewMockRootCoordClient(t)
+	b := mocks.NewMixCoord(t)
 
 	t.Run("get field name failed", func(t *testing.T) {
 		b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
@@ -259,7 +258,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		assert.Error(t, merr.CheckRPCCall(resp, err))
 	})
 
-	t.Run("not support disk index", func(t *testing.T) {
+	t.Run("disk index", func(t *testing.T) {
 		s.allocator = mock0Allocator
 		s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
 		req.IndexParams = []*commonpb.KeyValuePair{
@@ -270,7 +269,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		}
 		s.indexNodeManager = session.NewNodeManager(ctx, defaultDataNodeCreatorFunc)
 		resp, err := s.CreateIndex(ctx, req)
-		assert.Error(t, merr.CheckRPCCall(resp, err))
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("disk index with mmap", func(t *testing.T) {
@@ -290,10 +289,6 @@ func TestServer_CreateIndex(t *testing.T) {
 		s.indexNodeManager = nodeManager
 		mockNode := mocks.NewMockDataNodeClient(t)
 		nodeManager.SetClient(1001, mockNode)
-		mockNode.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&workerpb.GetJobStatsResponse{
-			Status:     merr.Success(),
-			EnableDisk: true,
-		}, nil)
 
 		resp, err := s.CreateIndex(ctx, req)
 		assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -2634,7 +2629,7 @@ func TestJsonIndex(t *testing.T) {
 	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
 	mock0Allocator := newMockAllocator(t)
 	indexMeta := newSegmentIndexMeta(catalog)
-	b := mocks.NewMockRootCoordClient(t)
+	b := mocks.NewMixCoord(t)
 	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: 0,

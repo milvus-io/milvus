@@ -46,15 +46,20 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
  public:
     ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
                         Timestamp timestamp,
-                        const PlaceholderGroup* placeholder_group)
+                        const PlaceholderGroup* placeholder_group,
+                        int32_t consystency_level = 0)
         : segment_(segment),
           timestamp_(timestamp),
-          placeholder_group_(placeholder_group) {
+          placeholder_group_(placeholder_group),
+          consystency_level_(consystency_level) {
     }
 
     ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
-                        Timestamp timestamp)
-        : segment_(segment), timestamp_(timestamp) {
+                        Timestamp timestamp,
+                        int32_t consystency_level = 0)
+        : segment_(segment),
+          timestamp_(timestamp),
+          consystency_level_(consystency_level) {
         placeholder_group_ = nullptr;
     }
 
@@ -108,6 +113,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     SearchResultOpt search_result_opt_;
     RetrieveResultOpt retrieve_result_opt_;
     bool expr_use_pk_index_ = false;
+    int32_t consystency_level_ = 0;
 };
 
 // for test use only

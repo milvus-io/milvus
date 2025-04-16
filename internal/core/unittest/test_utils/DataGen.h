@@ -30,12 +30,19 @@
 #include "index/VectorMemIndex.h"
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "segcore/SegmentSealedImpl.h"
+
 #include "segcore/Utils.h"
 #include "knowhere/comp/index_param.h"
 
 #include "PbHelper.h"
 #include "segcore/collection_c.h"
+#include "segcore/SegmentSealed.h"
+#include "common/Types.h"
+#include "storage/BinlogReader.h"
+#include "storage/Event.h"
+#include "storage/PayloadWriter.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "storage/Util.h"
 
 using boost::algorithm::starts_with;
 
@@ -1169,20 +1176,28 @@ SealedLoadFieldData(const GeneratedData& dataset,
         auto field_data = std::make_shared<milvus::FieldData<int64_t>>(
             DataType::INT64, false);
         field_data->FillFieldData(dataset.row_ids_.data(), row_count);
-        auto field_data_info =
-            FieldDataInfo(RowFieldID.get(),
-                          row_count,
-                          std::vector<milvus::FieldDataPtr>{field_data});
+
+        auto arrow_data_wrapper =
+            storage::ConvertFieldDataToArrowDataWrapper(field_data);
+
+        auto field_data_info = FieldDataInfo(
+            RowFieldID.get(),
+            row_count,
+            std::vector<std::shared_ptr<milvus::ArrowDataWrapper>>{
+                arrow_data_wrapper});
         seg.LoadFieldData(RowFieldID, field_data_info);
     }
     {
         auto field_data = std::make_shared<milvus::FieldData<int64_t>>(
             DataType::INT64, false);
         field_data->FillFieldData(dataset.timestamps_.data(), row_count);
-        auto field_data_info =
-            FieldDataInfo(TimestampFieldID.get(),
-                          row_count,
-                          std::vector<milvus::FieldDataPtr>{field_data});
+        auto arrow_data_wrapper =
+            storage::ConvertFieldDataToArrowDataWrapper(field_data);
+        auto field_data_info = FieldDataInfo(
+            TimestampFieldID.get(),
+            row_count,
+            std::vector<std::shared_ptr<milvus::ArrowDataWrapper>>{
+                arrow_data_wrapper});
         seg.LoadFieldData(TimestampFieldID, field_data_info);
     }
     for (auto& iter : dataset.schema_->get_fields()) {
@@ -1204,9 +1219,11 @@ SealedLoadFieldData(const GeneratedData& dataset,
         info.field_id = field_data.field_id();
         info.row_count = row_count;
         auto field_meta = fields.at(FieldId(field_id));
-        info.channel->push(
+        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
             CreateFieldDataFromDataArray(row_count, &field_data, field_meta));
-        info.channel->close();
+
+        info.arrow_reader_channel->push(arrow_data_wrapper);
+        info.arrow_reader_channel->close();
 
         if (with_mmap) {
             seg.MapFieldData(FieldId(field_id), info);

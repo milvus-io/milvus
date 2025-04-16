@@ -19,39 +19,6 @@
 using namespace milvus;
 using namespace milvus::index;
 
-TEST(JsonIndexTest, TestBuildNonExistJsonPath) {
-    std::string json_path = "/hello";
-    auto schema = std::make_shared<Schema>();
-    auto json_fid = schema->AddDebugField("json", DataType::JSON);
-    auto file_manager_ctx = storage::FileManagerContext();
-    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
-        milvus::proto::schema::JSON);
-    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
-    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
-    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::INVERTED_INDEX_TYPE,
-        JsonCastType::DOUBLE,
-        json_path,
-        file_manager_ctx);
-    auto json_index = std::unique_ptr<JsonInvertedIndex<int32_t>>(
-        static_cast<JsonInvertedIndex<int32_t>*>(inv_index.release()));
-
-    std::vector<std::string> json_raw_data = {R"({"hello": 1})",
-                                              R"({"world": 2})"};
-
-    std::vector<milvus::Json> jsons;
-    for (auto& json : json_raw_data) {
-        jsons.push_back(milvus::Json(simdjson::padded_string(json)));
-    }
-
-    auto json_field =
-        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
-    json_field->add_json_data(jsons);
-    json_index->BuildWithFieldData({json_field});
-    json_index->finish();
-    json_index->create_reader();
-}
-
 TEST(JsonIndexTest, TestJSONErrRecorder) {
     std::vector<std::string> json_raw_data = {
         R"(1)",

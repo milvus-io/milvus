@@ -281,20 +281,9 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 	paramtable.Init()
 
 	start := time.Now()
-	log.Info("=========================Data Coordinators stopped=========================")
-	c.StopDataCoord()
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
-
-	log.Info("=========================Query Coordinators stopped=========================")
-	c.StopQueryCoord()
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
 
 	log.Info("=========================Root Coordinators stopped=========================")
-	c.StopRootCoord()
+	c.StopMixCoord()
 	params.Save(params.CommonCfg.GracefulTime.Key, "60000")
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
@@ -306,19 +295,7 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 	testutil.ResetEnvironment()
 
 	log.Info("=========================restart Root Coordinators=========================")
-	c.StartRootCoord()
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
-
-	log.Info("=========================restart Data Coordinators=========================")
-	c.StartDataCoord()
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
-	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
-
-	log.Info("=========================restart Query Coordinators=========================")
-	c.StartQueryCoord()
+	c.StartMixCoord()
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)

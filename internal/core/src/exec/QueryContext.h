@@ -176,6 +176,7 @@ class QueryContext : public Context {
                  const milvus::segcore::SegmentInternalInterface* segment,
                  int64_t active_count,
                  milvus::Timestamp timestamp,
+                 int32_t consistency_level = 0,
                  std::shared_ptr<QueryConfig> query_config =
                      std::make_shared<QueryConfig>(),
                  folly::Executor* executor = nullptr,
@@ -187,7 +188,8 @@ class QueryContext : public Context {
           active_count_(active_count),
           query_timestamp_(timestamp),
           query_config_(query_config),
-          executor_(executor) {
+          executor_(executor),
+          consistency_level_(consistency_level) {
     }
 
     folly::Executor*
@@ -270,6 +272,11 @@ class QueryContext : public Context {
         return std::move(retrieve_result_);
     }
 
+    int32_t
+    get_consistency_level() {
+        return consistency_level_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -291,6 +298,8 @@ class QueryContext : public Context {
     // used for store segment search/retrieve result
     milvus::SearchResult search_result_;
     milvus::RetrieveResult retrieve_result_;
+
+    int32_t consistency_level_ = 0;
 };
 
 // Represent the state of one thread of query execution.

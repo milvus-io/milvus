@@ -54,7 +54,8 @@ get_default_mmap_config() {
         .disk_limit =
             uint64_t(2) * uint64_t(1024) * uint64_t(1024) * uint64_t(1024),
         .fix_file_size = uint64_t(4) * uint64_t(1024) * uint64_t(1024),
-        .growing_enable_mmap = false};
+        .growing_enable_mmap = false,
+    };
     return mmap_config;
 }
 
@@ -71,7 +72,9 @@ PrepareInsertBinlog(int64_t collection_id,
     auto SaveFieldData = [&](const FieldDataPtr field_data,
                              const std::string& file,
                              const int64_t field_id) {
-        auto insert_data = std::make_shared<InsertData>(field_data);
+        auto payload_reader =
+            std::make_shared<milvus::storage::PayloadReader>(field_data);
+        auto insert_data = std::make_shared<InsertData>(payload_reader);
         FieldDataMeta field_data_meta{
             collection_id, partition_id, segment_id, field_id};
         insert_data->SetFieldDataMeta(field_data_meta);

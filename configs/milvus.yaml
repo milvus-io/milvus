@@ -247,6 +247,10 @@ natsmq:
       maxBytes:  # How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size
       maxMsgs:  # How many message the single P-channel may contain. Removing oldest messages if the P-channel exceeds this limit
 
+# Related configuration of mixCoord
+mixCoord:
+  enableActiveStandby: false
+
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
   dmlChannelNum: 16 # The number of DML-Channels to create at the root coord startup.
@@ -412,8 +416,9 @@ queryNode:
       nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
-    multipleChunkedEnable: true # Enable multiple chunked search
+    multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
+    jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
@@ -447,10 +452,6 @@ queryNode:
     maxRetryTimes: 1 # max retry times for lazy load, 1 by default
     maxEvictPerRetry: 1 # max evict count for lazy load, 1 by default
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
-  grouping:
-    enabled: true
-    maxNQ: 1000
-    topKMergeRatio: 20
   scheduler:
     receiveChanSize: 10240
     unsolvedQueueSize: 10240
@@ -474,6 +475,9 @@ queryNode:
       taskQueueExpire: 60 # Control how long (many seconds) that queue retains since queue is empty
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
+  grouping:
+    maxNQ: 1000
+    topKMergeRatio: 20
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
@@ -507,8 +511,6 @@ indexCoord:
 indexNode:
   scheduler:
     buildParallel: 1
-  enableDisk: true # enable build disk vector index
-  maxDiskUsagePercentage: 95
 
 dataCoord:
   channel:
@@ -635,6 +637,13 @@ dataCoord:
     clusteringCompactionUsage: 16 # slot usage of clustering compaction job.
     mixCompactionUsage: 8 # slot usage of mix compaction job.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction job.
+    indexTaskSlotUsage: 64 # slot usage of index task per 512mb
+    statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
+    analyzeTaskSlotUsage: 65535 # slot usage of analyze task
+  jsonStatsTriggerCount: 10 # jsonkey stats task count per trigger
+  jsonStatsTriggerInterval: 10 # jsonkey task interval per trigger
+  enabledJSONKeyStatsInSort: false # Indicates whether to enable JSON key stats task with sort
+  jsonKeyStatsMemoryBudgetInTantivy: 16777216 # the memory budget for the JSON index In Tantivy, the unit is bytes
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
@@ -890,6 +899,8 @@ common:
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
+  enabledJSONKeyStats: false # Indicates sealedsegment whether to enable JSON key stats
+  enabledGrowingSegmentJSONKeyStats: false # Indicates growingsegment whether to enable JSON key stats
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

@@ -11,6 +11,7 @@ impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,
     // and then execute the disconjunction of term query.
     pub(crate) fn match_query(&self, q: &str) -> Result<Vec<u32>> {
+        // clone the tokenizer to make `match_query` thread-safe.
         let mut tokenizer = self
             .index
             .tokenizer_for_field(self.field)
@@ -83,8 +84,10 @@ mod tests {
         )
         .unwrap();
 
-        writer.add("网球和滑雪", Some(0)).unwrap();
-        writer.add("网球以及滑雪", Some(1)).unwrap();
+        writer.add_data_by_batch(&["网球和滑雪"], Some(0)).unwrap();
+        writer
+            .add_data_by_batch(&["网球以及滑雪"], Some(1))
+            .unwrap();
 
         writer.commit().unwrap();
 
@@ -115,7 +118,7 @@ mod tests {
         .unwrap();
 
         for i in 0..10000 {
-            writer.add("hello world", Some(i)).unwrap();
+            writer.add_data_by_batch(&["hello world"], Some(i)).unwrap();
         }
         writer.commit().unwrap();
 
@@ -128,7 +131,5 @@ mod tests {
 
         let res = reader.search(&query).unwrap();
         assert_eq!(res, (0..10000).collect::<Vec<u32>>());
-        let res = reader.search_i64(&query).unwrap();
-        assert_eq!(res, (0..10000).collect::<Vec<i64>>());
     }
 }

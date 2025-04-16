@@ -13,7 +13,7 @@ from prettytable import PrettyTable
 import functools
 from collections import Counter
 from time import sleep
-from pymilvus import AnnSearchRequest, RRFRanker
+from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient
 from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 from base.database_wrapper import ApiDatabaseWrapper
 from base.collection_wrapper import ApiCollectionWrapper
@@ -23,6 +23,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.milvus_sys import MilvusSys
 from chaos import constants
+from faker import Faker
 
 from common.common_type import CheckTasks
 from utils.util_log import test_log as log
@@ -228,6 +229,7 @@ class Op(Enum):
     query = 'query'
     text_match = 'text_match'
     phrase_match = 'phrase_match'
+    json_query = 'json_query'
     delete = 'delete'
     delete_freshness = 'delete_freshness'
     compact = 'compact'
@@ -237,6 +239,7 @@ class Op(Enum):
     drop_partition = 'drop_partition'
     load_balance = 'load_balance'
     bulk_insert = 'bulk_insert'
+    alter_collection = 'alter_collection'
     unknown = 'unknown'
 
 
@@ -340,11 +343,21 @@ class Checker:
         self.files = []
         self.word_freq = Counter()
         self.ms = MilvusSys()
-        self.bucket_name = self.ms.data_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
+        self.bucket_name = cf.param_info.param_bucket_name
         self.db_wrap = ApiDatabaseWrapper()
         self.c_wrap = ApiCollectionWrapper()
         self.p_wrap = ApiPartitionWrapper()
         self.utility_wrap = ApiUtilityWrapper()
+        if cf.param_info.param_uri:
+            uri = cf.param_info.param_uri
+        else:
+            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+        
+        if cf.param_info.param_token:
+            token = cf.param_info.param_token
+        else:
+            token = f"{cf.param_info.param_user}:{cf.param_info.param_password}"
+        self.milvus_client = MilvusClient(uri=uri, token=token)
         c_name = collection_name if collection_name is not None else cf.gen_unique_str(
             'Checker_')
         self.c_name = c_name
@@ -364,6 +377,7 @@ class Checker:
                                     timeout=timeout,
                                     enable_traceback=enable_traceback)
         self.scalar_field_names = cf.get_scalar_field_name_list(schema=schema)
+        self.json_field_names = cf.get_json_field_name_list(schema=schema)
         self.float_vector_field_names = cf.get_float_vec_field_name_list(schema=schema)
         self.binary_vector_field_names = cf.get_binary_vec_field_name_list(schema=schema)
         self.bm25_sparse_field_names = cf.get_bm25_vec_field_name_list(schema=schema)
@@ -379,6 +393,28 @@ class Checker:
                                      timeout=timeout,
                                      enable_traceback=enable_traceback,
                                      check_task=CheckTasks.check_nothing)
+        # create index for json fields
+        for f in self.json_field_names:
+            if f in indexed_fields:
+                continue
+            self.c_wrap.create_index(f,
+                                    {"index_type": "INVERTED",
+                                    "params": {"json_path": f"{f}['name']", "json_cast_type": "varchar"}},
+                                    timeout=timeout,
+                                    enable_traceback=enable_traceback,
+                                    check_task=CheckTasks.check_nothing)
+            self.c_wrap.create_index(f,
+                                    {"index_type": "INVERTED",
+                                    "params": {"json_path": f"{f}['address']", "json_cast_type": "varchar"}},
+                                    timeout=timeout,
+                                    enable_traceback=enable_traceback,
+                                    check_task=CheckTasks.check_nothing)
+            self.c_wrap.create_index(f,
+                                    {"index_type": "INVERTED",
+                                    "params": {"json_path": f"{f}['count']", "json_cast_type": "double"}},
+                                    timeout=timeout,
+                                    enable_traceback=enable_traceback,
+                                    check_task=CheckTasks.check_nothing)   
         # create index for float vector fields
         for f in self.float_vector_field_names:
             if f in indexed_fields:
@@ -1459,6 +1495,55 @@ class PhraseMatchChecker(Checker):
             sleep(constants.WAIT_PER_OP / 10)
 
 
+class JsonQueryChecker(Checker):
+    """check json query operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("JsonQueryChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        res, result = self.c_wrap.create_index(self.float_vector_field_name,
+                                               constants.DEFAULT_INDEX_PARAM,
+                                               timeout=timeout,
+                                               enable_traceback=enable_traceback,
+                                               check_task=CheckTasks.check_nothing)
+        self.c_wrap.load(replica_number=replica_number)  # do load before query
+        self.insert_data()
+        self.term_expr = self.get_term_expr()
+
+    def get_term_expr(self):
+        json_field_name = random.choice(self.json_field_names)
+        fake = Faker()
+        address_list = [fake.address() for _ in range(10)]
+        name_list = [fake.name() for _ in range(10)]
+        number_list = [random.randint(0, 100) for _ in range(10)]
+        path = random.choice([ "name", "count"])
+        path_value = {
+            "address": address_list, # TODO not used in json query because of issue
+            "name": name_list,
+            "count": number_list
+        }
+        return f"{json_field_name}['{path}'] <= '{path_value[path][random.randint(0, len(path_value[path]) - 1)]}'"
+        
+
+    @trace()
+    def json_query(self):
+        res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
+                                        check_task=CheckTasks.check_query_not_empty)
+        return res, result
+
+    @exception_handler()
+    def run_task(self):
+        self.term_expr = self.get_term_expr()
+        res, result = self.json_query()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+
 class DeleteChecker(Checker):
     """check delete operations in a dependent thread"""
 
@@ -1755,6 +1840,44 @@ class BulkInsertChecker(Checker):
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP / 10)
+
+
+class AlterCollectionChecker(Checker):
+    def __init__(self, collection_name=None, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("AlterCollectionChecker")
+        super().__init__(collection_name=collection_name, schema=schema)
+        self.c_wrap.release()
+        res, result = self.c_wrap.describe()
+        log.info(f"before alter collection {self.c_name} properties: {res}")
+        # alter collection attributes
+        self.milvus_client.alter_collection_properties(collection_name=self.c_name, 
+        properties={"mmap.enabled": True})
+        self.milvus_client.alter_collection_properties(collection_name=self.c_name, 
+        properties={"collection.ttl.seconds": 3600})
+        res, result = self.c_wrap.describe()
+        log.info(f"after alter collection {self.c_name} properties: {res}")
+        
+    @trace()
+    def alter_check(self):
+        res, result = self.c_wrap.describe()
+        if result:
+            properties = res["properties"]
+            if properties["mmap.enabled"] != "True":
+                return res, False
+            if properties["collection.ttl.seconds"] != "3600":
+                return res, False
+        return res, result
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.alter_check()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP)
 
 
 class TestResultAnalyzer(unittest.TestCase):

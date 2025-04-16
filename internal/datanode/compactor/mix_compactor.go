@@ -143,7 +143,14 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096)
+	compactionParams, err := compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
+	if err != nil {
+		return nil, err
+	}
+	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096)
+	if err != nil {
+		return nil, err
+	}
 
 	deletedRowCount := int64(0)
 	expiredRowCount := int64(0)
@@ -320,7 +327,12 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, errors.New("illegal compaction plan")
 	}
 
-	sortMergeAppicable := paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool()
+	compactionParams, err := compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
+	if err != nil {
+		return nil, err
+	}
+
+	sortMergeAppicable := compactionParams.UseMergeSort
 	if sortMergeAppicable {
 		for _, segment := range t.plan.GetSegmentBinlogs() {
 			if !segment.GetIsSorted() {
@@ -329,14 +341,13 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			}
 		}
 		if len(t.plan.GetSegmentBinlogs()) <= 1 ||
-			len(t.plan.GetSegmentBinlogs()) > paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt() {
+			len(t.plan.GetSegmentBinlogs()) > compactionParams.MaxSegmentMergeSort {
 			// sort merge is not applicable if there is only one segment or too many segments
 			sortMergeAppicable = false
 		}
 	}
 
 	var res []*datapb.CompactionSegment
-	var err error
 	if sortMergeAppicable {
 		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,

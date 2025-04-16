@@ -11,6 +11,7 @@ cluster:
 streaming:
   enabled: true
 dataCoordinator:
+  enabled: false
   resources:
     limits:
       cpu: "1"
@@ -101,9 +102,6 @@ extraConfigFiles:
     indexCoord:
       scheduler:
         interval: 100
-    indexNode:
-      scheduler:
-        buildParallel: 4
 metrics:
   serviceMonitor:
     enabled: true
@@ -237,6 +235,7 @@ pulsar:
       key: node-role.kubernetes.io/e2e
       operator: Exists
 queryCoordinator:
+  enabled: false
   resources:
     limits:
       cpu: "1"
@@ -267,6 +266,7 @@ mixCoordinator:
       cpu: "0.2"
       memory: 256Mi
 rootCoordinator:
+  enabled: false
   resources:
     limits:
       cpu: "1"

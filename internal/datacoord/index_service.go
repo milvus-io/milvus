@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -69,6 +68,7 @@ func (s *Server) createIndexForSegment(ctx context.Context, segment *SegmentInfo
 	if err != nil {
 		return err
 	}
+	taskSlot := calculateIndexTaskSlot(segment.getSegmentSize())
 	segIndex := &model.SegmentIndex{
 		SegmentID:      segment.ID,
 		CollectionID:   segment.CollectionID,
@@ -82,7 +82,7 @@ func (s *Server) createIndexForSegment(ctx context.Context, segment *SegmentInfo
 	if err = s.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err
 	}
-	s.taskScheduler.enqueue(newIndexBuildTask(buildID))
+	s.taskScheduler.enqueue(newIndexBuildTask(buildID, taskSlot))
 	return nil
 }
 
@@ -320,56 +320,15 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	indexID, err := s.meta.indexMeta.CanCreateIndex(req, isJson)
+	allocateIndexID, err := s.allocator.AllocID(ctx)
 	if err != nil {
-		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-
-	// merge with previous params because create index would not pass mmap params
-	indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
-	if len(indexes) == 1 {
-		req.UserIndexParams = UpdateParams(indexes[0], indexes[0].UserIndexParams, req.GetUserIndexParams())
-		req.IndexParams = UpdateParams(indexes[0], indexes[0].IndexParams, req.GetIndexParams())
-	}
-
-	if indexID == 0 {
-		indexID, err = s.allocator.AllocID(ctx)
-		if err != nil {
-			log.Warn("failed to alloc indexID", zap.Error(err))
-			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
-			return merr.Status(err), nil
-		}
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(GetIndexType(req.IndexParams)) && !s.indexNodeManager.ClientSupportDisk() {
-			errMsg := "all DataNodes do not support disk indexes, please verify"
-			log.Warn(errMsg)
-			err = merr.WrapErrIndexNotSupported(GetIndexType(req.IndexParams))
-			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
-			return merr.Status(err), nil
-		}
-	}
-	// exclude the mmap.enable param, because it will be conflict with the index's mmap.enable param
-	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
-
-	index := &model.Index{
-		CollectionID:    req.GetCollectionID(),
-		FieldID:         req.GetFieldID(),
-		IndexID:         indexID,
-		IndexName:       req.GetIndexName(),
-		TypeParams:      typeParams,
-		IndexParams:     req.GetIndexParams(),
-		CreateTime:      req.GetTimestamp(),
-		IsAutoIndex:     req.GetIsAutoIndex(),
-		UserIndexParams: req.GetUserIndexParams(),
-	}
-
-	if err := ValidateIndexParams(index); err != nil {
+		log.Warn("failed to alloc indexID", zap.Error(err))
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	// Get flushed segments and create index
-	err = s.meta.indexMeta.CreateIndex(ctx, index)
+	indexID, err := s.meta.indexMeta.CreateIndex(ctx, req, allocateIndexID, isJson)
 	if err != nil {
 		log.Error("CreateIndex fail",
 			zap.Int64("fieldID", req.GetFieldID()), zap.String("indexName", req.GetIndexName()), zap.Error(err))

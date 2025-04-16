@@ -21,13 +21,14 @@ import (
 // getVchannels gets the vchannels of current pchannel.
 func (impl *WALFlusherImpl) getVchannels(ctx context.Context, pchannel string) ([]string, error) {
 	var vchannels []string
-	rc, err := resource.Resource().RootCoordClient().GetWithContext(ctx)
+	rc, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "when wait for rootcoord client ready")
 	}
 	retryCnt := -1
 	if err := retry.Do(ctx, func() error {
 		retryCnt++
+
 		resp, err := rc.GetPChannelInfo(ctx, &rootcoordpb.GetPChannelInfoRequest{
 			Pchannel: pchannel,
 		})
@@ -81,9 +82,8 @@ func (impl *WALFlusherImpl) getRecoveryInfo(ctx context.Context, vchannel string
 	retryCnt := -1
 	err := retry.Do(ctx, func() error {
 		retryCnt++
-		dc, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
+		dc, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 		if err != nil {
-			// Should never failed at here.
 			return err
 		}
 		resp, err = dc.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: vchannel})

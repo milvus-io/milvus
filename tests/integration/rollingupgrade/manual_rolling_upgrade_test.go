@@ -145,7 +145,7 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 	log.Info("Load collection done")
 
 	// suspend balance
-	resp2, err := s.Cluster.QueryCoord.SuspendBalance(ctx, &querypb.SuspendBalanceRequest{})
+	resp2, err := s.Cluster.MixCoord.SuspendBalance(ctx, &querypb.SuspendBalanceRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(resp2))
 
@@ -159,19 +159,19 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 	qn2 := qnSever2.GetQueryNode()
 
 	// expected 2 querynode found
-	resp3, err := s.Cluster.QueryCoordClient.ListQueryNode(ctx, &querypb.ListQueryNodeRequest{})
+	resp3, err := s.Cluster.MixCoordClient.ListQueryNode(ctx, &querypb.ListQueryNodeRequest{})
 	s.NoError(err)
 	s.Len(resp3.GetNodeInfos(), 2)
 
 	// due to balance has been suspended, qn2 won't have any segment/channel distribution
-	resp4, err := s.Cluster.QueryCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
+	resp4, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
 		NodeID: qn2.GetNodeID(),
 	})
 	s.NoError(err)
 	s.Len(resp4.GetChannelNames(), 0)
 	s.Len(resp4.GetSealedSegmentIDs(), 0)
 
-	resp5, err := s.Cluster.QueryCoordClient.TransferChannel(ctx, &querypb.TransferChannelRequest{
+	resp5, err := s.Cluster.MixCoordClient.TransferChannel(ctx, &querypb.TransferChannelRequest{
 		SourceNodeID: qn1.GetNodeID(),
 		TargetNodeID: qn2.GetNodeID(),
 		TransferAll:  true,
@@ -181,7 +181,7 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 
 	// wait for transfer channel done
 	s.Eventually(func() bool {
-		resp, err := s.Cluster.QueryCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
+		resp, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
 			NodeID: qn1.GetNodeID(),
 		})
 		s.NoError(err)
@@ -189,7 +189,7 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 	}, 10*time.Second, 1*time.Second)
 
 	// test transfer segment
-	resp6, err := s.Cluster.QueryCoordClient.TransferSegment(ctx, &querypb.TransferSegmentRequest{
+	resp6, err := s.Cluster.MixCoordClient.TransferSegment(ctx, &querypb.TransferSegmentRequest{
 		SourceNodeID: qn1.GetNodeID(),
 		TargetNodeID: qn2.GetNodeID(),
 		TransferAll:  true,
@@ -199,7 +199,7 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 
 	// wait for transfer segment done
 	s.Eventually(func() bool {
-		resp, err := s.Cluster.QueryCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
+		resp, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
 			NodeID: qn1.GetNodeID(),
 		})
 		s.NoError(err)
@@ -207,12 +207,12 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 	}, 10*time.Second, 1*time.Second)
 
 	// resume balance, segment/channel will be balance to qn1
-	resp7, err := s.Cluster.QueryCoord.ResumeBalance(ctx, &querypb.ResumeBalanceRequest{})
+	resp7, err := s.Cluster.MixCoord.ResumeBalance(ctx, &querypb.ResumeBalanceRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(resp7))
 
 	s.Eventually(func() bool {
-		resp, err := s.Cluster.QueryCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
+		resp, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
 			NodeID: qn1.GetNodeID(),
 		})
 		s.NoError(err)
@@ -305,12 +305,12 @@ func (s *ManualRollingUpgradeSuite) TestSuspendNode() {
 	qn2 := qnSever2.GetQueryNode()
 
 	// expected 2 querynode found
-	resp3, err := s.Cluster.QueryCoordClient.ListQueryNode(ctx, &querypb.ListQueryNodeRequest{})
+	resp3, err := s.Cluster.MixCoordClient.ListQueryNode(ctx, &querypb.ListQueryNodeRequest{})
 	s.NoError(err)
 	s.Len(resp3.GetNodeInfos(), 2)
 
 	// suspend Node
-	resp2, err := s.Cluster.QueryCoord.SuspendNode(ctx, &querypb.SuspendNodeRequest{
+	resp2, err := s.Cluster.MixCoord.SuspendNode(ctx, &querypb.SuspendNodeRequest{
 		NodeID: qn2.GetNodeID(),
 	})
 	s.NoError(err)
@@ -330,7 +330,7 @@ func (s *ManualRollingUpgradeSuite) TestSuspendNode() {
 	log.Info("Load collection done")
 
 	// due to node has been suspended, no segment/channel will be loaded to this qn
-	resp4, err := s.Cluster.QueryCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
+	resp4, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
 		NodeID: qn2.GetNodeID(),
 	})
 	s.NoError(err)
@@ -338,14 +338,14 @@ func (s *ManualRollingUpgradeSuite) TestSuspendNode() {
 	s.Len(resp4.GetSealedSegmentIDs(), 0)
 
 	// resume node, segment/channel will be balance to qn2
-	resp5, err := s.Cluster.QueryCoord.ResumeNode(ctx, &querypb.ResumeNodeRequest{
+	resp5, err := s.Cluster.MixCoord.ResumeNode(ctx, &querypb.ResumeNodeRequest{
 		NodeID: qn2.GetNodeID(),
 	})
 	s.NoError(err)
 	s.True(merr.Ok(resp5))
 
 	s.Eventually(func() bool {
-		resp, err := s.Cluster.QueryCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
+		resp, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
 			NodeID: qn2.GetNodeID(),
 		})
 		s.NoError(err)

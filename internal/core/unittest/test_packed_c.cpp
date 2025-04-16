@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include "milvus-storage/common/constants.h"
 #include "segcore/packed_writer_c.h"
 #include "segcore/packed_reader_c.h"
 #include "segcore/arrow_fs_c.h"
@@ -25,8 +26,8 @@
 #include <arrow/array/builder_primitive.h>
 #include "arrow/table_builder.h"
 #include "arrow/type_fwd.h"
+#include <arrow/util/key_value_metadata.h>
 #include <numeric>
-#include <iostream>
 
 TEST(CPackedTest, PackedWriterAndReader) {
     std::vector<int64_t> test_data(5);
@@ -39,7 +40,12 @@ TEST(CPackedTest, PackedWriterAndReader) {
     ASSERT_TRUE(res.ok());
     std::shared_ptr<arrow::Array> array = res.ValueOrDie();
 
-    auto schema = arrow::schema({arrow::field("int64", arrow::int64())});
+    auto schema = arrow::schema(
+        {arrow::field("int64",
+                      arrow::int64(),
+                      false,
+                      arrow::key_value_metadata(
+                          {milvus_storage::ARROW_FIELD_ID_KEY}, {"100"}))});
     auto batch = arrow::RecordBatch::Make(schema, array->length(), {array});
 
     struct ArrowSchema c_write_schema;
