@@ -115,6 +115,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
     }
 
     bool
+    TryUseRegexQuery() const override {
+        return internal_index_->TryUseRegexQuery();
+    }
+
+    bool
     SupportRegexQuery() const override {
         return internal_index_->SupportRegexQuery();
     }
