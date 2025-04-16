@@ -183,7 +183,7 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, wg *sync.Wai
 
 func (mr *MilvusRoles) runMixCoord(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
 	wg.Add(1)
-	return runComponent(ctx, localMsg, wg, components.NewMixCoord, metrics.RegisterRootCoord)
+	return runComponent(ctx, localMsg, wg, components.NewMixCoord, metrics.RegisterMixCoord)
 }
 
 func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) component {
