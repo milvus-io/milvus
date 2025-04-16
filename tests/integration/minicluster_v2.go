@@ -37,19 +37,14 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
-	grpcdatacoord "github.com/milvus-io/milvus/internal/distributed/datacoord"
-	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
+	grpcmixcoord "github.com/milvus-io/milvus/internal/distributed/mixcoord"
+	grpcmixcoordclient "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	grpcproxy "github.com/milvus-io/milvus/internal/distributed/proxy"
 	grpcproxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
-	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
-	grpcquerycoordclient "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
-	grpcrootcoord "github.com/milvus-io/milvus/internal/distributed/rootcoord"
-	grpcrootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/distributed/streamingnode"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -103,14 +98,10 @@ type MiniClusterV2 struct {
 
 	EtcdCli *clientv3.Client
 
-	Proxy      *grpcproxy.Server
-	DataCoord  *grpcdatacoord.Server
-	RootCoord  *grpcrootcoord.Server
-	QueryCoord *grpcquerycoord.Server
+	Proxy    *grpcproxy.Server
+	MixCoord *grpcmixcoord.Server
 
-	DataCoordClient  types.DataCoordClient
-	RootCoordClient  types.RootCoordClient
-	QueryCoordClient types.QueryCoordClient
+	MixCoordClient types.MixCoordClient
 
 	MilvusClient    milvuspb.MilvusServiceClient
 	ProxyClient     types.ProxyClient
@@ -196,15 +187,7 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	params.Save(params.ProxyGrpcServerCfg.Port.Key, fmt.Sprint(ports[6]))
 
 	// setup clients
-	cluster.RootCoordClient, err = grpcrootcoordclient.NewClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cluster.DataCoordClient, err = grpcdatacoordclient.NewClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cluster.QueryCoordClient, err = grpcquerycoordclient.NewClient(ctx)
+	cluster.MixCoordClient, err = grpcmixcoordclient.NewClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -230,15 +213,7 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	}
 	cluster.ChunkManager = chunkManager
 
-	cluster.RootCoord, err = grpcrootcoord.NewServer(ctx, cluster.factory)
-	if err != nil {
-		return nil, err
-	}
-	cluster.DataCoord, err = grpcdatacoord.NewServer(ctx, cluster.factory)
-	if err != nil {
-		return nil, err
-	}
-	cluster.QueryCoord, err = grpcquerycoord.NewServer(ctx, cluster.factory)
+	cluster.MixCoord, err = grpcmixcoord.NewServer(ctx, cluster.factory)
 	if err != nil {
 		return nil, err
 	}
@@ -335,9 +310,7 @@ func (cluster *MiniClusterV2) AddStreamingNode() {
 
 func (cluster *MiniClusterV2) Start() error {
 	log.Info("mini cluster start")
-	runComponent(cluster.RootCoord)
-	runComponent(cluster.DataCoord)
-	runComponent(cluster.QueryCoord)
+	runComponent(cluster.MixCoord)
 	runComponent(cluster.DataNode)
 	runComponent(cluster.QueryNode)
 	runComponent(cluster.Proxy)
@@ -371,57 +344,20 @@ func (cluster *MiniClusterV2) Start() error {
 	return nil
 }
 
-func (cluster *MiniClusterV2) StopRootCoord() {
-	if err := cluster.RootCoord.Stop(); err != nil {
+func (cluster *MiniClusterV2) StopMixCoord() {
+	if err := cluster.MixCoord.Stop(); err != nil {
 		panic(err)
 	}
-	cluster.RootCoord = nil
+	cluster.MixCoord = nil
 }
 
-func (cluster *MiniClusterV2) StartRootCoord() {
-	if cluster.RootCoord == nil {
-		coordclient.ResetRootCoordRegistration()
+func (cluster *MiniClusterV2) StartMixCoord() {
+	if cluster.MixCoord == nil {
 		var err error
-		if cluster.RootCoord, err = grpcrootcoord.NewServer(cluster.ctx, cluster.factory); err != nil {
+		if cluster.MixCoord, err = grpcmixcoord.NewServer(cluster.ctx, cluster.factory); err != nil {
 			panic(err)
 		}
-		runComponent(cluster.RootCoord)
-	}
-}
-
-func (cluster *MiniClusterV2) StopDataCoord() {
-	if err := cluster.DataCoord.Stop(); err != nil {
-		panic(err)
-	}
-	cluster.DataCoord = nil
-}
-
-func (cluster *MiniClusterV2) StartDataCoord() {
-	if cluster.DataCoord == nil {
-		coordclient.ResetRootCoordRegistration()
-		var err error
-		if cluster.DataCoord, err = grpcdatacoord.NewServer(cluster.ctx, cluster.factory); err != nil {
-			panic(err)
-		}
-		runComponent(cluster.DataCoord)
-	}
-}
-
-func (cluster *MiniClusterV2) StopQueryCoord() {
-	if err := cluster.QueryCoord.Stop(); err != nil {
-		panic(err)
-	}
-	cluster.QueryCoord = nil
-}
-
-func (cluster *MiniClusterV2) StartQueryCoord() {
-	if cluster.QueryCoord == nil {
-		coordclient.ResetQueryCoordRegistration()
-		var err error
-		if cluster.QueryCoord, err = grpcquerycoord.NewServer(cluster.ctx, cluster.factory); err != nil {
-			panic(err)
-		}
-		runComponent(cluster.QueryCoord)
+		runComponent(cluster.MixCoord)
 	}
 }
 
@@ -458,19 +394,11 @@ func (cluster *MiniClusterV2) Stop() error {
 	if cluster.clientConn != nil {
 		cluster.clientConn.Close()
 	}
-	if cluster.RootCoord != nil {
-		cluster.RootCoord.Stop()
+	if cluster.MixCoord != nil {
+		cluster.MixCoord.Stop()
 		log.Info("mini cluster rootCoord stopped")
 	}
 
-	if cluster.DataCoord != nil {
-		cluster.DataCoord.Stop()
-		log.Info("mini cluster dataCoord stopped")
-	}
-	if cluster.QueryCoord != nil {
-		cluster.QueryCoord.Stop()
-		log.Info("mini cluster queryCoord stopped")
-	}
 	if cluster.Proxy != nil {
 		cluster.Proxy.Stop()
 		log.Info("mini cluster proxy stopped")

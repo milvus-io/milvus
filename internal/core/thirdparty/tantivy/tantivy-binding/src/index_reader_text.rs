@@ -144,8 +144,5 @@ mod tests {
             .search(&query, &mut res as *mut _ as *mut c_void)
             .unwrap();
         assert_eq!(res, (0..10000).collect::<Vec<u32>>());
-
-        let res = reader.search_i64(&query).unwrap();
-        assert_eq!(res, (0..10000).collect::<Vec<i64>>());
     }
 }

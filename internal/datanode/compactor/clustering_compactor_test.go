@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -40,6 +41,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+func refreshPlanParams(plan *datapb.CompactionPlan) {
+	params, err := compaction.GenerateJSONParams()
+	if err != nil {
+		panic(err)
+	}
+	plan.JsonParams = params
+}
 
 func TestClusteringCompactionTaskSuite(t *testing.T) {
 	suite.Run(t, new(ClusteringCompactionTaskSuite))
@@ -81,6 +90,10 @@ func (s *ClusteringCompactionTaskSuite) setupTest() {
 	s.task = NewClusteringCompactionTask(context.Background(), s.mockBinlogIO, nil)
 
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EntityExpirationTTL.Key, "0")
+	params, err := compaction.GenerateJSONParams()
+	if err != nil {
+		panic(err)
+	}
 
 	s.plan = &datapb.CompactionPlan{
 		PlanID: 999,
@@ -96,6 +109,7 @@ func (s *ClusteringCompactionTaskSuite) setupTest() {
 			Begin: 200,
 			End:   2000,
 		},
+		JsonParams: params,
 	}
 	s.task.plan = s.plan
 }
@@ -238,6 +252,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 	// writer will automatically flush after 1024 rows.
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "60000")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
+	refreshPlanParams(s.plan)
 
 	compactionResult, err := s.task.Compact()
 	s.Require().NoError(err)
@@ -331,6 +346,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key)
+	refreshPlanParams(s.plan)
 
 	compactionResult, err := s.task.Compact()
 	s.Require().NoError(err)
@@ -411,6 +427,7 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 	// writer will automatically flush after 1024 rows.
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "50000")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
+	refreshPlanParams(s.plan)
 	s.prepareCompactionWithBM25FunctionTask()
 
 	compactionResult, err := s.task.Compact()

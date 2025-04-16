@@ -66,8 +66,9 @@ class ParamInfo:
         self.param_replica_num = ct.default_replica_num
         self.param_uri = ""
         self.param_token = ""
+        self.param_bucket_name = ""
 
-    def prepare_param_info(self, host, port, handler, replica_num, user, password, secure, uri, token):
+    def prepare_param_info(self, host, port, handler, replica_num, user, password, secure, uri, token, bucket_name):
         self.param_host = host
         self.param_port = port
         self.param_handler = handler
@@ -77,6 +78,7 @@ class ParamInfo:
         self.param_replica_num = replica_num
         self.param_uri = uri
         self.param_token = token
+        self.param_bucket_name = bucket_name
 
 
 param_info = ParamInfo()

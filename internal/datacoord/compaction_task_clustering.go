@@ -30,6 +30,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -190,6 +191,10 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	if err != nil {
 		return nil, err
 	}
+	compactionParams, err := compaction.GenerateJSONParams()
+	if err != nil {
+		return nil, err
+	}
 	plan := &datapb.CompactionPlan{
 		PlanID:                 taskProto.GetPlanID(),
 		StartTime:              taskProto.GetStartTime(),
@@ -209,6 +214,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		PreAllocatedLogIDs:     logIDRange,
 		SlotUsage:              t.GetSlotUsage(),
 		MaxSize:                taskProto.GetMaxSize(),
+		JsonParams:             compactionParams,
 	}
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 

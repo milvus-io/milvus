@@ -10,12 +10,14 @@ proxy:
       memory: "256Mi"
 
 rootCoordinator:
+  enabled: false
   resources:
     requests:
       cpu: "0.3"
       memory: "256Mi"
 
 queryCoordinator:
+  enabled: false
   resources:
     requests:
       cpu: "0.4"
@@ -40,6 +42,7 @@ indexNode:
       memory: "500Mi"
 
 dataCoordinator:
+  enabled: false
   resources:
     requests:
       cpu: "0.1"

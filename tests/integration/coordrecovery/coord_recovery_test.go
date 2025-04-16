@@ -237,20 +237,14 @@ func (s *CoordSwitchSuite) switchCoord() float64 {
 	c := s.Cluster
 	start := time.Now()
 	log.Info("=========================Stopping Coordinators========================")
-	c.StopRootCoord()
-	c.StopDataCoord()
-	c.StopQueryCoord()
+	c.StopMixCoord()
 	log.Info("=========================Coordinators stopped=========================", zap.Duration("elapsed", time.Since(start)))
 	start = time.Now()
 
 	testutil.ResetEnvironment()
 
-	c.StartRootCoord()
+	c.StartMixCoord()
 	log.Info("=========================RootCoord restarted=========================")
-	c.StartDataCoord()
-	log.Info("=========================DataCoord restarted=========================")
-	c.StartQueryCoord()
-	log.Info("=========================QueryCoord restarted=========================")
 
 	for i := 0; i < 1000; i++ {
 		time.Sleep(time.Second)

@@ -199,7 +199,7 @@ func (c *bgGarbageCollector) generateDropRequest(coll *model.Collection, ts uint
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DropCollection),
 			commonpbutil.WithTimeStamp(ts),
-			commonpbutil.WithSourceID(c.s.session.ServerID),
+			commonpbutil.WithSourceID(c.s.session.GetServerID()),
 		),
 		CollectionName: coll.Name,
 		CollectionID:   coll.CollectionID,
@@ -248,7 +248,7 @@ func (c *bgGarbageCollector) notifyPartitionGc(ctx context.Context, pChannels []
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DropPartition),
 				commonpbutil.WithTimeStamp(ts),
-				commonpbutil.WithSourceID(c.s.session.ServerID),
+				commonpbutil.WithSourceID(c.s.session.GetServerID()),
 			),
 			PartitionName: partition.PartitionName,
 			CollectionID:  partition.CollectionID,
@@ -268,7 +268,7 @@ func (c *bgGarbageCollector) notifyPartitionGcByStreamingService(ctx context.Con
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DropPartition),
 			commonpbutil.WithTimeStamp(0), // Timetick is given by streamingnode.
-			commonpbutil.WithSourceID(c.s.session.ServerID),
+			commonpbutil.WithSourceID(c.s.session.GetServerID()),
 		),
 		PartitionName: partition.PartitionName,
 		CollectionID:  partition.CollectionID,

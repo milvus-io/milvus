@@ -224,12 +224,11 @@ func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*
 
 	// Transfer the pending segment into growing state.
 	// Alloc the growing segment at datacoord first.
-	dc, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
+	mix, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	resp, err := dc.AllocSegment(ctx, &datapb.AllocSegmentRequest{
+	resp, err := mix.AllocSegment(ctx, &datapb.AllocSegmentRequest{
 		CollectionId:         pendingSegment.GetCollectionID(),
 		PartitionId:          pendingSegment.GetPartitionID(),
 		SegmentId:            pendingSegment.GetSegmentID(),

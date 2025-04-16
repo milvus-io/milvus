@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -526,6 +527,11 @@ func Test_compactionTrigger_force(t *testing.T) {
 	im.segmentIndexes.Insert(2, segIdx2)
 	im.segmentIndexes.Insert(3, segIdx3)
 
+	params, err := compaction.GenerateJSONParams()
+	if err != nil {
+		panic(err)
+	}
+
 	tests := []struct {
 		name         string
 		fields       fields
@@ -631,6 +637,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					PreAllocatedLogIDs:     &datapb.IDRange{Begin: 100, End: 200},
 					MaxSize:                1342177280,
 					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
+					JsonParams:             params,
 				},
 			},
 		},
@@ -2628,52 +2635,6 @@ func (s *CompactionTriggerSuite) TestSqueezeSmallSegments() {
 	s.Equal(2, len(buckets[0]))
 	log.Info("buckets", zap.Any("buckets", buckets))
 }
-
-//func Test_compactionTrigger_clustering(t *testing.T) {
-//	paramtable.Init()
-//	catalog := mocks.NewDataCoordCatalog(t)
-//	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
-//	vecFieldID := int64(201)
-//	meta := &meta{
-//		catalog: catalog,
-//		collections: map[int64]*collectionInfo{
-//			1: {
-//				ID: 1,
-//				Schema: &schemapb.CollectionSchema{
-//					Fields: []*schemapb.FieldSchema{
-//						{
-//							FieldID:  vecFieldID,
-//							DataType: schemapb.DataType_FloatVector,
-//							TypeParams: []*commonpb.KeyValuePair{
-//								{
-//									Key:   common.DimKey,
-//									Value: "128",
-//								},
-//							},
-//						},
-//					},
-//				},
-//			},
-//		},
-//	}
-//
-//	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionEnable.Key, "false")
-//	allocator := &MockAllocator0{}
-//	tr := &compactionTrigger{
-//		handler:                      newMockHandlerWithMeta(meta),
-//		allocator:                    allocator,
-//		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-//		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-//		testingOnly:                  true,
-//	}
-//	_, err := tr.triggerManualCompaction(1, true)
-//	assert.Error(t, err)
-//	assert.True(t, errors.Is(err, merr.ErrClusteringCompactionClusterNotSupport))
-//	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionEnable.Key, "true")
-//	_, err2 := tr.triggerManualCompaction(1, true)
-//	assert.Error(t, err2)
-//	assert.True(t, errors.Is(err2, merr.ErrClusteringCompactionCollectionNotSupport))
-//}
 
 func TestCompactionTriggerSuite(t *testing.T) {
 	suite.Run(t, new(CompactionTriggerSuite))

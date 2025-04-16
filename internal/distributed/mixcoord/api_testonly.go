@@ -17,16 +17,35 @@
 //go:build test
 // +build test
 
-package grpcquerycoord
+package grpcmixcoord
 
 import (
+	"log"
+
 	"github.com/milvus-io/milvus/internal/querycoordv2"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 )
 
 func (s *Server) StopCheckerForTestOnly() {
-	s.queryCoord.(*querycoordv2.Server).StopCheckerForTestOnly()
+	if qc, ok := s.mixCoord.(querypb.QueryCoordServer); ok {
+		if server, ok := qc.(*querycoordv2.Server); ok {
+			server.StopCheckerForTestOnly()
+		} else {
+			log.Println("mixCoord does not hold a *querycoordv2.Server instance")
+		}
+	} else {
+		log.Println("mixCoord does not implement querypb.QueryCoordServer")
+	}
 }
 
 func (s *Server) StartCheckerForTestOnly() {
-	s.queryCoord.(*querycoordv2.Server).StartCheckerForTestOnly()
+	if qc, ok := s.mixCoord.(querypb.QueryCoordServer); ok {
+		if server, ok := qc.(*querycoordv2.Server); ok {
+			server.StartCheckerForTestOnly()
+		} else {
+			log.Println("mixCoord does not hold a *querycoordv2.Server instance")
+		}
+	} else {
+		log.Println("mixCoord does not implement querypb.QueryCoordServer")
+	}
 }

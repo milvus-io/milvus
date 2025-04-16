@@ -97,7 +97,7 @@ func (impl *msgHandlerImpl) HandleImport(ctx context.Context, vchannel string, i
 				})
 			}
 		}()
-		client, err := resource.Resource().DataCoordClient().GetWithContext(ctx)
+		client, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 		if err != nil {
 			return err
 		}

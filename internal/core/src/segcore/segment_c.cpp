@@ -28,12 +28,14 @@
 #include "segcore/Collection.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "segcore/SegmentSealedImpl.h"
 #include "segcore/Utils.h"
 #include "storage/Event.h"
 #include "storage/Util.h"
 #include "futures/Future.h"
 #include "futures/Executor.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "mmap/Types.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
@@ -61,18 +63,7 @@ NewSegment(CCollection collection,
                     segment_id,
                     milvus::segcore::SegcoreConfig::default_config(),
                     false,
-                    is_sorted_by_pk,
-                    false);
-                break;
-            case ChunkedSealed:
-                segment = milvus::segcore::CreateSealedSegment(
-                    col->get_schema(),
-                    col->get_index_meta(),
-                    segment_id,
-                    milvus::segcore::SegcoreConfig::default_config(),
-                    false,
-                    is_sorted_by_pk,
-                    true);
+                    is_sorted_by_pk);
                 break;
 
             default:
@@ -389,12 +380,13 @@ LoadFieldRawData(CSegmentInterface c_segment,
         auto field_data =
             milvus::storage::CreateFieldData(data_type, false, dim);
         field_data->FillFieldData(data, row_count);
-        milvus::FieldDataChannelPtr channel =
-            std::make_shared<milvus::FieldDataChannel>();
-        channel->push(field_data);
-        channel->close();
-        auto field_data_info = milvus::FieldDataInfo(
-            field_id, static_cast<size_t>(row_count), channel);
+        auto arrow_data_wrapper =
+            milvus::storage::ConvertFieldDataToArrowDataWrapper(field_data);
+        auto field_data_info = milvus::FieldDataInfo{
+            field_id,
+            static_cast<size_t>(row_count),
+            std::vector<std::shared_ptr<milvus::ArrowDataWrapper>>{
+                arrow_data_wrapper}};
         segment->LoadFieldData(milvus::FieldId(field_id), field_data_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

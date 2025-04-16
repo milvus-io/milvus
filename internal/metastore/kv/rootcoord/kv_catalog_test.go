@@ -1036,6 +1036,12 @@ func TestCatalog_AlterCollection(t *testing.T) {
 			kvs[key] = value
 			return nil
 		}
+		snapshot.MultiSaveFunc = func(ctx context.Context, saveKvs map[string]string, _ typeutil.Timestamp) error {
+			for k, v := range saveKvs {
+				kvs[k] = v
+			}
+			return nil
+		}
 		kc := NewCatalog(nil, snapshot).(*Catalog)
 		ctx := context.Background()
 		var collectionID int64 = 1

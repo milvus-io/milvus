@@ -107,7 +107,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 	rgs := make([]string, 0)
 	for i := 0; i < rgNum; i++ {
 		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.QueryCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+		s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: rgs[i],
 			Config: &rgpb.ResourceGroupConfig{
 				Requests: &rgpb.ResourceGroupLimit{
@@ -131,7 +131,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 		})
 	}
 
-	resp, err := s.Cluster.QueryCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
+	resp, err := s.Cluster.MixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(resp.GetStatus()))
 	s.Len(resp.GetResourceGroups(), rgNum+1)
@@ -143,7 +143,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 	s.Eventually(func() bool {
 		matchCounter := 0
 		for _, rg := range rgs {
-			resp1, err := s.Cluster.QueryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
+			resp1, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
 				ResourceGroup: rg,
 			})
 			s.NoError(err)
@@ -237,7 +237,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineDatabaseLevelConfig() {
 	rgs := make([]string, 0)
 	for i := 0; i < rgNum; i++ {
 		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.QueryCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+		s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: rgs[i],
 			Config: &rgpb.ResourceGroupConfig{
 				Requests: &rgpb.ResourceGroupLimit{
@@ -261,7 +261,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineDatabaseLevelConfig() {
 		})
 	}
 
-	resp, err := s.Cluster.QueryCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
+	resp, err := s.Cluster.MixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(resp.GetStatus()))
 	s.Len(resp.GetResourceGroups(), rgNum+1)
@@ -273,7 +273,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineDatabaseLevelConfig() {
 	s.Eventually(func() bool {
 		matchCounter := 0
 		for _, rg := range rgs {
-			resp1, err := s.Cluster.QueryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
+			resp1, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
 				ResourceGroup: rg,
 			})
 			s.NoError(err)
@@ -384,7 +384,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineClusterLevelConfig() {
 	rgs := make([]string, 0)
 	for i := 0; i < rgNum; i++ {
 		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.QueryCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+		s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: rgs[i],
 			Config: &rgpb.ResourceGroupConfig{
 				Requests: &rgpb.ResourceGroupLimit{
@@ -408,7 +408,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineClusterLevelConfig() {
 		})
 	}
 
-	resp, err := s.Cluster.QueryCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
+	resp, err := s.Cluster.MixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(resp.GetStatus()))
 	s.Len(resp.GetResourceGroups(), rgNum+1)
@@ -420,7 +420,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineClusterLevelConfig() {
 	s.Eventually(func() bool {
 		matchCounter := 0
 		for _, rg := range rgs {
-			resp1, err := s.Cluster.QueryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
+			resp1, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
 				ResourceGroup: rg,
 			})
 			s.NoError(err)
@@ -506,7 +506,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 	rgs := make([]string, 0)
 	for i := 0; i < rgNum; i++ {
 		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.QueryCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+		s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: rgs[i],
 			Config: &rgpb.ResourceGroupConfig{
 				Requests: &rgpb.ResourceGroupLimit{
@@ -530,7 +530,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 		})
 	}
 
-	resp, err := s.Cluster.QueryCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
+	resp, err := s.Cluster.MixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(resp.GetStatus()))
 	s.Len(resp.GetResourceGroups(), rgNum+1)
@@ -543,7 +543,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 	s.Eventually(func() bool {
 		matchCounter := 0
 		for _, rg := range rgs {
-			resp1, err := s.Cluster.QueryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
+			resp1, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
 				ResourceGroup: rg,
 			})
 			s.NoError(err)
@@ -703,7 +703,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 	s.Len(resp2.GetReplicas(), 1)
 
 	recycleRG := "__recycle_rg"
-	s.Cluster.QueryCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+	s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
 		ResourceGroup: recycleRG,
 		Config: &rgpb.ResourceGroupConfig{
 			Requests: &rgpb.ResourceGroupLimit{
@@ -719,7 +719,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 	rgs := make([]string, 0)
 	for i := 0; i < rgNum; i++ {
 		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.QueryCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+		s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: rgs[i],
 			Config: &rgpb.ResourceGroupConfig{
 				Requests: &rgpb.ResourceGroupLimit{
@@ -742,7 +742,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 		})
 	}
 
-	s.Cluster.QueryCoord.UpdateResourceGroups(ctx, &querypb.UpdateResourceGroupsRequest{
+	s.Cluster.MixCoord.UpdateResourceGroups(ctx, &querypb.UpdateResourceGroupsRequest{
 		ResourceGroups: map[string]*rgpb.ResourceGroupConfig{
 			meta.DefaultResourceGroupName: {
 				Requests: &rgpb.ResourceGroupLimit{
@@ -755,7 +755,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 		},
 	})
 
-	resp, err := s.Cluster.QueryCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
+	resp, err := s.Cluster.MixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(resp.GetStatus()))
 	s.Len(resp.GetResourceGroups(), rgNum+2)
@@ -824,7 +824,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 	s.Eventually(func() bool {
 		matchCounter := 0
 		for _, rg := range rgs {
-			resp1, err := s.Cluster.QueryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
+			resp1, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
 				ResourceGroup: rg,
 			})
 			s.NoError(err)
@@ -871,7 +871,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 	rgs := make([]string, 0)
 	for i := 0; i < rgNum; i++ {
 		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.QueryCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+		s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: rgs[i],
 			Config: &rgpb.ResourceGroupConfig{
 				Requests: &rgpb.ResourceGroupLimit{
@@ -895,7 +895,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 		})
 	}
 
-	resp, err := s.Cluster.QueryCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
+	resp, err := s.Cluster.MixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(resp.GetStatus()))
 	s.Len(resp.GetResourceGroups(), rgNum+1)
@@ -908,7 +908,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 	s.Eventually(func() bool {
 		matchCounter := 0
 		for _, rg := range rgs {
-			resp1, err := s.Cluster.QueryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
+			resp1, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
 				ResourceGroup: rg,
 			})
 			s.NoError(err)

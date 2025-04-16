@@ -109,11 +109,10 @@ type DataNode struct {
 	timeTickSender           *util2.TimeTickSender
 	channelCheckpointUpdater *util2.ChannelCheckpointUpdater
 
-	etcdCli   *clientv3.Client
-	address   string
-	rootCoord types.RootCoordClient
-	dataCoord types.DataCoordClient
-	broker    broker.Broker
+	etcdCli  *clientv3.Client
+	address  string
+	mixCoord types.MixCoordClient
+	broker   broker.Broker
 
 	// call once
 	initOnce     sync.Once
@@ -148,8 +147,7 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		Role:     typeutil.DataNodeRole,
 		lifetime: lifetime.NewLifetime(commonpb.StateCode_Abnormal),
 
-		rootCoord:              nil,
-		dataCoord:              nil,
+		mixCoord:               nil,
 		factory:                factory,
 		compactionExecutor:     compactor.NewExecutor(),
 		reportImportRetryTimes: 10,
@@ -179,23 +177,12 @@ func (node *DataNode) SetEtcdClient(etcdCli *clientv3.Client) {
 }
 
 // SetRootCoordClient sets RootCoord's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetRootCoordClient(rc types.RootCoordClient) error {
+func (node *DataNode) SetMixCoordClient(mixc types.MixCoordClient) error {
 	switch {
-	case rc == nil, node.rootCoord != nil:
+	case mixc == nil, node.mixCoord != nil:
 		return errors.New("nil parameter or repeatedly set")
 	default:
-		node.rootCoord = rc
-		return nil
-	}
-}
-
-// SetDataCoordClient sets data service's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetDataCoordClient(ds types.DataCoordClient) error {
-	switch {
-	case ds == nil, node.dataCoord != nil:
-		return errors.New("nil parameter or repeatedly set")
-	default:
-		node.dataCoord = ds
+		node.mixCoord = mixc
 		return nil
 	}
 }
@@ -238,9 +225,7 @@ func (node *DataNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
 		node.registerMetricsRequest()
-		log.Ctx(node.ctx).Info("DataNode server initializing",
-			zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()),
-		)
+		log.Ctx(node.ctx).Info("DataNode server initializing")
 		if err := node.initSession(); err != nil {
 			log.Error("DataNode server init session failed", zap.Error(err))
 			initError = err
@@ -250,12 +235,12 @@ func (node *DataNode) Init() error {
 		serverID := node.GetNodeID()
 		log := log.Ctx(node.ctx).With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
 
-		node.broker = broker.NewCoordBroker(node.dataCoord, serverID)
+		node.broker = broker.NewCoordBroker(node.mixCoord, serverID)
 
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, serverID)
 		log.Info("DataNode server init dispatcher client done")
 
-		alloc, err := allocator.New(context.Background(), node.rootCoord, serverID)
+		alloc, err := allocator.New(context.Background(), node.mixCoord, serverID)
 		if err != nil {
 			log.Error("failed to create id allocator", zap.Error(err))
 			initError = err
@@ -264,8 +249,7 @@ func (node *DataNode) Init() error {
 		node.allocator = alloc
 
 		node.factory.Init(Params)
-		log.Info("DataNode server init succeeded",
-			zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName.GetValue()))
+		log.Info("DataNode server init succeeded")
 
 		chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
 		if err != nil {

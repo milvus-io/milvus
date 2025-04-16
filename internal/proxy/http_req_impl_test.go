@@ -93,9 +93,9 @@ func TestGetQueryComponentMetrics(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?key=value", nil)
-		qc := mocks.NewMockQueryCoordClient(t)
-		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
-		proxy := &Proxy{queryCoord: qc}
+		mixc := mocks.NewMockMixCoordClient(t)
+		mixc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+		proxy := &Proxy{mixCoord: mixc}
 		handler := getQueryComponentMetrics(proxy, "system_info")
 		handler(c)
 
@@ -107,46 +107,13 @@ func TestGetQueryComponentMetrics(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?key=value", nil)
-		qc := mocks.NewMockQueryCoordClient(t)
-		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+		mixc := mocks.NewMockMixCoordClient(t)
+		mixc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
 			Status:   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			Response: "test_response",
 		}, nil)
-		proxy := &Proxy{queryCoord: qc}
+		proxy := &Proxy{mixCoord: mixc}
 		handler := getQueryComponentMetrics(proxy, "test_metric")
-		handler(c)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "test_response")
-	})
-}
-
-func TestGetDataComponentMetrics(t *testing.T) {
-	t.Run("get metrics failed", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request, _ = http.NewRequest("GET", "/?key=value", nil)
-		dc := mocks.NewMockDataCoordClient(t)
-		dc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
-		proxy := &Proxy{dataCoord: dc}
-		handler := getDataComponentMetrics(proxy, "system_info")
-		handler(c)
-
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		assert.Contains(t, w.Body.String(), "error")
-	})
-
-	t.Run("ok", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request, _ = http.NewRequest("GET", "/?key=value", nil)
-		dc := mocks.NewMockDataCoordClient(t)
-		dc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			Response: "test_response",
-		}, nil)
-		proxy := &Proxy{dataCoord: dc}
-		handler := getDataComponentMetrics(proxy, "test_metric")
 		handler(c)
 
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -160,8 +127,8 @@ func TestListCollection(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=default", nil)
 
-		mockRoortCoordClient := mocks.NewMockRootCoordClient(t)
-		mockRoortCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
+		mockMixCoordClient := mocks.NewMockMixCoordClient(t)
+		mockMixCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
 			Status:                &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			CollectionIds:         []int64{1, 2},
 			CollectionNames:       []string{"collection1", "collection2"},
@@ -170,15 +137,14 @@ func TestListCollection(t *testing.T) {
 			QueryServiceAvailable: []bool{true, true},
 		}, nil)
 
-		mockQueryCoordClient := mocks.NewMockQueryCoordClient(t)
-		mockQueryCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		mockMixCoordClient.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 			Status:                &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			CollectionIDs:         []int64{1},
 			InMemoryPercentages:   []int64{100, 100},
 			QueryServiceAvailable: []bool{true, true},
 		}, nil)
 
-		proxy := &Proxy{queryCoord: mockQueryCoordClient, rootCoord: mockRoortCoordClient}
+		proxy := &Proxy{mixCoord: mockMixCoordClient}
 		handler := listCollection(proxy)
 		handler(c)
 
@@ -192,10 +158,10 @@ func TestListCollection(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=default", nil)
 
-		mockRoortCoordClient := mocks.NewMockRootCoordClient(t)
-		mockRoortCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+		mockMixCoordClient := mocks.NewMockMixCoordClient(t)
+		mockMixCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 
-		proxy := &Proxy{rootCoord: mockRoortCoordClient}
+		proxy := &Proxy{mixCoord: mockMixCoordClient}
 		handler := listCollection(proxy)
 		handler(c)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -207,14 +173,13 @@ func TestListCollection(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=default", nil)
 
-		mockRoortCoordClient := mocks.NewMockRootCoordClient(t)
+		mockRoortCoordClient := mocks.NewMockMixCoordClient(t)
 		mockRoortCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		}, nil)
-		mockQueryCoordClient := mocks.NewMockQueryCoordClient(t)
-		mockQueryCoordClient.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+		mockRoortCoordClient.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 
-		proxy := &Proxy{queryCoord: mockQueryCoordClient, rootCoord: mockRoortCoordClient}
+		proxy := &Proxy{mixCoord: mockRoortCoordClient}
 		handler := listCollection(proxy)
 		handler(c)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -228,8 +193,8 @@ func TestDescribeCollection(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=default&collection_name=collection1", nil)
 
-		mockRootCoord := mocks.NewMockRootCoordClient(t)
-		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		mockMixCoord := mocks.NewMockMixCoordClient(t)
+		mockMixCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 			Status:               &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			CollectionID:         1,
 			CollectionName:       "collection1",
@@ -253,11 +218,11 @@ func TestDescribeCollection(t *testing.T) {
 			},
 		}, nil)
 
-		mockRootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		mockMixCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		}, nil)
 
-		proxy := &Proxy{rootCoord: mockRootCoord}
+		proxy := &Proxy{mixCoord: mockMixCoord}
 		handler := describeCollection(proxy)
 		handler(c)
 
@@ -271,10 +236,10 @@ func TestDescribeCollection(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=default&collection_name=collection1", nil)
 
-		mockRootCoord := mocks.NewMockRootCoordClient(t)
-		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+		mockMixCoord := mocks.NewMockMixCoordClient(t)
+		mockMixCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 
-		proxy := &Proxy{rootCoord: mockRootCoord}
+		proxy := &Proxy{mixCoord: mockMixCoord}
 		handler := describeCollection(proxy)
 		handler(c)
 
@@ -287,8 +252,8 @@ func TestDescribeCollection(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=default", nil)
 
-		mockRootCoord := mocks.NewMockRootCoordClient(t)
-		proxy := &Proxy{rootCoord: mockRootCoord}
+		mockMixCoord := mocks.NewMockMixCoordClient(t)
+		proxy := &Proxy{mixCoord: mockMixCoord}
 		handler := describeCollection(proxy)
 		handler(c)
 

@@ -13,7 +13,7 @@ from prettytable import PrettyTable
 import functools
 from collections import Counter
 from time import sleep
-from pymilvus import AnnSearchRequest, RRFRanker
+from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient
 from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 from base.database_wrapper import ApiDatabaseWrapper
 from base.collection_wrapper import ApiCollectionWrapper
@@ -239,6 +239,7 @@ class Op(Enum):
     drop_partition = 'drop_partition'
     load_balance = 'load_balance'
     bulk_insert = 'bulk_insert'
+    alter_collection = 'alter_collection'
     unknown = 'unknown'
 
 
@@ -342,11 +343,21 @@ class Checker:
         self.files = []
         self.word_freq = Counter()
         self.ms = MilvusSys()
-        self.bucket_name = self.ms.data_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
+        self.bucket_name = cf.param_info.param_bucket_name
         self.db_wrap = ApiDatabaseWrapper()
         self.c_wrap = ApiCollectionWrapper()
         self.p_wrap = ApiPartitionWrapper()
         self.utility_wrap = ApiUtilityWrapper()
+        if cf.param_info.param_uri:
+            uri = cf.param_info.param_uri
+        else:
+            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+        
+        if cf.param_info.param_token:
+            token = cf.param_info.param_token
+        else:
+            token = f"{cf.param_info.param_user}:{cf.param_info.param_password}"
+        self.milvus_client = MilvusClient(uri=uri, token=token)
         c_name = collection_name if collection_name is not None else cf.gen_unique_str(
             'Checker_')
         self.c_name = c_name
@@ -1829,6 +1840,44 @@ class BulkInsertChecker(Checker):
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP / 10)
+
+
+class AlterCollectionChecker(Checker):
+    def __init__(self, collection_name=None, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("AlterCollectionChecker")
+        super().__init__(collection_name=collection_name, schema=schema)
+        self.c_wrap.release()
+        res, result = self.c_wrap.describe()
+        log.info(f"before alter collection {self.c_name} properties: {res}")
+        # alter collection attributes
+        self.milvus_client.alter_collection_properties(collection_name=self.c_name, 
+        properties={"mmap.enabled": True})
+        self.milvus_client.alter_collection_properties(collection_name=self.c_name, 
+        properties={"collection.ttl.seconds": 3600})
+        res, result = self.c_wrap.describe()
+        log.info(f"after alter collection {self.c_name} properties: {res}")
+        
+    @trace()
+    def alter_check(self):
+        res, result = self.c_wrap.describe()
+        if result:
+            properties = res["properties"]
+            if properties["mmap.enabled"] != "True":
+                return res, False
+            if properties["collection.ttl.seconds"] != "3600":
+                return res, False
+        return res, result
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.alter_check()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP)
 
 
 class TestResultAnalyzer(unittest.TestCase):

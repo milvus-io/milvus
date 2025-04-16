@@ -24,7 +24,7 @@ import (
 type dataCoordSuite struct {
 	suite.Suite
 
-	dc     *mocks.MockDataCoordClient
+	dc     *mocks.MockMixCoordClient
 	broker Broker
 }
 
@@ -33,7 +33,7 @@ func (s *dataCoordSuite) SetupSuite() {
 }
 
 func (s *dataCoordSuite) SetupTest() {
-	s.dc = mocks.NewMockDataCoordClient(s.T())
+	s.dc = mocks.NewMockMixCoordClient(s.T())
 	s.broker = NewCoordBroker(s.dc, 1)
 }
 

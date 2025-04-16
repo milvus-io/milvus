@@ -97,9 +97,12 @@ class TaskTest : public testing::TestWithParam<DataType> {
 
             auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
             auto field_meta = fields.at(FieldId(field_id));
-            info.channel->push(
-                CreateFieldDataFromDataArray(N, &field_data, field_meta));
-            info.channel->close();
+            auto arrow_data_wrapper =
+                storage::ConvertFieldDataToArrowDataWrapper(
+                    CreateFieldDataFromDataArray(N, &field_data, field_meta));
+
+            info.arrow_reader_channel->push(arrow_data_wrapper);
+            info.arrow_reader_channel->close();
 
             segment->LoadFieldData(FieldId(field_id), info);
         }

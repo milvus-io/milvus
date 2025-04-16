@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -49,8 +48,7 @@ func TestQueryTask_all(t *testing.T) {
 		err error
 		ctx = context.TODO()
 
-		rc = NewRootCoordMock()
-		qc = mocks.NewMockQueryCoordClient(t)
+		qc = NewMixCoordMock()
 		qn = getQueryNodeClient()
 
 		shardsNum      = common.DefaultShardsNum
@@ -62,28 +60,11 @@ func TestQueryTask_all(t *testing.T) {
 
 	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
-	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
-	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
-		Status: &successStatus,
-		Shards: []*querypb.ShardLeadersList{
-			{
-				ChannelName: "channel-1",
-				NodeIds:     []int64{1, 2, 3},
-				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
-			},
-		},
-	}, nil).Maybe()
-	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
-		Status: &successStatus,
-	}, nil).Maybe()
-
 	mgr := NewMockShardClientManager(t)
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
 	lb := NewLBPolicyImpl(mgr)
 
-	defer rc.Close()
-	err = InitMetaCache(ctx, rc, qc, mgr)
+	err = InitMetaCache(ctx, qc, mgr)
 	assert.NoError(t, err)
 
 	fieldName2Types := map[string]schemapb.DataType{
@@ -109,15 +90,14 @@ func TestQueryTask_all(t *testing.T) {
 			Schema:         marshaledSchema,
 			ShardsNum:      shardsNum,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
+		ctx:      ctx,
+		mixCoord: qc,
 	}
 
 	require.NoError(t, createColT.OnEnqueue())
 	require.NoError(t, createColT.PreExecute(ctx))
 	require.NoError(t, createColT.Execute(ctx))
 	require.NoError(t, createColT.PostExecute(ctx))
-
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
@@ -161,8 +141,8 @@ func TestQueryTask_all(t *testing.T) {
 					},
 				},
 			},
-			qc: qc,
-			lb: lb,
+			mixCoord: qc,
+			lb:       lb,
 		}
 
 		assert.NoError(t, task.OnEnqueue())
@@ -310,7 +290,7 @@ func TestQueryTask_all(t *testing.T) {
 					},
 				},
 			},
-			qc:        qc,
+			mixCoord:  qc,
 			lb:        lb,
 			resultBuf: &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
 		}
@@ -361,7 +341,7 @@ func TestQueryTask_all(t *testing.T) {
 				},
 				GuaranteeTimestamp: enqueTs,
 			},
-			qc:        qc,
+			mixCoord:  qc,
 			lb:        lb,
 			resultBuf: &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
 		}

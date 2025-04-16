@@ -10,7 +10,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -48,8 +47,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		assert.Error(t, err)
 
 		ctx = GetContext(context.Background(), "alice:123456")
-		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoordClient{}
+		client := &MockMixCoordClientInterface{}
 		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
@@ -81,7 +79,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = InitMetaCache(ctx, client, queryCoord, mgr)
+		err = InitMetaCache(ctx, client, mgr)
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{
 			DbName:         "db_test",
@@ -218,8 +216,7 @@ func TestResourceGroupPrivilege(t *testing.T) {
 		assert.Error(t, err)
 
 		ctx = GetContext(context.Background(), "fooo:123456")
-		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoordClient{}
+		client := &MockMixCoordClientInterface{}
 		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
@@ -238,7 +235,7 @@ func TestResourceGroupPrivilege(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, queryCoord, mgr)
+		InitMetaCache(ctx, client, mgr)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: "rg",
@@ -275,8 +272,7 @@ func TestPrivilegeGroup(t *testing.T) {
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
-		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoordClient{}
+		client := &MockMixCoordClientInterface{}
 		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
@@ -290,7 +286,7 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, queryCoord, mgr)
+		InitMetaCache(ctx, client, mgr)
 		defer CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
@@ -333,8 +329,7 @@ func TestPrivilegeGroup(t *testing.T) {
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
-		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoordClient{}
+		client := &MockMixCoordClientInterface{}
 		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
@@ -348,7 +343,7 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, queryCoord, mgr)
+		InitMetaCache(ctx, client, mgr)
 		defer CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
@@ -391,8 +386,7 @@ func TestPrivilegeGroup(t *testing.T) {
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
-		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoordClient{}
+		client := &MockMixCoordClientInterface{}
 		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
@@ -406,7 +400,7 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, queryCoord, mgr)
+		InitMetaCache(ctx, client, mgr)
 		defer CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
@@ -495,8 +489,7 @@ func TestPrivilegeGroup(t *testing.T) {
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
-		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoordClient{}
+		client := &MockMixCoordClientInterface{}
 		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
@@ -510,7 +503,7 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, queryCoord, mgr)
+		InitMetaCache(ctx, client, mgr)
 		defer CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{
@@ -563,8 +556,7 @@ func TestPrivilegeGroup(t *testing.T) {
 
 		var err error
 		ctx = GetContext(context.Background(), "fooo:123456")
-		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoordClient{}
+		client := &MockMixCoordClientInterface{}
 		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
@@ -578,7 +570,7 @@ func TestPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, queryCoord, mgr)
+		InitMetaCache(ctx, client, mgr)
 		defer CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.QueryRequest{})
@@ -605,8 +597,7 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 
 		var err error
 		ctx := GetContext(context.Background(), "fooo:123456")
-		client := &MockRootCoordClientInterface{}
-		queryCoord := &mocks.MockQueryCoordClient{}
+		client := &MockMixCoordClientInterface{}
 		mgr := newShardClientMgr()
 
 		policies := []string{}
@@ -623,7 +614,7 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 				},
 			}, nil
 		}
-		InitMetaCache(ctx, client, queryCoord, mgr)
+		InitMetaCache(ctx, client, mgr)
 		defer CleanPrivilegeCache()
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.SelectUserRequest{})

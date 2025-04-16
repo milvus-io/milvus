@@ -125,23 +125,16 @@ func removePidFile(lock *flock.Flock) {
 func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 	alias, enableRootCoord, enableQueryCoord, enableDataCoord, enableQueryNode,
 		enableDataNode, enableProxy, enableStreamingNode := formatFlags(args, flags)
-
 	serverType := args[2]
 	role := roles.NewMilvusRoles()
 	role.Alias = alias
 	role.ServerType = serverType
 
 	switch serverType {
-	case typeutil.RootCoordRole:
-		role.EnableRootCoord = true
 	case typeutil.ProxyRole:
 		role.EnableProxy = true
-	case typeutil.QueryCoordRole:
-		role.EnableQueryCoord = true
 	case typeutil.QueryNodeRole:
 		role.EnableQueryNode = true
-	case typeutil.DataCoordRole:
-		role.EnableDataCoord = true
 	case typeutil.DataNodeRole:
 		role.EnableDataNode = true
 	case typeutil.StreamingNodeRole:
@@ -149,17 +142,18 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableStreamingNode = true
 		role.EnableQueryNode = true
 	case typeutil.StandaloneRole, typeutil.EmbeddedRole:
-		role.EnableRootCoord = true
+		role.EnableMixCoord = true
 		role.EnableProxy = true
-		role.EnableQueryCoord = true
 		role.EnableQueryNode = true
-		role.EnableDataCoord = true
 		role.EnableDataNode = true
 		if streamingutil.IsStreamingServiceEnabled() {
 			role.EnableStreamingNode = true
 		}
 		role.Local = true
 		role.Embedded = serverType == typeutil.EmbeddedRole
+	case typeutil.MixCoordRole:
+		role.EnableMixCoord = true
+
 	case typeutil.MixtureRole:
 		role.EnableRootCoord = enableRootCoord
 		role.EnableQueryCoord = enableQueryCoord
@@ -181,17 +175,14 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 }
 
 func formatFlags(args []string, flags *flag.FlagSet) (alias string, enableRootCoord, enableQueryCoord,
-	enableDataCoord, enableQueryNode, enableDataNode, enableProxy bool,
-	enableStreamingNode bool,
+	enableDataCoord, enableQueryNode, enableDataNode, enableProxy bool, enableStreamingNode bool,
 ) {
 	flags.StringVar(&alias, "alias", "", "set alias")
-
 	var enableIndexCoord bool
 	flags.BoolVar(&enableRootCoord, typeutil.RootCoordRole, false, "enable root coordinator")
 	flags.BoolVar(&enableQueryCoord, typeutil.QueryCoordRole, false, "enable query coordinator")
-	flags.BoolVar(&enableIndexCoord, typeutil.IndexCoordRole, false, "enable index coordinator")
 	flags.BoolVar(&enableDataCoord, typeutil.DataCoordRole, false, "enable data coordinator")
-
+	flags.BoolVar(&enableIndexCoord, typeutil.IndexCoordRole, false, "enable index coordinator")
 	flags.BoolVar(&enableQueryNode, typeutil.QueryNodeRole, false, "enable query node")
 	flags.BoolVar(&enableDataNode, typeutil.DataNodeRole, false, "enable data node")
 	flags.BoolVar(&enableProxy, typeutil.ProxyRole, false, "enable proxy node")
@@ -258,7 +249,7 @@ func addActiveKeySuffix(ctx context.Context, client *clientv3.Client, sessionPat
 	})
 
 	for _, suffix := range sessionSuffix {
-		if strings.Contains(suffix, "-") && (strings.HasPrefix(suffix, typeutil.RootCoordRole) ||
+		if strings.Contains(suffix, "-") && (strings.HasPrefix(suffix, typeutil.MixCoordRole) ||
 			strings.HasPrefix(suffix, typeutil.QueryCoordRole) || strings.HasPrefix(suffix, typeutil.DataCoordRole)) {
 			res := strings.Split(suffix, "-")
 			if len(res) != 2 {

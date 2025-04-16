@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -33,13 +32,11 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/coordinator/coordclient"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -118,24 +115,20 @@ type Core struct {
 	idAllocator  allocator.Interface
 	tsoAllocator tso2.Allocator
 
-	dataCoord  types.DataCoordClient
-	queryCoord types.QueryCoordClient
-
-	quotaCenter *QuotaCenter
+	mixCoord       types.MixCoord
+	streamingCoord *streamingcoord.Server
+	quotaCenter    *QuotaCenter
 
 	stateCode atomic.Int32
 	initOnce  sync.Once
 	startOnce sync.Once
-	session   *sessionutil.Session
+	session   sessionutil.SessionInterface
 
 	factory dependency.Factory
 
-	enableActiveStandBy bool
-	activateFunc        func() error
+	activateFunc func() error
 
 	metricsRequest *metricsinfo.MetricsRequest
-
-	streamingCoord *streamingcoord.Server
 }
 
 // --------------------- function --------------------------
@@ -145,11 +138,10 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
 	rand.Seed(time.Now().UnixNano())
 	core := &Core{
-		ctx:                 ctx,
-		cancel:              cancel,
-		factory:             factory,
-		enableActiveStandBy: Params.RootCoordCfg.EnableActiveStandby.GetAsBool(),
-		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		ctx:            ctx,
+		cancel:         cancel,
+		factory:        factory,
+		metricsRequest: metricsinfo.NewMetricsRequest(),
 	}
 
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -263,46 +255,13 @@ func (c *Core) SetProxyCreator(f func(ctx context.Context, addr string, nodeID i
 	c.proxyCreator = f
 }
 
-func (c *Core) SetDataCoordClient(s types.DataCoordClient) error {
-	if s == nil {
-		return errors.New("null DataCoord interface")
-	}
-	c.dataCoord = s
-	return nil
-}
-
-func (c *Core) SetQueryCoordClient(s types.QueryCoordClient) error {
-	if s == nil {
-		return errors.New("null QueryCoord interface")
-	}
-	c.queryCoord = s
+func (c *Core) SetMixCoord(s types.MixCoord) error {
+	c.mixCoord = s
 	return nil
 }
 
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
-	log := log.Ctx(c.ctx)
-	c.session.Register()
-	afterRegister := func() {
-		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.RootCoordRole).Inc()
-		log.Info("RootCoord Register Finished")
-		c.session.LivenessCheck(c.ctx, func() {
-			log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
-			os.Exit(1)
-		})
-	}
-	if c.enableActiveStandBy {
-		go func() {
-			if err := c.session.ProcessActiveStandBy(c.activateFunc); err != nil {
-				log.Warn("failed to activate standby rootcoord server", zap.Error(err))
-				panic(err)
-			}
-			afterRegister()
-		}()
-	} else {
-		afterRegister()
-	}
-
 	return nil
 }
 
@@ -320,13 +279,11 @@ func (c *Core) SetTiKVClient(client *txnkv.Client) {
 	c.tikvCli = client
 }
 
-func (c *Core) initSession() error {
-	c.session = sessionutil.NewSession(c.ctx)
+func (c *Core) SetSession(session sessionutil.SessionInterface) error {
+	c.session = session
 	if c.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
-	c.session.Init(typeutil.RootCoordRole, c.address, true, true)
-	c.session.SetEnableActiveStandBy(c.enableActiveStandBy)
 	return nil
 }
 
@@ -344,15 +301,6 @@ func (c *Core) initKVCreator() {
 			}
 		}
 	}
-}
-
-func (c *Core) initStreamingCoord() {
-	c.streamingCoord = streamingcoord.NewServerBuilder().
-		WithETCD(c.etcdCli).
-		WithMetaKV(c.metaKVCreator()).
-		WithSession(c.session).
-		WithRootCoordClient(coordclient.MustGetLocalRootCoordClientFuture()).
-		Build()
 }
 
 func (c *Core) initMetaTable(initCtx context.Context) error {
@@ -466,7 +414,7 @@ func (c *Core) initInternal() error {
 
 	c.factory.Init(Params)
 	chanMap := c.meta.ListCollectionPhysicalChannels(c.ctx)
-	c.chanTimeTick = newTimeTickSync(initCtx, c.ctx, c.session.ServerID, c.factory, chanMap)
+	c.chanTimeTick = newTimeTickSync(initCtx, c.ctx, c.session.GetServerID(), c.factory, chanMap)
 	log.Info("create TimeTick sync done")
 
 	c.proxyClientManager = proxyutil.NewProxyClientManager(c.proxyCreator)
@@ -476,10 +424,6 @@ func (c *Core) initInternal() error {
 	c.garbageCollector = newBgGarbageCollector(c)
 	c.stepExecutor = newBgStepExecutor(c.ctx)
 
-	if err := c.streamingCoord.Start(c.ctx); err != nil {
-		log.Info("start streaming coord failed", zap.Error(err))
-		return err
-	}
 	if !streamingutil.IsStreamingServiceEnabled() {
 		c.proxyWatcher = proxyutil.NewProxyWatcher(
 			c.etcdCli,
@@ -500,7 +444,7 @@ func (c *Core) initInternal() error {
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
-	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.queryCoord, c.dataCoord, c.tsoAllocator, c.meta)
+	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.mixCoord, c.tsoAllocator, c.meta)
 	log.Debug("RootCoord init QuotaCenter done")
 
 	if err := c.initCredentials(initCtx); err != nil {
@@ -530,40 +474,12 @@ func (c *Core) Init() error {
 	var initError error
 	c.registerMetricsRequest()
 	c.factory.Init(Params)
-	if err := c.initSession(); err != nil {
-		return err
-	}
 	c.initKVCreator()
-	c.initStreamingCoord()
 
-	if c.enableActiveStandBy {
-		c.activateFunc = func() error {
-			log.Info("RootCoord switch from standby to active, activating")
-
-			var err error
-			c.initOnce.Do(func() {
-				if err = c.initInternal(); err != nil {
-					log.Error("RootCoord init failed", zap.Error(err))
-				}
-			})
-			if err != nil {
-				return err
-			}
-			c.startOnce.Do(func() {
-				if err = c.startInternal(); err != nil {
-					log.Error("RootCoord start failed", zap.Error(err))
-				}
-			})
-			log.Info("RootCoord startup success", zap.String("address", c.session.Address))
-			return err
-		}
-		c.UpdateStateCode(commonpb.StateCode_StandBy)
-		log.Info("RootCoord enter standby mode successfully")
-	} else {
-		c.initOnce.Do(func() {
-			initError = c.initInternal()
-		})
-	}
+	c.initOnce.Do(func() {
+		initError = c.initInternal()
+	})
+	log.Info("RootCoord init successfully")
 
 	return initError
 }
@@ -765,7 +681,7 @@ func (c *Core) startInternal() error {
 
 	c.startServerLoop()
 	c.UpdateStateCode(commonpb.StateCode_Healthy)
-	sessionutil.SaveServerInfo(typeutil.RootCoordRole, c.session.ServerID)
+	sessionutil.SaveServerInfo(typeutil.MixCoordRole, c.session.GetServerID())
 	log.Info("rootcoord startup successfully")
 
 	// regster the core as a appendoperator for broadcast service.
@@ -788,11 +704,9 @@ func (c *Core) startServerLoop() {
 // Start starts RootCoord.
 func (c *Core) Start() error {
 	var err error
-	if !c.enableActiveStandBy {
-		c.startOnce.Do(func() {
-			err = c.startInternal()
-		})
-	}
+	c.startOnce.Do(func() {
+		err = c.startInternal()
+	})
 
 	return err
 }
@@ -827,9 +741,6 @@ func (c *Core) revokeSession() {
 }
 
 func (c *Core) GracefulStop() {
-	if c.streamingCoord != nil {
-		c.streamingCoord.Stop()
-	}
 }
 
 // Stop stops rootCoord.
@@ -858,7 +769,7 @@ func (c *Core) GetComponentStates(ctx context.Context, req *milvuspb.GetComponen
 
 	nodeID := common.NotRegisteredID
 	if c.session != nil && c.session.Registered() {
-		nodeID = c.session.ServerID
+		nodeID = c.session.GetServerID()
 	}
 
 	return &milvuspb.ComponentStates{
@@ -2232,7 +2143,7 @@ func (c *Core) ListAliases(ctx context.Context, in *milvuspb.ListAliasesRequest)
 func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
 	req := proxypb.InvalidateCredCacheRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithSourceID(c.session.ServerID),
+			commonpbutil.WithSourceID(c.session.GetServerID()),
 		),
 		Username: username,
 	}
@@ -2243,7 +2154,7 @@ func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
 func (c *Core) UpdateCredCache(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
 	req := proxypb.UpdateCredCacheRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithSourceID(c.session.ServerID),
+			commonpbutil.WithSourceID(c.session.GetServerID()),
 		),
 		Username: credInfo.Username,
 		Password: credInfo.Sha256Password,
@@ -3101,7 +3012,7 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 		return &milvuspb.CheckHealthResponse{
 			Status:    merr.Status(err),
 			IsHealthy: false,
-			Reasons:   []string{fmt.Sprintf("serverID=%d: %v", c.session.ServerID, err)},
+			Reasons:   []string{fmt.Sprintf("serverID=%d: %v", c.session.GetServerID(), err)},
 		}, nil
 	}
 
@@ -3132,7 +3043,7 @@ func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest)
 	maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
 	if maxDelay > 0 {
 		group.Go(func() error {
-			err := CheckTimeTickLagExceeded(ctx, c.queryCoord, c.dataCoord, maxDelay)
+			err := CheckTimeTickLagExceeded(ctx, c.mixCoord, maxDelay)
 			if err != nil {
 				errs.Insert(err)
 			}
@@ -3313,9 +3224,4 @@ func (c *Core) getDefaultAndCustomPrivilegeGroups(ctx context.Context) ([]*milvu
 		return nil, err
 	}
 	return allGroups, nil
-}
-
-// RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.
-func (s *Core) RegisterStreamingCoordGRPCService(server *grpc.Server) {
-	s.streamingCoord.RegisterGRPCService(server)
 }

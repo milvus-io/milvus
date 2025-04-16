@@ -21,9 +21,8 @@ func TestTimestampAllocator(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	client := NewMockRootCoordClient(t)
-	f := syncutil.NewFuture[types.RootCoordClient]()
+	f := syncutil.NewFuture[types.MixCoordClient]()
 	f.Set(client)
-
 	allocator := NewTSOAllocator(f)
 
 	for i := 0; i < 5000; i++ {
@@ -51,8 +50,6 @@ func TestTimestampAllocator(t *testing.T) {
 			}, nil
 		},
 	)
-	f = syncutil.NewFuture[types.RootCoordClient]()
-	f.Set(client)
 
 	allocator = NewTSOAllocator(f)
 	_, err := allocator.Allocate(context.Background())
@@ -64,7 +61,7 @@ func TestIDAllocator(t *testing.T) {
 	paramtable.SetNodeID(1)
 
 	client := NewMockRootCoordClient(t)
-	f := syncutil.NewFuture[types.RootCoordClient]()
+	f := syncutil.NewFuture[types.MixCoordClient]()
 	f.Set(client)
 
 	allocator := NewIDAllocator(f)

@@ -52,13 +52,6 @@ class ChunkCache {
          bool mmap_enabled,
          bool mmap_rss_not_need = false);
 
-    std::shared_ptr<ColumnBase>
-    Read(const std::string& filepath,
-         const MmapChunkDescriptorPtr& descriptor,
-         const FieldMeta& field_meta,
-         bool mmap_enabled,
-         bool mmap_rss_not_need = false);
-
     void
     Remove(const std::string& filepath);
 
@@ -68,12 +61,6 @@ class ChunkCache {
  private:
     std::string
     CachePath(const std::string& filepath);
-
-    std::shared_ptr<ColumnBase>
-    ConvertToColumn(const FieldDataPtr& field_data,
-                    const MmapChunkDescriptorPtr& descriptor,
-                    const FieldMeta& field_meta,
-                    bool mmap_enabled);
 
  private:
     using ColumnTable = std::unordered_map<
