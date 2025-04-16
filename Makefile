@@ -81,7 +81,7 @@ INSTALL_PROTOC_GEN_GO_GRPC := $(findstring $(PROTOC_GEN_GO_GRPC_VERSION),$(PROTO
 index_engine = knowhere
 
 export GIT_BRANCH=master
-ENABLE_AZURE = false
+
 ifeq (${ENABLE_AZURE}, false)
 	AZURE_OPTION := -Z
 endif

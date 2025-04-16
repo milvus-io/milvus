@@ -91,14 +91,15 @@ generateConfig(const StorageConfig& storage_config) {
         s3CrtConfig.scheme = Aws::Http::Scheme::HTTPS;
     } else {
         s3CrtConfig.scheme = Aws::Http::Scheme::HTTP;
-        s3CrtConfig.tlsConnectionOptions = nullptr;
+        s3CrtConfig.verifySSL = false;
     }
 
     if (!storage_config.region.empty()) {
-        s3CrtConfig.region = ConvertToAwsString(storage_config.region);
+        s3CrtConfig.region = storage_config.region;
     }
+    s3CrtConfig.useVirtualAddressing = storage_config.useVirtualHost;
     s3CrtConfig.throughputTargetGbps = 10;
-    s3CrtConfig.partSize = 8 * 1024 * 1024;
+    s3CrtConfig.partSize = 20 * 1024 * 1024;
     return s3CrtConfig;
 }
 
@@ -269,8 +270,7 @@ MinioChunkManager::BuildAccessKeyClient(
                                           ConvertToAwsString(storage_config.access_key_value));
     LOG_INFO("hc===start to create s3_crt_client_1");
     crt_client_ = Aws::MakeShared<Aws::S3Crt::S3CrtClient>("S3-Crt-client", credentials, config,
-                                                           Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-                                                           storage_config.useVirtualHost);
+                                                           Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never);
     LOG_INFO("hc===finished created s3_crt_client");
 }
 
@@ -636,10 +636,7 @@ MinioChunkManager::GetObjectBuffer(const std::string& bucket_name,
                                    void* buf,
                                    uint64_t size) {
     Aws::S3Crt::Model::GetObjectRequest request;
-    request.SetBucket(bucket_name.c_str());
-    request.SetKey(object_name.c_str());
-
-    /*
+    request.WithBucket(bucket_name).WithKey(object_name);
     request.SetResponseStreamFactory([buf, size]() {
     // For macOs, pubsetbuf interface not implemented
 #ifdef __linux__
@@ -651,7 +648,7 @@ MinioChunkManager::GetObjectBuffer(const std::string& bucket_name,
             "AwsResponseStream", static_cast<char*>(buf), size));
 #endif
         return stream.release();
-    });*/
+    });
     auto start = std::chrono::system_clock::now();
     auto outcome = crt_client_->GetObject(request);
     monitor::internal_storage_request_latency_get.Observe(
@@ -669,6 +666,7 @@ MinioChunkManager::GetObjectBuffer(const std::string& bucket_name,
                      bucket_name,
                      object_name);
     }
+    LOG_INFO("hc===GetObjectBuffer ok");
     monitor::internal_storage_op_count_get_suc.Increment();
     return size;
 }

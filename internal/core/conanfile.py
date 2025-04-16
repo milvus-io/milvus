@@ -15,7 +15,7 @@ class MilvusConan(ConanFile):
         "lzo/2.10#9517fc1bcc4d4cc229a79806003a1baa",
         "arrow/17.0.0#8cea917a6e06ca17c28411966d6fcdd7",
         "openssl/3.1.2#02594c4c0a6e2b4feb3cd15119993597",
-        "aws-sdk-cpp/1.9.234#28d6d2c175975900ce292bafe8022c88",
+        "aws-sdk-cpp/1.11.352@milvus/dev",
         "googleapis/cci.20221108#65604e1b3b9a6b363044da625b201a2a",
         "benchmark/1.7.0#459f3bb1a64400a886ba43047576df3c",
         "gtest/1.13.0#f9548be18a41ccc6367efcb8146e92be",
