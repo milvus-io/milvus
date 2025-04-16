@@ -1458,17 +1458,17 @@ TEST(Expr, TestArrayContainsEmptyValuesPanic) {
     std::vector<proto::plan::GenericValue> empty_values;
 
     for (auto field_id : fields) {
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(field_id, DataType::ARRAY),
+            proto::plan::JSONContainsExpr_JSONOp_Contains,
+            true,
+            empty_values);
+
+        auto dummy_seg = CreateGrowingSegment(schema, empty_index_meta);
+        auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(dummy_seg.get());
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         EXPECT_THROW(
             {
-                auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
-                    expr::ColumnInfo(field_id, DataType::ARRAY),
-                    proto::plan::JSONContainsExpr_JSONOp_Contains,
-                    true,
-                    empty_values);
-
-                auto dummy_seg = CreateGrowingSegment(schema, empty_index_meta);
-                auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(dummy_seg.get());
-                auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
                 ExecuteQueryExpr(plan, seg_promote, 0, MAX_TIMESTAMP);
             },
             milvus::SegcoreError
