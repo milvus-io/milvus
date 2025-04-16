@@ -28,6 +28,7 @@
 #include "Types.h"
 #include "arrow/api.h"
 #include "arrow/array/array_binary.h"
+#include "arrow/chunked_array.h"
 #include "common/FieldMeta.h"
 #include "common/Utils.h"
 #include "common/VectorTrait.h"
@@ -56,6 +57,8 @@ class FieldDataBase {
                   const uint8_t* valid_data,
                   ssize_t element_count) = 0;
 
+    virtual void
+    FillFieldData(const std::shared_ptr<arrow::ChunkedArray> arrays) = 0;
     virtual void
     FillFieldData(const std::shared_ptr<arrow::Array> array) = 0;
 
@@ -171,6 +174,14 @@ class FieldBitsetImpl : public FieldDataBase {
         PanicInfo(NotImplemented,
                   "FillFieldData(const std::shared_ptr<arrow::Array>& array) "
                   "not implemented for bitset");
+    }
+
+    void
+    FillFieldData(const std::shared_ptr<arrow::ChunkedArray> arrays) override {
+        PanicInfo(
+            NotImplemented,
+            "FillFieldData(const std::shared_ptr<arrow::ChunkedArray>& arrays) "
+            "not implemented for bitset");
     }
 
     void
@@ -366,6 +377,9 @@ class FieldDataImpl : public FieldDataBase {
     FillFieldData(const void* field_data,
                   const uint8_t* valid_data,
                   ssize_t element_count) override;
+
+    void
+    FillFieldData(const std::shared_ptr<arrow::ChunkedArray> arrays) override;
 
     void
     FillFieldData(const std::shared_ptr<arrow::Array> array) override;

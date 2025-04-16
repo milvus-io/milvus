@@ -97,6 +97,9 @@ set(MILVUS_TEST_FILES
         test_random_sample.cpp
         test_json_index.cpp
         test_json_key_stats_index.cpp
+        test_types.cpp
+        test_growing_storage_v2.cpp
+        test_memory_planner.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

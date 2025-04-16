@@ -17,11 +17,15 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include "arrow/type.h"
 #include <boost/lexical_cast.hpp>
 #include <google/protobuf/text_format.h>
+#include <memory>
 
 #include "Schema.h"
 #include "SystemProperty.h"
+#include "arrow/util/key_value_metadata.h"
+#include "milvus-storage/common/constants.h"
 #include "protobuf_utils.h"
 
 namespace milvus {
@@ -64,5 +68,25 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
 const FieldMeta FieldMeta::RowIdMeta(
     FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+
+const ArrowSchemaPtr
+Schema::ConvertToArrowSchema() const {
+    arrow::FieldVector arrow_fields;
+    for (auto& field : fields_) {
+        auto meta = field.second;
+        int dim = IsVectorDataType(meta.get_data_type()) &&
+                          !IsSparseFloatVectorDataType(meta.get_data_type())
+                      ? meta.get_dim()
+                      : 1;
+        auto arrow_field = std::make_shared<arrow::Field>(
+            meta.get_name().get(),
+            GetArrowDataType(meta.get_data_type(), dim),
+            meta.is_nullable(),
+            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                      {std::to_string(meta.get_id().get())}));
+        arrow_fields.push_back(arrow_field);
+    }
+    return arrow::schema(arrow_fields);
+}
 
 }  // namespace milvus

@@ -16,6 +16,7 @@
 #include <numeric>
 #include <vector>
 #include "arrow/array/array_primitive.h"
+#include "arrow/type_fwd.h"
 #include "common/ChunkTarget.h"
 #include "arrow/record_batch.h"
 #include "common/Chunk.h"
@@ -32,7 +33,7 @@ class ChunkWriterBase {
     }
 
     virtual void
-    write(std::shared_ptr<arrow::RecordBatchReader> data) = 0;
+    write(const arrow::ArrayVector& data) = 0;
 
     virtual std::shared_ptr<Chunk>
     finish() = 0;
@@ -76,15 +77,12 @@ class ChunkWriter final : public ChunkWriterBase {
         : ChunkWriterBase(file, offset, nullable), dim_(dim){};
 
     void
-    write(std::shared_ptr<arrow::RecordBatchReader> data) override {
+    write(const arrow::ArrayVector& array_vec) override {
         auto size = 0;
         auto row_nums = 0;
 
-        auto batch_vec = data->ToRecordBatches().ValueOrDie();
-
-        for (auto& batch : batch_vec) {
-            row_nums += batch->num_rows();
-            auto data = batch->column(0);
+        for (const auto& data : array_vec) {
+            row_nums += data->length();
             auto array = std::static_pointer_cast<ArrowType>(data);
             if (nullable_) {
                 auto null_bitmap_n = (data->length() + 7) / 8;
@@ -104,8 +102,7 @@ class ChunkWriter final : public ChunkWriterBase {
         // 2. Data values: Contiguous storage of data elements in the order:
         //    data1, data2, ..., dataN where each data element has size dim_*sizeof(T)
         if (nullable_) {
-            for (auto& batch : batch_vec) {
-                auto data = batch->column(0);
+            for (const auto& data : array_vec) {
                 auto null_bitmap = data->null_bitmap_data();
                 auto null_bitmap_n = (data->length() + 7) / 8;
                 if (null_bitmap) {
@@ -117,8 +114,7 @@ class ChunkWriter final : public ChunkWriterBase {
             }
         }
 
-        for (auto& batch : batch_vec) {
-            auto data = batch->column(0);
+        for (const auto& data : array_vec) {
             auto array = std::static_pointer_cast<ArrowType>(data);
             auto data_ptr = array->raw_values();
             target_->write(data_ptr, array->length() * dim_ * sizeof(T));
@@ -139,14 +135,12 @@ class ChunkWriter final : public ChunkWriterBase {
 template <>
 inline void
 ChunkWriter<arrow::BooleanArray, bool>::write(
-    std::shared_ptr<arrow::RecordBatchReader> data) {
+    const arrow::ArrayVector& array_vec) {
     auto size = 0;
     auto row_nums = 0;
-    auto batch_vec = data->ToRecordBatches().ValueOrDie();
 
-    for (auto& batch : batch_vec) {
-        row_nums += batch->num_rows();
-        auto data = batch->column(0);
+    for (const auto& data : array_vec) {
+        row_nums += data->length();
         auto array = std::dynamic_pointer_cast<arrow::BooleanArray>(data);
         size += array->length() * dim_;
         size += (data->length() + 7) / 8;
@@ -160,8 +154,7 @@ ChunkWriter<arrow::BooleanArray, bool>::write(
 
     if (nullable_) {
         // chunk layout: nullbitmap, data1, data2, ..., datan
-        for (auto& batch : batch_vec) {
-            auto data = batch->column(0);
+        for (const auto& data : array_vec) {
             auto null_bitmap = data->null_bitmap_data();
             auto null_bitmap_n = (data->length() + 7) / 8;
             if (null_bitmap) {
@@ -173,8 +166,7 @@ ChunkWriter<arrow::BooleanArray, bool>::write(
         }
     }
 
-    for (auto& batch : batch_vec) {
-        auto data = batch->column(0);
+    for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BooleanArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto value = array->Value(i);
@@ -188,7 +180,7 @@ class StringChunkWriter : public ChunkWriterBase {
     using ChunkWriterBase::ChunkWriterBase;
 
     void
-    write(std::shared_ptr<arrow::RecordBatchReader> data) override;
+    write(const arrow::ArrayVector& array_vec) override;
 
     std::shared_ptr<Chunk>
     finish() override;
@@ -199,7 +191,7 @@ class JSONChunkWriter : public ChunkWriterBase {
     using ChunkWriterBase::ChunkWriterBase;
 
     void
-    write(std::shared_ptr<arrow::RecordBatchReader> data) override;
+    write(const arrow::ArrayVector& array_vec) override;
 
     std::shared_ptr<Chunk>
     finish() override;
@@ -218,7 +210,7 @@ class ArrayChunkWriter : public ChunkWriterBase {
     }
 
     void
-    write(std::shared_ptr<arrow::RecordBatchReader> data) override;
+    write(const arrow::ArrayVector& array_vec) override;
 
     std::shared_ptr<Chunk>
     finish() override;
@@ -232,7 +224,7 @@ class SparseFloatVectorChunkWriter : public ChunkWriterBase {
     using ChunkWriterBase::ChunkWriterBase;
 
     void
-    write(std::shared_ptr<arrow::RecordBatchReader> data) override;
+    write(const arrow::ArrayVector& array_vec) override;
 
     std::shared_ptr<Chunk>
     finish() override;
@@ -241,12 +233,16 @@ class SparseFloatVectorChunkWriter : public ChunkWriterBase {
 std::shared_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              int dim,
-             std::shared_ptr<arrow::RecordBatchReader> r);
+             const arrow::ArrayVector& array_vec);
 
 std::shared_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              int dim,
              File& file,
              size_t file_offset,
-             std::shared_ptr<arrow::RecordBatchReader> r);
+             const arrow::ArrayVector& array_vec);
+
+arrow::ArrayVector
+read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader);
+
 }  // namespace milvus
