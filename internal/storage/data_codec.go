@@ -64,6 +64,15 @@ type (
 // InvalidUniqueID is used when the UniqueID is not set (like in return with err)
 const InvalidUniqueID = UniqueID(-1)
 
+// Value is the return value of Next
+type Value struct {
+	ID        int64
+	PK        PrimaryKey
+	Timestamp int64
+	IsDeleted bool
+	Value     interface{}
+}
+
 // Blob is a pack of key&value
 type Blob struct {
 	Key        string
