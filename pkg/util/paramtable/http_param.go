@@ -25,6 +25,7 @@ type httpConfig struct {
 	RequestTimeoutMs      ParamItem `refreshable:"true"`
 	HSTSMaxAge            ParamItem `refreshable:"false"`
 	HSTSIncludeSubDomains ParamItem `refreshable:"false"`
+	EnableHSTS            ParamItem `refreshable:"false"`
 }
 
 func (p *httpConfig) init(base *BaseTable) {
@@ -86,7 +87,7 @@ func (p *httpConfig) init(base *BaseTable) {
 	p.HSTSMaxAge = ParamItem{
 		Key:          "proxy.http.hstsMaxAge",
 		DefaultValue: "31536000", // 1 year
-		Version:      "2.5.0",
+		Version:      "2.6.0",
 		Doc:          "Strict-Transport-Security max-age in seconds",
 		Export:       true,
 	}
@@ -95,9 +96,18 @@ func (p *httpConfig) init(base *BaseTable) {
 	p.HSTSIncludeSubDomains = ParamItem{
 		Key:          "proxy.http.hstsIncludeSubDomains",
 		DefaultValue: "true",
-		Version:      "2.5.0",
+		Version:      "2.6.0",
 		Doc:          "Include subdomains in Strict-Transport-Security",
 		Export:       true,
 	}
 	p.HSTSIncludeSubDomains.Init(base.mgr)
+
+	p.EnableHSTS = ParamItem{
+		Key:          "proxy.http.enableHSTS",
+		DefaultValue: "false",
+		Version:      "2.6.0",
+		Doc:          "Whether to enable setting the Strict-Transport-Security header",
+		Export:       true,
+	}
+	p.EnableHSTS.Init(base.mgr)
 }

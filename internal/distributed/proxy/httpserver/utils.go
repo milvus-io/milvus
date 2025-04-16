@@ -1751,14 +1751,16 @@ func RequestHandlerFunc(c *gin.Context) {
 	c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH")
 	c.Writer.Header().Set("X-Content-Type-Options", "nosniff") // Prevents MIME sniffing
 
-	maxAge := paramtable.Get().HTTPCfg.HSTSMaxAge.GetValue()
-	includeSubDomains := paramtable.Get().HTTPCfg.HSTSIncludeSubDomains.GetAsBool()
-
-	hstsValue := fmt.Sprintf("max-age=%s", maxAge)
-	if includeSubDomains {
-		hstsValue += "; includeSubDomains"
+	enableHSTS := paramtable.Get().HTTPCfg.EnableHSTS.GetAsBool()
+	if enableHSTS {
+		maxAge := paramtable.Get().HTTPCfg.HSTSMaxAge.GetValue()
+		hstsValue := fmt.Sprintf("max-age=%s", maxAge)
+		includeSubDomains := paramtable.Get().HTTPCfg.HSTSIncludeSubDomains.GetAsBool()
+		if includeSubDomains {
+			hstsValue += "; includeSubDomains"
+		}
+		c.Writer.Header().Set("Strict-Transport-Security", hstsValue)
 	}
-	c.Writer.Header().Set("Strict-Transport-Security", hstsValue)
 
 	if c.Request.Method == "OPTIONS" {
 		c.AbortWithStatus(204)
