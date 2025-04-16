@@ -95,7 +95,7 @@ func (p *httpConfig) init(base *BaseTable) {
 
 	p.HSTSIncludeSubDomains = ParamItem{
 		Key:          "proxy.http.hstsIncludeSubDomains",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		Version:      "2.6.0",
 		Doc:          "Include subdomains in Strict-Transport-Security",
 		Export:       true,
