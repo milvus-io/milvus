@@ -98,7 +98,12 @@ func Test_createCollectionTask_validate(t *testing.T) {
 
 	t.Run("shard num exceeds max configuration", func(t *testing.T) {
 		// TODO: better to have a `Set` method for ParamItem.
-		cfgMaxShardNum := Params.RootCoordCfg.DmlChannelNum.GetAsInt32()
+		var cfgMaxShardNum int32
+		if Params.CommonCfg.PreCreatedTopicEnabled.GetAsBool() {
+			cfgMaxShardNum = int32(len(Params.CommonCfg.TopicNames.GetAsStrings()))
+		} else {
+			cfgMaxShardNum = Params.RootCoordCfg.DmlChannelNum.GetAsInt32()
+		}
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:      &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
