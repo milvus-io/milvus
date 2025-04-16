@@ -65,7 +65,7 @@ func TestWalAdaptorReadFail(t *testing.T) {
 	writeAheadBuffer := mock_wab.NewMockROWriteAheadBuffer(t)
 	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
 	operator.EXPECT().Channel().Return(types.PChannelInfo{}).Maybe()
-	operator.EXPECT().Sync(mock.Anything).Return().Maybe()
+	operator.EXPECT().Sync(mock.Anything, mock.Anything).Return().Maybe()
 	operator.EXPECT().WriteAheadBuffer(mock.Anything).Return(writeAheadBuffer, nil).Maybe()
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(
 		operator,
@@ -95,7 +95,7 @@ func TestWALAdaptor(t *testing.T) {
 
 	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
 	operator.EXPECT().Channel().Return(types.PChannelInfo{})
-	operator.EXPECT().Sync(mock.Anything).Return()
+	operator.EXPECT().Sync(mock.Anything, mock.Anything).Return()
 	buffer := mock_wab.NewMockROWriteAheadBuffer(t)
 	operator.EXPECT().WriteAheadBuffer(mock.Anything).Return(buffer, nil)
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)

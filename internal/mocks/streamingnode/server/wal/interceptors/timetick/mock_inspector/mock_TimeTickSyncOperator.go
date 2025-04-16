@@ -130,9 +130,9 @@ func (_c *MockTimeTickSyncOperator_MVCCManager_Call) RunAndReturn(run func(conte
 	return _c
 }
 
-// Sync provides a mock function with given fields: ctx
-func (_m *MockTimeTickSyncOperator) Sync(ctx context.Context) {
-	_m.Called(ctx)
+// Sync provides a mock function with given fields: ctx, forcePersisted
+func (_m *MockTimeTickSyncOperator) Sync(ctx context.Context, forcePersisted bool) {
+	_m.Called(ctx, forcePersisted)
 }
 
 // MockTimeTickSyncOperator_Sync_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Sync'
@@ -142,13 +142,14 @@ type MockTimeTickSyncOperator_Sync_Call struct {
 
 // Sync is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockTimeTickSyncOperator_Expecter) Sync(ctx interface{}) *MockTimeTickSyncOperator_Sync_Call {
-	return &MockTimeTickSyncOperator_Sync_Call{Call: _e.mock.On("Sync", ctx)}
+//   - forcePersisted bool
+func (_e *MockTimeTickSyncOperator_Expecter) Sync(ctx interface{}, forcePersisted interface{}) *MockTimeTickSyncOperator_Sync_Call {
+	return &MockTimeTickSyncOperator_Sync_Call{Call: _e.mock.On("Sync", ctx, forcePersisted)}
 }
 
-func (_c *MockTimeTickSyncOperator_Sync_Call) Run(run func(ctx context.Context)) *MockTimeTickSyncOperator_Sync_Call {
+func (_c *MockTimeTickSyncOperator_Sync_Call) Run(run func(ctx context.Context, forcePersisted bool)) *MockTimeTickSyncOperator_Sync_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(bool))
 	})
 	return _c
 }
@@ -158,7 +159,7 @@ func (_c *MockTimeTickSyncOperator_Sync_Call) Return() *MockTimeTickSyncOperator
 	return _c
 }
 
-func (_c *MockTimeTickSyncOperator_Sync_Call) RunAndReturn(run func(context.Context)) *MockTimeTickSyncOperator_Sync_Call {
+func (_c *MockTimeTickSyncOperator_Sync_Call) RunAndReturn(run func(context.Context, bool)) *MockTimeTickSyncOperator_Sync_Call {
 	_c.Call.Return(run)
 	return _c
 }
