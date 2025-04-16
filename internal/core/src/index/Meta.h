@@ -48,6 +48,7 @@ constexpr const char* BITMAP_INDEX_TYPE = "BITMAP";
 constexpr const char* HYBRID_INDEX_TYPE = "HYBRID";
 constexpr const char* SCALAR_INDEX_ENGINE_VERSION =
     "scalar_index_engine_version";
+constexpr const char* INDEX_NON_ENCODING = "index.nonEncoding";
 
 // index meta
 constexpr const char* COLLECTION_ID = "collection_id";
