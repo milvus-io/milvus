@@ -81,8 +81,10 @@ ChunkCache::Read(const std::string& filepath,
             std::filesystem::create_directories(dir);
 
             auto file = File::Open(path.string(), O_CREAT | O_TRUNC | O_RDWR);
-            chunk = create_chunk(
-                field_meta, dim, file, 0, field_data->GetReader()->reader);
+
+            arrow::ArrayVector array_vec =
+                read_single_column_batches(field_data->GetReader()->reader);
+            chunk = create_chunk(field_meta, dim, file, 0, array_vec);
             // unlink
             auto ok = unlink(path.c_str());
             AssertInfo(ok == 0,
@@ -90,8 +92,9 @@ ChunkCache::Read(const std::string& filepath,
                        path.c_str(),
                        strerror(errno));
         } else {
-            chunk =
-                create_chunk(field_meta, dim, field_data->GetReader()->reader);
+            arrow::ArrayVector array_vec =
+                read_single_column_batches(field_data->GetReader()->reader);
+            chunk = create_chunk(field_meta, dim, array_vec);
         }
 
         auto data_type = field_meta.get_data_type();

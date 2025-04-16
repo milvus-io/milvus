@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <arrow/util/key_value_metadata.h>
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdint>
@@ -26,6 +27,7 @@
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
+#include "milvus-storage/common/constants.h"
 #include "mmap/ChunkedColumn.h"
 #include "mmap/Types.h"
 #include "pb/plan.pb.h"
@@ -190,18 +192,47 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
             true);
         test_data_count = 10000;
 
-        auto arrow_i64_field = arrow::field("int64", arrow::int64());
-        auto arrow_pk_field =
-            arrow::field("pk", pk_is_string ? arrow::utf8() : arrow::int64());
-        auto arrow_ts_field = arrow::field("ts", arrow::int64());
-        auto arrow_str_field = arrow::field("string1", arrow::utf8());
-        auto arrow_str2_field = arrow::field("string2", arrow::utf8());
+        auto arrow_i64_field = arrow::field(
+            "int64",
+            arrow::int64(),
+            true,
+            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                      {std::to_string(100)}));
+        auto arrow_pk_field = arrow::field(
+            "pk",
+            pk_is_string ? arrow::utf8() : arrow::int64(),
+            true,
+            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                      {std::to_string(101)}));
+        auto arrow_ts_field = arrow::field(
+            "ts",
+            arrow::int64(),
+            true,
+            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                      {std::to_string(1)}));
+        auto arrow_str_field = arrow::field(
+            "string1",
+            arrow::utf8(),
+            true,
+            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                      {std::to_string(102)}));
+        auto arrow_str2_field = arrow::field(
+            "string2",
+            arrow::utf8(),
+            true,
+            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                      {std::to_string(103)}));
         std::vector<std::shared_ptr<arrow::Field>> arrow_fields = {
-            arrow_i64_field,
-            arrow_pk_field,
             arrow_ts_field,
+            arrow_str2_field,
             arrow_str_field,
-            arrow_str2_field};
+            arrow_pk_field,
+            arrow_i64_field,
+        };
+        auto expected_arrow_schema =
+            std::make_shared<arrow::Schema>(arrow_fields);
+        ASSERT_EQ(schema->ConvertToArrowSchema()->ToString(),
+                  expected_arrow_schema->ToString());
 
         std::vector<FieldId> field_ids = {
             int64_fid, pk_fid, TimestampFieldID, str_fid, str2_fid};
