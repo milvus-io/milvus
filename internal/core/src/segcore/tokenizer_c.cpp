@@ -54,6 +54,16 @@ create_token_stream(CTokenizer tokenizer, const char* text, uint32_t text_len) {
 }
 
 CStatus
+validate_tokenizer(const char* params){
+    try {
+        auto impl = std::make_unique<milvus::tantivy::Tokenizer>(params);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 validate_text_schema(const uint8_t* field_schema, uint64_t length) {
     try {
         auto schema = std::make_unique<milvus::proto::schema::FieldSchema>();

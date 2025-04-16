@@ -131,6 +131,7 @@ message SearchRequest {
   bool is_topk_reduce = 26;
   bool is_recall_evaluation = 27;
   bool is_iterator = 28;
+  string analyzer_name = 29;
 }
 
 message SubSearchResults {

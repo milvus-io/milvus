@@ -36,3 +36,25 @@ func TestTokenizer(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateTokenizer(t *testing.T) {
+	// valid tokenizer
+	{
+		m := "{\"tokenizer\": \"standard\"}"
+		err := ValidateTokenizer(m)
+		assert.NoError(t, err)
+	}
+
+	{
+		m := ""
+		err := ValidateTokenizer(m)
+		assert.NoError(t, err)
+	}
+
+	// invalid tokenizer
+	{
+		m := "{\"tokenizer\": \"invalid\"}"
+		err := ValidateTokenizer(m)
+		assert.Error(t, err)
+	}
+}
