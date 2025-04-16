@@ -5,7 +5,7 @@ use crate::{
     array::RustResult,
     cstr_to_str,
     data_type::TantivyDataType,
-    index_reader::SetBitsetFn,
+    index_reader_c::SetBitsetFn,
     index_writer::IndexWriterWrapper,
     util::{create_binding, free_binding},
     TantivyIndexVersion,

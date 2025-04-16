@@ -167,5 +167,31 @@ CheckAndUpdateKnowhereRangeSearchParam(const SearchInfo& search_info,
                                        const MetricType& metric_type,
                                        knowhere::Json& search_config);
 
-void inline SetBitset(void* bitset, uint32_t doc_id);
+void inline SetBitset(void* bitset, const uint32_t* doc_id, uintptr_t n) {
+    TargetBitmap* bitmap = static_cast<TargetBitmap*>(bitset);
+
+    uintptr_t i = 0;
+    while (i + 3 < n) {
+        uint32_t doc_id_0 = doc_id[i];
+        uint32_t doc_id_1 = doc_id[i + 1];
+        uint32_t doc_id_2 = doc_id[i + 2];
+        uint32_t doc_id_3 = doc_id[i + 3];
+        assert(doc_id_3 < bitmap->size());
+
+        (*bitmap)[doc_id_0] = true;
+        (*bitmap)[doc_id_1] = true;
+        (*bitmap)[doc_id_2] = true;
+        (*bitmap)[doc_id_3] = true;
+
+        i += 4;
+    }
+
+    while (i < n) {
+        uint32_t doc_id_0 = doc_id[i];
+        assert(doc_id_0 < bitmap->size());
+
+        (*bitmap)[doc_id_0] = true;
+        i++;
+    }
+}
 }  // namespace milvus::index

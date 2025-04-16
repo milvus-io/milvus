@@ -8,13 +8,12 @@ use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
 use crate::bitset_wrapper::BitsetWrapper;
 use crate::docid_collector::{DocIdCollector, DocIdCollectorI64};
+use crate::index_reader_c::SetBitsetFn;
 use crate::log::init_log;
 use crate::util::make_bounds;
 use crate::vec_collector::VecCollector;
 
 use crate::error::{Result, TantivyBindingError};
-
-pub(crate) type SetBitsetFn = extern "C" fn(*mut c_void, u32);
 
 #[allow(dead_code)]
 pub(crate) struct IndexReaderWrapper {

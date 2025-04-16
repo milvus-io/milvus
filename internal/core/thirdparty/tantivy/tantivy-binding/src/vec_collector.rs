@@ -57,7 +57,7 @@ impl SegmentCollector for VecChildCollector {
 
     #[inline]
     fn collect(&mut self, doc: DocId, _score: tantivy::Score) {
-        self.bitset_wrapper.set(doc);
+        self.bitset_wrapper.batch_set(&[doc]);
     }
 
     #[inline]

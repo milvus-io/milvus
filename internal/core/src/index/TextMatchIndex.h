@@ -76,7 +76,7 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
 
  public:
     void
-    CreateReader(SetBitsetFn set_bitset);
+    CreateReader();
 
     void
     RegisterTokenizer(const char* tokenizer_name, const char* analyzer_params);

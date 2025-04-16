@@ -13,7 +13,8 @@ use tantivy::{doc, Index, IndexWriter, TantivyDocument};
 use crate::data_type::TantivyDataType;
 
 use crate::error::{Result, TantivyBindingError};
-use crate::index_reader::{IndexReaderWrapper, SetBitsetFn};
+use crate::index_reader::IndexReaderWrapper;
+use crate::index_reader_c::SetBitsetFn;
 use crate::index_writer::TantivyValue;
 
 const BATCH_SIZE: usize = 4096;

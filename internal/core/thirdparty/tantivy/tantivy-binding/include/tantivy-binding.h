@@ -71,7 +71,7 @@ struct RustResult {
   const char *error;
 };
 
-using SetBitsetFn = void(*)(void*, uint32_t);
+using SetBitsetFn = void(*)(void*, const uint32_t*, uintptr_t);
 
 struct TantivyToken {
   const char *token;

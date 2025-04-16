@@ -5,7 +5,8 @@ use libc::c_char;
 use crate::data_type::TantivyDataType;
 
 use crate::error::{Result, TantivyBindingError};
-use crate::index_reader::{IndexReaderWrapper, SetBitsetFn};
+use crate::index_reader::IndexReaderWrapper;
+use crate::index_reader_c::SetBitsetFn;
 use crate::log::init_log;
 use crate::{index_writer_v5, index_writer_v7, TantivyIndexVersion};
 

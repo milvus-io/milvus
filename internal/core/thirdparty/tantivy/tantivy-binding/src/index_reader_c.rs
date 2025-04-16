@@ -3,10 +3,12 @@ use std::ffi::{c_char, c_void, CStr};
 use crate::{
     array::RustResult,
     cstr_to_str,
-    index_reader::{IndexReaderWrapper, SetBitsetFn},
+    index_reader::IndexReaderWrapper,
     util::{create_binding, free_binding},
     util_c::tantivy_index_exist,
 };
+
+pub(crate) type SetBitsetFn = extern "C" fn(*mut c_void, *const u32, usize);
 
 #[no_mangle]
 pub extern "C" fn tantivy_load_index(path: *const c_char, set_bitset: SetBitsetFn) -> RustResult {

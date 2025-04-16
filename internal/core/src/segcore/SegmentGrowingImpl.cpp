@@ -944,7 +944,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
         "milvus_tokenizer",
         field_meta.get_analyzer_params().c_str());
     index->Commit();
-    index->CreateReader(index::SetBitset);
+    index->CreateReader();
     index->RegisterTokenizer("milvus_tokenizer",
                              field_meta.get_analyzer_params().c_str());
     text_indexes_[field_id] = std::move(index);

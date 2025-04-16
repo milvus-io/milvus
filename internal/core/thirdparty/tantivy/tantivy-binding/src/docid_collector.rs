@@ -52,9 +52,13 @@ impl SegmentCollector for DocIdChildCollector {
 
     #[inline]
     fn collect_block(&mut self, docs: &[DocId]) {
-        for doc_id in self.column.values_for_docs_flatten(docs).into_iter() {
-            self.bitset_wrapper.set(doc_id as u32);
-        }
+        let docs: Vec<_> = self
+            .column
+            .values_for_docs_flatten(docs)
+            .into_iter()
+            .map(|doc_id| doc_id as u32)
+            .collect();
+        self.bitset_wrapper.batch_set(&docs);
     }
 
     fn collect(&mut self, doc: DocId, _score: Score) {

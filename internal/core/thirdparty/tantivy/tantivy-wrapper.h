@@ -12,6 +12,7 @@
 #include "rust-binding.h"
 #include "rust-array.h"
 #include "rust-hashmap.h"
+#include "index/Utils.h"
 
 namespace milvus::tantivy {
 using Map = std::map<std::string, std::string>;
@@ -150,10 +151,10 @@ struct TantivyIndexWrapper {
     }
     // create reader.
     void
-    create_reader(SetBitsetFn set_bitset) {
+    create_reader() {
         if (writer_ != nullptr) {
             auto res = RustResultWrapper(
-                tantivy_create_reader_from_writer(writer_, set_bitset));
+                tantivy_create_reader_from_writer(writer_, milvus::index::SetBitset));
             AssertInfo(res.result_->success,
                        "failed to create reader from writer: {}",
                        res.result_->error);
@@ -161,7 +162,7 @@ struct TantivyIndexWrapper {
         } else if (!path_.empty()) {
             assert(tantivy_index_exist(path_.c_str()));
             auto res = RustResultWrapper(
-                tantivy_load_index(path_.c_str(), set_bitset));
+                tantivy_load_index(path_.c_str(), milvus::index::SetBitset));
             AssertInfo(res.result_->success,
                        "failed to load index: {}",
                        res.result_->error);

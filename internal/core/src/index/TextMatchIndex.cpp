@@ -289,8 +289,8 @@ TextMatchIndex::Reload() {
 }
 
 void
-TextMatchIndex::CreateReader(SetBitsetFn set_bitset) {
-    wrapper_->create_reader(set_bitset);
+TextMatchIndex::CreateReader() {
+    wrapper_->create_reader();
 }
 
 void

@@ -350,8 +350,8 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
     }
     // The expression is "not" in, so we flip the bit.
     bitset.flip();
-    for (size_t i = 0; i < null_offset.size(); ++i) {
-        bitset.reset(null_offset[i]);
+    for (size_t i = 0; i < null_offset_.size(); ++i) {
+        bitset.reset(null_offset_[i]);
     }
     return bitset;
 }
@@ -505,7 +505,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
                 static_cast<const T*>(values), n);
         }
     }
-    wrapper_->create_reader(milvus::index::SetBitset);
+    wrapper_->create_reader();
     finish();
     wrapper_->reload();
 }

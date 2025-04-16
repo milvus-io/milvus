@@ -1,6 +1,6 @@
 use std::{ffi::c_void, ptr::NonNull};
 
-use crate::index_reader::SetBitsetFn;
+use crate::index_reader_c::SetBitsetFn;
 
 #[derive(Clone)]
 pub struct BitsetWrapper {
@@ -18,7 +18,8 @@ impl BitsetWrapper {
         BitsetWrapper { bitset, set_bitset }
     }
 
-    pub fn set(&self, doc_id: u32) {
-        (self.set_bitset)(self.bitset.as_ptr(), doc_id);
+    #[inline]
+    pub fn batch_set(&self, doc_ids: &[u32]) {
+        (self.set_bitset)(self.bitset.as_ptr(), doc_ids.as_ptr(), doc_ids.len());
     }
 }
