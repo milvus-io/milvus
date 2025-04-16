@@ -5,6 +5,9 @@ use tantivy::{
 
 use crate::bitset_wrapper::BitsetWrapper;
 
+// "warning": bitset_wrapper has no guarantee for thread safety, so `MilvusIdChildCollector`
+// should be handled serializely which means we should only use single thread
+// for executing query.
 pub(crate) struct MilvusIdCollector {
     pub(crate) bitset_wrapper: BitsetWrapper,
 }

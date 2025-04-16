@@ -6,7 +6,7 @@ use tantivy::{
 
 use crate::bitset_wrapper::BitsetWrapper;
 
-// "warning": bitset_wrapper has no guarantee for thread safety, so `DocIdChildCollector`
+// "warning": bitset_wrapper has no guarantee for thread safety, so `VecChildCollector`
 // should be handled serializely which means we should only use single thread
 // for executing query.
 pub struct VecCollector {

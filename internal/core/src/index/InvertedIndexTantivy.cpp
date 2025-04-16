@@ -349,14 +349,19 @@ InvertedIndexTantivy<T>::InApplyCallback(
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
-    TargetBitmap bitset(Count());
+    int64_t count = Count();
+    TargetBitmap bitset(count);
     for (size_t i = 0; i < n; ++i) {
         wrapper_->term_query(values[i], &bitset);
     }
     // The expression is "not" in, so we flip the bit.
     bitset.flip();
-    for (size_t i = 0; i < null_offset_.size(); ++i) {
-        bitset.reset(null_offset_[i]);
+
+    folly::SharedMutex::ReadHolder lock(mutex_);
+    auto end =
+        std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
+    for (auto iter = null_offset_.begin(); iter != end; ++iter) {
+        bitset.reset(*iter);
     }
     return bitset;
 }
