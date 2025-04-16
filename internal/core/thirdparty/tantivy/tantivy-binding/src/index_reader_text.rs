@@ -85,7 +85,9 @@ mod tests {
         .unwrap();
 
         writer.add_data_by_batch(&["网球和滑雪"], Some(0)).unwrap();
-        writer.add_data_by_batch(&["网球以及滑雪"], Some(1)).unwrap();
+        writer
+            .add_data_by_batch(&["网球以及滑雪"], Some(1))
+            .unwrap();
 
         writer.commit().unwrap();
 
@@ -129,7 +131,5 @@ mod tests {
 
         let res = reader.search(&query).unwrap();
         assert_eq!(res, (0..10000).collect::<Vec<u32>>());
-        let res = reader.search_i64(&query).unwrap();
-        assert_eq!(res, (0..10000).collect::<Vec<i64>>());
     }
 }

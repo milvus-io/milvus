@@ -1,24 +1,25 @@
+use log::info;
 use std::sync::Arc;
 
-use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, FAST};
+use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions};
 use tantivy::Index;
 
 use crate::analyzer::create_analyzer;
 use crate::error::Result;
-use crate::log::init_log;
 
 use super::IndexWriterWrapperImpl;
 
-fn build_text_schema(field_name: &str, tokenizer_name: &str) -> (Schema, Field, Field) {
+fn build_text_schema(field_name: &str, tokenizer_name: &str) -> (Schema, Field) {
     let mut schema_builder = Schema::builder();
     // positions is required for matching phase.
     let indexing = TextFieldIndexing::default()
         .set_tokenizer(tokenizer_name)
+        .set_fieldnorms(false)
         .set_index_option(IndexRecordOption::WithFreqsAndPositions);
     let option = TextOptions::default().set_indexing_options(indexing);
     let field = schema_builder.add_text_field(field_name, option);
-    let id_field = schema_builder.add_i64_field("doc_id", FAST);
-    (schema_builder.build(), field, id_field)
+    schema_builder.enable_user_specified_doc_id();
+    (schema_builder.build(), field)
 }
 
 impl IndexWriterWrapperImpl {
@@ -31,10 +32,14 @@ impl IndexWriterWrapperImpl {
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
     ) -> Result<IndexWriterWrapperImpl> {
-        init_log();
+        info!(
+            "create text index writer, field_name: {}, tantivy_index_version 7",
+            field_name
+        );
+
         let tokenizer = create_analyzer(tokenizer_params)?;
 
-        let (schema, field, id_field) = build_text_schema(field_name, tokenizer_name);
+        let (schema, field) = build_text_schema(field_name, tokenizer_name);
         let index = if in_ram {
             Index::create_in_ram(schema)
         } else {
@@ -48,7 +53,6 @@ impl IndexWriterWrapperImpl {
         Ok(IndexWriterWrapperImpl {
             field,
             index_writer,
-            id_field,
             index: Arc::new(index),
         })
     }

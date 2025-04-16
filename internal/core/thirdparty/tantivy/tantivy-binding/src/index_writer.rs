@@ -29,7 +29,6 @@ impl IndexWriterWrapper {
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         tanviy_index_version: TantivyIndexVersion,
-        in_ram: bool,
     ) -> Result<IndexWriterWrapper> {
         init_log();
         match tanviy_index_version {
@@ -40,7 +39,6 @@ impl IndexWriterWrapper {
                     path,
                     num_threads,
                     overall_memory_budget_in_bytes,
-                    in_ram,
                 )?;
                 Ok(IndexWriterWrapper::V5(writer))
             }
@@ -51,7 +49,6 @@ impl IndexWriterWrapper {
                     path,
                     num_threads,
                     overall_memory_budget_in_bytes,
-                    in_ram,
                 )?;
                 Ok(IndexWriterWrapper::V7(writer))
             }
@@ -88,7 +85,9 @@ impl IndexWriterWrapper {
     {
         match self {
             IndexWriterWrapper::V5(writer) => writer.add_data_by_batch(data, offset),
-            IndexWriterWrapper::V7(writer) => writer.add_data_by_batch(data, offset.unwrap()),
+            IndexWriterWrapper::V7(writer) => {
+                writer.add_data_by_batch(data, offset.unwrap() as u32)
+            }
         }
     }
 
@@ -99,7 +98,7 @@ impl IndexWriterWrapper {
     {
         match self {
             IndexWriterWrapper::V5(writer) => writer.add_array(data, offset),
-            IndexWriterWrapper::V7(writer) => writer.add_array(data, offset.unwrap()),
+            IndexWriterWrapper::V7(writer) => writer.add_array(data, offset.unwrap() as u32),
         }
     }
 
@@ -110,7 +109,9 @@ impl IndexWriterWrapper {
     ) -> Result<()> {
         match self {
             IndexWriterWrapper::V5(writer) => writer.add_string_by_batch(data, offset),
-            IndexWriterWrapper::V7(writer) => writer.add_string_by_batch(data, offset.unwrap()),
+            IndexWriterWrapper::V7(writer) => {
+                writer.add_string_by_batch(data, offset.unwrap() as u32)
+            }
         }
     }
 
@@ -121,7 +122,9 @@ impl IndexWriterWrapper {
     ) -> Result<()> {
         match self {
             IndexWriterWrapper::V5(writer) => writer.add_array_keywords(datas, offset),
-            IndexWriterWrapper::V7(writer) => writer.add_array_keywords(datas, offset.unwrap()),
+            IndexWriterWrapper::V7(writer) => {
+                writer.add_array_keywords(datas, offset.unwrap() as u32)
+            }
         }
     }
 
@@ -193,7 +196,6 @@ mod tests {
                 1,
                 50_000_000,
                 TantivyIndexVersion::V5,
-                false,
             )
             .unwrap();
 
@@ -309,14 +311,12 @@ mod tests {
 
     #[test]
     pub fn test_add_json_key_stats() {
-        use crate::data_type::TantivyDataType;
         use crate::index_writer::IndexWriterWrapper;
 
         let temp_dir = tempdir().unwrap();
-        let mut index_writer = IndexWriterWrapper::new(
+        let mut index_writer = IndexWriterWrapper::create_json_key_stats_writer(
             "test",
-            TantivyDataType::Keyword,
-            temp_dir.path().to_str().unwrap().to_string(),
+            temp_dir.path().to_str().unwrap(),
             1,
             15 * 1024 * 1024,
             TantivyIndexVersion::V7,
@@ -351,5 +351,74 @@ mod tests {
         index_writer.commit().unwrap();
         let count = index_writer.create_reader().unwrap().count().unwrap();
         assert_eq!(count, total_count);
+    }
+
+    #[test]
+    pub fn test_add_strings_by_batch() {
+        use crate::data_type::TantivyDataType;
+        use crate::index_writer::IndexWriterWrapper;
+
+        let temp_dir = tempdir().unwrap();
+        let mut index_writer = IndexWriterWrapper::new(
+            "test",
+            TantivyDataType::Keyword,
+            temp_dir.path().to_str().unwrap().to_string(),
+            1,
+            15 * 1024 * 1024,
+            TantivyIndexVersion::V7,
+        )
+        .unwrap();
+
+        let keys = (0..10000)
+            .map(|i| format!("key{:05}", i))
+            .collect::<Vec<_>>();
+
+        let c_keys: Vec<CString> = keys.into_iter().map(|k| CString::new(k).unwrap()).collect();
+        let key_ptrs: Vec<*const libc::c_char> = c_keys.iter().map(|cs| cs.as_ptr()).collect();
+
+        index_writer
+            .add_string_by_batch(&key_ptrs, Some(0))
+            .unwrap();
+        index_writer.commit().unwrap();
+        let reader = index_writer.create_reader().unwrap();
+        let count: u32 = reader.count().unwrap();
+        assert_eq!(count, 10000);
+    }
+
+    #[test]
+    pub fn test_add_data_by_batch() {
+        use crate::data_type::TantivyDataType;
+        use crate::index_writer::IndexWriterWrapper;
+
+        let temp_dir = tempdir().unwrap();
+        let mut index_writer = IndexWriterWrapper::new(
+            "test",
+            TantivyDataType::I64,
+            temp_dir.path().to_str().unwrap().to_string(),
+            1,
+            15 * 1024 * 1024,
+            TantivyIndexVersion::V7,
+        )
+        .unwrap();
+
+        let keys = (0..10000).collect::<Vec<_>>();
+
+        let mut count = 0;
+        for i in keys {
+            index_writer
+                .add_data_by_batch::<i64>(&[i], Some(i as i64))
+                .unwrap();
+
+            count += 1;
+
+            if count % 1000 == 0 {
+                index_writer.commit().unwrap();
+            }
+        }
+
+        index_writer.commit().unwrap();
+        let reader = index_writer.create_reader().unwrap();
+        let count: u32 = reader.count().unwrap();
+        assert_eq!(count, 10000);
     }
 }
