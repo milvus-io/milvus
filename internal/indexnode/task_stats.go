@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	sio "io"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"time"
@@ -322,6 +323,10 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 		zap.Duration("sort elapse", sortTimeCost),
 		zap.Duration("serWrite elapse", serWriteTimeCost),
 		zap.Duration("total elapse", totalElapse))
+
+	writer = nil
+	values = nil
+	debug.FreeOSMemory()
 	return insertLogs, nil
 }
 
@@ -785,6 +790,7 @@ func (st *statsTask) createJSONKeyIndex(ctx context.Context,
 		log.Info("create json key index failed dataformat invalid")
 		return nil
 	}
+
 	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
 		return binlog.GetFieldID()
 	})
