@@ -243,7 +243,14 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 			}
 		}
 	}
-
+	indexNonEncoding := "false"
+	if dependency.indexEngineVersionManager.GetIndexNonEncoding() {
+		indexNonEncoding = "true"
+	}
+	indexParams = append(indexParams, &commonpb.KeyValuePair{
+		Key:   common.IndexNonEncoding,
+		Value: indexNonEncoding,
+	})
 	it.req = &workerpb.CreateJobRequest{
 		ClusterID:                 Params.CommonCfg.ClusterPrefix.GetValue(),
 		IndexFilePrefix:           path.Join(dependency.chunkManager.RootPath(), common.SegmentIndexPath),
@@ -273,6 +280,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		zap.Int64("segID", segment.GetID()),
 		zap.Int32("CurrentIndexVersion", it.req.GetCurrentIndexVersion()),
 		zap.Int32("CurrentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
+		zap.String("IndexNonEncoding", indexNonEncoding),
 		zap.Int64("segID", segment.GetID()))
 	return true
 }

@@ -601,11 +601,21 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           IndexMeta index_meta,
                           FieldDataMeta field_meta,
                           std::string object_key) {
+    std::shared_ptr<IndexData> index_data = nullptr;
+    if (index_meta.index_non_encoding) {
+        index_data = std::make_shared<IndexData>(buf, batch_size);
+        // index-build tasks assigned from new milvus-coord nodes to none-encoding
+    } else {
+        auto field_data = CreateFieldData(DataType::INT8, false);
+        field_data->FillFieldData(buf, batch_size);
+        auto payload_reader = std::make_shared<PayloadReader>(field_data);
+        index_data = std::make_shared<IndexData>(payload_reader);
+        // index-build tasks assigned from old milvus-coord nodes, fallback to int8 encoding
+    }
     // index not use valid_data, so no need to set nullable==true
-    auto indexData = std::make_shared<IndexData>(buf, batch_size);
-    indexData->set_index_meta(index_meta);
-    indexData->SetFieldDataMeta(field_meta);
-    auto serialized_index_data = indexData->serialize_to_remote_file();
+    index_data->set_index_meta(index_meta);
+    index_data->SetFieldDataMeta(field_meta);
+    auto serialized_index_data = index_data->serialize_to_remote_file();
     auto serialized_index_size = serialized_index_data.size();
     chunk_manager->Write(
         object_key, serialized_index_data.data(), serialized_index_size);

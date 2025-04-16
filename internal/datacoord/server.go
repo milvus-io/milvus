@@ -945,7 +945,8 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 		case sessionutil.SessionAddEvent:
 			log.Info("received querynode register",
 				zap.String("address", event.Session.Address),
-				zap.Int64("serverID", event.Session.ServerID))
+				zap.Int64("serverID", event.Session.ServerID),
+				zap.Bool("indexNonEncoding", event.Session.IndexNonEncoding))
 			s.indexEngineVersionManager.AddNode(event.Session)
 		case sessionutil.SessionDelEvent:
 			log.Info("received querynode unregister",
