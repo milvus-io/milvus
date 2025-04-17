@@ -48,27 +48,6 @@ pub(crate) fn schema_builder_add_field(
     }
 }
 
-impl TantivyValue<TantivyDocument> for i8 {
-    #[inline]
-    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
-        document.add_i64(Field::from_field_id(field), *self as i64);
-    }
-}
-
-impl TantivyValue<TantivyDocument> for i16 {
-    #[inline]
-    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
-        document.add_i64(Field::from_field_id(field), *self as i64);
-    }
-}
-
-impl TantivyValue<TantivyDocument> for i32 {
-    #[inline]
-    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
-        document.add_i64(Field::from_field_id(field), *self as i64);
-    }
-}
-
 impl TantivyValue<TantivyDocument> for i64 {
     #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
@@ -76,10 +55,9 @@ impl TantivyValue<TantivyDocument> for i64 {
     }
 }
 
-impl TantivyValue<TantivyDocument> for f32 {
-    #[inline]
+impl TantivyValue<TantivyDocument> for u64 {
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
-        document.add_f64(Field::from_field_id(field), *self as f64);
+        document.add_u64(Field::from_field_id(field), *self);
     }
 }
 
@@ -147,31 +125,15 @@ impl IndexWriterWrapperImpl {
         Ok(())
     }
 
-    pub fn add_data_by_batch<T: TantivyValue<TantivyDocument>>(
+    pub fn add<T: TantivyValue<TantivyDocument>>(
         &mut self,
-        batch_data: &[T],
-        mut offset: u32,
+        data: T,
+        offset: Option<i64>,
     ) -> Result<()> {
-        let mut batch = Vec::with_capacity(BATCH_SIZE);
-        for data in batch_data.into_iter() {
-            let mut doc = TantivyDocument::default();
-            data.add_to_document(self.field.field_id(), &mut doc);
+        let mut document = TantivyDocument::default();
+        data.add_to_document(self.field.field_id(), &mut document);
 
-            batch.push(doc);
-            if batch.len() == BATCH_SIZE {
-                self.index_writer.add_documents_with_doc_id(
-                    offset,
-                    std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE)),
-                )?;
-                offset += BATCH_SIZE as u32;
-            }
-        }
-
-        if !batch.is_empty() {
-            self.index_writer.add_documents_with_doc_id(offset, batch)?;
-        }
-
-        Ok(())
+        self.add_document(document, offset)
     }
 
     pub fn add_array<T: TantivyValue<TantivyDocument>, I>(
@@ -201,24 +163,32 @@ impl IndexWriterWrapperImpl {
 
     pub fn add_string_by_batch(&mut self, data: &[*const c_char], mut offset: u32) -> Result<()> {
         let mut batch = Vec::with_capacity(BATCH_SIZE);
-        for key in data.into_iter() {
-            let key = unsafe { CStr::from_ptr(*key) }
-                .to_str()
-                .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
-            batch.push(doc!(
-                self.field => key,
-            ));
-            if batch.len() == BATCH_SIZE {
-                self.index_writer.add_documents_with_doc_id(
-                    offset,
-                    std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE)),
-                )?;
-                offset += BATCH_SIZE as u32;
-            }
-        }
+        data.iter()
+            .enumerate()
+            .try_for_each(|(idx, key)| -> Result<()> {
+                let key = unsafe { CStr::from_ptr(*key) }
+                    .to_str()
+                    .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+                let key_offset = offset + idx as i64;
+                batch.push(UserOperation::Add(doc!(
+                    id_field => key_offset,
+                    self.field => key,
+                )));
+                if batch.len() >= BATCH_SIZE {
+                    writer.run(std::mem::replace(
+                        &mut batch,
+                        Vec::with_capacity(BATCH_SIZE),
+                    ))?;
+                }
+
+                Ok(())
+            })?;
 
         if !batch.is_empty() {
-            self.index_writer.add_documents_with_doc_id(offset, batch)?;
+            writer.run(std::mem::replace(
+                &mut batch,
+                Vec::with_capacity(BATCH_SIZE),
+            ))?;
         }
 
         Ok(())

@@ -79,15 +79,13 @@ impl IndexWriterWrapper {
         }
     }
 
-    pub fn add_data_by_batch<T>(&mut self, data: &[T], offset: Option<i64>) -> Result<()>
+    pub fn add<T>(&mut self, data: T, offset: Option<i64>) -> Result<()>
     where
         T: TantivyValue<TantivyDocumentV5> + TantivyValue<TantivyDocumentV7>,
     {
         match self {
-            IndexWriterWrapper::V5(writer) => writer.add_data_by_batch(data, offset),
-            IndexWriterWrapper::V7(writer) => {
-                writer.add_data_by_batch(data, offset.unwrap() as u32)
-            }
+            IndexWriterWrapper::V5(writer) => writer.add(data, offset),
+            IndexWriterWrapper::V7(writer) => writer.add(data, offset.unwrap() as u32),
         }
     }
 
@@ -200,9 +198,7 @@ mod tests {
             .unwrap();
 
             for i in 0..10 {
-                index_wrapper
-                    .add_data_by_batch::<i64>(&[i], Some(i as i64))
-                    .unwrap();
+                index_wrapper.add::<i64>(i, Some(i as i64)).unwrap();
             }
             index_wrapper.commit().unwrap();
         }
@@ -240,7 +236,7 @@ mod tests {
             .unwrap();
 
             for i in 0..10 {
-                index_wrapper.add_data_by_batch::<i64>(&[i], None).unwrap();
+                index_wrapper.add::<i64>(i, None).unwrap();
             }
             index_wrapper.finish().unwrap();
         }
@@ -283,9 +279,7 @@ mod tests {
             .unwrap();
 
             for i in 0..10 {
-                index_wrapper
-                    .add_data_by_batch(&["hello"], Some(i as i64))
-                    .unwrap();
+                index_wrapper.add("hello", Some(i as i64)).unwrap();
             }
             index_wrapper.commit().unwrap();
         }
