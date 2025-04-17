@@ -274,17 +274,16 @@ struct TantivyIndexWrapper {
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
-            std::vector<const char*> views;
-            views.reserve(len);
+            // TODO: not very efficient, a lot of overhead due to rust-ffi call.
             for (uintptr_t i = 0; i < len; i++) {
-                views.push_back(
-                    static_cast<const std::string*>(array)[i].c_str());
+                auto res = RustResultWrapper(tantivy_index_add_string(
+                    writer_,
+                    static_cast<const std::string*>(array)[i].c_str(),
+                    offset_begin + i));
+                AssertInfo(res.result_->success,
+                           "failed to add string: {}",
+                           res.result_->error);
             }
-            auto res = RustResultWrapper(tantivy_index_add_strings(
-                writer_, views.data(), len, offset_begin));
-            AssertInfo(res.result_->success,
-                       "failed to add string: {}",
-                       res.result_->error);
             return;
         }
 
@@ -468,18 +467,16 @@ struct TantivyIndexWrapper {
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
-            std::vector<const char*> views;
-            views.reserve(len);
+            // TODO: not very efficient, a lot of overhead due to rust-ffi call.
             for (uintptr_t i = 0; i < len; i++) {
-                views.push_back(
-                    static_cast<const std::string*>(array)[i].c_str());
+                auto res = RustResultWrapper(
+                    tantivy_index_add_string_by_single_segment_writer(
+                        writer_,
+                        static_cast<const std::string*>(array)[i].c_str()));
+                AssertInfo(res.result_->success,
+                           "failed to add string: {}",
+                           res.result_->error);
             }
-            auto res = RustResultWrapper(
-                tantivy_index_add_strings_by_single_segment_writer(
-                    writer_, views.data(), len));
-            AssertInfo(res.result_->success,
-                       "failed to add string: {}",
-                       res.result_->error);
             return;
         }
 
