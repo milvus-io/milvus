@@ -360,3 +360,14 @@ func (c *Client) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchReques
 		return client.DeleteBatch(ctx, req)
 	})
 }
+
+func (c *Client) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(c.nodeID),
+	)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*commonpb.Status, error) {
+		return client.UpdateSchema(ctx, req)
+	})
+}

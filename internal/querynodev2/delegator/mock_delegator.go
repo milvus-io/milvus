@@ -12,6 +12,8 @@ import (
 
 	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	streamrpc "github.com/milvus-io/milvus/internal/util/streamrpc"
 )
 
@@ -1101,6 +1103,53 @@ func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) Return() *MockShardD
 }
 
 func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) RunAndReturn(run func(uint64)) *MockShardDelegator_TryCleanExcludedSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateSchema provides a mock function with given fields: ctx, sch
+func (_m *MockShardDelegator) UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema) error {
+	ret := _m.Called(ctx, sch)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSchema")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *schemapb.CollectionSchema) error); ok {
+		r0 = rf(ctx, sch)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_UpdateSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateSchema'
+type MockShardDelegator_UpdateSchema_Call struct {
+	*mock.Call
+}
+
+// UpdateSchema is a helper method to define mock.On call
+//   - ctx context.Context
+//   - sch *schemapb.CollectionSchema
+func (_e *MockShardDelegator_Expecter) UpdateSchema(ctx interface{}, sch interface{}) *MockShardDelegator_UpdateSchema_Call {
+	return &MockShardDelegator_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", ctx, sch)}
+}
+
+func (_c *MockShardDelegator_UpdateSchema_Call) Run(run func(ctx context.Context, sch *schemapb.CollectionSchema)) *MockShardDelegator_UpdateSchema_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*schemapb.CollectionSchema))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateSchema_Call) Return(_a0 error) *MockShardDelegator_UpdateSchema_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateSchema_Call) RunAndReturn(run func(context.Context, *schemapb.CollectionSchema) error) *MockShardDelegator_UpdateSchema_Call {
 	_c.Call.Return(run)
 	return _c
 }

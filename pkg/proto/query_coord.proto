@@ -167,6 +167,7 @@ service QueryNode {
     // it's basically same as `Delete` but cost less memory pressure.
     rpc DeleteBatch(DeleteBatchRequest) returns (DeleteBatchResponse) {
     } 
+    rpc UpdateSchema(UpdateSchemaRequest) returns (common.Status) {}
 }
 
 // --------------------QueryCoord grpc request and response proto------------------
@@ -943,4 +944,10 @@ message UpdateLoadConfigRequest {
     repeated int64 collectionIDs = 3;
     int32 replica_number = 4;
     repeated string resource_groups = 5;
+}
+
+message UpdateSchemaRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    schema.CollectionSchema schema = 3;
 }

@@ -114,7 +114,8 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 				// only consume messages with timestamp >= position timestamp
 				options.DeliverFilterTimeTickGTE(position.GetTimestamp()),
 				// only consume insert and delete messages
-				options.DeliverFilterMessageType(message.MessageTypeInsert, message.MessageTypeDelete),
+				// also schema change message to notify schema change events
+				options.DeliverFilterMessageType(message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeSchemaChange),
 			},
 			MessageHandler: handler,
 		})

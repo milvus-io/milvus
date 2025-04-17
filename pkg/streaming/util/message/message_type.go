@@ -25,6 +25,7 @@ const (
 	MessageTypeCommitTxn        MessageType = MessageType(messagespb.MessageType_CommitTxn)
 	MessageTypeRollbackTxn      MessageType = MessageType(messagespb.MessageType_RollbackTxn)
 	MessageTypeImport           MessageType = MessageType(messagespb.MessageType_Import)
+	MessageTypeSchemaChange     MessageType = MessageType(messagespb.MessageType_SchemaChange)
 )
 
 var messageTypeName = map[MessageType]string{
@@ -44,6 +45,7 @@ var messageTypeName = map[MessageType]string{
 	MessageTypeCommitTxn:        "COMMIT_TXN",
 	MessageTypeRollbackTxn:      "ROLLBACK_TXN",
 	MessageTypeImport:           "IMPORT",
+	MessageTypeSchemaChange:     "SCHEMA_CHANGE",
 }
 
 // String implements fmt.Stringer interface.

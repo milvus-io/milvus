@@ -54,6 +54,8 @@ type MetaCache interface {
 	DetectMissingSegments(segments map[int64]struct{}) []int64
 	// UpdateSegmentView updates the segments BF from datacoord view.
 	UpdateSegmentView(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*pkoracle.BloomFilterSet, allSegments map[int64]struct{})
+	// UpdateSchema update the latest collection schema
+	UpdateSchema(updatedSchema *schemapb.CollectionSchema)
 }
 
 var _ MetaCache = (*metaCacheImpl)(nil)
@@ -315,4 +317,8 @@ func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 			delete(c.stateSegments[info.State()], segID)
 		}
 	}
+}
+
+func (c *metaCacheImpl) UpdateSchema(updatedSchema *schemapb.CollectionSchema) {
+	c.schema = updatedSchema
 }

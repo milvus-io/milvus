@@ -121,3 +121,27 @@ func NewManualFlushMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, e
 		ManualFlushMessage: flushMsg,
 	}, nil
 }
+
+type SchemaChangeMessageBody struct {
+	*tsMsgImpl
+	SchemaChangeMessage message.ImmutableSchemaChangeMessageV2
+}
+
+func NewSchemaChangeMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	schChgMsg, err := message.AsImmutableCollectionSchemaChangeV2(msg)
+	if err != nil {
+		return nil, err
+	}
+	return &SchemaChangeMessageBody{
+		tsMsgImpl: &tsMsgImpl{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: msg.TimeTick(),
+				EndTimestamp:   msg.TimeTick(),
+			},
+			ts:      msg.TimeTick(),
+			sz:      msg.EstimateSize(),
+			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
+		},
+		SchemaChangeMessage: schChgMsg,
+	}, nil
+}

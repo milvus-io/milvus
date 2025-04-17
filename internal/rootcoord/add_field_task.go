@@ -88,13 +88,22 @@ func executeAddCollectionFieldTaskSteps(ctx context.Context,
 	req *milvuspb.AddCollectionFieldRequest,
 	ts Timestamp,
 ) error {
-	oldColl := col.Clone()
 	redoTask := newBaseRedoTask(core.stepExecutor)
+
+	oldColl := col.Clone()
 	redoTask.AddSyncStep(&AddCollectionFieldStep{
 		baseStep: baseStep{core: core},
 		oldColl:  oldColl,
 		newField: newField,
 		ts:       ts,
+	})
+
+	updatedCollection := col.Clone()
+	updatedCollection.Fields = append(updatedCollection.Fields, newField)
+	redoTask.AddSyncStep(&WriteSchemaChangeWALStep{
+		baseStep:   baseStep{core: core},
+		collection: updatedCollection,
+		ts:         ts,
 	})
 
 	req.CollectionID = oldColl.CollectionID
