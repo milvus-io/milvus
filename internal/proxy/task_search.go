@@ -626,11 +626,12 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 
 	err := t.lb.Execute(ctx, CollectionWorkLoad{
-		db:             t.request.GetDbName(),
-		collectionID:   t.SearchRequest.CollectionID,
-		collectionName: t.collectionName,
-		nq:             t.Nq,
-		exec:           t.searchShard,
+		db:                             t.request.GetDbName(),
+		collectionID:                   t.SearchRequest.CollectionID,
+		collectionName:                 t.collectionName,
+		nq:                             t.Nq,
+		exec:                           t.searchShard,
+		partialResultRequiredDataRatio: float64(t.SearchRequest.GetPartialResultRequiredDataRatio()),
 	})
 	if err != nil {
 		log.Warn("search execute failed", zap.Error(err))
@@ -748,10 +749,15 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	// reduce
 	if t.SearchRequest.GetIsAdvanced() {
 		multipleInternalResults := make([][]*internalpb.SearchResults, len(t.SearchRequest.GetSubReqs()))
+		minAccessDataRatio := float32(math.MaxFloat32)
 		for _, searchResult := range toReduceResults {
 			// if get a non-advanced result, skip all
 			if !searchResult.GetIsAdvanced() {
 				continue
+			}
+
+			if searchResult.GetAccessedDataRatio() < minAccessDataRatio {
+				minAccessDataRatio = searchResult.GetAccessedDataRatio()
 			}
 			for _, subResult := range searchResult.GetSubResults() {
 				// swallow copy
@@ -787,12 +793,18 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 			t.SearchRequest.GetGroupByFieldId(),
 			t.SearchRequest.GetGroupSize(),
 			t.groupScorer)
+		t.result.AccessedDataRatio = minAccessDataRatio
 		if err != nil {
 			log.Warn("rank search result failed", zap.Error(err))
 			return err
 		}
 	} else {
 		t.result, err = t.reduceResults(t.ctx, toReduceResults, t.SearchRequest.GetNq(), t.SearchRequest.GetTopk(), t.SearchRequest.GetOffset(), metricType, t.queryInfos[0], false)
+		if len(toReduceResults) > 0 {
+			t.result.AccessedDataRatio = lo.MinBy(toReduceResults, func(r1, r2 *internalpb.SearchResults) bool {
+				return r1.GetAccessedDataRatio() < r2.GetAccessedDataRatio()
+			}).GetAccessedDataRatio()
+		}
 		if err != nil {
 			return err
 		}

@@ -47,6 +47,7 @@ func (s *DistributionSuite) TestAddDistribution() {
 		growing              []SegmentEntry
 		expected             []SnapshotItem
 		expectedSignalClosed bool
+		expectedLoadRatio    float64
 	}
 
 	cases := []testCase{

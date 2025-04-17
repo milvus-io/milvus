@@ -661,7 +661,7 @@ func (_c *MockShardDelegator_ProcessInsert_Call) RunAndReturn(run func(map[int64
 }
 
 // Query provides a mock function with given fields: ctx, req
-func (_m *MockShardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
+func (_m *MockShardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, float64, error) {
 	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
@@ -669,8 +669,9 @@ func (_m *MockShardDelegator) Query(ctx context.Context, req *querypb.QueryReque
 	}
 
 	var r0 []*internalpb.RetrieveResults
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)); ok {
+	var r1 float64
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) ([]*internalpb.RetrieveResults, float64, error)); ok {
 		return rf(ctx, req)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) []*internalpb.RetrieveResults); ok {
@@ -681,13 +682,19 @@ func (_m *MockShardDelegator) Query(ctx context.Context, req *querypb.QueryReque
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *querypb.QueryRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.QueryRequest) float64); ok {
 		r1 = rf(ctx, req)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(float64)
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(context.Context, *querypb.QueryRequest) error); ok {
+		r2 = rf(ctx, req)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // MockShardDelegator_Query_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Query'
@@ -709,12 +716,12 @@ func (_c *MockShardDelegator_Query_Call) Run(run func(ctx context.Context, req *
 	return _c
 }
 
-func (_c *MockShardDelegator_Query_Call) Return(_a0 []*internalpb.RetrieveResults, _a1 error) *MockShardDelegator_Query_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockShardDelegator_Query_Call) Return(_a0 []*internalpb.RetrieveResults, _a1 float64, _a2 error) *MockShardDelegator_Query_Call {
+	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *MockShardDelegator_Query_Call) RunAndReturn(run func(context.Context, *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)) *MockShardDelegator_Query_Call {
+func (_c *MockShardDelegator_Query_Call) RunAndReturn(run func(context.Context, *querypb.QueryRequest) ([]*internalpb.RetrieveResults, float64, error)) *MockShardDelegator_Query_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -816,7 +823,7 @@ func (_c *MockShardDelegator_ReleaseSegments_Call) RunAndReturn(run func(context
 }
 
 // Search provides a mock function with given fields: ctx, req
-func (_m *MockShardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
+func (_m *MockShardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, float64, error) {
 	ret := _m.Called(ctx, req)
 
 	if len(ret) == 0 {
@@ -824,8 +831,9 @@ func (_m *MockShardDelegator) Search(ctx context.Context, req *querypb.SearchReq
 	}
 
 	var r0 []*internalpb.SearchResults
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SearchRequest) ([]*internalpb.SearchResults, error)); ok {
+	var r1 float64
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SearchRequest) ([]*internalpb.SearchResults, float64, error)); ok {
 		return rf(ctx, req)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SearchRequest) []*internalpb.SearchResults); ok {
@@ -836,13 +844,19 @@ func (_m *MockShardDelegator) Search(ctx context.Context, req *querypb.SearchReq
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *querypb.SearchRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.SearchRequest) float64); ok {
 		r1 = rf(ctx, req)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(float64)
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(context.Context, *querypb.SearchRequest) error); ok {
+		r2 = rf(ctx, req)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // MockShardDelegator_Search_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Search'
@@ -864,12 +878,12 @@ func (_c *MockShardDelegator_Search_Call) Run(run func(ctx context.Context, req 
 	return _c
 }
 
-func (_c *MockShardDelegator_Search_Call) Return(_a0 []*internalpb.SearchResults, _a1 error) *MockShardDelegator_Search_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockShardDelegator_Search_Call) Return(_a0 []*internalpb.SearchResults, _a1 float64, _a2 error) *MockShardDelegator_Search_Call {
+	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *MockShardDelegator_Search_Call) RunAndReturn(run func(context.Context, *querypb.SearchRequest) ([]*internalpb.SearchResults, error)) *MockShardDelegator_Search_Call {
+func (_c *MockShardDelegator_Search_Call) RunAndReturn(run func(context.Context, *querypb.SearchRequest) ([]*internalpb.SearchResults, float64, error)) *MockShardDelegator_Search_Call {
 	_c.Call.Return(run)
 	return _c
 }

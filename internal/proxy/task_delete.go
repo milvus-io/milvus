@@ -598,11 +598,12 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	}
 
 	err = dr.lb.Execute(ctx, CollectionWorkLoad{
-		db:             dr.req.GetDbName(),
-		collectionName: dr.req.GetCollectionName(),
-		collectionID:   dr.collectionID,
-		nq:             1,
-		exec:           dr.getStreamingQueryAndDelteFunc(plan),
+		db:                             dr.req.GetDbName(),
+		collectionName:                 dr.req.GetCollectionName(),
+		collectionID:                   dr.collectionID,
+		nq:                             1,
+		exec:                           dr.getStreamingQueryAndDelteFunc(plan),
+		partialResultRequiredDataRatio: 1.0, // disable partial result on delete request
 	})
 	dr.result.DeleteCnt = dr.count.Load()
 	dr.result.Timestamp = dr.sessionTS.Load()

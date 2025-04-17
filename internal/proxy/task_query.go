@@ -506,11 +506,12 @@ func (t *queryTask) Execute(ctx context.Context) error {
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
 	err := t.lb.Execute(ctx, CollectionWorkLoad{
-		db:             t.request.GetDbName(),
-		collectionID:   t.CollectionID,
-		collectionName: t.collectionName,
-		nq:             1,
-		exec:           t.queryShard,
+		db:                             t.request.GetDbName(),
+		collectionID:                   t.CollectionID,
+		collectionName:                 t.collectionName,
+		nq:                             1,
+		exec:                           t.queryShard,
+		partialResultRequiredDataRatio: float64(t.RetrieveRequest.GetPartialResultRequiredDataRatio()),
 	})
 	if err != nil {
 		log.Warn("fail to execute query", zap.Error(err))
@@ -557,6 +558,11 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	reducer := createMilvusReducer(ctx, t.queryParams, t.RetrieveRequest, t.schema.CollectionSchema, t.plan, t.collectionName)
 
 	t.result, err = reducer.Reduce(toReduceResults)
+	if len(toReduceResults) > 0 {
+		t.result.AccessedDataRatio = lo.MinBy(toReduceResults, func(r1, r2 *internalpb.RetrieveResults) bool {
+			return r1.GetAccessedDataRatio() < r2.GetAccessedDataRatio()
+		}).GetAccessedDataRatio()
+	}
 	if err != nil {
 		log.Warn("fail to reduce query result", zap.Error(err))
 		return err

@@ -230,6 +230,7 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 		if err != nil {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.Leader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 		}
+		metrics.QueryNodePartialResultCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 	}()
 
 	log.Debug("start do query with channel",
@@ -250,7 +251,7 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	}
 
 	// do query
-	results, err := sd.Query(queryCtx, req)
+	results, accessDataRatio, err := sd.Query(queryCtx, req)
 	if err != nil {
 		log.Warn("failed to query on delegator", zap.Error(err))
 		return nil, err
@@ -279,6 +280,7 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	if err != nil {
 		return nil, err
 	}
+	resp.AccessedDataRatio = float32(accessDataRatio)
 
 	tr.CtxElapse(ctx, fmt.Sprintf("do query with channel done , vChannel = %s, segmentIDs = %v",
 		channel,
@@ -398,6 +400,7 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		if err != nil {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.Leader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 		}
+		metrics.QueryNodePartialResultCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 	}()
 
 	log.Debug("start to search channel",
@@ -416,7 +419,7 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		return nil, err
 	}
 	// do search
-	results, err := sd.Search(searchCtx, req)
+	results, accessDataRatio, err := sd.Search(searchCtx, req)
 	if err != nil {
 		log.Warn("failed to search on delegator", zap.Error(err))
 		return nil, err
@@ -436,6 +439,7 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	if err != nil {
 		return nil, err
 	}
+	resp.AccessedDataRatio = float32(accessDataRatio)
 
 	tr.CtxElapse(ctx, fmt.Sprintf("do search with channel done , vChannel = %s, segmentIDs = %v",
 		channel,

@@ -769,6 +769,10 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 	defer node.lifetime.Done()
 
+	if !req.Req.GetEnablePartialResult() {
+		req.Req.PartialResultRequiredDataRatio = 1.0
+	}
+
 	resp := &internalpb.SearchResults{
 		Status: merr.Success(),
 	}
@@ -913,6 +917,10 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	}
 	defer node.lifetime.Done()
 
+	if !req.Req.GetEnablePartialResult() {
+		req.Req.PartialResultRequiredDataRatio = 1.0
+	}
+
 	toMergeResults := make([]*internalpb.RetrieveResults, len(req.GetDmlChannels()))
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 
@@ -991,6 +999,10 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 		return nil
 	}
 	defer node.lifetime.Done()
+
+	// disable partial result on query stream, cause we can't compute accessed data ratio for each sub result
+	// cause query stream is only used for delete, and delete is not supported partial result yet
+	req.Req.PartialResultRequiredDataRatio = 1.0
 
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 

@@ -46,11 +46,12 @@ type ChannelWorkload struct {
 }
 
 type CollectionWorkLoad struct {
-	db             string
-	collectionName string
-	collectionID   int64
-	nq             int64
-	exec           executeFunc
+	db                             string
+	collectionName                 string
+	collectionID                   int64
+	nq                             int64
+	exec                           executeFunc
+	partialResultRequiredDataRatio float64
 }
 
 type LBPolicy interface {
@@ -225,7 +226,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	return err
 }
 
-// Execute will execute collection workload in parallel
+// Execute will execute collection workload in parallel and log success ratio
 func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad) error {
 	dml2leaders, err := lb.GetShardLeaders(ctx, workload.db, workload.collectionName, workload.collectionID, true)
 	if err != nil {
@@ -233,8 +234,21 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		return err
 	}
 
-	// let every request could retry at least twice, which could retry after update shard leader cache
-	wg, ctx := errgroup.WithContext(ctx)
+	totalChannels := len(dml2leaders)
+	if totalChannels == 0 {
+		return nil
+	}
+
+	// Structure to hold the result of each channel execution
+	type channelResult struct {
+		channel string
+		err     error
+	}
+	// Buffered channel to collect results from all goroutines
+	results := make(chan channelResult, totalChannels)
+
+	wg, _ := errgroup.WithContext(ctx)
+	// Launch a goroutine for each channel
 	for k, v := range dml2leaders {
 		channel := k
 		nodes := v
@@ -243,7 +257,7 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 			channelRetryTimes *= len(nodes)
 		}
 		wg.Go(func() error {
-			return lb.ExecuteWithRetry(ctx, ChannelWorkload{
+			err := lb.ExecuteWithRetry(ctx, ChannelWorkload{
 				db:             workload.db,
 				collectionName: workload.collectionName,
 				collectionID:   workload.collectionID,
@@ -253,10 +267,54 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 				exec:           workload.exec,
 				retryTimes:     uint(channelRetryTimes),
 			})
+			if err != nil {
+				// check if partial result is disabled, if so, let all sub tasks fail fast
+				if workload.partialResultRequiredDataRatio == 1 {
+					return err
+				}
+			}
+
+			// Send result to the results channel
+			results <- channelResult{channel: channel, err: err}
+			// Return nil to prevent errgroup from canceling other goroutines
+			return nil
 		})
 	}
 
-	return wg.Wait()
+	// Wait for all goroutines to complete
+	wg.Wait()
+	close(results)
+
+	// Collect statistics and errors
+	successCount := 0
+	failedChannels := make([]string, 0)
+	var errors []error
+
+	// Process all results
+	for result := range results {
+		if result.err == nil {
+			successCount++
+		} else {
+			failedChannels = append(failedChannels, result.channel)
+			errors = append(errors, result.err)
+		}
+	}
+
+	accessDataRatio := float64(successCount) / float64(totalChannels)
+	if accessDataRatio < 1.0 {
+		log.Ctx(ctx).Debug("collection workload execution completed",
+			zap.Int64("collectionID", workload.collectionID),
+			zap.Float64("successRatio", accessDataRatio),
+			zap.Float64("partialResultRequiredDataRatio", workload.partialResultRequiredDataRatio),
+			zap.Strings("failedChannels", failedChannels))
+	}
+
+	if accessDataRatio >= workload.partialResultRequiredDataRatio {
+		return nil
+	}
+
+	// todo:  refine to a user friendly error
+	return merr.Combine(errors...)
 }
 
 func (lb *LBPolicyImpl) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {

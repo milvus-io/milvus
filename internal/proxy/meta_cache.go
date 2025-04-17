@@ -979,7 +979,8 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 			commonpbutil.WithMsgType(commonpb.MsgType_GetShardLeaders),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		CollectionID: info.collID,
+		CollectionID:            info.collID,
+		WithUnserviceableShards: true,
 	}
 
 	tr := timerecord.NewTimeRecorder("UpdateShardCache")

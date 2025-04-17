@@ -280,6 +280,7 @@ message GetSegmentInfoResponse {
 message GetShardLeadersRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
+    bool with_unserviceable_shards = 3;
 }
 
 message GetShardLeadersResponse {
@@ -296,6 +297,7 @@ message ShardLeadersList {  // All leaders of all replicas of one shard
     string channel_name = 1;
     repeated int64 node_ids = 2;
     repeated string node_addrs = 3;
+    repeated bool serviceable = 4;
 }
 
 message SyncNewCreatedPartitionRequest {

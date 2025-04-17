@@ -67,6 +67,8 @@ type channelQueryView struct {
 	version         int64              // version of current query view, same as targetVersion in qc
 
 	loadedRatio *atomic.Float64 // loaded ratio of current query view, set serviceable to true if loadedRatio == 1.0
+
+	unloadedSealedSegments []SegmentEntry // workerID -> -1
 }
 
 func NewChannelQueryView(growings, sealeds []int64, partitions []int64, version int64) *channelQueryView {
@@ -146,16 +148,14 @@ func (d *distribution) SetIDFOracle(idfOracle IDFOracle) {
 	d.idfOracle = idfOracle
 }
 
+// return segment distribution in query view
 func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64, err error) {
 	d.mut.RLock()
 	defer d.mut.RUnlock()
 
-	if !d.Serviceable() {
-		return nil, nil, -1, merr.WrapErrChannelNotAvailable("channel distribution is not serviceable")
-	}
-
 	if d.queryView.GetLoadedRatio() < requiredLoadRatio {
-		return nil, nil, -1, merr.WrapErrChannelNotAvailable(d.channelName, fmt.Sprintf("channel distribution is not serviceable, required load ratio is %f, current load ratio is %f", requiredLoadRatio, d.queryView.GetLoadedRatio()))
+		return nil, nil, -1, merr.WrapErrChannelNotAvailable(d.channelName,
+			fmt.Sprintf("channel distribution is not serviceable, required load ratio is %f, current load ratio is %f", requiredLoadRatio, d.queryView.GetLoadedRatio()))
 	}
 
 	current := d.current.Load()
@@ -171,6 +171,12 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	targetVersion := current.GetTargetVersion()
 	filterReadable := d.readableFilter(targetVersion)
 	sealed, growing = d.filterSegments(sealed, growing, filterReadable)
+
+	// append distribution of unloaded segment
+	sealed = append(sealed, SnapshotItem{
+		NodeID:   -1,
+		Segments: d.queryView.unloadedSealedSegments,
+	})
 	return
 }
 
@@ -234,30 +240,31 @@ func (d *distribution) Serviceable() bool {
 	return d.queryView.Serviceable()
 }
 
+// for now, delegator become serviceable only when watchDmChannel is done
+// so we regard all needed growing is loaded and we compute loadRatio based on sealed segments
 func (d *distribution) updateServiceable(triggerAction string) {
 	loadedSealedSegments := 0
-	loadedGrowingSegments := 0
+	unloadedSealedSegments := make([]SegmentEntry, 0)
 	for _, s := range d.queryView.sealedSegments {
 		if entry, ok := d.sealedSegments[s]; ok && !entry.Offline {
 			loadedSealedSegments++
+		} else {
+			unloadedSealedSegments = append(unloadedSealedSegments, SegmentEntry{
+				SegmentID: s,
+				NodeID:    -1,
+			})
 		}
 	}
 
-	for _, s := range d.queryView.growingSegments {
-		if _, ok := d.growingSegments[s]; ok {
-			loadedGrowingSegments++
-		}
-	}
+	// unloaded segment entry list for partial result
+	d.queryView.unloadedSealedSegments = unloadedSealedSegments
 
-	// Notice: if querynode consume stream data faster than datanode, then loadedGrowingSegments > len(d.queryView.growingSegments)
-	// which may cause loadedRatio > 1.0
 	loadedRatio := 0.0
 	if len(d.queryView.sealedSegments)+len(d.queryView.growingSegments) == 0 {
 		loadedRatio = 1.0
 	} else {
-		loadedRatio = float64(loadedGrowingSegments+loadedSealedSegments) / float64(len(d.queryView.sealedSegments)+len(d.queryView.growingSegments))
+		loadedRatio = float64(loadedSealedSegments) / float64(len(d.queryView.sealedSegments))
 	}
-	d.queryView.loadedRatio.Store(loadedRatio)
 
 	serviceable := loadedRatio >= 1.0
 	if serviceable != d.queryView.Serviceable() {
@@ -266,6 +273,7 @@ func (d *distribution) updateServiceable(triggerAction string) {
 			zap.Bool("serviceable", serviceable),
 			zap.String("action", triggerAction))
 	}
+	d.queryView.loadedRatio.Store(loadedRatio)
 }
 
 // AddDistributions add multiple segment entries.
