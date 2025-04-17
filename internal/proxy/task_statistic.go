@@ -273,7 +273,7 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	return nil
 }
 
-func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 	nodeReq := proto.Clone(g.GetStatisticsRequest).(*internalpb.GetStatisticsRequest)
 	nodeReq.Base.TargetID = nodeID
 	req := &querypb.GetStatisticsRequest{

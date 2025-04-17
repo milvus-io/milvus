@@ -342,7 +342,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, 0, err
 	}
 
-	log.Debug("Delegator search done")
+	log.Debug("Delegator search done", zap.Float64("accessedDataRatio", accessDataRatio))
 
 	return results, accessDataRatio, nil
 }
@@ -376,14 +376,17 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
-	if err != nil {
-		log.Warn("delegator search failed to wait tsafe", zap.Error(err))
-		return nil, 0, err
+	if req.GetReq().GetPartialResultRequiredDataRatio() >= 1.0 {
+		tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+		if err != nil {
+			log.Warn("delegator search failed to wait tsafe", zap.Error(err))
+			return nil, 0, err
+		}
+		if req.GetReq().GetMvccTimestamp() == 0 {
+			req.Req.MvccTimestamp = tSafe
+		}
 	}
-	if req.GetReq().GetMvccTimestamp() == 0 {
-		req.Req.MvccTimestamp = tSafe
-	}
+
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
@@ -435,9 +438,9 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				}
 				searchReq.Req.GuaranteeTimestamp = req.GetReq().GetGuaranteeTimestamp()
 				searchReq.Req.TimeoutTimestamp = req.GetReq().GetTimeoutTimestamp()
-				if searchReq.GetReq().GetMvccTimestamp() == 0 {
-					searchReq.GetReq().MvccTimestamp = tSafe
-				}
+				// if searchReq.GetReq().GetMvccTimestamp() == 0 {
+				// 	searchReq.GetReq().MvccTimestamp = tSafe
+				// }
 
 				results, accessDataRatio, err := sd.search(ctx, searchReq, sealed, growing)
 				if err != nil {
@@ -584,13 +587,15 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GetGuaranteeTimestamp())
-	if err != nil {
-		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
-		return nil, 0, err
-	}
-	if req.GetReq().GetMvccTimestamp() == 0 {
-		req.Req.MvccTimestamp = tSafe
+	if req.GetReq().GetPartialResultRequiredDataRatio() >= 1.0 {
+		tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+		if err != nil {
+			log.Warn("delegator search failed to wait tsafe", zap.Error(err))
+			return nil, 0, err
+		}
+		if req.GetReq().GetMvccTimestamp() == 0 {
+			req.Req.MvccTimestamp = tSafe
+		}
 	}
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
@@ -639,7 +644,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		return nil, 0, err
 	}
 
-	log.Debug("Delegator Query done")
+	log.Debug("Delegator Query done", zap.Float64("accessedDataRatio", accessDataRatio))
 
 	return results, accessDataRatio, nil
 }
@@ -831,13 +836,22 @@ func executeSubTasks[T interface {
 		}
 	}
 
-	accessDataRatio := float64(len(successSegmentList)) / float64(len(successSegmentList)+len(failureSegmentList))
-	if accessDataRatio < 1.0 {
-		log.Debug("execute sub tasks done",
+	accessDataRatio := 1.0
+	totalSegments := len(successSegmentList) + len(failureSegmentList)
+	if totalSegments > 0 {
+		accessDataRatio = float64(len(successSegmentList)) / float64(totalSegments)
+		if accessDataRatio < 1.0 {
+			log.Info("partial result executed successfully",
+				zap.String("taskType", taskType),
+				zap.Float64("successRatio", accessDataRatio),
+				zap.Float64("partialResultRequiredDataRatio", partialResultRequiredDataRatio),
+				zap.Int("totalSegments", totalSegments),
+				zap.Int64s("failureSegmentList", failureSegmentList),
+			)
+		}
+	} else {
+		log.Info("no segments to execute",
 			zap.String("taskType", taskType),
-			zap.Float64("successRatio", accessDataRatio),
-			zap.Float64("partialResultRequiredDataRatio", partialResultRequiredDataRatio),
-			zap.Int64s("failureSegmentList", failureSegmentList),
 		)
 	}
 
@@ -846,7 +860,7 @@ func executeSubTasks[T interface {
 	}
 
 	// todo:  refine to a user friendly error
-	return nil, accessDataRatio, merr.Combine(errors...)
+	return nil, 0, merr.Combine(errors...)
 }
 
 // speedupGuranteeTS returns the guarantee timestamp for strong consistency search.

@@ -952,6 +952,11 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		}, nil
 	}
 
+	// save accessed data ratio from first result before reduce
+	accessedDataRatio := float32(0)
+	if len(toMergeResults) > 0 {
+		accessedDataRatio = toMergeResults[0].GetAccessedDataRatio()
+	}
 	tr.RecordSpan()
 	reducer := segments.CreateInternalReducer(req, node.manager.Collection.Get(req.GetReq().GetCollectionID()).Schema())
 	ret, err := reducer.Reduce(ctx, toMergeResults)
@@ -960,6 +965,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 			Status: merr.Status(err),
 		}, nil
 	}
+	ret.AccessedDataRatio = accessedDataRatio
 	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()),
 		metrics.QueryLabel, metrics.ReduceShards, metrics.BatchReduce).

@@ -946,6 +946,13 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 				collectionIDLabelName: collectionIDLabel,
 			})
 
+	QueryNodePartialResultCount.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
 	QueryNodeSearchHitSegmentNum.
 		DeletePartialMatch(
 			prometheus.Labels{

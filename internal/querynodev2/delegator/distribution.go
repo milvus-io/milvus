@@ -61,8 +61,8 @@ func getClosedCh() chan struct{} {
 // for new delegator, will got a new channelQueryView from WatchChannel, and get the queryView update from querycoord before it becomes serviceable
 // after delegator becomes serviceable, it only update the queryView by SyncTargetVersion
 type channelQueryView struct {
-	growingSegments []int64            // growing segment list which should be used for search/query
-	sealedSegments  []int64            // sealed segment list which should be used for search/query
+	growingSegments typeutil.UniqueSet // growing segment list which should be used for search/query
+	sealedSegments  typeutil.UniqueSet // sealed segment list which should be used for search/query
 	partitions      typeutil.UniqueSet // partitions list which sealed segments belong to
 	version         int64              // version of current query view, same as targetVersion in qc
 
@@ -73,8 +73,8 @@ type channelQueryView struct {
 
 func NewChannelQueryView(growings, sealeds []int64, partitions []int64, version int64) *channelQueryView {
 	return &channelQueryView{
-		growingSegments: growings,
-		sealedSegments:  sealeds,
+		growingSegments: typeutil.NewUniqueSet(growings...),
+		sealedSegments:  typeutil.NewUniqueSet(sealeds...),
 		partitions:      typeutil.NewUniqueSet(partitions...),
 		version:         version,
 		loadedRatio:     atomic.NewFloat64(0),
@@ -245,7 +245,7 @@ func (d *distribution) Serviceable() bool {
 func (d *distribution) updateServiceable(triggerAction string) {
 	loadedSealedSegments := 0
 	unloadedSealedSegments := make([]SegmentEntry, 0)
-	for _, s := range d.queryView.sealedSegments {
+	d.queryView.sealedSegments.Range(func(s UniqueID) bool {
 		if entry, ok := d.sealedSegments[s]; ok && !entry.Offline {
 			loadedSealedSegments++
 		} else {
@@ -254,8 +254,8 @@ func (d *distribution) updateServiceable(triggerAction string) {
 				NodeID:    -1,
 			})
 		}
-	}
-
+		return true
+	})
 	// unloaded segment entry list for partial result
 	d.queryView.unloadedSealedSegments = unloadedSealedSegments
 
@@ -271,6 +271,9 @@ func (d *distribution) updateServiceable(triggerAction string) {
 		log.Info("channel distribution serviceable changed",
 			zap.String("channel", d.channelName),
 			zap.Bool("serviceable", serviceable),
+			zap.Float64("loadedRatio", loadedRatio),
+			zap.Int("loadedSealedSegments", loadedSealedSegments),
+			zap.Any("sealedSegments", d.queryView.sealedSegments),
 			zap.String("action", triggerAction))
 	}
 	d.queryView.loadedRatio.Store(loadedRatio)
@@ -298,8 +301,13 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 			// remain the target version for already loaded segment to void skipping this segment when executing search
 			entry.TargetVersion = oldEntry.TargetVersion
 		} else {
-			// waiting for sync target version, to become readable
-			entry.TargetVersion = unreadableTargetVersion
+			if d.queryView.sealedSegments.Contain(entry.SegmentID) || d.queryView.growingSegments.Contain(entry.SegmentID) {
+				// set segment version to query view version, to support partial result
+				entry.TargetVersion = d.queryView.GetVersion()
+			} else {
+				// set segment version to unreadableTargetVersion, if it's not in query view
+				entry.TargetVersion = unreadableTargetVersion
+			}
 		}
 		d.sealedSegments[entry.SegmentID] = entry
 	}
@@ -358,8 +366,8 @@ func (d *distribution) SyncReadableChannelView(action *querypb.SyncAction, parti
 
 	oldValue := d.queryView.version
 	d.queryView = &channelQueryView{
-		growingSegments: action.GetGrowingInTarget(),
-		sealedSegments:  action.GetSealedInTarget(),
+		growingSegments: typeutil.NewUniqueSet(action.GetGrowingInTarget()...),
+		sealedSegments:  typeutil.NewUniqueSet(action.GetSealedInTarget()...),
 		partitions:      typeutil.NewUniqueSet(partitions...),
 		version:         action.GetTargetVersion(),
 		loadedRatio:     atomic.NewFloat64(0),
@@ -375,25 +383,27 @@ func (d *distribution) SyncReadableChannelView(action *querypb.SyncAction, parti
 		}
 	}
 
-	for _, segmentID := range d.queryView.growingSegments {
-		entry, ok := d.growingSegments[segmentID]
+	d.queryView.growingSegments.Range(func(s UniqueID) bool {
+		entry, ok := d.growingSegments[s]
 		if !ok {
 			log.Warn("readable growing segment lost, consume from dml seems too slow",
-				zap.Int64("segmentID", segmentID))
-			continue
+				zap.Int64("segmentID", s))
+			return true
 		}
 		entry.TargetVersion = action.GetTargetVersion()
-		d.growingSegments[segmentID] = entry
-	}
+		d.growingSegments[s] = entry
+		return true
+	})
 
-	for _, segmentID := range d.queryView.sealedSegments {
-		entry, ok := d.sealedSegments[segmentID]
+	d.queryView.sealedSegments.Range(func(s UniqueID) bool {
+		entry, ok := d.sealedSegments[s]
 		if !ok {
-			continue
+			return true
 		}
 		entry.TargetVersion = action.TargetVersion
-		d.sealedSegments[segmentID] = entry
-	}
+		d.sealedSegments[s] = entry
+		return true
+	})
 
 	d.genSnapshot()
 	d.updateServiceable("SyncTargetVersion")

@@ -559,9 +559,22 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 
 	t.result, err = reducer.Reduce(toReduceResults)
 	if len(toReduceResults) > 0 {
-		t.result.AccessedDataRatio = lo.MinBy(toReduceResults, func(r1, r2 *internalpb.RetrieveResults) bool {
-			return r1.GetAccessedDataRatio() < r2.GetAccessedDataRatio()
-		}).GetAccessedDataRatio()
+		collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), t.collectionName, t.CollectionID)
+		if err != nil {
+			log.Warn("failed to get collection info", zap.Error(err))
+			return err
+		}
+		ratioSum := lo.SumBy(toReduceResults, func(r *internalpb.RetrieveResults) float32 {
+			return r.GetAccessedDataRatio()
+		})
+		if ratioSum > 0 {
+			t.result.AccessedDataRatio = ratioSum / float32(collectionInfo.shardsNum)
+		}
+	}
+
+	if t.result.AccessedDataRatio < t.RetrieveRequest.GetPartialResultRequiredDataRatio() {
+		log.Info("query result accessed data ratio is less than partial result required data ratio", zap.Float32("accessed data ratio", t.result.AccessedDataRatio), zap.Float32("partial result required data ratio", t.RetrieveRequest.GetPartialResultRequiredDataRatio()))
+		return merr.WrapErrCollectionNotFullyLoaded(t.collectionName)
 	}
 	if err != nil {
 		log.Warn("fail to reduce query result", zap.Error(err))
@@ -588,7 +601,7 @@ func (t *queryTask) IsSubTask() bool {
 	return t.reQuery
 }
 
-func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 	needOverrideMvcc := false
 	mvccTs := t.MvccTimestamp
 	if len(t.channelsMvcc) > 0 {
@@ -617,6 +630,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 		zap.Int64("nodeID", nodeID),
 		zap.String("channel", channel))
 
+	req.Req.PartialResultRequiredDataRatio = float32(partialResultRequiredDataRatio)
 	result, err := qn.Query(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode query return error", zap.Error(err))
@@ -633,7 +647,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to Query on QueryNode %d", nodeID)
 	}
 
-	log.Debug("get query result")
+	log.Debug("get query result", zap.Float32("accessedDataRatio", result.GetAccessedDataRatio()))
 	t.resultBuf.Insert(result)
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
 	return nil

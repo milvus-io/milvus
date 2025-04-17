@@ -37,7 +37,7 @@ func (s *PartialSearchTestSuit) SetupSuite() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
 
 	// slow down segment checker and channel checker
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.SegmentCheckInterval.Key, "10000")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.SegmentCheckInterval.Key, "1000")
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ChannelCheckInterval.Key, "1000")
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoBalanceInterval.Key, "10000")
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "10000")
@@ -213,10 +213,16 @@ func (s *PartialSearchTestSuit) TestAllNodeDownOnSingleReplica() {
 	// init cluster with 2 querynode
 	s.Cluster.AddQueryNode()
 
+	// 1 channel will be recovered after 10s
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.TaskExecutionCap.Key, "1")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.SegmentCheckInterval.Key, "1000")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ChannelCheckInterval.Key, "1000")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.CheckExecutedFlagInterval.Key, "1000")
+
 	// init collection with 1 replica, 2 channels, 4 segments, 2000 rows per segment
 	// expect each node has 1 channel and 2 segments
 	name := "test_balance_" + funcutil.GenRandomStr()
-	s.initCollection(name, 1, 2, 2, 2000)
+	s.initCollection(name, 1, 10, 1, 2000)
 
 	ctx := context.Background()
 	stopSearchCh := make(chan struct{})
@@ -246,7 +252,7 @@ func (s *PartialSearchTestSuit) TestAllNodeDownOnSingleReplica() {
 				searchReq.EnablePartialResult = true
 				searchReq.PartialResultRequiredDataRatio = 0.5
 
-				searchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				searchCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 				defer cancel()
 				searchResult, err := s.Cluster.Proxy.Search(searchCtx, searchReq)
 
@@ -336,7 +342,7 @@ func (s *PartialSearchTestSuit) TestSingleNodeDownOnMultiReplica() {
 				} else if searchResult.GetAccessedDataRatio() < 1.0 {
 					log.Info("search return partial result", zap.Float32("accessed data ratio", searchResult.GetAccessedDataRatio()))
 					partialResultCounter.Inc()
-					s.True(searchResult.GetAccessedDataRatio() >= searchReq.GetPartialResultRequiredDataRatio())
+					s.True(searchResult.GetAccessedDataRatio() == 1.0)
 				}
 			}
 		}
@@ -350,7 +356,7 @@ func (s *PartialSearchTestSuit) TestSingleNodeDownOnMultiReplica() {
 	qn1.Stop()
 	time.Sleep(10 * time.Second)
 	s.Equal(failCounter.Load(), int64(0))
-	s.True(partialResultCounter.Load() > 0)
+	s.Equal(partialResultCounter.Load(), int64(0))
 	close(stopSearchCh)
 	wg.Wait()
 }
@@ -413,7 +419,6 @@ func (s *PartialSearchTestSuit) TestEachReplicaHasNodeDownOnMultiReplica() {
 	s.Equal(failCounter.Load(), int64(0))
 	s.Equal(partialResultCounter.Load(), int64(0))
 
-	// stop qn in single replica expected got search failures
 	replicaResp, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 		DbName:         dbName,
 		CollectionName: name,
@@ -497,7 +502,6 @@ func (s *PartialSearchTestSuit) TestPartialResultRequiredDataRatioTooHigh() {
 	s.Equal(failCounter.Load(), int64(0))
 	s.Equal(partialResultCounter.Load(), int64(0))
 
-	// stop qn in single replica expected got search failures
 	qn1.Stop()
 	time.Sleep(10 * time.Second)
 	s.True(failCounter.Load() > 0)

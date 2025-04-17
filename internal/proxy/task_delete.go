@@ -461,7 +461,7 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, 
 // getStreamingQueryAndDelteFunc return query function used by LBPolicy
 // make sure it concurrent safe
 func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) executeFunc {
-	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 		log := log.Ctx(ctx).With(
 			zap.Int64("collectionID", dr.collectionID),
 			zap.Int64s("partitionIDs", dr.partitionIDs),
