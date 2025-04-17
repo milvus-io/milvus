@@ -92,7 +92,7 @@ TEST(Sealed, without_predicate) {
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
 
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
@@ -293,7 +293,7 @@ TEST(Sealed, with_predicate) {
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
 
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
@@ -400,7 +400,7 @@ TEST(Sealed, with_predicate_filter_all) {
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
 
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
@@ -570,7 +570,7 @@ TEST(Sealed, LoadFieldData) {
                                     >
                                     placeholder_tag: "$0"
      >)";
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -758,7 +758,7 @@ TEST(Sealed, ClearData) {
                                     >
                                     placeholder_tag: "$0"
      >)";
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -862,7 +862,7 @@ TEST(Sealed, LoadFieldDataMmap) {
                                     >
                                     placeholder_tag: "$0"
      >)";
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -1015,7 +1015,7 @@ TEST(Sealed, LoadScalarIndex) {
                                     >
                                     placeholder_tag: "$0"
      >)";
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -1135,7 +1135,7 @@ TEST(Sealed, Delete) {
                                     >
                                     placeholder_tag: "$0"
      >)";
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -1152,7 +1152,7 @@ TEST(Sealed, Delete) {
     std::vector<idx_t> pks{1, 2, 3, 4, 5};
     auto ids = std::make_unique<IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
-    std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
+    std::vector<milvus::Timestamp> timestamps{10, 10, 10, 10, 10};
 
     LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
@@ -1173,7 +1173,7 @@ TEST(Sealed, Delete) {
     segment->Delete(reserved_offset,
                     new_count,
                     new_ids.get(),
-                    reinterpret_cast<const Timestamp*>(new_timestamps.data()));
+                    reinterpret_cast<const milvus::Timestamp*>(new_timestamps.data()));
 }
 
 TEST(Sealed, OverlapDelete) {
@@ -1220,7 +1220,7 @@ TEST(Sealed, OverlapDelete) {
                                     >
                                     placeholder_tag: "$0"
      >)";
-    Timestamp timestamp = 1000000;
+    milvus::Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
         CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
@@ -1237,7 +1237,7 @@ TEST(Sealed, OverlapDelete) {
     std::vector<idx_t> pks{1, 2, 3, 4, 5};
     auto ids = std::make_unique<IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
-    std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
+    std::vector<milvus::Timestamp> timestamps{10, 10, 10, 10, 10};
 
     LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
@@ -1431,7 +1431,7 @@ TEST(Sealed, DeleteCount) {
         auto offset = segment->get_deleted_count();
         ASSERT_EQ(offset, 0);
 
-        Timestamp begin_ts = 100;
+        milvus::Timestamp begin_ts = 100;
         auto tss = GenTss(c, begin_ts);
         auto pks = GenPKs(c, 0);
         auto status = segment->Delete(offset, c, pks.get(), tss.data());
@@ -1456,7 +1456,7 @@ TEST(Sealed, DeleteCount) {
 
         auto iter = std::max_element(pks.begin(), pks.end());
         auto delete_pks = GenPKs(c, *iter);
-        Timestamp begin_ts = 100;
+        milvus::Timestamp begin_ts = 100;
         auto tss = GenTss(c, begin_ts);
         auto status = segment->Delete(offset, c, delete_pks.get(), tss.data());
         ASSERT_TRUE(status.ok());
@@ -2639,7 +2639,7 @@ TEST(Sealed, SearchSortedPk) {
     SealedLoadFieldData(dataset, *segment);
 
     auto pk_values = dataset.get_col<std::string>(varchar_pk_field);
-    auto offsets = segment->search_pk(PkType(pk_values[100]), Timestamp(99999));
+    auto offsets = segment->search_pk(PkType(pk_values[100]), milvus::Timestamp(99999));
     EXPECT_EQ(10, offsets.size());
     EXPECT_EQ(100, offsets[0].get());
 

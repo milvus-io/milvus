@@ -66,14 +66,14 @@ TEST(Util, GetDeleteBitmap) {
     InsertRecord insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
-        [&insert_record](const PkType& pk, Timestamp timestamp) {
+        [&insert_record](const PkType& pk, milvus::Timestamp timestamp) {
             return insert_record.search_pk(pk, timestamp);
         },
         0);
 
     // fill insert record, all insert records has same pk = 1, timestamps= {1 ... N}
     std::vector<int64_t> age_data(N);
-    std::vector<Timestamp> tss(N);
+    std::vector<milvus::Timestamp> tss(N);
     for (int i = 0; i < N; ++i) {
         age_data[i] = 1;
         tss[i] = i + 1;
@@ -86,7 +86,7 @@ TEST(Util, GetDeleteBitmap) {
     insert_record.ack_responder_.AddSegment(insert_offset, insert_offset + N);
 
     // test case delete pk1(ts = 0) -> insert repeated pk1 (ts = {1 ... N}) -> query (ts = N)
-    std::vector<Timestamp> delete_ts = {0};
+    std::vector<milvus::Timestamp> delete_ts = {0};
     std::vector<PkType> delete_pk = {1};
     delete_record.StreamPush(delete_pk, delete_ts.data());
 

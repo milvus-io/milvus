@@ -50,6 +50,7 @@ generate_scalar_index(SpanBase data, DataType data_type) {
             return generate_scalar_index(Span<int16_t>(data));
         case DataType::INT32:
             return generate_scalar_index(Span<int32_t>(data));
+        case DataType::TIMESTAMP:
         case DataType::INT64:
             return generate_scalar_index(Span<int64_t>(data));
         case DataType::FLOAT:

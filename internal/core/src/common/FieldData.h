@@ -70,6 +70,16 @@ class FieldData<Json> : public FieldDataJsonImpl {
 };
 
 template <>
+class FieldData<TIMESTAMP> : public FieldDataImpl<int64_t, true> {
+ public:
+    explicit FieldData(DataType data_type,
+                       bool nullable,
+                       int64_t buffered_num_rows = 0)
+        : FieldDataImpl<int64_t, true>::FieldDataImpl(1, data_type, nullable, buffered_num_rows) {
+    }
+};
+
+template <>
 class FieldData<Array> : public FieldDataArrayImpl {
  public:
     static_assert(IsScalar<Array> || std::is_same_v<std::string, PkType>);

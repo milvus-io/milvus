@@ -82,6 +82,8 @@ enum class DataType {
     // GEOMETRY = 24 // reserved in proto
     TEXT = 25,
 
+    TIMESTAMP = 30,
+
     // Some special Data type, start from after 50
     // just for internal use now, may sync proto in future
     ROW = 50,
@@ -125,6 +127,8 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
             return sizeof(float);
         case DataType::DOUBLE:
             return sizeof(double);
+        case DataType::TIMESTAMP:
+            return sizeof(int64_t);
         case DataType::VECTOR_FLOAT:
             return sizeof(float) * dim;
         case DataType::VECTOR_BINARY: {
@@ -232,6 +236,8 @@ GetDataTypeName(DataType data_type) {
             return "array";
         case DataType::JSON:
             return "json";
+        case DataType::TIMESTAMP:
+            return "timestamp";
         case DataType::TEXT:
             return "text";
         case DataType::VECTOR_FLOAT:
@@ -286,6 +292,7 @@ IsIntegerDataType(DataType data_type) {
         case DataType::INT16:
         case DataType::INT32:
         case DataType::INT64:
+        case DataType::TIMESTAMP:
             return true;
         default:
             return false;
@@ -318,6 +325,11 @@ IsStringDataType(DataType data_type) {
         default:
             return false;
     }
+}
+
+inline bool
+IsTimestampDataType(DataType data_type) {
+    return data_type == DataType::TIMESTAMP;
 }
 
 inline bool
@@ -622,6 +634,15 @@ struct TypeTraits<DataType::JSON> {
 };
 
 template <>
+struct TypeTraits<DataType::TIMESTAMP> {
+    using NativeType = int64_t;
+    static constexpr DataType TypeKind = DataType::TIMESTAMP;
+    static constexpr bool IsPrimitiveType = true;
+    static constexpr bool IsFixedWidth = true;
+    static constexpr const char* Name = "TIMESTAMP";
+};
+
+template <>
 struct TypeTraits<DataType::ROW> {
     using NativeType = void;
     static constexpr DataType TypeKind = DataType::ROW;
@@ -665,6 +686,9 @@ FromValCase(milvus::proto::plan::GenericValue::ValCase val_case) {
             return DataType::NONE;
     }
 }
+
+// TIMESTAMP is a type that represents a timestamp in microseconds.
+typedef int64_t TIMESTAMP;
 }  // namespace milvus
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {
@@ -710,6 +734,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::JSON:
                 name = "JSON";
+                break;
+            case milvus::DataType::TIMESTAMP:
+                name = "TIMESTAMP";
                 break;
             case milvus::DataType::ROW:
                 name = "ROW";

@@ -3568,6 +3568,8 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
     auto str3_fid = schema->AddDebugField("string3", DataType::VARCHAR);
+    auto ts_fid = schema->AddDebugField("ts", DataType::TIMESTAMP);
+    auto ts_1_fid = schema->AddDebugField("ts1", DataType::TIMESTAMP);
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
@@ -3661,6 +3663,15 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
                                                         DataType::VARCHAR,
                                                         OpType::LessThan);
                 return compare_expr;
+                }
+            case DataType::TIMESTAMP: {
+                auto compare_expr =
+                    std::make_shared<expr::CompareExpr>(ts_fid,
+                                                        ts_1_fid,
+                                                        DataType::TIMESTAMP,
+                                                        DataType::TIMESTAMP,
+                                                        OpType::LessThan);
+                return compare_expr;
             }
             default:
                 return std::make_shared<expr::CompareExpr>(int8_fid,
@@ -3692,6 +3703,9 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     expr = build_expr(DataType::DOUBLE);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    expr = build_expr(DataType::TIMESTAMP);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     std::cout << "end compare test" << std::endl;
@@ -3865,6 +3879,9 @@ TEST_P(ExprTest, TestCompareExprNullable) {
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
     auto str_nullable_fid =
         schema->AddDebugField("string3", DataType::VARCHAR, true);
+    auto ts_fid = schema->AddDebugField("ts", DataType::TIMESTAMP);
+    auto ts_nullable_fid =
+        schema->AddDebugField("ts1", DataType::TIMESTAMP, true);
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
@@ -3959,6 +3976,14 @@ TEST_P(ExprTest, TestCompareExprNullable) {
                                                         OpType::LessThan);
                 return compare_expr;
             }
+            case DataType::TIMESTAMP: {
+                auto compare_expr =
+                    std::make_shared<expr::CompareExpr>(ts_fid,
+                                                        ts_nullable_fid,
+                                                        DataType::TIMESTAMP,
+                                                        DataType::TIMESTAMP,
+                                                        OpType::LessThan);
+            }
             default:
                 return std::make_shared<expr::CompareExpr>(int8_fid,
                                                            int8_nullable_fid,
@@ -3989,6 +4014,9 @@ TEST_P(ExprTest, TestCompareExprNullable) {
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     expr = build_expr(DataType::DOUBLE);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    expr = build_expr(DataType::TIMESTAMP);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     std::cout << "end compare test" << std::endl;
@@ -4022,6 +4050,9 @@ TEST_P(ExprTest, TestCompareExprNullable2) {
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
     auto str_nullable_fid =
         schema->AddDebugField("string3", DataType::VARCHAR, true);
+    auto ts_fid = schema->AddDebugField("ts", DataType::TIMESTAMP);
+    auto ts_nullable_fid =
+        schema->AddDebugField("ts1", DataType::TIMESTAMP, true);
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
@@ -4116,6 +4147,15 @@ TEST_P(ExprTest, TestCompareExprNullable2) {
                                                         OpType::LessThan);
                 return compare_expr;
             }
+            case DataType::TIMESTAMP: {
+                auto compare_expr =
+                    std::make_shared<expr::CompareExpr>(ts_nullable_fid,
+                                                        ts_fid,
+                                                        DataType::TIMESTAMP,
+                                                        DataType::TIMESTAMP,
+                                                        OpType::LessThan);
+                return compare_expr;
+            }
             default:
                 return std::make_shared<expr::CompareExpr>(int8_nullable_fid,
                                                            int8_fid,
@@ -4148,6 +4188,9 @@ TEST_P(ExprTest, TestCompareExprNullable2) {
     expr = build_expr(DataType::DOUBLE);
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    expr = build_expr(DataType::TIMESTAMP);
+    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     std::cout << "end compare test" << std::endl;
 }
 
@@ -4173,6 +4216,8 @@ TEST_P(ExprTest, TestMutiInConvert) {
     auto json_fid = schema->AddDebugField("json", DataType::JSON, false);
     auto str_array_fid =
         schema->AddDebugField("str_array", DataType::ARRAY, DataType::VARCHAR);
+    auto ts_fid = schema->AddDebugField("ts", DataType::TIMESTAMP);
+    auto ts_1_fid = schema->AddDebugField("ts1", DataType::TIMESTAMP, true);
     schema->set_primary_field_id(pk);
 
     auto seg = CreateSealedSegment(schema);
@@ -4617,6 +4662,7 @@ TEST(Expr, TestExprNOT) {
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR, true);
     auto float_fid = schema->AddDebugField("float", DataType::FLOAT, true);
     auto double_fid = schema->AddDebugField("double", DataType::DOUBLE, true);
+    auto ts_fid = schema->AddDebugField("ts", DataType::TIMESTAMP, true);
     schema->set_primary_field_id(str1_fid);
 
     std::map<DataType, FieldId> fids = {{DataType::INT8, int8_fid},
@@ -4625,7 +4671,8 @@ TEST(Expr, TestExprNOT) {
                                         {DataType::INT64, int64_fid},
                                         {DataType::VARCHAR, str2_fid},
                                         {DataType::FLOAT, float_fid},
-                                        {DataType::DOUBLE, double_fid}};
+                                        {DataType::DOUBLE, double_fid},
+                                        {DataType::TIMESTAMP, ts_fid}};
 
     auto seg = CreateSealedSegment(schema);
     FixedVector<bool> valid_data_i8;
@@ -4635,6 +4682,7 @@ TEST(Expr, TestExprNOT) {
     FixedVector<bool> valid_data_str;
     FixedVector<bool> valid_data_float;
     FixedVector<bool> valid_data_double;
+    FixedVector<bool> valid_data_ts;
     int N = 1000;
     auto raw_data = DataGen(schema, N);
     valid_data_i8 = raw_data.get_col_valid(int8_fid);
@@ -4644,7 +4692,7 @@ TEST(Expr, TestExprNOT) {
     valid_data_str = raw_data.get_col_valid(str2_fid);
     valid_data_float = raw_data.get_col_valid(float_fid);
     valid_data_double = raw_data.get_col_valid(double_fid);
-
+    valid_data_ts = raw_data.get_col_valid(ts_fid);
     // load field data
     auto fields = schema->get_fields();
     for (auto field_data : raw_data.raw_->fields_data()) {
@@ -4899,6 +4947,8 @@ TEST(Expr, TestExprNOT) {
     test_ans(expr, valid_data_double);
     expr = build_unary_range_expr(DataType::VARCHAR, 10);
     test_ans(expr, valid_data_str);
+    expr = build_unary_range_expr(DataType::TIMESTAMP, 10);
+    test_ans(expr, valid_data_ts);
 
     expr = build_binary_range_expr(DataType::INT8, 10, 100);
     test_ans(expr, valid_data_i8);
@@ -4914,6 +4964,8 @@ TEST(Expr, TestExprNOT) {
     test_ans(expr, valid_data_double);
     expr = build_binary_range_expr(DataType::VARCHAR, 10, 100);
     test_ans(expr, valid_data_str);
+    expr = build_binary_range_expr(DataType::TIMESTAMP, 10, 100);
+    test_ans(expr, valid_data_ts);
 
     expr = build_compare_expr(DataType::INT8);
     test_ans(expr, valid_data_i8);
@@ -4929,6 +4981,8 @@ TEST(Expr, TestExprNOT) {
     test_ans(expr, valid_data_double);
     expr = build_compare_expr(DataType::VARCHAR);
     test_ans(expr, valid_data_str);
+    expr = build_compare_expr(DataType::TIMESTAMP);
+    test_ans(expr, valid_data_ts);
 
     expr = build_arith_op_expr(DataType::INT8, 10, 100);
     test_ans(expr, valid_data_i8);
@@ -4942,6 +4996,8 @@ TEST(Expr, TestExprNOT) {
     test_ans(expr, valid_data_float);
     expr = build_arith_op_expr(DataType::DOUBLE, 10, 100);
     test_ans(expr, valid_data_double);
+    expr = build_arith_op_expr(DataType::TIMESTAMP, 10, 100);
+    test_ans(expr, valid_data_ts);
 
     expr = build_logical_unary_expr(DataType::INT8);
     test_ans(expr, valid_data_i8);
@@ -4957,6 +5013,8 @@ TEST(Expr, TestExprNOT) {
     test_ans(expr, valid_data_double);
     expr = build_logical_unary_expr(DataType::VARCHAR);
     test_ans(expr, valid_data_str);
+    expr = build_logical_unary_expr(DataType::TIMESTAMP);
+    test_ans(expr, valid_data_ts);
 
     expr = build_logical_binary_expr(DataType::INT8);
     test_ans(expr, valid_data_i8);
@@ -4972,6 +5030,8 @@ TEST(Expr, TestExprNOT) {
     test_ans(expr, valid_data_double);
     expr = build_logical_binary_expr(DataType::VARCHAR);
     test_ans(expr, valid_data_str);
+    expr = build_logical_binary_expr(DataType::TIMESTAMP);
+    test_ans(expr, valid_data_ts);
 
     expr = build_multi_logical_binary_expr(DataType::INT8);
     test_ans(expr, valid_data_i8);
@@ -4987,6 +5047,8 @@ TEST(Expr, TestExprNOT) {
     test_ans(expr, valid_data_double);
     expr = build_multi_logical_binary_expr(DataType::VARCHAR);
     test_ans(expr, valid_data_str);
+    expr = build_multi_logical_binary_expr(DataType::TIMESTAMP);
+    test_ans(expr, valid_data_ts);
 }
 
 TEST_P(ExprTest, test_term_pk) {
@@ -5724,6 +5786,8 @@ TEST(Expr, TestExprNull) {
     auto float_1_fid = schema->AddDebugField("float1", DataType::FLOAT);
     auto double_fid = schema->AddDebugField("double", DataType::DOUBLE, true);
     auto double_1_fid = schema->AddDebugField("double1", DataType::DOUBLE);
+    auto ts_fid = schema->AddDebugField("ts", DataType::TIMESTAMP, true);
+    auto ts_1_fid = schema->AddDebugField("ts1", DataType::TIMESTAMP);
     schema->set_primary_field_id(str1_fid);
 
     std::map<DataType, FieldId> fids = {{DataType::BOOL, bool_fid},
@@ -5733,7 +5797,8 @@ TEST(Expr, TestExprNull) {
                                         {DataType::INT64, int64_fid},
                                         {DataType::VARCHAR, str2_fid},
                                         {DataType::FLOAT, float_fid},
-                                        {DataType::DOUBLE, double_fid}};
+                                        {DataType::DOUBLE, double_fid},
+                                        {DataType::TIMESTAMP, ts_fid}};
 
     std::map<DataType, FieldId> fids_not_nullable = {
         {DataType::BOOL, bool_1_fid},
@@ -5743,7 +5808,8 @@ TEST(Expr, TestExprNull) {
         {DataType::INT64, int64_1_fid},
         {DataType::VARCHAR, str1_fid},
         {DataType::FLOAT, float_1_fid},
-        {DataType::DOUBLE, double_1_fid}};
+        {DataType::DOUBLE, double_1_fid},
+        {DataType::TIMESTAMP, ts_1_fid}};
 
     auto seg = CreateSealedSegment(schema);
     FixedVector<bool> valid_data_bool;
@@ -5754,7 +5820,7 @@ TEST(Expr, TestExprNull) {
     FixedVector<bool> valid_data_str;
     FixedVector<bool> valid_data_float;
     FixedVector<bool> valid_data_double;
-
+    FixedVector<bool> valid_data_ts;
     int N = 1000;
     auto raw_data = DataGen(schema, N);
     valid_data_bool = raw_data.get_col_valid(bool_fid);
@@ -5765,7 +5831,7 @@ TEST(Expr, TestExprNull) {
     valid_data_str = raw_data.get_col_valid(str2_fid);
     valid_data_float = raw_data.get_col_valid(float_fid);
     valid_data_double = raw_data.get_col_valid(double_fid);
-
+    valid_data_ts = raw_data.get_col_valid(ts_fid);
     FixedVector<bool> valid_data_all_true(N, true);
 
     // load field data
@@ -5850,6 +5916,9 @@ TEST(Expr, TestExprNull) {
     expr = build_nullable_expr(DataType::DOUBLE,
                                proto::plan::NullExpr_NullOp_IsNull);
     test_is_null_ans(expr, valid_data_double);
+    expr = build_nullable_expr(DataType::TIMESTAMP,
+                               proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_ts);
     expr = build_nullable_expr(DataType::BOOL,
                                proto::plan::NullExpr_NullOp_IsNotNull);
     test_is_not_null_ans(expr, valid_data_bool);
@@ -5877,6 +5946,9 @@ TEST(Expr, TestExprNull) {
     expr = build_nullable_expr(DataType::DOUBLE,
                                proto::plan::NullExpr_NullOp_IsNotNull);
     test_is_not_null_ans(expr, valid_data_double);
+    expr = build_nullable_expr(DataType::TIMESTAMP,
+                               proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_ts);
     //not nullable expr
     expr = build_not_nullable_expr(DataType::BOOL,
                                    proto::plan::NullExpr_NullOp_IsNull);
@@ -5905,6 +5977,9 @@ TEST(Expr, TestExprNull) {
     expr = build_not_nullable_expr(DataType::DOUBLE,
                                    proto::plan::NullExpr_NullOp_IsNull);
     test_is_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::TIMESTAMP,
+                                   proto::plan::NullExpr_NullOp_IsNull);
+    test_is_null_ans(expr, valid_data_all_true);
     expr = build_not_nullable_expr(DataType::BOOL,
                                    proto::plan::NullExpr_NullOp_IsNotNull);
     test_is_not_null_ans(expr, valid_data_all_true);
@@ -5930,6 +6005,9 @@ TEST(Expr, TestExprNull) {
                                    proto::plan::NullExpr_NullOp_IsNotNull);
     test_is_not_null_ans(expr, valid_data_all_true);
     expr = build_not_nullable_expr(DataType::DOUBLE,
+                                   proto::plan::NullExpr_NullOp_IsNotNull);
+    test_is_not_null_ans(expr, valid_data_all_true);
+    expr = build_not_nullable_expr(DataType::TIMESTAMP,
                                    proto::plan::NullExpr_NullOp_IsNotNull);
     test_is_not_null_ans(expr, valid_data_all_true);
 }
@@ -16719,7 +16797,6 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     EXPECT_EQ(final.count(), expect_count);
 }
-
 TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
@@ -17097,5 +17174,150 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
         auto res =
             ExecuteQueryExpr(plan, seg.get(), json_strs.size(), MAX_TIMESTAMP);
         EXPECT_TRUE(res == expect_result);
+    }
+}
+
+TEST_P(ExprTest, UnaryRangeTIMESTAMP) {
+    using T = int64_t; // Underlying type for TIMESTAMP
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto ts_fid = schema->AddDebugField("ts", DataType::TIMESTAMP);
+    schema->set_primary_field_id(pk_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 100;
+    int num_iters = 1;
+
+    std::vector<T> ts_col;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = milvus::segcore::DataGen(schema, N, iter);
+        // Manually set timestamp data for predictable values
+        std::vector<T> current_ts_col(N);
+        for (int i = 0; i < N; ++i) {
+            current_ts_col[i] = 1000 + i * 2; // Timestamps: 1000, 1002, 1004, ...
+        }
+        auto ts_field_data = milvus::storage::CreateFieldData(DataType::TIMESTAMP, false, 0);
+        ts_field_data->FillFieldData(current_ts_col.data(), N);
+
+        ts_col.insert(ts_col.end(), current_ts_col.begin(), current_ts_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+        }
+
+    auto active_count = seg->get_active_count(static_cast<milvus::Timestamp>(0));
+    ASSERT_EQ(active_count, N * num_iters);
+
+    // Define test cases: { Operator, FilterValue, ReferenceCheckLambda }
+    using OpType = proto::plan::OpType;
+    std::vector<std::tuple<OpType, T, std::function<bool(T)>>> testcases = {
+        {OpType::LessThan, 1050, [](T v){ return v < 1050; }}, // ts < 1050
+        {OpType::LessEqual, 1050, [](T v){ return v <= 1050; }}, // ts <= 1050
+        {OpType::GreaterThan, 1050, [](T v){ return v > 1050; }}, // ts > 1050
+        {OpType::GreaterEqual, 1050, [](T v){ return v >= 1050; }}, // ts >= 1050
+        {OpType::Equal, 1050, [](T v){ return v == 1050; }}, // ts == 1050 (will match if N is large enough)
+        {OpType::NotEqual, 1050, [](T v){ return v != 1050; }}  // ts != 1050
+    };
+
+    for (const auto& [op, filter_val, ref_func] : testcases) {
+        proto::plan::GenericValue val_pb;
+        val_pb.set_int64_val(filter_val);
+
+        auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(ts_fid, DataType::TIMESTAMP, {}), op, val_pb);
+
+        // Use FilterBitsNode for plan structure similar to JSON tests
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+
+        // Execute the query expression
+        BitsetType final_bits = ExecuteQueryExpr(plan, seg.get(), active_count, MAX_TIMESTAMP);
+
+        // Verify results row by row using the reference function
+        ASSERT_EQ(final_bits.size(), active_count);
+        for (int i = 0; i < active_count; ++i) {
+            bool expected_result = ref_func(ts_col[i]);
+            ASSERT_EQ(final_bits[i], expected_result)
+                << "Mismatch at index " << i << " for OpType " << op << " with value " << ts_col[i];
+        }
+    }
+}
+
+
+TEST_P(ExprTest, CompareTIMESTAMP) {
+    using T = int64_t; // Underlying type for TIMESTAMP
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto ts1_fid = schema->AddDebugField("ts1", DataType::TIMESTAMP);
+    auto ts2_fid = schema->AddDebugField("ts2", DataType::TIMESTAMP);
+    schema->set_primary_field_id(pk_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 100;
+    int num_iters = 1;
+
+    std::vector<T> ts1_col;
+    std::vector<T> ts2_col;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = milvus::segcore::DataGen(schema, N, iter);
+        // Manually set timestamp data for specific comparison scenarios
+        std::vector<T> current_ts1_col(N);
+        std::vector<T> current_ts2_col(N);
+        for (int i = 0; i < N; ++i) {
+            current_ts1_col[i] = 1000 + i;
+            current_ts2_col[i] = 1050; // Default: ts1 < ts2 for i < 50, ts1 > ts2 for i > 50
+            if (i == 50) current_ts2_col[i] = 1050; // ts1 == ts2 at i=50
+            if (i % 5 == 0 && i != 50) current_ts2_col[i] = 1000 + i - 10; // Make ts1 > ts2
+            if (i % 7 == 0 && i != 50) current_ts2_col[i] = 1000 + i + 10; // Make ts1 < ts2
+        }
+        auto ts1_field_data = milvus::storage::CreateFieldData(DataType::TIMESTAMP, false, 0);
+        ts1_field_data->FillFieldData(current_ts1_col.data(), N);
+
+        auto ts2_field_data = milvus::storage::CreateFieldData(DataType::TIMESTAMP, false, 0);
+        ts2_field_data->FillFieldData(current_ts2_col.data(), N);
+
+        ts1_col.insert(ts1_col.end(), current_ts1_col.begin(), current_ts1_col.end());
+        ts2_col.insert(ts2_col.end(), current_ts2_col.begin(), current_ts2_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto active_count = seg->get_active_count(static_cast<milvus::Timestamp>(0));
+    ASSERT_EQ(active_count, N * num_iters);
+
+    // Define test cases: { Operator, ReferenceCheckLambda }
+    using OpType = proto::plan::OpType;
+    std::vector<std::pair<OpType, std::function<bool(T, T)>>> testcases = {
+        {OpType::LessThan, [](T v1, T v2){ return v1 < v2; }},
+        {OpType::LessEqual, [](T v1, T v2){ return v1 <= v2; }},
+        {OpType::GreaterThan, [](T v1, T v2){ return v1 > v2; }},
+        {OpType::GreaterEqual, [](T v1, T v2){ return v1 >= v2; }},
+        {OpType::Equal, [](T v1, T v2){ return v1 == v2; }},
+        {OpType::NotEqual, [](T v1, T v2){ return v1 != v2; }}
+    };
+
+    for (const auto& [op, ref_func] : testcases) {
+        auto expr = std::make_shared<expr::CompareExpr>(
+            ts1_fid, ts2_fid, DataType::TIMESTAMP, DataType::TIMESTAMP, op);
+
+        // Use FilterBitsNode for plan structure
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+
+        // Execute the query expression
+        BitsetType final_bits = ExecuteQueryExpr(plan, seg.get(), active_count, MAX_TIMESTAMP);
+
+        // Verify results row by row using the reference function
+        ASSERT_EQ(final_bits.size(), active_count);
+        for (int i = 0; i < active_count; ++i) {
+            bool expected_result = ref_func(ts1_col[i], ts2_col[i]);
+            ASSERT_EQ(final_bits[i], expected_result)
+                << "Mismatch at index " << i << " for OpType " << op << " comparing " << ts1_col[i] << " and " << ts2_col[i];
+        }
     }
 }

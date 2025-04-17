@@ -1971,7 +1971,7 @@ Test_Indexing_Without_Predicate() {
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
 
-    Timestamp timestmap = 10000000;
+    milvus::Timestamp timestmap = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = CSearch(segment,
@@ -2127,7 +2127,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
 
-    Timestamp timestamp = 10000000;
+    milvus::Timestamp timestamp = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = CSearch(segment,
@@ -2305,7 +2305,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp timestamp = 10000000;
+    milvus::Timestamp timestamp = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = CSearch(segment,
@@ -2485,7 +2485,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp timestamp = 10000000;
+    milvus::Timestamp timestamp = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = CSearch(segment,
@@ -2657,7 +2657,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp timestamp = 10000000;
+    milvus::Timestamp timestamp = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = CSearch(segment,
@@ -2830,7 +2830,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp timestamp = 10000000;
+    milvus::Timestamp timestamp = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = CSearch(segment,
@@ -3010,7 +3010,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp timestamp = 10000000;
+    milvus::Timestamp timestamp = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = CSearch(segment,
@@ -3191,7 +3191,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp timestamp = 10000000;
+    milvus::Timestamp timestamp = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = CSearch(segment,
@@ -3367,7 +3367,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp timestamp = 10000000;
+    milvus::Timestamp timestamp = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = CSearch(segment,
@@ -3565,7 +3565,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp timestamp = 10000000;
+    milvus::Timestamp timestamp = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = CSearch(segment,
@@ -3772,7 +3772,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp timestamp = 10000000;
+    milvus::Timestamp timestamp = 10000000;
 
     // load index to segment
     auto indexing = generate_index(vec_col.data(),
@@ -4005,7 +4005,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    Timestamp timestamp = 10000000;
+    milvus::Timestamp timestamp = 10000000;
 
     // load index to segment
     auto indexing = generate_index(vec_col.data(),
@@ -4550,8 +4550,8 @@ TEST(CApiTest, Range_Search_With_Radius_And_Range_Filter) {
 
 std::vector<SegOffset>
 search_id(const BitsetType& bitset,
-          Timestamp* timestamps,
-          Timestamp timestamp,
+          milvus::Timestamp* timestamps,
+          milvus::Timestamp timestamp,
           bool use_find) {
     std::vector<SegOffset> dst_offset;
     if (use_find) {
@@ -4584,7 +4584,7 @@ TEST(CApiTest, SearchIdTest) {
 
     auto test = [&](int NT) {
         BitsetType bitset(1000000);
-        Timestamp* timestamps = new Timestamp[1000000];
+        milvus::Timestamp* timestamps = new milvus::Timestamp[1000000];
         srand(time(NULL));
         for (int i = 0; i < 1000000; i++) {
             timestamps[i] = i;

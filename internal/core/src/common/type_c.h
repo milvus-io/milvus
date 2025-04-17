@@ -49,6 +49,8 @@ enum CDataType {
     String = 20,
     VarChar = 21,
 
+    Timestamp = 30,
+
     BinaryVector = 100,
     FloatVector = 101,
     Float16Vector = 102,
