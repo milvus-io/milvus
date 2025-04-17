@@ -271,12 +271,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
     for (auto& [id, info] : infos.field_infos) {
         auto field_id = FieldId(id);
         auto insert_files = info.insert_files;
-        std::sort(insert_files.begin(),
-                  insert_files.end(),
-                  [](const std::string& a, const std::string& b) {
-                      return std::stol(a.substr(a.find_last_of('/') + 1)) <
-                             std::stol(b.substr(b.find_last_of('/') + 1));
-                  });
+        storage::SortByPath(insert_files);
 
         auto channel = std::make_shared<FieldDataChannel>();
         auto& pool =
@@ -412,12 +407,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
     for (auto& [id, info] : infos.field_infos) {
         auto column_group_id = FieldId(id);
         auto insert_files = info.insert_files;
-        std::sort(insert_files.begin(),
-                  insert_files.end(),
-                  [](const std::string& a, const std::string& b) {
-                      return std::stol(a.substr(a.find_last_of('/') + 1)) <
-                             std::stol(b.substr(b.find_last_of('/') + 1));
-                  });
+        storage::SortByPath(insert_files);
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
         auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(

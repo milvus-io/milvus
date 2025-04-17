@@ -19,7 +19,6 @@
 #include "pb/segcore.pb.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
-#include "cachinglayer/CacheSlot.h"
 #include "segcore/Types.h"
 
 namespace milvus::segcore {
@@ -47,6 +46,9 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual void
     LoadTextIndex(FieldId field_id,
                   std::unique_ptr<index::TextMatchIndex> index) = 0;
+
+    virtual InsertRecord<true>&
+    get_insert_record() = 0;
 
     virtual index::IndexBase*
     GetJsonIndex(FieldId field_id, std::string path) const override {
@@ -103,9 +105,6 @@ class SegmentSealed : public SegmentInternalInterface {
                (data_type == DataType::INT64 &&
                 index->second->JsonCastType() == DataType::DOUBLE);
     }
-
-    virtual std::shared_ptr<CacheSlot<InsertRecord<true>>>
-    get_insert_record_slot() const = 0;
 
  protected:
     struct JSONIndexKey {

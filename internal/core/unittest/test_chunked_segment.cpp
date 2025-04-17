@@ -179,21 +179,7 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
     void
     SetUp() override {
         bool pk_is_string = GetParam();
-        auto schema = std::make_shared<Schema>();
-        auto int64_fid = schema->AddDebugField("int64", DataType::INT64, true);
-
-        auto pk_fid = schema->AddDebugField(
-            "pk", pk_is_string ? DataType::VARCHAR : DataType::INT64, false);
-        auto str_fid =
-            schema->AddDebugField("string1", DataType::VARCHAR, true);
-        auto str2_fid =
-            schema->AddDebugField("string2", DataType::VARCHAR, true);
-        schema->AddField(FieldName("ts"),
-                         TimestampFieldID,
-                         DataType::INT64,
-                         true,
-                         std::nullopt);
-        schema->set_primary_field_id(pk_fid);
+        auto schema = segcore::GenChunkedSegmentTestSchema(pk_is_string);
         segment = segcore::CreateSealedSegment(
             schema,
             nullptr,
@@ -203,55 +189,17 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
             true);
         test_data_count = 10000;
 
-        auto arrow_i64_field = arrow::field(
-            "int64",
-            arrow::int64(),
-            true,
-            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
-                                      {std::to_string(100)}));
-        auto arrow_pk_field = arrow::field(
-            "pk",
-            pk_is_string ? arrow::utf8() : arrow::int64(),
-            false,
-            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
-                                      {std::to_string(101)}));
-        auto arrow_ts_field = arrow::field(
-            "ts",
-            arrow::int64(),
-            true,
-            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
-                                      {std::to_string(1)}));
-        auto arrow_str_field = arrow::field(
-            "string1",
-            arrow::utf8(),
-            true,
-            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
-                                      {std::to_string(102)}));
-        auto arrow_str2_field = arrow::field(
-            "string2",
-            arrow::utf8(),
-            true,
-            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
-                                      {std::to_string(103)}));
-        std::vector<std::shared_ptr<arrow::Field>> arrow_fields = {
-            arrow_ts_field,
-            arrow_str2_field,
-            arrow_str_field,
-            arrow_pk_field,
-            arrow_i64_field,
-        };
-        auto expected_arrow_schema =
-            std::make_shared<arrow::Schema>(arrow_fields);
-        ASSERT_EQ(schema->ConvertToArrowSchema()->ToString(),
-                  expected_arrow_schema->ToString());
-
         std::vector<FieldId> field_ids = {
-            int64_fid, pk_fid, TimestampFieldID, str_fid, str2_fid};
-        fields = {{"int64", int64_fid},
-                  {"pk", pk_fid},
+            schema->get_field_id(FieldName("int64")),
+            schema->get_field_id(FieldName("pk")),
+            TimestampFieldID,
+            schema->get_field_id(FieldName("string1")),
+            schema->get_field_id(FieldName("string2"))};
+        fields = {{"int64", schema->get_field_id(FieldName("int64"))},
+                  {"pk", schema->get_field_id(FieldName("pk"))},
                   {"ts", TimestampFieldID},
-                  {"string1", str_fid},
-                  {"string2", str2_fid}};
+                  {"string1", schema->get_field_id(FieldName("string1"))},
+                  {"string2", schema->get_field_id(FieldName("string2"))}};
 
         int start_id = 0;
         chunk_num = 2;
@@ -273,11 +221,13 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
             std::vector<int64_t> test_data(test_data_count);
             std::iota(test_data.begin(), test_data.end(), start_id);
 
-            for (int i = 0; i < arrow_fields.size(); i++) {
+            for (int i = 0; i < field_ids.size(); i++) {
                 // if i < 3, this is system field, thus must be int64.
                 // other fields include a pk field and 2 string fields. pk field is string if pk_is_string is true.
                 auto datatype =
-                    i < 3 && (field_ids[i] != pk_fid || !pk_is_string)
+                    i < 3 && (field_ids[i] !=
+                                  schema->get_field_id(FieldName("pk")) ||
+                              !pk_is_string)
                         ? DataType::INT64
                         : DataType::VARCHAR;
                 FieldDataPtr field_data{nullptr};

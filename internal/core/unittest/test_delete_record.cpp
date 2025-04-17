@@ -38,12 +38,12 @@ TEST(DeleteMVCC, common_case) {
     auto pks = dataset.get_col<int64_t>(pk);
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     ASSERT_EQ(c, segment->get_real_count());
-    auto insert_record = segment->get_insert_record_slot();
+    auto& insert_record = segment->get_insert_record();
     auto segment_ptr = segment.get();
     DeletedRecord<true> delete_record(
-        insert_record,
-        [segment_ptr](const PkType& pk, Timestamp timestamp) {
-            return segment_ptr->search_pk(pk, timestamp);
+        &insert_record,
+        [&insert_record](const PkType& pk, Timestamp timestamp) {
+            return insert_record.search_pk(pk, timestamp);
         },
         0);
     delete_record.set_sealed_row_count(c);

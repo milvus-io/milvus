@@ -1308,12 +1308,7 @@ TEST(Sealed, DeleteCount) {
 
         auto dataset = DataGen(schema, N);
         auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
-
-        auto insert_record_slot = segment->get_insert_record_slot();
-        auto ca = milvus::cachinglayer::SemiInlineGet(
-            insert_record_slot->PinCells({0}));
-        auto insert_record = ca->get_cell_of(0);
-        insert_record->seal_pks();
+        segment->get_insert_record().seal_pks();
 
         int64_t c = 10;
         ASSERT_EQ(segment->get_deleted_count(), 0);

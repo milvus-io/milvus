@@ -100,6 +100,9 @@ set(MILVUS_TEST_FILES
         test_growing_storage_v2.cpp
         test_memory_planner.cpp
         test_storage_v2_index_raw_data.cpp
+        test_chunked_column_group.cpp
+        test_group_chunk_translator.cpp
+        test_chunked_segment_storage_v2.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

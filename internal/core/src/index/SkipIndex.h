@@ -12,7 +12,7 @@
 #pragma once
 
 #include <unordered_map>
-
+#include "mmap/ChunkedColumnGroup.h"
 #include "common/Types.h"
 
 namespace milvus {
@@ -294,8 +294,8 @@ class SkipIndex {
     ProcessStringFieldMetrics(const T& var_column) {
         int num_rows = var_column.NumRows();
         // find first not null value
-        int64_t start = 0;
-        for (int64_t i = start; i < num_rows; i++) {
+        size_t start = 0;
+        for (size_t i = start; i < num_rows; i++) {
             if (!var_column.IsValid(i)) {
                 start++;
                 continue;
@@ -305,15 +305,27 @@ class SkipIndex {
         if (start > num_rows - 1) {
             return {std::string(), std::string(), num_rows};
         }
-        std::string min_string = var_column.RawAt(start);
+
+        // Handle both ChunkedVariableColumn and ProxyChunkColumn cases
+        std::string min_string;
+        if constexpr (std::is_same_v<T, ProxyChunkColumn>) {
+            min_string = var_column.template RawAt<std::string>(start);
+        } else {
+            min_string = var_column.RawAt(start);
+        }
         std::string max_string = min_string;
         int64_t null_count = start;
-        for (int64_t i = start; i < num_rows; i++) {
+        for (size_t i = start; i < num_rows; i++) {
             if (!var_column.IsValid(i)) {
                 null_count++;
                 continue;
             }
-            const auto& val = var_column.RawAt(i);
+            std::string val;
+            if constexpr (std::is_same_v<T, ProxyChunkColumn>) {
+                val = var_column.template RawAt<std::string>(i);
+            } else {
+                val = var_column.RawAt(i);
+            }
             if (val < min_string) {
                 min_string = val;
             }

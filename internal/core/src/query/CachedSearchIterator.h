@@ -61,7 +61,7 @@ class CachedSearchIterator {
                          const milvus::DataType& data_type);
 
     // For sealed segment with chunked data, BF
-    CachedSearchIterator(ChunkedColumnBase* column,
+    CachedSearchIterator(ChunkedColumnInterface* column,
                          const dataset::SearchDataset& dataset,
                          const SearchInfo& search_info,
                          const std::map<std::string, std::string>& index_info,

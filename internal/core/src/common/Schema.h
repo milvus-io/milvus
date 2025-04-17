@@ -237,6 +237,15 @@ class Schema {
         return fields_;
     }
 
+    const std::unordered_map<FieldId, FieldMeta>
+    get_field_metas(std::vector<FieldId> field_ids) {
+        std::unordered_map<FieldId, FieldMeta> field_metas;
+        for (const auto& field_id : field_ids) {
+            field_metas.emplace(field_id, operator[](field_id));
+        }
+        return field_metas;
+    }
+
     const std::vector<FieldId>&
     get_field_ids() const {
         return field_ids_;

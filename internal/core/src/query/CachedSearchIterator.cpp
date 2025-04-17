@@ -134,7 +134,7 @@ CachedSearchIterator::CachedSearchIterator(
 }
 
 CachedSearchIterator::CachedSearchIterator(
-    ChunkedColumnBase* column,
+    ChunkedColumnInterface* column,
     const dataset::SearchDataset& query_ds,
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,

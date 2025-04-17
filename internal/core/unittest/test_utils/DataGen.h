@@ -336,15 +336,59 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline GeneratedData DataGen(SchemaPtr schema,
-                             int64_t N,
-                             uint64_t seed = 42,
-                             uint64_t ts_offset = 0,
-                             int repeat_count = 1,
-                             int array_len = 10,
-                             bool random_pk = false,
-                             bool random_val = true,
-                             bool random_valid = false) {
+inline SchemaPtr CreateTestSchema() {
+    auto schema = std::make_shared<milvus::Schema>();
+    auto bool_field =
+        schema->AddDebugField("bool", milvus::DataType::BOOL, true);
+    auto int8_field =
+        schema->AddDebugField("int8", milvus::DataType::INT8, true);
+    auto int16_field =
+        schema->AddDebugField("int16", milvus::DataType::INT16, true);
+    auto int32_field =
+        schema->AddDebugField("int32", milvus::DataType::INT32, true);
+    auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
+    auto float_field =
+        schema->AddDebugField("float", milvus::DataType::FLOAT, true);
+    auto double_field =
+        schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
+    auto varchar_field =
+        schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
+    auto json_field =
+        schema->AddDebugField("json", milvus::DataType::JSON, true);
+    auto int_array_field = schema->AddDebugField(
+        "int_array", milvus::DataType::ARRAY, milvus::DataType::INT8, true);
+    auto long_array_field = schema->AddDebugField(
+        "long_array", milvus::DataType::ARRAY, milvus::DataType::INT64, true);
+    auto bool_array_field = schema->AddDebugField(
+        "bool_array", milvus::DataType::ARRAY, milvus::DataType::BOOL, true);
+    auto string_array_field = schema->AddDebugField("string_array",
+                                                    milvus::DataType::ARRAY,
+                                                    milvus::DataType::VARCHAR,
+                                                    true);
+    auto double_array_field = schema->AddDebugField("double_array",
+                                                    milvus::DataType::ARRAY,
+                                                    milvus::DataType::DOUBLE,
+                                                    true);
+    auto float_array_field = schema->AddDebugField(
+        "float_array", milvus::DataType::ARRAY, milvus::DataType::FLOAT, true);
+    auto vec = schema->AddDebugField("embeddings",
+                                     milvus::DataType::VECTOR_FLOAT,
+                                     128,
+                                     knowhere::metric::L2);
+    schema->set_primary_field_id(int64_field);
+    return schema;
+}
+
+inline GeneratedData
+DataGen(SchemaPtr schema,
+        int64_t N,
+        uint64_t seed = 42,
+        uint64_t ts_offset = 0,
+        int repeat_count = 1,
+        int array_len = 10,
+        bool random_pk = false,
+        bool random_val = true,
+        bool random_valid = false) {
     using std::vector;
     std::default_random_engine random(seed);
     std::normal_distribution<> distr(0, 1);
@@ -1419,6 +1463,20 @@ gen_all_data_types_schema() {
                                      128,
                                      knowhere::metric::L2);
     schema->set_primary_field_id(int64_field);
+inline SchemaPtr
+GenChunkedSegmentTestSchema(bool pk_is_string) {
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64, true);
+    auto pk_fid = schema->AddDebugField(
+        "pk", pk_is_string ? DataType::VARCHAR : DataType::INT64, false);
+    auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR, true);
+    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR, true);
+    schema->AddField(FieldName("ts"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk_fid);
     return schema;
 }
 
