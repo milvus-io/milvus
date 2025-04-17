@@ -658,7 +658,7 @@ FromValCase(milvus::proto::plan::GenericValue::ValCase val_case) {
         case milvus::proto::plan::GenericValue::ValCase::kFloatVal:
             return DataType::DOUBLE;
         case milvus::proto::plan::GenericValue::ValCase::kStringVal:
-            return DataType::STRING;
+            return DataType::VARCHAR;
         case milvus::proto::plan::GenericValue::ValCase::kArrayVal:
             return DataType::ARRAY;
         default:
