@@ -2802,7 +2802,7 @@ def compare_distance_vector_and_vector_list(x, y, metric, distance):
         else:
             raise Exception("metric type is invalid")
         if abs(distance_i - distance[i]) > ct.epsilon:
-            log.error("The distance between %f and %f is not equal with %f" % (x, y[i], distance[i]))
+            log.error(f"The distance between {x} and {y[i]} is not equal with {distance[i]}")
             assert abs(distance_i - distance[i]) < ct.epsilon
 
     return True
