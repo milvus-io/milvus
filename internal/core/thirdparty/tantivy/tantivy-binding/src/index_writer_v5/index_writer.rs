@@ -188,63 +188,6 @@ impl IndexWriterWrapperImpl {
         self.add_document(document, offset)
     }
 
-    pub fn add_string_by_batch(
-        &mut self,
-        data: &[*const c_char],
-        offset: Option<i64>,
-    ) -> Result<()> {
-        match &self.index_writer {
-            Either::Left(_) => self.add_strings(data, offset.unwrap()),
-            Either::Right(_) => self.add_strings_by_single_segment(data),
-        }
-    }
-
-    fn add_strings(&mut self, data: &[*const c_char], offset: i64) -> Result<()> {
-        let writer = self.index_writer.as_ref().left().unwrap();
-        let id_field = self.id_field.unwrap();
-        let mut batch = Vec::with_capacity(BATCH_SIZE);
-        data.iter()
-            .enumerate()
-            .try_for_each(|(idx, key)| -> Result<()> {
-                let key = unsafe { CStr::from_ptr(*key) }
-                    .to_str()
-                    .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
-                let key_offset = offset + idx as i64;
-                batch.push(UserOperation::Add(doc!(
-                    id_field => key_offset,
-                    self.field => key,
-                )));
-                if batch.len() >= BATCH_SIZE {
-                    writer.run(std::mem::replace(
-                        &mut batch,
-                        Vec::with_capacity(BATCH_SIZE),
-                    ))?;
-                }
-
-                Ok(())
-            })?;
-
-        if !batch.is_empty() {
-            writer.run(std::mem::replace(
-                &mut batch,
-                Vec::with_capacity(BATCH_SIZE),
-            ))?;
-        }
-
-        Ok(())
-    }
-
-    fn add_strings_by_single_segment(&mut self, data: &[*const c_char]) -> Result<()> {
-        let writer = self.index_writer.as_mut().right().unwrap();
-        for key in data {
-            let key = unsafe { CStr::from_ptr(*key) }
-                .to_str()
-                .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
-            writer.add_document(doc!(self.field => key))?;
-        }
-        Ok(())
-    }
-
     pub fn add_json_key_stats(
         &mut self,
         keys: &[*const i8],
