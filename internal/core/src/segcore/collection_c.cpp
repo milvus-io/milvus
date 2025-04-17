@@ -36,12 +36,11 @@ NewCollection(const void* schema_proto_blob,
 
 CStatus
 UpdateSchema(CCollection collection,
-    const void* proto_blob,
-    const int64_t length
-) {
+             const void* proto_blob,
+             const int64_t length) {
     try {
         auto col = static_cast<milvus::segcore::Collection*>(collection);
-        
+
         col->parse_schema(proto_blob, length);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

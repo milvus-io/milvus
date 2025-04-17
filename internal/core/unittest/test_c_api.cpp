@@ -286,12 +286,14 @@ TEST(CApiTest, UpdateSchemaTest) {
 
     // Call UpdateSchema CApi here
     // UpdateSchema(CCollection, const void*, const int64_t)
-    auto status = UpdateSchema(collection, updated_schema_string.c_str(), updated_schema_string.length());
+    auto status = UpdateSchema(collection,
+                               updated_schema_string.c_str(),
+                               updated_schema_string.length());
     ASSERT_EQ(status.error_code, Success);
 
     auto col = static_cast<milvus::segcore::Collection*>(collection);
     auto updated_schema = col->get_schema();
-    auto add_field = updated_schema->operator [](FieldId(103));
+    auto add_field = updated_schema->operator[](FieldId(103));
 
     ASSERT_EQ(add_field.get_name().get(), "added_field");
 
@@ -4293,7 +4295,6 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
 
     DeleteSegment(segment);
 }
-
 
 TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
     double double_default_value = 20;
