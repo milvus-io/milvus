@@ -25,7 +25,7 @@ class Collection {
     explicit Collection(const std::string_view schema_proto);
     explicit Collection(const void* collection_proto, const int64_t length);
 
-void
+    void
     parseIndexMeta(const void* index_meta_proto_blob, const int64_t length);
 
     void

@@ -65,7 +65,7 @@ Collection::parseIndexMeta(const void* index_proto, const int64_t length) {
 }
 
 void
-Collection::parse_schema(const void* schema_proto_blob, const int64_t length){
+Collection::parse_schema(const void* schema_proto_blob, const int64_t length) {
     Assert(schema_proto_blob != nullptr);
 
     milvus::proto::schema::CollectionSchema collection_schema;
