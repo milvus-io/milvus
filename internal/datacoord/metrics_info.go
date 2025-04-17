@@ -70,6 +70,13 @@ func (s *Server) getCollectionMetrics(ctx context.Context) *metricsinfo.DataCoor
 			IndexName:    "",
 			Timestamp:    0,
 		})
+		if err == merr.ErrIndexNotFound {
+			log.Ctx(ctx).Debug("index not found, ignore to report index metrics",
+				zap.Int64("collection", collectionID),
+				zap.Error(err),
+			)
+			continue
+		}
 		if err := merr.CheckRPCCall(indexInfo, err); err != nil {
 			log.Ctx(ctx).Warn("failed to describe index, ignore to report index metrics",
 				zap.Int64("collection", collectionID),
