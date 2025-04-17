@@ -308,6 +308,53 @@ func (_c *MockCollectionManager_Unref_Call) RunAndReturn(run func(int64, uint32)
 	return _c
 }
 
+// UpdateSchema provides a mock function with given fields: collectionID, schema
+func (_m *MockCollectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema) error {
+	ret := _m.Called(collectionID, schema)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSchema")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema) error); ok {
+		r0 = rf(collectionID, schema)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCollectionManager_UpdateSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateSchema'
+type MockCollectionManager_UpdateSchema_Call struct {
+	*mock.Call
+}
+
+// UpdateSchema is a helper method to define mock.On call
+//   - collectionID int64
+//   - schema *schemapb.CollectionSchema
+func (_e *MockCollectionManager_Expecter) UpdateSchema(collectionID interface{}, schema interface{}) *MockCollectionManager_UpdateSchema_Call {
+	return &MockCollectionManager_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", collectionID, schema)}
+}
+
+func (_c *MockCollectionManager_UpdateSchema_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema)) *MockCollectionManager_UpdateSchema_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*schemapb.CollectionSchema))
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_UpdateSchema_Call) Return(_a0 error) *MockCollectionManager_UpdateSchema_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCollectionManager_UpdateSchema_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema) error) *MockCollectionManager_UpdateSchema_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockCollectionManager creates a new instance of MockCollectionManager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockCollectionManager(t interface {

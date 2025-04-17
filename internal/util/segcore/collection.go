@@ -85,6 +85,16 @@ func (c *CCollection) IndexMeta() *segcorepb.CollectionIndexMeta {
 	return c.indexMeta
 }
 
+func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema) error {
+	schemaBlob, err := proto.Marshal(sch)
+	if err != nil {
+		return err
+	}
+
+	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)))
+	return ConsumeCStatusIntoError(&status)
+}
+
 // Release releases the underlying collection
 func (c *CCollection) Release() {
 	C.DeleteCollection(c.ptr)

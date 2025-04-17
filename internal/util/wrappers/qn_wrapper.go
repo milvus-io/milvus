@@ -152,6 +152,10 @@ func (qn *qnServerWrapper) DeleteBatch(ctx context.Context, in *querypb.DeleteBa
 	return qn.QueryNode.DeleteBatch(ctx, in)
 }
 
+func (qn *qnServerWrapper) UpdateSchema(ctx context.Context, in *querypb.UpdateSchemaRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+	return qn.QueryNode.UpdateSchema(ctx, in)
+}
+
 func WrapQueryNodeServerAsClient(qn types.QueryNode) types.QueryNodeClient {
 	return &qnServerWrapper{
 		QueryNode: qn,

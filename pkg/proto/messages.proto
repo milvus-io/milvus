@@ -4,6 +4,8 @@ package milvus.proto.messages;
 
 option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/messagespb";
 
+import "schema.proto";
+
 // MessageID is the unique identifier of a message.
 message MessageID {
     string id = 1;
@@ -36,6 +38,7 @@ enum MessageType {
     ManualFlush      = 9;
     CreateSegment    = 10;
     Import           = 11;
+    SchemaChange     = 12;
     // begin transaction message is only used for transaction, once a begin
     // transaction message is received, all messages combined with the
     // transaction message cannot be consumed until a CommitTxn message
@@ -207,6 +210,17 @@ message RollbackTxnMessageHeader {}
 message TxnMessageHeader {}
 
 message ImportMessageHeader {}
+
+// SchemaChangeMessageHeader is the header of CollectionSchema update message.
+message SchemaChangeMessageHeader{
+    int64 collection_id = 1;
+}
+
+// SchemaChangeMessageBody is the body of CollectionSchema update message.
+message SchemaChangeMessageBody{
+    schema.CollectionSchema schema = 1;
+    uint64 modify_ts = 2;
+}
 
 ///
 /// Message Extra Response

@@ -18,6 +18,7 @@ package pipeline
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -60,6 +61,8 @@ type FlowGraphMsg struct {
 	segmentsToSync []typeutil.UniqueID
 	dropCollection bool
 	dropPartitions []typeutil.UniqueID
+
+	updatedSchema *schemapb.CollectionSchema
 }
 
 func (fgMsg *FlowGraphMsg) TimeTick() typeutil.Timestamp {

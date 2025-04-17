@@ -64,4 +64,16 @@ Collection::parseIndexMeta(const void* index_proto, const int64_t length) {
     LOG_INFO("index meta info: {}", index_meta_->ToString());
 }
 
+void
+Collection::parse_schema(const void* schema_proto_blob, const int64_t length){
+    Assert(schema_proto_blob != nullptr);
+
+    milvus::proto::schema::CollectionSchema collection_schema;
+    auto suc = collection_schema.ParseFromArray(schema_proto_blob, length);
+
+    AssertInfo(suc, "parse schema proto failed");
+
+    schema_ = Schema::ParseFrom(collection_schema);
+}
+
 }  // namespace milvus::segcore
