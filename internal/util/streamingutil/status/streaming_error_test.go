@@ -62,4 +62,12 @@ func TestStreamingError(t *testing.T) {
 	assert.False(t, streamingErr.IsWrongStreamingNode())
 	pbErr = streamingErr.AsPBError()
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED, pbErr.Code)
+
+	streamingErr = NewTransactionExpired("test, %d", 1)
+	assert.Contains(t, streamingErr.Error(), "code: STREAMING_CODE_TRANSACTION_EXPIRED, cause: test, 1")
+	assert.True(t, streamingErr.IsTxnExpired())
+	assert.True(t, streamingErr.IsTxnUnavilable())
+	assert.True(t, streamingErr.IsUnrecoverable())
+	pbErr = streamingErr.AsPBError()
+	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, pbErr.Code)
 }
