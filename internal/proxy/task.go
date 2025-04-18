@@ -1249,20 +1249,19 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 		case common.MaxLengthKey:
 			IsStringType := false
 			fieldName := ""
-			var dataType int32
 			for _, field := range collSchema.Fields {
 				if field.GetName() == t.FieldName && (typeutil.IsStringType(field.DataType) || typeutil.IsArrayContainStringElementType(field.DataType, field.ElementType)) {
 					IsStringType = true
 					fieldName = field.GetName()
-					dataType = int32(field.DataType)
+					break
 				}
 			}
 			if !IsStringType {
-				return merr.WrapErrParameterInvalid(fieldName, "%s can not modify the maxlength for non-string types", schemapb.DataType_name[dataType])
+				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxlength for non-string types", fieldName)
 			}
 			value, err := strconv.Atoi(prop.Value)
 			if err != nil {
-				return merr.WrapErrParameterInvalid("%s should be an integer, but got %T", prop.Key, prop.Value)
+				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxLengthKey, fieldName)
 			}
 
 			defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
@@ -1276,15 +1275,16 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 				if field.GetName() == t.FieldName && typeutil.IsArrayType(field.DataType) {
 					IsArrayType = true
 					fieldName = field.GetName()
+					break
 				}
 			}
 			if !IsArrayType {
-				return merr.WrapErrParameterInvalid("%s can not modify the maxcapacity for non-array types", fieldName)
+				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxcapacity for non-array types", fieldName)
 			}
 
 			maxCapacityPerRow, err := strconv.ParseInt(prop.Value, 10, 64)
 			if err != nil {
-				return merr.WrapErrParameterInvalid("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
+				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
 			}
 			if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
 				return merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", defaultMaxArrayCapacity)

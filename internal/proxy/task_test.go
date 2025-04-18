@@ -4420,9 +4420,11 @@ func TestInsertForReplicate(t *testing.T) {
 }
 
 func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
-	qc := NewMixCoordMock()
-	InitMetaCache(context.Background(), qc, nil)
-	collectionName := "test_alter_collection_field_check_loaded"
+	rc := NewRootCoordMock()
+	rc.state.Store(commonpb.StateCode_Healthy)
+	qc := &mocks.MockQueryCoordClient{}
+	InitMetaCache(context.Background(), rc, qc, nil)
+	collectionName := "test_alter_collection_check_loaded"
 	createColReq := &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropCollection,
@@ -4434,35 +4436,32 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 		Schema:         nil,
 		ShardsNum:      1,
 	}
-	qc.CreateCollection(context.Background(), createColReq)
-	resp, err := qc.DescribeCollection(context.Background(), &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	rc.CreateCollection(context.Background(), createColReq)
+	resp, err := rc.DescribeCollection(context.Background(), &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	assert.NoError(t, err)
 
-	qc.ShowLoadCollectionsFunc = func(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
-		return &querypb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			CollectionIDs:       []int64{resp.CollectionID},
-			InMemoryPercentages: []int64{100},
-		}, nil
-	}
-
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		CollectionIDs:       []int64{resp.CollectionID},
+		InMemoryPercentages: []int64{100},
+	}, nil)
 	task := &alterCollectionFieldTask{
 		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
 			Properties:     []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
 		},
-		mixCoord: qc,
+		queryCoord: qc,
 	}
 	err = task.PreExecute(context.Background())
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
 }
 
 func TestAlterCollectionField1(t *testing.T) {
-	qc := NewMixCoordMock()
-	InitMetaCache(context.Background(), qc, nil)
+	rc := NewRootCoordMock()
+	rc.state.Store(commonpb.StateCode_Healthy)
+	qc := &mocks.MockQueryCoordClient{}
+	InitMetaCache(context.Background(), rc, qc, nil)
 	collectionName := "test_alter_collection_field"
 
 	// Create collection with string and array fields
@@ -4498,8 +4497,14 @@ func TestAlterCollectionField1(t *testing.T) {
 		Schema:         schemaBytes,
 		ShardsNum:      1,
 	}
-	qc.CreateCollection(context.Background(), createColReq)
-
+	rc.CreateCollection(context.Background(), createColReq)
+	resp, err := rc.DescribeCollection(context.Background(), &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	assert.NoError(t, err)
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		CollectionIDs:       []int64{resp.CollectionID},
+		InMemoryPercentages: []int64{100},
+	}, nil)
 	// Test cases
 	tests := []struct {
 		name        string
@@ -4521,14 +4526,6 @@ func TestAlterCollectionField1(t *testing.T) {
 			fieldName: "array_field",
 			properties: []*commonpb.KeyValuePair{
 				{Key: common.MaxCapacityKey, Value: "200"},
-			},
-			expectError: false,
-		},
-		{
-			name:      "update mmap_enabled",
-			fieldName: "string_field",
-			properties: []*commonpb.KeyValuePair{
-				{Key: common.MmapEnabledKey, Value: "true"},
 			},
 			expectError: false,
 		},
@@ -4586,6 +4583,15 @@ func TestAlterCollectionField1(t *testing.T) {
 			expectError: true,
 			errCode:     merr.Code(merr.ErrParameterInvalid),
 		},
+		{
+			name:      "max_capacity invalid type",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "3"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
 	}
 
 	for _, test := range tests {
@@ -4597,7 +4603,7 @@ func TestAlterCollectionField1(t *testing.T) {
 					FieldName:      test.fieldName,
 					Properties:     test.properties,
 				},
-				mixCoord: qc,
+				queryCoord: qc,
 			}
 
 			err := task.PreExecute(context.Background())
