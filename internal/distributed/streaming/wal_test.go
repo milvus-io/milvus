@@ -8,12 +8,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/mock_client"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_handler"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
@@ -137,6 +139,34 @@ func TestWAL(t *testing.T) {
 
 	err = w.Broadcast().Ack(ctx, types.BroadcastAckRequest{BroadcastID: 1, VChannel: vChannel1})
 	assert.NoError(t, err)
+
+	cnt := atomic.NewInt32(0)
+	p.EXPECT().Append(mock.Anything, mock.Anything).Unset()
+	p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+			if mm.MessageType() == message.MessageTypeInsert {
+				cnt.Inc()
+				if cnt.Load() == 1 {
+					return nil, status.NewTransactionExpired("")
+				}
+			}
+			return &types.AppendResult{
+				MessageID: walimplstest.NewTestMessageID(1),
+				TimeTick:  10,
+				TxnCtx: &message.TxnContext{
+					TxnID:     1,
+					Keepalive: 10 * time.Second,
+				},
+			}, nil
+		})
+	resp = w.AppendMessages(ctx,
+		newInsertMessage(vChannel2),
+		newInsertMessage(vChannel2),
+		newInsertMessage(vChannel3),
+		newInsertMessage(vChannel3),
+		newInsertMessage(vChannel3),
+	)
+	assert.NoError(t, resp.UnwrapFirstError())
 
 	w.Close()
 

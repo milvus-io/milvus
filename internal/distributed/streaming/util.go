@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
@@ -83,13 +84,12 @@ func (u *walAccesserImpl) appendToVChannel(ctx context.Context, vchannel string,
 	if len(msgs) == 0 {
 		return types.NewAppendResponseN(0)
 	}
-	resp := types.NewAppendResponseN(len(msgs))
-
 	// if only one message here, append it directly, no more goroutine needed.
 	// at most time, there's only one message here.
 	// TODO: only the partition-key with high partition will generate many message in one time on the same pchannel,
 	// we should optimize the message-format, make it into one; but not the goroutine count.
 	if len(msgs) == 1 {
+		resp := types.NewAppendResponseN(1)
 		appendResult, err := u.appendToWAL(ctx, msgs[0])
 		resp.FillResponseAtIdx(AppendResponse{
 			AppendResult: appendResult,
@@ -97,6 +97,27 @@ func (u *walAccesserImpl) appendToVChannel(ctx context.Context, vchannel string,
 		}, 0)
 		return resp
 	}
+
+	for {
+		if ctx.Err() != nil {
+			resp := types.NewAppendResponseN(len(msgs))
+			resp.FillAllError(ctx.Err())
+			return resp
+		}
+		resp := u.appendWithTxn(ctx, vchannel, msgs...)
+		if err := status.AsStreamingError(resp.UnwrapFirstError()); err != nil && err.IsTxnExpired() {
+			// if the transaction is expired,
+			// there may be wal is transferred to another streaming node,
+			// retry it with new transaction.
+			continue
+		}
+		return resp
+	}
+}
+
+// appendWithTxn appends the messages to the wal with a transaction.
+func (u *walAccesserImpl) appendWithTxn(ctx context.Context, vchannel string, msgs ...message.MutableMessage) AppendResponses {
+	resp := types.NewAppendResponseN(len(msgs))
 
 	// Otherwise, we start a transaction to append the messages.
 	// The transaction will be committed when all messages are appended.
