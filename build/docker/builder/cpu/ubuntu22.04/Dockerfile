@@ -16,7 +16,7 @@ ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
     g++ gcc gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-12 clang-tidy-12 lcov libtool m4 autoconf automake python3 python3-pip \
-    pkg-config uuid-dev libaio-dev libopenblas-dev && \
+    pkg-config uuid-dev libaio-dev libopenblas-openmp-dev && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
