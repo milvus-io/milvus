@@ -93,7 +93,7 @@ func (impl *timeTickSyncOperator) Channel() types.PChannelInfo {
 
 // Sync trigger a sync operation.
 // Sync operation is not thread safe, so call it in a single goroutine.
-func (impl *timeTickSyncOperator) Sync(ctx context.Context) {
+func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
 	// Sync operation cannot trigger until isReady.
 	if !impl.isReady() {
 		return
@@ -106,7 +106,7 @@ func (impl *timeTickSyncOperator) Sync(ctx context.Context) {
 			return nil, err
 		}
 		return appendResult.MessageID, nil
-	})
+	}, persisted)
 	if err != nil {
 		impl.logger.Warn("send time tick sync message failed", zap.Error(err))
 	}
@@ -235,7 +235,7 @@ func (impl *timeTickSyncOperator) Close() {
 
 // sendTsMsg sends first timestamp message to wal.
 // TODO: TT lag warning.
-func (impl *timeTickSyncOperator) sendTsMsg(ctx context.Context, appender func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)) error {
+func (impl *timeTickSyncOperator) sendTsMsg(ctx context.Context, appender func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error), forcePersisted bool) error {
 	// Sync the timestamp acknowledged details.
 	impl.syncAcknowledgedDetails(ctx)
 
@@ -248,7 +248,7 @@ func (impl *timeTickSyncOperator) sendTsMsg(ctx context.Context, appender func(c
 	// Construct time tick message.
 	ts := impl.ackDetails.LastAllAcknowledgedTimestamp()
 	lastConfirmedMessageID := impl.ackDetails.EarliestLastConfirmedMessageID()
-	persist := !impl.ackDetails.IsNoPersistedMessage()
+	persist := (!impl.ackDetails.IsNoPersistedMessage() || forcePersisted)
 
 	return impl.sendTsMsgToWAL(ctx, ts, lastConfirmedMessageID, persist, appender)
 }

@@ -29,8 +29,8 @@ type timeTickSyncInspectorImpl struct {
 	operators    *typeutil.ConcurrentMap[string, TimeTickSyncOperator]
 }
 
-func (s *timeTickSyncInspectorImpl) TriggerSync(pChannelInfo types.PChannelInfo) {
-	s.syncNotifier.AddAndNotify(pChannelInfo)
+func (s *timeTickSyncInspectorImpl) TriggerSync(pChannelInfo types.PChannelInfo, persisted bool) {
+	s.syncNotifier.AddAndNotify(pChannelInfo, persisted)
 }
 
 // GetOperator gets the operator by pchannel info.
@@ -72,16 +72,16 @@ func (s *timeTickSyncInspectorImpl) background() {
 			return
 		case <-ticker.C:
 			s.operators.Range(func(_ string, operator TimeTickSyncOperator) bool {
-				operator.Sync(s.taskNotifier.Context())
+				operator.Sync(s.taskNotifier.Context(), false)
 				return true
 			})
 		case <-s.syncNotifier.WaitChan():
-			s.syncNotifier.Get().Range(func(pchannel types.PChannelInfo) bool {
+			signals := s.syncNotifier.Get()
+			for pchannel, persisted := range signals {
 				if operator, ok := s.operators.Get(pchannel.Name); ok {
-					operator.Sync(s.taskNotifier.Context())
+					operator.Sync(s.taskNotifier.Context(), persisted)
 				}
-				return true
-			})
+			}
 		}
 	}
 }
