@@ -1402,6 +1402,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                                 }
                             }
                         }
+                    case proto::plan::InnerMatch:
+                    case proto::plan::PostfixMatch:
                     case proto::plan::PrefixMatch:
                         if constexpr (std::is_same_v<GetType,
                                                      proto::plan::Array>) {
