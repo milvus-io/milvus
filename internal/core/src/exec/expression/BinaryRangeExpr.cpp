@@ -68,24 +68,60 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             auto value_type = expr_->lower_val_.val_case();
-            switch (value_type) {
-                case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForJson<int64_t>(context);
-                    break;
+            if (is_index_mode_ && !has_offset_input_) {
+                switch (value_type) {
+                    case proto::plan::GenericValue::ValCase::kInt64Val: {
+                        proto::plan::GenericValue double_lower_val;
+                        double_lower_val.set_float_val(
+                            static_cast<double>(expr_->lower_val_.int64_val()));
+                        proto::plan::GenericValue double_upper_val;
+                        double_upper_val.set_float_val(
+                            static_cast<double>(expr_->upper_val_.int64_val()));
+
+                        lower_arg_.SetValue<double>(double_lower_val);
+                        upper_arg_.SetValue<double>(double_upper_val);
+                        arg_inited_ = true;
+
+                        result = ExecRangeVisitorImplForIndex<double>();
+                        break;
+                    }
+                    case proto::plan::GenericValue::ValCase::kFloatVal: {
+                        result = ExecRangeVisitorImplForIndex<double>();
+                        break;
+                    }
+                    case proto::plan::GenericValue::ValCase::kStringVal: {
+                        result =
+                            ExecRangeVisitorImplForJson<std::string>(context);
+                        break;
+                    }
+                    default: {
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format(
+                                      "unsupported value type {} in expression",
+                                      value_type));
+                    }
                 }
-                case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForJson<double>(context);
-                    break;
-                }
-                case proto::plan::GenericValue::ValCase::kStringVal: {
-                    result = ExecRangeVisitorImplForJson<std::string>(context);
-                    break;
-                }
-                default: {
-                    PanicInfo(
-                        DataTypeInvalid,
-                        fmt::format("unsupported value type {} in expression",
-                                    value_type));
+            } else {
+                switch (value_type) {
+                    case proto::plan::GenericValue::ValCase::kInt64Val: {
+                        result = ExecRangeVisitorImplForJson<int64_t>(context);
+                        break;
+                    }
+                    case proto::plan::GenericValue::ValCase::kFloatVal: {
+                        result = ExecRangeVisitorImplForJson<double>(context);
+                        break;
+                    }
+                    case proto::plan::GenericValue::ValCase::kStringVal: {
+                        result =
+                            ExecRangeVisitorImplForJson<std::string>(context);
+                        break;
+                    }
+                    default: {
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format(
+                                      "unsupported value type {} in expression",
+                                      value_type));
+                    }
                 }
             }
             break;
