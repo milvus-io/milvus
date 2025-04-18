@@ -26,6 +26,7 @@
 #include <aws/core/platform/Environment.h>
 #include <aws/core/client/AWSError.h>
 #include "TencentCloudSTSClient.h"
+#include <aws/core/client/ClientConfiguration.h>
 
 namespace Aws {
 namespace Http {
@@ -33,11 +34,6 @@ class HttpClient;
 class HttpRequest;
 enum class HttpResponseCode;
 }  // namespace Http
-
-namespace Client {
-Aws::String
-ComputeUserAgentString();
-}
 
 namespace Internal {
 
