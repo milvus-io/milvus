@@ -95,8 +95,8 @@ func (w *roWALAdaptorImpl) Close() {
 	// begin to close the wal.
 	w.Logger().Info("wal begin to close...")
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
-	w.lifetime.Wait()
 	close(w.available)
+	w.lifetime.Wait()
 
 	w.Logger().Info("wal begin to close scanners...")
 
