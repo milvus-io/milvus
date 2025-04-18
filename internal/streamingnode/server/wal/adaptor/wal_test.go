@@ -13,6 +13,7 @@ import (
 	"github.com/remeh/sizedwaitgroup"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
@@ -24,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -391,6 +393,7 @@ func (f *testOneWALFramework) testRead(ctx context.Context, w wal.ROWAL) ([]mess
 	cnt := 5
 	for {
 		msg, ok := <-s.Chan()
+		log.Info("read message", zap.Uint64("msg", msg.TimeTick()))
 		// make a random slow down to trigger cache expire.
 		if rand.Int31n(10) == 0 && cnt > 0 {
 			cnt--

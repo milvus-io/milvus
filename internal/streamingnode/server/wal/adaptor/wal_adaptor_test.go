@@ -35,6 +35,7 @@ func TestWalAdaptorReadFail(t *testing.T) {
 	expectedErr := errors.New("test")
 	l.EXPECT().WALName().Return("test")
 	cnt := atomic.NewInt64(2)
+	l.EXPECT().Append(mock.Anything, mock.Anything).Return(walimplstest.NewTestMessageID(1), nil)
 	l.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, ro walimpls.ReadOption) (walimpls.ScannerImpls, error) {
 			if cnt.Dec() < 0 {
@@ -49,7 +50,8 @@ func TestWalAdaptorReadFail(t *testing.T) {
 
 	// Test adapt to a read-only wal.
 	l.EXPECT().Channel().Return(types.PChannelInfo{AccessMode: types.AccessModeRO})
-	lAdapted := adaptImplsToWAL(l, nil, func() {})
+	lAdapted, err := adaptImplsToWAL(context.Background(), l, nil, func() {})
+	assert.NoError(t, err)
 	scanner, err := lAdapted.Read(context.Background(), wal.ReadOption{
 		VChannel: "test",
 	})
@@ -66,7 +68,7 @@ func TestWalAdaptorReadFail(t *testing.T) {
 	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
 	operator.EXPECT().Channel().Return(types.PChannelInfo{}).Maybe()
 	operator.EXPECT().Sync(mock.Anything, mock.Anything).Return().Maybe()
-	operator.EXPECT().WriteAheadBuffer(mock.Anything).Return(writeAheadBuffer, nil).Maybe()
+	operator.EXPECT().WriteAheadBuffer().Return(writeAheadBuffer).Maybe()
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(
 		operator,
 	)
@@ -74,7 +76,8 @@ func TestWalAdaptorReadFail(t *testing.T) {
 	// Test adapt to a read-write wal.
 	l.EXPECT().Channel().Unset()
 	l.EXPECT().Channel().Return(types.PChannelInfo{AccessMode: types.AccessModeRW})
-	lAdapted = adaptImplsToWAL(l, nil, func() {})
+	lAdapted, err = adaptImplsToWAL(context.Background(), l, nil, func() {})
+	assert.NoError(t, err)
 	scanner, err = lAdapted.Read(context.Background(), wal.ReadOption{
 		VChannel: "test",
 	})
@@ -97,7 +100,7 @@ func TestWALAdaptor(t *testing.T) {
 	operator.EXPECT().Channel().Return(types.PChannelInfo{})
 	operator.EXPECT().Sync(mock.Anything, mock.Anything).Return()
 	buffer := mock_wab.NewMockROWriteAheadBuffer(t)
-	operator.EXPECT().WriteAheadBuffer(mock.Anything).Return(buffer, nil)
+	operator.EXPECT().WriteAheadBuffer().Return(buffer)
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
 
 	// Create a mock WAL implementation
@@ -122,7 +125,8 @@ func TestWALAdaptor(t *testing.T) {
 	l.EXPECT().Channel().Return(types.PChannelInfo{AccessMode: types.AccessModeRO})
 
 	// Test read only wal
-	lAdapted := adaptImplsToWAL(l, nil, func() {})
+	lAdapted, err := adaptImplsToWAL(context.Background(), l, nil, func() {})
+	assert.NoError(t, err)
 	assert.Panics(t, func() {
 		lAdapted.Append(context.Background(), nil)
 	})
@@ -137,14 +141,15 @@ func TestWALAdaptor(t *testing.T) {
 	// Test read-write wal
 	l.EXPECT().Channel().Unset()
 	l.EXPECT().Channel().Return(types.PChannelInfo{AccessMode: types.AccessModeRW})
-	lAdapted = adaptImplsToWAL(l, nil, func() {})
+	lAdapted, err = adaptImplsToWAL(context.Background(), l, nil, func() {})
+	assert.NoError(t, err)
 	assert.NotNil(t, lAdapted.Channel())
 
 	msg := mock_message.NewMockMutableMessage(t)
 	msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
 	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
 	msg.EXPECT().EstimateSize().Return(1).Maybe()
-	_, err := lAdapted.Append(context.Background(), msg)
+	_, err = lAdapted.Append(context.Background(), msg)
 	assert.NoError(t, err)
 	lAdapted.AppendAsync(context.Background(), msg, func(mi *wal.AppendResult, err error) {
 		assert.Nil(t, err)
@@ -205,13 +210,14 @@ func TestNoInterceptor(t *testing.T) {
 	})
 	l.EXPECT().Close().Run(func() {})
 
-	lWithInterceptors := adaptImplsToWAL(l, nil, func() {})
+	lWithInterceptors, err := adaptImplsToWAL(context.Background(), l, nil, func() {})
+	assert.NoError(t, err)
 
 	msg := mock_message.NewMockMutableMessage(t)
 	msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
 	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
 	msg.EXPECT().EstimateSize().Return(1).Maybe()
-	_, err := lWithInterceptors.Append(context.Background(), msg)
+	_, err = lWithInterceptors.Append(context.Background(), msg)
 	assert.NoError(t, err)
 	lWithInterceptors.Close()
 }
@@ -227,7 +233,7 @@ func TestWALWithInterceptor(t *testing.T) {
 
 	b := mock_interceptors.NewMockInterceptorBuilder(t)
 	readyCh := make(chan struct{})
-	b.EXPECT().Build(mock.Anything).RunAndReturn(func(ibp interceptors.InterceptorBuildParam) interceptors.Interceptor {
+	b.EXPECT().Build(mock.Anything).RunAndReturn(func(ibp *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 		interceptor := mock_interceptors.NewMockInterceptorWithReady(t)
 		interceptor.EXPECT().Ready().Return(readyCh)
 		interceptor.EXPECT().DoAppend(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
@@ -237,7 +243,8 @@ func TestWALWithInterceptor(t *testing.T) {
 		interceptor.EXPECT().Close().Run(func() {})
 		return interceptor
 	})
-	lWithInterceptors := adaptImplsToWAL(l, []interceptors.InterceptorBuilder{b}, func() {})
+	lWithInterceptors, err := adaptImplsToWAL(context.Background(), l, []interceptors.InterceptorBuilder{b}, func() {})
+	assert.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -246,7 +253,7 @@ func TestWALWithInterceptor(t *testing.T) {
 	msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
 	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
 	msg.EXPECT().EstimateSize().Return(1).Maybe()
-	_, err := lWithInterceptors.Append(ctx, msg)
+	_, err = lWithInterceptors.Append(ctx, msg)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 
 	// Interceptor is ready, so the append/read will return soon.

@@ -34,7 +34,7 @@ func TestScannerAdaptorReadError(t *testing.T) {
 		sig1.Close()
 	})
 	wb := mock_wab.NewMockROWriteAheadBuffer(t)
-	operator.EXPECT().WriteAheadBuffer(mock.Anything).Return(wb, nil)
+	operator.EXPECT().WriteAheadBuffer().Return(wb)
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
 
 	err := errors.New("read error")

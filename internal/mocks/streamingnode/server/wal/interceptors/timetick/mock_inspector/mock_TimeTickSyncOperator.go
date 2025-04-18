@@ -72,34 +72,24 @@ func (_c *MockTimeTickSyncOperator_Channel_Call) RunAndReturn(run func() types.P
 	return _c
 }
 
-// MVCCManager provides a mock function with given fields: ctx
-func (_m *MockTimeTickSyncOperator) MVCCManager(ctx context.Context) (*mvcc.MVCCManager, error) {
-	ret := _m.Called(ctx)
+// MVCCManager provides a mock function with given fields:
+func (_m *MockTimeTickSyncOperator) MVCCManager() *mvcc.MVCCManager {
+	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for MVCCManager")
 	}
 
 	var r0 *mvcc.MVCCManager
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (*mvcc.MVCCManager, error)); ok {
-		return rf(ctx)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context) *mvcc.MVCCManager); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func() *mvcc.MVCCManager); ok {
+		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*mvcc.MVCCManager)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
 // MockTimeTickSyncOperator_MVCCManager_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MVCCManager'
@@ -108,24 +98,23 @@ type MockTimeTickSyncOperator_MVCCManager_Call struct {
 }
 
 // MVCCManager is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockTimeTickSyncOperator_Expecter) MVCCManager(ctx interface{}) *MockTimeTickSyncOperator_MVCCManager_Call {
-	return &MockTimeTickSyncOperator_MVCCManager_Call{Call: _e.mock.On("MVCCManager", ctx)}
+func (_e *MockTimeTickSyncOperator_Expecter) MVCCManager() *MockTimeTickSyncOperator_MVCCManager_Call {
+	return &MockTimeTickSyncOperator_MVCCManager_Call{Call: _e.mock.On("MVCCManager")}
 }
 
-func (_c *MockTimeTickSyncOperator_MVCCManager_Call) Run(run func(ctx context.Context)) *MockTimeTickSyncOperator_MVCCManager_Call {
+func (_c *MockTimeTickSyncOperator_MVCCManager_Call) Run(run func()) *MockTimeTickSyncOperator_MVCCManager_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run()
 	})
 	return _c
 }
 
-func (_c *MockTimeTickSyncOperator_MVCCManager_Call) Return(_a0 *mvcc.MVCCManager, _a1 error) *MockTimeTickSyncOperator_MVCCManager_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockTimeTickSyncOperator_MVCCManager_Call) Return(_a0 *mvcc.MVCCManager) *MockTimeTickSyncOperator_MVCCManager_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockTimeTickSyncOperator_MVCCManager_Call) RunAndReturn(run func(context.Context) (*mvcc.MVCCManager, error)) *MockTimeTickSyncOperator_MVCCManager_Call {
+func (_c *MockTimeTickSyncOperator_MVCCManager_Call) RunAndReturn(run func() *mvcc.MVCCManager) *MockTimeTickSyncOperator_MVCCManager_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -164,34 +153,24 @@ func (_c *MockTimeTickSyncOperator_Sync_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
-// WriteAheadBuffer provides a mock function with given fields: ctx
-func (_m *MockTimeTickSyncOperator) WriteAheadBuffer(ctx context.Context) (wab.ROWriteAheadBuffer, error) {
-	ret := _m.Called(ctx)
+// WriteAheadBuffer provides a mock function with given fields:
+func (_m *MockTimeTickSyncOperator) WriteAheadBuffer() wab.ROWriteAheadBuffer {
+	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for WriteAheadBuffer")
 	}
 
 	var r0 wab.ROWriteAheadBuffer
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (wab.ROWriteAheadBuffer, error)); ok {
-		return rf(ctx)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context) wab.ROWriteAheadBuffer); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func() wab.ROWriteAheadBuffer); ok {
+		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(wab.ROWriteAheadBuffer)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
 // MockTimeTickSyncOperator_WriteAheadBuffer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WriteAheadBuffer'
@@ -200,24 +179,23 @@ type MockTimeTickSyncOperator_WriteAheadBuffer_Call struct {
 }
 
 // WriteAheadBuffer is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockTimeTickSyncOperator_Expecter) WriteAheadBuffer(ctx interface{}) *MockTimeTickSyncOperator_WriteAheadBuffer_Call {
-	return &MockTimeTickSyncOperator_WriteAheadBuffer_Call{Call: _e.mock.On("WriteAheadBuffer", ctx)}
+func (_e *MockTimeTickSyncOperator_Expecter) WriteAheadBuffer() *MockTimeTickSyncOperator_WriteAheadBuffer_Call {
+	return &MockTimeTickSyncOperator_WriteAheadBuffer_Call{Call: _e.mock.On("WriteAheadBuffer")}
 }
 
-func (_c *MockTimeTickSyncOperator_WriteAheadBuffer_Call) Run(run func(ctx context.Context)) *MockTimeTickSyncOperator_WriteAheadBuffer_Call {
+func (_c *MockTimeTickSyncOperator_WriteAheadBuffer_Call) Run(run func()) *MockTimeTickSyncOperator_WriteAheadBuffer_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run()
 	})
 	return _c
 }
 
-func (_c *MockTimeTickSyncOperator_WriteAheadBuffer_Call) Return(_a0 wab.ROWriteAheadBuffer, _a1 error) *MockTimeTickSyncOperator_WriteAheadBuffer_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockTimeTickSyncOperator_WriteAheadBuffer_Call) Return(_a0 wab.ROWriteAheadBuffer) *MockTimeTickSyncOperator_WriteAheadBuffer_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockTimeTickSyncOperator_WriteAheadBuffer_Call) RunAndReturn(run func(context.Context) (wab.ROWriteAheadBuffer, error)) *MockTimeTickSyncOperator_WriteAheadBuffer_Call {
+func (_c *MockTimeTickSyncOperator_WriteAheadBuffer_Call) RunAndReturn(run func() wab.ROWriteAheadBuffer) *MockTimeTickSyncOperator_WriteAheadBuffer_Call {
 	_c.Call.Return(run)
 	return _c
 }

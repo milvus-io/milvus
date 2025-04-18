@@ -23,14 +23,14 @@ import (
 var errChannelLifetimeUnrecoverable = errors.New("channel lifetime unrecoverable")
 
 // RecoverWALFlusher recovers the wal flusher.
-func RecoverWALFlusher(param interceptors.InterceptorBuildParam) *WALFlusherImpl {
+func RecoverWALFlusher(param *interceptors.InterceptorBuildParam) *WALFlusherImpl {
 	flusher := &WALFlusherImpl{
 		notifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		wal:      param.WAL,
 		logger: resource.Resource().Logger().With(
 			log.FieldComponent("flusher"),
-			zap.String("pchannel", param.WALImpls.Channel().Name)),
-		metrics: newFlusherMetrics(param.WALImpls.Channel()),
+			zap.String("pchannel", param.ChannelInfo.Name)),
+		metrics: newFlusherMetrics(param.ChannelInfo),
 	}
 	go flusher.Execute()
 	return flusher
