@@ -961,3 +961,12 @@ func newValidateUtil(opts ...validateOption) *validateUtil {
 func ValidateAutoIndexMmapConfig(isVectorField bool, indexParams map[string]string) error {
 	return common.ValidateAutoIndexMmapConfig(Params.AutoIndexConfig.Enable.GetAsBool(), isVectorField, indexParams)
 }
+
+func wasBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	for _, fun := range coll.GetFunctions() {
+		if fun.GetType() == schemapb.FunctionType_BM25 && field.GetName() == fun.GetInputFieldNames()[0] {
+			return true
+		}
+	}
+	return false
+}

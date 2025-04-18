@@ -26,3 +26,14 @@ func NewTokenizer(param string) (tokenizerapi.Tokenizer, error) {
 
 	return NewCTokenizer(ptr), nil
 }
+
+func ValidateTokenizer(param string) error {
+	paramPtr := C.CString(param)
+	defer C.free(unsafe.Pointer(paramPtr))
+
+	status := C.validate_tokenizer(paramPtr)
+	if err := HandleCStatus(&status, "failed to create tokenizer"); err != nil {
+		return err
+	}
+	return nil
+}
