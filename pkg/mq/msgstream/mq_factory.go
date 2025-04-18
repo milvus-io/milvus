@@ -250,3 +250,80 @@ func NewRocksmqFactory(path string, cfg *paramtable.ServiceParam) Factory {
 		MQBufSize:         cfg.MQCfg.MQBufSize.GetAsInt64(),
 	}
 }
+
+var _ Factory = &WpmsFactory{}
+
+// TODO Should use streamingNode uniformly as a message stream service
+type WpmsFactory struct{}
+
+func (w WpmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
+	return &WpMsgStream{}, nil
+}
+
+func (w WpmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
+	return nil, nil
+}
+
+func (w WpmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
+	return nil
+}
+
+var _ MsgStream = &WpMsgStream{}
+
+type WpMsgStream struct{}
+
+func (w WpMsgStream) Close() {
+	// NO-OP
+}
+
+func (w WpMsgStream) AsProducer(ctx context.Context, channels []string) {
+	// NO-OP
+}
+
+func (w WpMsgStream) Produce(ctx context.Context, pack *MsgPack) error {
+	// NO-OP
+	return nil
+}
+
+func (w WpMsgStream) SetRepackFunc(repackFunc RepackFunc) {}
+
+func (w WpMsgStream) GetProduceChannels() []string {
+	return nil
+}
+
+func (w WpMsgStream) Broadcast(ctx context.Context, pack *MsgPack) (map[string][]MessageID, error) {
+	return nil, nil
+}
+
+func (w WpMsgStream) AsConsumer(ctx context.Context, channels []string, subName string, position common.SubscriptionInitialPosition) error {
+	return nil
+}
+
+func (w WpMsgStream) Chan() <-chan *ConsumeMsgPack {
+	return nil
+}
+
+func (w WpMsgStream) GetUnmarshalDispatcher() UnmarshalDispatcher {
+	return nil
+}
+
+func (w WpMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, includeCurrentMsg bool) error {
+	return nil
+}
+
+func (w WpMsgStream) GetLatestMsgID(channel string) (MessageID, error) {
+	return nil, nil
+}
+
+func (w WpMsgStream) CheckTopicValid(channel string) error {
+	return nil
+}
+
+func (w WpMsgStream) ForceEnableProduce(can bool) {
+}
+
+// NewWpmsFactory creates a new message stream factory based on woodpecker
+func NewWpmsFactory(cfg *paramtable.ServiceParam) Factory {
+	// TODO should not be used in mq wrapper
+	return &WpmsFactory{}
+}

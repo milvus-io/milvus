@@ -165,7 +165,7 @@ minio:
 # 2. cluster mode:  Pulsar(default) > Kafka (rocksmq and natsmq is unsupported in cluster mode)
 mq:
   # Default value: "default"
-  # Valid values: [default, pulsar, kafka, rocksmq, natsmq]
+  # Valid values: [default, pulsar, kafka, rocksmq, natsmq, woodpecker]
   type: default
   enablePursuitMode: true # Default value: "true"
   pursuitLag: 10 # time tick lag threshold to enter pursuit mode, in seconds
@@ -176,6 +176,36 @@ mq:
     mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
     targetBufSize: 16 # the lenth of channel buffer for targe
     maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
+
+# Related configuration of woodpecker, used to manage Milvus logs of recent mutation operations, output streaming log, and provide embedded log sequential read and write.
+woodpecker:
+  meta:
+    type: etcd # The Type of the metadata provider. currently only support etcd.
+    prefix: woodpecker # The Prefix of the metadata provider. default is woodpecker.
+  client:
+    segmentAppend:
+      queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
+      maxRetries: 3 # Maximum number of retries for segment append operations.
+    segmentRollingPolicy:
+      maxSize: 2000000000 # Maximum entries count of a segment, default is 2GB
+      maxInterval: 600 # Maximum interval between two segments in seconds, default is 10 minutes.
+    auditor:
+      maxInterval: 10 # Maximum interval between two auditing operations in seconds, default is 10 seconds.
+  logstore:
+    logFileSyncPolicy:
+      maxInterval: 1000 # Maximum interval between two sync operations in milliseconds.
+      maxBytes: 64000000 # Maximum size of write buffer in bytes.
+      maxEntries: 100000 # Maximum entries number of write buffer.
+      maxFlushRetries: 5 # Maximum size of write buffer in bytes.
+      retryInterval: 1000 # Maximum interval between two retries in milliseconds.
+      maxFlushSize: 8000000 # Maximum size of a fragment in bytes to flush, default is 8M.
+      maxFlushThreads: 4 # Maximum number of threads to flush data
+    fragmentManager:
+      maxBytes: 1000000000 # Maximum size of fragment cached data in bytes.
+      maxInterval: 1000 # Maximum interval between two fragment evicts in milliseconds.
+  storage:
+    type: minio # The Type of the storage provider. Valid values: [default, minio, local, service], default is minio.
+    rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:

@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -166,4 +167,63 @@ func TestRmsFactory(t *testing.T) {
 
 	_, err = rmsFactory.NewTtMsgStream(ctx)
 	assert.NoError(t, err)
+}
+
+func TestWpmsFactory(t *testing.T) {
+	wpmsFactory := NewWpmsFactory(&Params.ServiceParam)
+
+	ctx := context.Background()
+
+	// Test NewMsgStream
+	stream, err := wpmsFactory.NewMsgStream(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, stream)
+
+	// Test NewTtMsgStream
+	ttStream, err := wpmsFactory.NewTtMsgStream(ctx)
+	assert.NoError(t, err)
+	assert.Nil(t, ttStream)
+
+	// Test NewMsgStreamDisposer
+	disposer := wpmsFactory.NewMsgStreamDisposer(ctx)
+	assert.Nil(t, disposer)
+}
+
+func TestWpMsgStream(t *testing.T) {
+	wpStream := &WpMsgStream{}
+
+	// Test methods return expected values
+	assert.Nil(t, wpStream.GetProduceChannels())
+	assert.Nil(t, wpStream.Chan())
+	assert.Nil(t, wpStream.GetUnmarshalDispatcher())
+
+	// Test methods execute without panic
+	ctx := context.Background()
+
+	// Test all no-op methods
+	wpStream.Close()
+	wpStream.AsProducer(ctx, []string{"test-channel"})
+	wpStream.SetRepackFunc(nil)
+	wpStream.ForceEnableProduce(true)
+
+	// Test methods returning nil/empty values
+	msgID, err := wpStream.GetLatestMsgID("test-channel")
+	assert.Nil(t, msgID)
+	assert.Nil(t, err)
+
+	err = wpStream.CheckTopicValid("test-channel")
+	assert.Nil(t, err)
+
+	err = wpStream.Produce(ctx, &MsgPack{})
+	assert.Nil(t, err)
+
+	broadcastResult, err := wpStream.Broadcast(ctx, &MsgPack{})
+	assert.Nil(t, broadcastResult)
+	assert.Nil(t, err)
+
+	err = wpStream.AsConsumer(ctx, []string{"test-channel"}, "test-sub", common.SubscriptionPositionEarliest)
+	assert.Nil(t, err)
+
+	err = wpStream.Seek(ctx, []*MsgPosition{}, false)
+	assert.Nil(t, err)
 }
