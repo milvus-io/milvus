@@ -1208,3 +1208,28 @@ func TestQueryWithTemplateParamInvalid(t *testing.T) {
 	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter("{_123} > 10").WithTemplateParam("_123", common.DefaultInt64FieldName))
 	common.CheckErr(t, err, false, "cannot parse expression")
 }
+
+func TestRunAnalyzer(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// run analyzer with default analyzer
+	tokens, err := mc.RunAnalyzer(ctx, client.NewRunAnalyzerOption([]string{"test doc"}))
+	require.NoError(t, err)
+	for i, text := range []string{"test", "doc"} {
+		require.Equal(t, text, tokens[0].Tokens[i].Text)
+	}
+
+	// run analyzer with invalid params
+	_, err = mc.RunAnalyzer(ctx, client.NewRunAnalyzerOption([]string{"text doc"}).WithAnalyzerParams("invalid params}"))
+	common.CheckErr(t, err, false, "JsonError")
+
+	// run analyzer with custom analyzer
+	tokens, err = mc.RunAnalyzer(ctx, client.NewRunAnalyzerOption([]string{"test doc"}).
+		WithAnalyzerParams(`{"type": "standard", "stop_words": ["test"]}`))
+
+	require.NoError(t, err)
+	for i, text := range []string{"doc"} {
+		require.Equal(t, text, tokens[0].Tokens[i].Text)
+	}
+}
