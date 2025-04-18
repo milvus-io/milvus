@@ -1269,6 +1269,7 @@ const (
 var allowedProps = []string{
 	common.MaxLengthKey,
 	common.MmapEnabledKey,
+	common.MaxCapacityKey,
 }
 
 func IsKeyAllowed(key string) bool {
@@ -1350,6 +1351,26 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
 			if int64(value) > defaultMaxVarCharLength {
 				return merr.WrapErrParameterInvalidMsg("%s exceeds the maximum allowed value %s", prop.Value, strconv.FormatInt(defaultMaxVarCharLength, 10))
+			}
+		case common.MaxCapacityKey:
+			IsArrayType := false
+			fieldName := ""
+			for _, field := range collSchema.Fields {
+				if field.GetName() == t.FieldName && typeutil.IsArrayType(field.DataType) {
+					IsArrayType = true
+					fieldName = field.GetName()
+				}
+			}
+			if !IsArrayType {
+				return merr.WrapErrParameterInvalid("%s can not modify the maxcapacity for non-array types", fieldName)
+			}
+
+			maxCapacityPerRow, err := strconv.ParseInt(prop.Value, 10, 64)
+			if err != nil {
+				return merr.WrapErrParameterInvalid("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
+			}
+			if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
+				return merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", defaultMaxArrayCapacity)
 			}
 		}
 	}

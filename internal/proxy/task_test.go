@@ -4621,3 +4621,197 @@ func TestInsertForReplicate(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
+	qc := NewMixCoordMock()
+	InitMetaCache(context.Background(), qc, nil)
+	collectionName := "test_alter_collection_field_check_loaded"
+	createColReq := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DropCollection,
+			MsgID:     100,
+			Timestamp: 100,
+		},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         nil,
+		ShardsNum:      1,
+	}
+	qc.CreateCollection(context.Background(), createColReq)
+	resp, err := qc.DescribeCollection(context.Background(), &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	assert.NoError(t, err)
+
+	qc.ShowLoadCollectionsFunc = func(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
+		return &querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			CollectionIDs:       []int64{resp.CollectionID},
+			InMemoryPercentages: []int64{100},
+		}, nil
+	}
+
+	task := &alterCollectionFieldTask{
+		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+			Base:           &commonpb.MsgBase{},
+			CollectionName: collectionName,
+			Properties:     []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
+		},
+		mixCoord: qc,
+	}
+	err = task.PreExecute(context.Background())
+	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+}
+
+func TestAlterCollectionField1(t *testing.T) {
+	qc := NewMixCoordMock()
+	InitMetaCache(context.Background(), qc, nil)
+	collectionName := "test_alter_collection_field"
+
+	// Create collection with string and array fields
+	schema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:    100,
+				Name:       "string_field",
+				DataType:   schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "100"}},
+			},
+			{
+				FieldID:     101,
+				Name:        "array_field",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64,
+				TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
+			},
+		},
+	}
+	schemaBytes, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	createColReq := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_CreateCollection,
+			MsgID:     100,
+			Timestamp: 100,
+		},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         schemaBytes,
+		ShardsNum:      1,
+	}
+	qc.CreateCollection(context.Background(), createColReq)
+
+	// Test cases
+	tests := []struct {
+		name        string
+		fieldName   string
+		properties  []*commonpb.KeyValuePair
+		expectError bool
+		errCode     int32
+	}{
+		{
+			name:      "update string field max_length",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "200"},
+			},
+			expectError: false,
+		},
+		{
+			name:      "update array field max_capacity",
+			fieldName: "array_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "200"},
+			},
+			expectError: false,
+		},
+		{
+			name:      "update mmap_enabled",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MmapEnabledKey, Value: "true"},
+			},
+			expectError: false,
+		},
+		{
+			name:      "invalid property key",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: "invalid_key", Value: "value"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "invalid max_length value type",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "not_a_number"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "invalid max_capacity value type",
+			fieldName: "array_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "not_a_number"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "max_length exceeds limit",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "65536"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "max_capacity exceeds limit",
+			fieldName: "array_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "5000"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "max_capacity invalid range",
+			fieldName: "array_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "0"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			task := &alterCollectionFieldTask{
+				AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+					Base:           &commonpb.MsgBase{},
+					CollectionName: collectionName,
+					FieldName:      test.fieldName,
+					Properties:     test.properties,
+				},
+				mixCoord: qc,
+			}
+
+			err := task.PreExecute(context.Background())
+			if test.expectError {
+				assert.Error(t, err)
+				if test.errCode != 0 {
+					assert.Equal(t, test.errCode, merr.Code(err))
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
