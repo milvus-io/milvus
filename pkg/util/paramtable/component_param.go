@@ -5205,6 +5205,11 @@ type streamingConfig struct {
 	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
 	FlushGrowingSegmentBytesHwmThreshold ParamItem `refreshable:"true"`
 	FlushGrowingSegmentBytesLwmThreshold ParamItem `refreshable:"true"`
+
+	// recovery configuration.
+	WALRecoveryPersistInterval      ParamItem `refreshable:"true"`
+	WALRecoveryMaxDirtyMessage      ParamItem `refreshable:"true"`
+	WALRecoveryGracefulCloseTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -5365,6 +5370,39 @@ until the total bytes of growing segment is less than this threshold, 0.2 by def
 		Export:       true,
 	}
 	p.FlushGrowingSegmentBytesLwmThreshold.Init(base.mgr)
+
+	p.WALRecoveryPersistInterval = ParamItem{
+		Key:     "streaming.walRecovery.persistInterval",
+		Version: "2.6.0",
+		Doc: `The interval of persist recovery info, 10s by default. 
+Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.
+Currently it only affect the recovery of wal, but not affect the recovery of data flush into object storage`,
+		DefaultValue: "10s",
+		Export:       true,
+	}
+	p.WALRecoveryPersistInterval.Init(base.mgr)
+
+	p.WALRecoveryMaxDirtyMessage = ParamItem{
+		Key:     "streaming.walRecovery.maxDirtyMessage",
+		Version: "2.6.0",
+		Doc: `The max dirty message count of wal recovery, 100 by default.
+If there are more than this count of dirty message in wal recovery info, it will be persisted immediately, 
+but not wait for the persist interval.`,
+		DefaultValue: "100",
+		Export:       true,
+	}
+	p.WALRecoveryMaxDirtyMessage.Init(base.mgr)
+
+	p.WALRecoveryGracefulCloseTimeout = ParamItem{
+		Key:     "streaming.walRecovery.gracefulCloseTimeout",
+		Version: "2.6.0",
+		Doc: `The graceful close timeout for wal recovery, 3s by default.
+When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
+If that persist operation exceeds this timeout, the wal recovery module will close right now.`,
+		DefaultValue: "3s",
+		Export:       true,
+	}
+	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

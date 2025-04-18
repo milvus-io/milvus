@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -18,7 +19,7 @@ import (
 )
 
 // NewTxnManager creates a new transaction manager.
-func NewTxnManager(pchannel types.PChannelInfo) *TxnManager {
+func NewTxnManager(pchannel types.PChannelInfo, buffer *utility.TxnBuffer) *TxnManager {
 	return &TxnManager{
 		mu:       sync.Mutex{},
 		sessions: make(map[message.TxnID]*TxnSession),
@@ -42,7 +43,11 @@ type TxnManager struct {
 // BeginNewTxn starts a new transaction with a session.
 // We only support a transaction work on a streaming node, once the wal is transferred to another node,
 // the transaction is treated as expired (rollback), and user will got a expired error, then perform a retry.
-func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive time.Duration) (*TxnSession, error) {
+func (m *TxnManager) BeginNewTxn(ctx context.Context, msg message.MutableBeginTxnMessageV2) (*TxnSession, error) {
+	timetick := msg.TimeTick()
+	vchannel := msg.VChannel()
+	keepalive := time.Duration(msg.Header().KeepaliveMilliseconds) * time.Millisecond
+
 	if keepalive == 0 {
 		// If keepalive is 0, the txn set the keepalive with default keepalive.
 		keepalive = paramtable.Get().StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse()
@@ -65,6 +70,7 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive
 	metricsGuard := m.metrics.BeginTxn()
 	session := &TxnSession{
 		mu:           sync.Mutex{},
+		vchannel:     vchannel,
 		lastTimetick: timetick,
 		txnContext: message.TxnContext{
 			TxnID:     message.TxnID(id),
@@ -78,6 +84,24 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive
 	}
 	m.sessions[session.TxnContext().TxnID] = session
 	return session, nil
+}
+
+// FailTxnAtVChannel fails all transactions at the specified vchannel.
+func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
+	// avoid the txn to be commited.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ids := make([]int64, 0, len(m.sessions))
+	for id, session := range m.sessions {
+		if session.VChannel() == vchannel {
+			session.Cleanup()
+			delete(m.sessions, id)
+			ids = append(ids, int64(id))
+		}
+	}
+	if len(ids) > 0 {
+		m.logger.Info("transaction at vchannel is failed because of incoming exclusive required message", zap.String("vchannel", vchannel), zap.Int64s("txnIDs", ids))
+	}
 }
 
 // CleanupTxnUntil cleans up the transactions until the specified timestamp.

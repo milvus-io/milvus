@@ -13,12 +13,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
@@ -126,27 +123,14 @@ func (m *partitionSegmentManager) GetAndRemoveSegment(segmentID int64) *segmentA
 	return nil
 }
 
-// CollectAllSegmentsAndClear collects all segments in the manager and clear the manager.
-func (m *partitionSegmentManager) CollectAllSegmentsAndClear() []*segmentAllocManager {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	segments := m.segments
-	m.segments = make([]*segmentAllocManager, 0)
-	return segments
-}
-
-// CollectAllCanBeSealedAndClear collects all segments that can be sealed and clear the manager.
-func (m *partitionSegmentManager) CollectAllCanBeSealedAndClear(sealPolicy policy.SealPolicy) []*segmentAllocManager {
+// CollectAllAndClear collects all segments that can be sealed and clear the manager.
+func (m *partitionSegmentManager) CollectAllAndClear(sealPolicy policy.SealPolicy) []*segmentAllocManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	canBeSealed := make([]*segmentAllocManager, 0, len(m.segments))
 	for _, segment := range m.segments {
-		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING ||
-			segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED {
-			canBeSealed = append(canBeSealed, segment.WithSealPolicy(sealPolicy))
-		}
+		canBeSealed = append(canBeSealed, segment.WithSealPolicy(sealPolicy))
 	}
 	m.segments = make([]*segmentAllocManager, 0)
 	return canBeSealed
@@ -155,94 +139,6 @@ func (m *partitionSegmentManager) CollectAllCanBeSealedAndClear(sealPolicy polic
 // allocNewGrowingSegment allocates a new growing segment.
 // After this operation, the growing segment can be seen at datacoord.
 func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*segmentAllocManager, error) {
-	// A pending segment may be already created when failure or recovery.
-	pendingSegment := m.findPendingSegmentInMeta()
-	if pendingSegment == nil {
-		// if there's no pending segment, create a new pending segment.
-		var err error
-		if pendingSegment, err = m.createNewPendingSegment(ctx); err != nil {
-			return nil, err
-		}
-	}
-
-	// Transfer the pending segment into growing state.
-	// Alloc the growing segment at datacoord first.
-	mix, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := mix.AllocSegment(ctx, &datapb.AllocSegmentRequest{
-		CollectionId:         pendingSegment.GetCollectionID(),
-		PartitionId:          pendingSegment.GetPartitionID(),
-		SegmentId:            pendingSegment.GetSegmentID(),
-		Vchannel:             pendingSegment.GetVChannel(),
-		StorageVersion:       pendingSegment.GetStorageVersion(),
-		IsCreatedByStreaming: true,
-	})
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return nil, errors.Wrap(err, "failed to alloc growing segment at datacoord")
-	}
-	msg, err := message.NewCreateSegmentMessageBuilderV2().
-		WithVChannel(pendingSegment.GetVChannel()).
-		WithHeader(&message.CreateSegmentMessageHeader{}).
-		WithBody(&message.CreateSegmentMessageBody{
-			CollectionId: pendingSegment.GetCollectionID(),
-			Segments: []*messagespb.CreateSegmentInfo{{
-				// We only execute one segment creation operation at a time.
-				// But in future, we need to modify the segment creation operation to support batch creation.
-				// Because the partition-key based collection may create huge amount of segments at the same time.
-				PartitionId:    pendingSegment.GetPartitionID(),
-				SegmentId:      pendingSegment.GetSegmentID(),
-				StorageVersion: pendingSegment.GetStorageVersion(),
-			}},
-		}).BuildMutable()
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to create new segment message, segmentID: %d", pendingSegment.GetSegmentID())
-	}
-	// Send CreateSegmentMessage into wal.
-	msgID, err := m.wal.Get().Append(ctx, msg)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to send create segment message into wal, segmentID: %d", pendingSegment.GetSegmentID())
-	}
-
-	// Getnerate growing segment limitation.
-	limitation := getSegmentLimitationPolicy().GenerateLimitation()
-
-	// Commit it into streaming node meta.
-	// growing segment can be assigned now.
-	tx := pendingSegment.BeginModification()
-	tx.IntoGrowing(&limitation, msgID.TimeTick)
-	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.Wrapf(err, "failed to commit modification of segment assignment into growing, segmentID: %d", pendingSegment.GetSegmentID())
-	}
-	m.logger.Info("generate new growing segment",
-		zap.Int64("segmentID", pendingSegment.GetSegmentID()),
-		zap.String("messageID", msgID.MessageID.String()),
-		zap.Uint64("timetick", msgID.TimeTick),
-		zap.String("limitationPolicy", limitation.PolicyName),
-		zap.Uint64("segmentBinarySize", limitation.SegmentSize),
-		zap.Any("extraInfo", limitation.ExtraInfo),
-	)
-	return pendingSegment, nil
-}
-
-// findPendingSegmentInMeta finds a pending segment in the meta list.
-func (m *partitionSegmentManager) findPendingSegmentInMeta() *segmentAllocManager {
-	// Found if there's already a pending segment.
-	for _, segment := range m.segments {
-		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_PENDING {
-			return segment
-		}
-	}
-	return nil
-}
-
-// createNewPendingSegment creates a new pending segment.
-// pending segment only have a segment id, it's not a real segment,
-// and will be transfer into growing state until registering to datacoord.
-// The segment id is always allocated from rootcoord to avoid repeated.
-// Pending state is used to avoid growing segment leak at datacoord.
-func (m *partitionSegmentManager) createNewPendingSegment(ctx context.Context) (*segmentAllocManager, error) {
 	// Allocate new segment id and create ts from remote.
 	segmentID, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
@@ -252,14 +148,47 @@ func (m *partitionSegmentManager) createNewPendingSegment(ctx context.Context) (
 	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
 		storageVersion = storage.StorageV2
 	}
-	meta := newSegmentAllocManager(m.pchannel, m.collectionID, m.paritionID, int64(segmentID), m.vchannel, m.metrics, storageVersion)
-	tx := meta.BeginModification()
-	tx.IntoPending()
-	if err := tx.Commit(ctx); err != nil {
-		return nil, errors.Wrap(err, "failed to commit segment assignment modification")
+	// Getnerate growing segment limitation.
+	limitation := getSegmentLimitationPolicy().GenerateLimitation()
+	// Create a new segment by sending a create segment message into wal directly.
+	msg, err := message.NewCreateSegmentMessageBuilderV2().
+		WithVChannel(m.vchannel).
+		WithHeader(&message.CreateSegmentMessageHeader{}).
+		WithBody(&message.CreateSegmentMessageBody{
+			CollectionId: m.collectionID,
+			Segments: []*messagespb.CreateSegmentInfo{{
+				// We only execute one segment creation operation at a time.
+				// But in future, we need to modify the segment creation operation to support batch creation.
+				// Because the partition-key based collection may create huge amount of segments at the same time.
+				PartitionId:    m.paritionID,
+				SegmentId:      int64(segmentID),
+				StorageVersion: storageVersion,
+				MaxSegmentSize: limitation.SegmentSize,
+			}},
+		}).BuildMutable()
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create new segment message, segmentID: %d", segmentID)
 	}
-	m.segments = append(m.segments, meta)
-	return meta, nil
+	// Send CreateSegmentMessage into wal.
+	msgID, err := m.wal.Get().Append(ctx, msg)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to send create segment message into wal, segmentID: %d", segmentID)
+	}
+
+	immutableMessage := msg.IntoImmutableMessage(msgID.MessageID)
+	createSegmentMsg, _ := message.AsImmutableCreateSegmentMessageV2(immutableMessage)
+
+	pendingSegment := newSegmentAllocManager(m.pchannel, createSegmentMsg, m.metrics)
+	m.logger.Info("generate new growing segment",
+		zap.Int64("segmentID", int64(segmentID)),
+		zap.String("messageID", msgID.MessageID.String()),
+		zap.Uint64("timetick", msgID.TimeTick),
+		zap.String("limitationPolicy", limitation.PolicyName),
+		zap.Uint64("segmentBinarySize", limitation.SegmentSize),
+		zap.Any("extraInfo", limitation.ExtraInfo),
+	)
+	m.segments = append(m.segments, pendingSegment)
+	return pendingSegment, nil
 }
 
 // assignSegment assigns a segment for a assign segment request and return should trigger a seal operation.

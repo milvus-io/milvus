@@ -64,6 +64,14 @@ func (t MessageType) Valid() bool {
 	return t != MessageTypeUnknown && ok
 }
 
+// IsExclusiveRequired checks if the MessageType is exclusive required.
+// An exclusive required message type is that the message's timetick should keep same order with message id.
+// And when the message is appending, other messages with the same vchannel cannot append simultaneously.
+func (t MessageType) IsExclusiveRequired() bool {
+	_, ok := exclusiveRequiredMessageType[t]
+	return ok
+}
+
 // CanEnableCipher checks if the MessageType can enable cipher.
 func (t MessageType) CanEnableCipher() bool {
 	_, ok := cipherMessageType[t]

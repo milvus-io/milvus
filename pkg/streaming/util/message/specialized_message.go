@@ -81,6 +81,15 @@ var cipherMessageType = map[MessageType]struct{}{
 	MessageTypeDelete: {},
 }
 
+var exclusiveRequiredMessageType = map[MessageType]struct{}{
+	MessageTypeCreateCollection: {},
+	MessageTypeDropCollection:   {},
+	MessageTypeCreatePartition:  {},
+	MessageTypeDropPartition:    {},
+	MessageTypeManualFlush:      {},
+	MessageTypeSchemaChange:     {},
+}
+
 // List all specialized message types.
 type (
 	MutableTimeTickMessageV1         = specializedMutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
@@ -147,7 +156,22 @@ var (
 	AsImmutableCommitTxnMessageV2        = asSpecializedImmutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 	AsImmutableRollbackTxnMessageV2      = asSpecializedImmutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
 	AsImmutableCollectionSchemaChangeV2  = asSpecializedImmutableMessage[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
-	AsImmutableTxnMessage                = func(msg ImmutableMessage) ImmutableTxnMessage {
+
+	MustAsImmutableTimeTickMessageV1         = mustAsSpecializedImmutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
+	MustAsImmutableInsertMessageV1           = mustAsSpecializedImmutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
+	MustAsImmutableDeleteMessageV1           = mustAsSpecializedImmutableMessage[*DeleteMessageHeader, *msgpb.DeleteRequest]
+	MustAsImmutableCreateCollectionMessageV1 = mustAsSpecializedImmutableMessage[*CreateCollectionMessageHeader, *msgpb.CreateCollectionRequest]
+	MustAsImmutableDropCollectionMessageV1   = mustAsSpecializedImmutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
+	MustAsImmutableCreatePartitionMessageV1  = mustAsSpecializedImmutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
+	MustAsImmutableDropPartitionMessageV1    = mustAsSpecializedImmutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
+	MustAsImmutableImportMessageV1           = mustAsSpecializedImmutableMessage[*ImportMessageHeader, *msgpb.ImportMsg]
+	MustAsImmutableCreateSegmentMessageV2    = mustAsSpecializedImmutableMessage[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]
+	MustAsImmutableFlushMessageV2            = mustAsSpecializedImmutableMessage[*FlushMessageHeader, *FlushMessageBody]
+	MustAsImmutableManualFlushMessageV2      = mustAsSpecializedImmutableMessage[*ManualFlushMessageHeader, *ManualFlushMessageBody]
+	MustAsImmutableBeginTxnMessageV2         = mustAsSpecializedImmutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
+	MustAsImmutableCommitTxnMessageV2        = mustAsSpecializedImmutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
+	MustAsImmutableCollectionSchemaChangeV2  = mustAsSpecializedImmutableMessage[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
+	AsImmutableTxnMessage                    = func(msg ImmutableMessage) ImmutableTxnMessage {
 		underlying, ok := msg.(*immutableTxnMessageImpl)
 		if !ok {
 			return nil
@@ -190,6 +214,20 @@ func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMess
 		header:      header,
 		messageImpl: underlying,
 	}, nil
+}
+
+func mustAsSpecializedImmutableMessage[H proto.Message, B proto.Message](msg ImmutableMessage) specializedImmutableMessage[H, B] {
+	smsg, err := asSpecializedImmutableMessage[H, B](msg)
+	if err != nil {
+		panic(
+			fmt.Sprintf("failed to parse immutable message: %s @ %s, %s, %d",
+				err.Error(),
+				msg.MessageID(),
+				msg.LastConfirmedMessageID(),
+				msg.TimeTick(),
+			))
+	}
+	return smsg
 }
 
 // asSpecializedImmutableMessage converts a ImmutableMessage to a specialized ImmutableMessage.
@@ -282,6 +320,15 @@ func (m *specializedImmutableMessageImpl[H, B]) Header() H {
 // Body returns the message body.
 func (m *specializedImmutableMessageImpl[H, B]) Body() (B, error) {
 	return unmarshalProtoB[B](m.Payload())
+}
+
+// Must Body returns the message body.
+func (m *specializedImmutableMessageImpl[H, B]) MustBody() B {
+	b, err := m.Body()
+	if err != nil {
+		panic(fmt.Sprintf("failed to unmarshal specialized body, %s, %s", m.MessageID().String(), err.Error()))
+	}
+	return b
 }
 
 func unmarshalProtoB[B proto.Message](data []byte) (B, error) {

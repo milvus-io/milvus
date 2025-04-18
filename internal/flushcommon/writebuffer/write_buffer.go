@@ -48,6 +48,8 @@ type WriteBuffer interface {
 	GetFlushTimestamp() uint64
 	// SealSegments is the method to perform `Sync` operation with provided options.
 	SealSegments(ctx context.Context, segmentIDs []int64) error
+	// SealAllSegments is the method to perform `Sync` operation with provided options.
+	SealAllSegments(ctx context.Context)
 	// DropPartitions mark segments as Dropped of the partition
 	DropPartitions(partitionIDs []int64)
 	// GetCheckpoint returns current channel checkpoint.
@@ -182,6 +184,12 @@ func (wb *writeBufferBase) HasSegment(segmentID int64) bool {
 	return ok
 }
 
+func (wb *writeBufferBase) SealAllSegments(ctx context.Context) {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+	wb.sealAllSegments(ctx)
+}
+
 func (wb *writeBufferBase) SealSegments(ctx context.Context, segmentIDs []int64) error {
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
@@ -273,6 +281,11 @@ func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 	}
 
 	return segmentsToSync
+}
+
+func (wb *writeBufferBase) sealAllSegments(ctx context.Context) {
+	segmentIDs := wb.metaCache.GetSegmentIDsBy(metacache.WithAll())
+	wb.sealSegments(ctx, segmentIDs)
 }
 
 func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) error {

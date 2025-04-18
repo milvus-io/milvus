@@ -18,6 +18,7 @@ var txnSessionKeyValue txnSessionKeyType = 1
 type TxnSession struct {
 	mu sync.Mutex
 
+	vchannel         string                       // The vchannel of the session.
 	lastTimetick     uint64                       // session last timetick.
 	expired          bool                         // The flag indicates the transaction has trigger expired once.
 	txnContext       message.TxnContext           // transaction id of the session
@@ -27,6 +28,11 @@ type TxnSession struct {
 	rollback         bool                         // The flag indicates the transaction is rollbacked.
 	cleanupCallbacks []func()                     // The cleanup callbacks function for the session.
 	metricsGuard     *metricsutil.TxnMetricsGuard // The metrics guard for the session.
+}
+
+// VChannel returns the vchannel of the session.
+func (s *TxnSession) VChannel() string {
+	return s.vchannel
 }
 
 // TxnContext returns the txn context of the session.

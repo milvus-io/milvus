@@ -32,7 +32,7 @@ func newTimeTickSyncOperator(param *interceptors.InterceptorBuildParam) *timeTic
 			zap.Any("pchannel", param.ChannelInfo),
 		),
 		interceptorBuildParam: param,
-		ackManager:            ack.NewAckManager(param.InitializedTimeTick, param.InitializedMessageID, metrics),
+		ackManager:            ack.NewAckManager(param.LastTimeTickMessage.TimeTick(), param.LastTimeTickMessage.LastConfirmedMessageID(), metrics),
 		ackDetails:            ack.NewAckDetails(),
 		sourceID:              paramtable.GetNodeID(),
 		metrics:               metrics,
@@ -135,6 +135,8 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 		ctx = utility.WithNotPersisted(ctx, &utility.NotPersistedHint{
 			MessageID: lastConfirmedMessageID,
 		})
+		// setup a hint for the message.
+		msg.WithNotPersisted()
 	}
 
 	// Append it to wal.

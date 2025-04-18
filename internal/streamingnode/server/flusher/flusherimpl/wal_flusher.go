@@ -11,19 +11,27 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 var errChannelLifetimeUnrecoverable = errors.New("channel lifetime unrecoverable")
 
+// RecoverWALFlusherParam is the parameter for building wal flusher.
+type RecoverWALFlusherParam struct {
+	ChannelInfo     types.PChannelInfo
+	WAL             *syncutil.Future[wal.WAL]
+	RecoveryStorage *recovery.RecoveryStorage
+}
+
 // RecoverWALFlusher recovers the wal flusher.
-func RecoverWALFlusher(param *interceptors.InterceptorBuildParam) *WALFlusherImpl {
+func RecoverWALFlusher(param *RecoverWALFlusherParam) *WALFlusherImpl {
 	flusher := &WALFlusherImpl{
 		notifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		wal:      param.WAL,
@@ -31,6 +39,7 @@ func RecoverWALFlusher(param *interceptors.InterceptorBuildParam) *WALFlusherImp
 			log.FieldComponent("flusher"),
 			zap.String("pchannel", param.ChannelInfo.Name)),
 		metrics: newFlusherMetrics(param.ChannelInfo),
+		rs:      param.RecoveryStorage,
 	}
 	go flusher.Execute()
 	return flusher
@@ -42,6 +51,7 @@ type WALFlusherImpl struct {
 	flusherComponents *flusherComponents
 	logger            *log.MLogger
 	metrics           *flusherMetrics
+	rs                *recovery.RecoveryStorage
 }
 
 // Execute starts the wal flusher.
@@ -92,6 +102,7 @@ func (impl *WALFlusherImpl) Execute() (err error) {
 				return nil
 			}
 			impl.metrics.ObserveMetrics(msg.TimeTick())
+			impl.rs.ObserveMessage(msg)
 			if err := impl.dispatch(msg); err != nil {
 				// The error is always context canceled.
 				return nil
@@ -104,6 +115,11 @@ func (impl *WALFlusherImpl) Execute() (err error) {
 func (impl *WALFlusherImpl) Close() {
 	impl.notifier.Cancel()
 	impl.notifier.BlockUntilFinish()
+
+	impl.logger.Info("wal flusher start to close the recovery storage...")
+	impl.rs.Close()
+	impl.logger.Info("recovery storage closed")
+
 	impl.metrics.Close()
 }
 
@@ -124,6 +140,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 		return nil, err
 	}
 	impl.logger.Info("fetch recovery info done", zap.Int("recoveryInfoNum", len(recoverInfos)))
+	impl.rs.InitVChannelCheckpoint(checkpoints)
 
 	mixc, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 	if err != nil {
@@ -136,25 +153,19 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	broker := broker.NewCoordBroker(mixc, paramtable.GetNodeID())
 	chunkManager := resource.Resource().ChunkManager()
 
-	pm, err := recoverPChannelCheckpointManager(ctx, l.WALName(), l.Channel().Name, checkpoints)
-	if err != nil {
-		impl.logger.Warn("recover pchannel checkpoint manager failure", zap.Error(err))
-		return nil, err
-	}
 	cpUpdater := util.NewChannelCheckpointUpdaterWithCallback(broker, func(mp *msgpb.MsgPosition) {
 		// After vchannel checkpoint updated, notify the pchannel checkpoint manager to work.
-		pm.Update(mp.ChannelName, adaptor.MustGetMessageIDFromMQWrapperIDBytes(l.WALName(), mp.MsgID))
+		impl.rs.UpdateVChannelCheckpoint(mp.ChannelName, adaptor.MustGetMessageIDFromMQWrapperIDBytes(l.WALName(), mp.MsgID))
 	})
 	go cpUpdater.Start()
 
 	fc := &flusherComponents{
-		wal:               l,
-		broker:            broker,
-		cpUpdater:         cpUpdater,
-		chunkManager:      chunkManager,
-		dataServices:      make(map[string]*dataSyncServiceWrapper),
-		checkpointManager: pm,
-		logger:            impl.logger,
+		wal:          l,
+		broker:       broker,
+		cpUpdater:    cpUpdater,
+		chunkManager: chunkManager,
+		dataServices: make(map[string]*dataSyncServiceWrapper),
+		logger:       impl.logger,
 	}
 	impl.logger.Info("flusher components intiailizing done")
 	if err := fc.recover(ctx, recoverInfos); err != nil {
@@ -175,7 +186,7 @@ func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL) (wal
 		MesasgeHandler: handler,
 		DeliverPolicy:  options.DeliverPolicyAll(),
 	}
-	if startMessageID := impl.flusherComponents.StartMessageID(); startMessageID != nil {
+	if startMessageID := impl.rs.FlushCheckpoint(); startMessageID != nil {
 		impl.logger.Info("wal start to scan from minimum checkpoint", zap.Stringer("startMessageID", startMessageID))
 		// !!! we always set the deliver policy to start from the last confirmed message id.
 		// because the catchup scanner at the streamingnode server must see the last confirmed message id if it's the last timetick.
@@ -196,10 +207,14 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) error {
 			return nil
 		}
 		impl.flusherComponents.WhenCreateCollection(createCollectionMsg)
+		impl.rs.AddVChannelCheckpoint(createCollectionMsg.VChannel(), createCollectionMsg.LastConfirmedMessageID())
 	case message.MessageTypeDropCollection:
 		// defer to remove the data sync service from the components.
 		// TODO: Current drop collection message will be handled by the underlying data sync service.
-		defer impl.flusherComponents.WhenDropCollection(msg.VChannel())
+		defer func() {
+			impl.flusherComponents.WhenDropCollection(msg.VChannel())
+			impl.rs.DropVChannelCheckpoint(msg.VChannel())
+		}()
 	}
 	return impl.flusherComponents.HandleMessage(impl.notifier.Context(), msg)
 }

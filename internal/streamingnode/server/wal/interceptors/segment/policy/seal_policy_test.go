@@ -35,16 +35,6 @@ func TestPolicyCollectionRemoved(t *testing.T) {
 	}
 }
 
-func TestPolicyRecover(t *testing.T) {
-	policy := PolicyRecover()
-	if policy.Policy != PolicyNameRecover {
-		t.Errorf("expected policy name %s, got %s", PolicyNameRecover, policy.Policy)
-	}
-	if policy.Extra != nil {
-		t.Errorf("expected extra to be nil, got %v", policy.Extra)
-	}
-}
-
 func TestPolicyFenced(t *testing.T) {
 	timetick := uint64(12345)
 	policy := PolicyFenced(timetick)

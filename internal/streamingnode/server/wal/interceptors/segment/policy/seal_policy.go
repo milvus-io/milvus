@@ -43,14 +43,6 @@ func PolicyCollectionRemoved() SealPolicy {
 	}
 }
 
-// PolicyRecover returns a SealPolicy for recover.
-func PolicyRecover() SealPolicy {
-	return SealPolicy{
-		Policy: PolicyNameRecover,
-		Extra:  nil,
-	}
-}
-
 // PolicyFenced returns a SealPolicy for fenced.
 func PolicyFenced(timetick uint64) SealPolicy {
 	return SealPolicy{

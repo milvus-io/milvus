@@ -1,4 +1,4 @@
-package flusherimpl
+package recovery
 
 import (
 	"fmt"

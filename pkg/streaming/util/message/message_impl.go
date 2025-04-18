@@ -51,6 +51,11 @@ func (m *messageImpl) Properties() RProperties {
 	return m.properties
 }
 
+// IsPersisted returns true if the message is persisted.
+func (m *messageImpl) IsPersisted() bool {
+	return !m.properties.Exist(messageNotPersisteted)
+}
+
 // EstimateSize returns the estimated size of current message.
 func (m *messageImpl) EstimateSize() int {
 	if ch := m.cipherHeader(); ch != nil {
@@ -59,6 +64,15 @@ func (m *messageImpl) EstimateSize() int {
 	}
 	// TODO: more accurate size estimation.
 	return len(m.payload) + m.properties.EstimateSize()
+}
+
+// WithNotPersisted sets the message as not persisted.
+func (m *messageImpl) WithNotPersisted() MutableMessage {
+	if m.properties.Exist(messageNotPersisteted) {
+		panic("not persisted already set in properties of message")
+	}
+	m.properties.Set(messageNotPersisteted, "")
+	return m
 }
 
 // WithBarrierTimeTick sets the barrier time tick of current message.

@@ -38,21 +38,26 @@ func buildInterceptorParams(ctx context.Context, underlyingWALImpls walimpls.WAL
 	)
 	mvccManager := mvcc.NewMVCCManager(msg.TimeTick())
 	return &interceptors.InterceptorBuildParam{
-		ChannelInfo:          underlyingWALImpls.Channel(),
-		WAL:                  syncutil.NewFuture[wal.WAL](),
-		InitializedTimeTick:  msg.TimeTick(),
-		InitializedMessageID: msg.MessageID(),
-		WriteAheadBuffer:     writeAheadBuffer,
-		MVCCManager:          mvccManager,
+		ChannelInfo:         underlyingWALImpls.Channel(),
+		WAL:                 syncutil.NewFuture[wal.WAL](),
+		LastTimeTickMessage: msg,
+		WriteAheadBuffer:    writeAheadBuffer,
+		MVCCManager:         mvccManager,
 	}, nil
 }
 
 // sendFirstTimeTick sends the first timetick message to walimpls.
 // It is used to make a fence operation with the underlying walimpls and get the timetick and last message id to recover the wal state.
-func sendFirstTimeTick(ctx context.Context, underlyingWALImpls walimpls.WALImpls) (message.ImmutableMessage, error) {
-	logger := resource.Resource().Logger()
+func sendFirstTimeTick(ctx context.Context, underlyingWALImpls walimpls.WALImpls) (msg message.ImmutableMessage, err error) {
+	logger := resource.Resource().Logger().With(zap.String("channel", underlyingWALImpls.Channel().String()))
 	logger.Info("start to sync first time tick")
-	defer logger.Info("sync first time tick done")
+	defer func() {
+		if err != nil {
+			logger.Error("sync first time tick failed", zap.Error(err))
+			return
+		}
+		logger.Info("sync first time tick done", zap.String("msgID", msg.MessageID().String()), zap.Uint64("timetick", msg.TimeTick()))
+	}()
 
 	backoffTimer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
 		Default: 5 * time.Second,
