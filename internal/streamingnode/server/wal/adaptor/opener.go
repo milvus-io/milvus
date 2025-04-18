@@ -56,10 +56,13 @@ func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.
 	}
 
 	// wrap the wal into walExtend with cleanup function and interceptors.
-	wal := adaptImplsToWAL(l, o.interceptorBuilders, func() {
+	wal, err := adaptImplsToWAL(ctx, l, o.interceptorBuilders, func() {
 		o.walInstances.Remove(id)
 		logger.Info("wal deleted from opener")
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	o.walInstances.Insert(id, wal)
 	logger.Info("new wal created")

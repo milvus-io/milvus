@@ -126,9 +126,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 	var wb wab.ROWriteAheadBuffer
 	var err error
 	if s.Channel().AccessMode == types.AccessModeRW {
-		if wb, err = resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer(s.Context()); err != nil {
-			return err
-		}
+		wb = resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer()
 	}
 
 	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)
