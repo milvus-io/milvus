@@ -1,17 +1,12 @@
+use serde_json as json;
 use std::collections::HashMap;
 use tantivy::tokenizer::*;
-use serde_json as json;
 
+use crate::analyzer::{
+    build_in_analyzer::*, filter::*, tokenizers::get_builder_with_tokenizer, util::*,
+};
 use crate::error::Result;
 use crate::error::TantivyBindingError;
-use crate::analyzer::{
-    build_in_analyzer::*,
-    tokenizers::get_builder_with_tokenizer,
-    filter::*,
-    util::*
-};
-
-
 
 struct AnalyzerBuilder<'a> {
     filters: HashMap<String, SystemFilter>,
@@ -26,16 +21,16 @@ impl AnalyzerBuilder<'_> {
         }
     }
 
-    fn get_tokenizer_params(&self) -> Result<&json::Value>{
-        let tokenizer=self.params.get("tokenizer");
-        if tokenizer.is_none(){
+    fn get_tokenizer_params(&self) -> Result<&json::Value> {
+        let tokenizer = self.params.get("tokenizer");
+        if tokenizer.is_none() {
             return Err(TantivyBindingError::InternalError(format!(
                 "tokenizer name or type must be set"
             )));
         }
         let value = tokenizer.unwrap();
         if value.is_object() || value.is_string() {
-            return Ok(tokenizer.unwrap())
+            return Ok(tokenizer.unwrap());
         }
 
         Err(TantivyBindingError::InternalError(format!(
@@ -57,6 +52,8 @@ impl AnalyzerBuilder<'_> {
         }
     }
 
+    // not used now
+    // support add custom filter with filter name
     fn add_custom_filters(&mut self, params: &json::Map<String, json::Value>) -> Result<()> {
         for (name, value) in params {
             if !value.is_object() {
@@ -168,63 +165,40 @@ impl AnalyzerBuilder<'_> {
 
         //build custom analyzer
         let tokenizer_params = self.get_tokenizer_params()?;
-        let mut builder = get_builder_with_tokenizer(&tokenizer_params)?;
+        let mut builder = get_builder_with_tokenizer(&tokenizer_params, create_analyzer_by_json)?;
 
-        // build with option
+        // build and check other options
         builder = self.build_option(builder)?;
         Ok(builder.build())
     }
 }
 
-pub(crate) fn create_analyzer_with_filter(params: &String) -> Result<TextAnalyzer> {
-    match json::from_str::<json::Value>(&params) {
-        Ok(value) => {
-            if value.is_null() {
-                return Ok(standard_analyzer(vec![]));
-            }
-            if !value.is_object() {
-                return Err(TantivyBindingError::InternalError(
-                    "tokenizer params should be a json map".to_string(),
-                ));
-            }
-            let json_params = value.as_object().unwrap();
-
-            // create builder
-            let analyzer_params = json_params.get("analyzer");
-            if analyzer_params.is_none() {
-                return Ok(standard_analyzer(vec![]));
-            }
-            if !analyzer_params.unwrap().is_object() {
-                return Err(TantivyBindingError::InternalError(
-                    "analyzer params should be a json map".to_string(),
-                ));
-            }
-
-            let builder_params = analyzer_params.unwrap().as_object().unwrap();
-            if builder_params.is_empty(){
-                return Ok(standard_analyzer(vec![]));
-            }
-
-            let mut builder = AnalyzerBuilder::new(builder_params);
-    
-            // build custom filter
-            let filter_params = json_params.get("filter");
-            if !filter_params.is_none() && filter_params.unwrap().is_object() {
-                builder.add_custom_filters(filter_params.unwrap().as_object().unwrap())?;
-            }
-
-            // build analyzer
-            builder.build()
-        }
-        Err(err) => Err(err.into()),
+pub fn create_analyzer_by_json(
+    analyzer_params: &json::Map<String, json::Value>,
+) -> Result<TextAnalyzer> {
+    if analyzer_params.is_empty() {
+        return Ok(standard_analyzer(vec![]));
     }
+
+    let builder = AnalyzerBuilder::new(analyzer_params);
+    builder.build()
 }
 
-pub(crate) fn create_analyzer(params: &str) -> Result<TextAnalyzer> {
+pub fn create_analyzer(params: &str) -> Result<TextAnalyzer> {
     if params.len() == 0 {
         return Ok(standard_analyzer(vec![]));
     }
-    create_analyzer_with_filter(&format!("{{\"analyzer\":{}}}", params))
+
+    let json_params =
+        json::from_str::<json::Value>(&params).map_err(|e| TantivyBindingError::JsonError(e))?;
+
+    create_analyzer_by_json(
+        json_params
+            .as_object()
+            .ok_or(TantivyBindingError::InternalError(
+                "params should be a json map".to_string(),
+            ))?,
+    )
 }
 
 #[cfg(test)]
@@ -263,6 +237,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "lindera-ipadic")]
     fn test_lindera_analyzer() {
         let params = r#"{
             "tokenizer": {
@@ -275,7 +250,8 @@ mod tests {
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
 
         let mut bining = tokenizer.unwrap();
-        let mut stream = bining.token_stream("東京スカイツリーの最寄り駅はとうきょうスカイツリー駅です");
+        let mut stream =
+            bining.token_stream("東京スカイツリーの最寄り駅はとうきょうスカイツリー駅です");
 
         let mut results = Vec::<String>::new();
         while stream.advance() {
