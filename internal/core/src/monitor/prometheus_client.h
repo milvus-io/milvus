@@ -142,6 +142,7 @@ DECLARE_PROMETHEUS_HISTOGRAM(internal_core_get_vector_latency);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_retrieve_get_target_entry_latency);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_get_target_entry_latency);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_optimize_expr_latency);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_expr_filter_ratio);
 
 // async cgo metrics
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_queue_duration_seconds);
