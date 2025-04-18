@@ -1341,11 +1341,11 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 				}
 			}
 			if !IsStringType {
-				return merr.WrapErrParameterInvalid(fieldName, "%s can not modify the maxlength for non-string types", schemapb.DataType_name[dataType])
+				return merr.WrapErrParameterInvalidMsg(fieldName, "%s can not modify the maxlength for non-string types", schemapb.DataType_name[dataType])
 			}
 			value, err := strconv.Atoi(prop.Value)
 			if err != nil {
-				return merr.WrapErrParameterInvalid("%s should be an integer, but got %T", prop.Key, prop.Value)
+				return merr.WrapErrParameterInvalidMsg("%s should be an integer, but got %T", prop.Key, prop.Value)
 			}
 
 			defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
@@ -1362,12 +1362,12 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 				}
 			}
 			if !IsArrayType {
-				return merr.WrapErrParameterInvalid("%s can not modify the maxcapacity for non-array types", fieldName)
+				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxcapacity for non-array types", fieldName)
 			}
 
 			maxCapacityPerRow, err := strconv.ParseInt(prop.Value, 10, 64)
 			if err != nil {
-				return merr.WrapErrParameterInvalid("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
+				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
 			}
 			if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
 				return merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", defaultMaxArrayCapacity)
