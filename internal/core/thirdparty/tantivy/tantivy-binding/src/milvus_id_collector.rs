@@ -3,15 +3,21 @@ use tantivy::{
     DocId, Score, SegmentOrdinal, SegmentReader,
 };
 
-#[derive(Default)]
-pub(crate) struct MilvusIdCollector {}
+use crate::bitset_wrapper::BitsetWrapper;
+
+// "warning": bitset_wrapper has no guarantee for thread safety, so `MilvusIdChildCollector`
+// should be handled serializely which means we should only use single thread
+// for executing query.
+pub(crate) struct MilvusIdCollector {
+    pub(crate) bitset_wrapper: BitsetWrapper,
+}
 
 pub(crate) struct MilvusIdChildCollector {
-    milvus_doc_ids: Vec<u32>,
+    pub(crate) bitset_wrapper: BitsetWrapper,
 }
 
 impl Collector for MilvusIdCollector {
-    type Fruit = Vec<u32>;
+    type Fruit = ();
     type Child = MilvusIdChildCollector;
 
     fn for_segment(
@@ -20,7 +26,7 @@ impl Collector for MilvusIdCollector {
         _segment: &SegmentReader,
     ) -> tantivy::Result<Self::Child> {
         Ok(MilvusIdChildCollector {
-            milvus_doc_ids: Vec::new(),
+            bitset_wrapper: self.bitset_wrapper.clone(),
         })
     }
 
@@ -30,25 +36,18 @@ impl Collector for MilvusIdCollector {
 
     fn merge_fruits(
         &self,
-        segment_fruits: Vec<<Self::Child as SegmentCollector>::Fruit>,
+        _segment_fruits: Vec<<Self::Child as SegmentCollector>::Fruit>,
     ) -> tantivy::Result<Self::Fruit> {
-        let len: usize = segment_fruits.iter().map(|docset| docset.len()).sum();
-        let mut result = Vec::with_capacity(len);
-        for docs in segment_fruits {
-            for doc in docs {
-                result.push(doc);
-            }
-        }
-        Ok(result)
+        Ok(())
     }
 }
 
 impl SegmentCollector for MilvusIdChildCollector {
-    type Fruit = Vec<u32>;
+    type Fruit = ();
 
     #[inline]
     fn collect_block(&mut self, docs: &[DocId]) {
-        self.milvus_doc_ids.extend(docs);
+        self.bitset_wrapper.batch_set(docs);
     }
 
     fn collect(&mut self, doc: DocId, _score: Score) {
@@ -57,7 +56,5 @@ impl SegmentCollector for MilvusIdChildCollector {
     }
 
     #[inline]
-    fn harvest(self) -> Self::Fruit {
-        self.milvus_doc_ids
-    }
+    fn harvest(self) -> Self::Fruit {}
 }

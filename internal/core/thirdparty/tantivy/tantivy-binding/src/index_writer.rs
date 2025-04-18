@@ -6,6 +6,7 @@ use crate::data_type::TantivyDataType;
 
 use crate::error::{Result, TantivyBindingError};
 use crate::index_reader::IndexReaderWrapper;
+use crate::index_reader_c::SetBitsetFn;
 use crate::log::init_log;
 use crate::{index_writer_v5, index_writer_v7, TantivyIndexVersion};
 
@@ -66,7 +67,7 @@ impl IndexWriterWrapper {
         Ok(IndexWriterWrapper::V5(writer))
     }
 
-    pub fn create_reader(&self) -> Result<IndexReaderWrapper> {
+    pub fn create_reader(&self, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
         match self {
             IndexWriterWrapper::V5(_) => {
                 return Err(TantivyBindingError::InternalError(
@@ -75,7 +76,7 @@ impl IndexWriterWrapper {
                         .into(),
                 ));
             }
-            IndexWriterWrapper::V7(writer) => writer.create_reader(),
+            IndexWriterWrapper::V7(writer) => writer.create_reader(set_bitset),
         }
     }
 
@@ -163,7 +164,7 @@ mod tests {
     use rand::Rng;
     use tempfile::{tempdir, TempDir};
 
-    use crate::{data_type::TantivyDataType, TantivyIndexVersion};
+    use crate::{data_type::TantivyDataType, util::set_bitset, TantivyIndexVersion};
 
     use super::IndexWriterWrapper;
 
@@ -331,7 +332,11 @@ mod tests {
             .unwrap();
 
         index_writer.commit().unwrap();
-        let count = index_writer.create_reader().unwrap().count().unwrap();
+        let count = index_writer
+            .create_reader(set_bitset)
+            .unwrap()
+            .count()
+            .unwrap();
         assert_eq!(count, total_count);
     }
 }

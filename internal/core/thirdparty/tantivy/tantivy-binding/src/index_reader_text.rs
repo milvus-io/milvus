@@ -1,3 +1,5 @@
+use std::ffi::c_void;
+
 use tantivy::{
     query::{BooleanQuery, PhraseQuery},
     tokenizer::{TextAnalyzer, TokenStream},
@@ -10,7 +12,7 @@ use crate::{analyzer::standard_analyzer, index_reader::IndexReaderWrapper};
 impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,
     // and then execute the disconjunction of term query.
-    pub(crate) fn match_query(&self, q: &str) -> Result<Vec<u32>> {
+    pub(crate) fn match_query(&self, q: &str, bitset: *mut c_void) -> Result<()> {
         // clone the tokenizer to make `match_query` thread-safe.
         let mut tokenizer = self
             .index
@@ -24,12 +26,12 @@ impl IndexReaderWrapper {
             terms.push(Term::from_field_text(self.field, &token.text));
         }
         let query = BooleanQuery::new_multiterms_query(terms);
-        self.search(&query)
+        self.search(&query, bitset)
     }
 
     // split the query string into multiple tokens using index's default tokenizer,
     // and then execute the disconjunction of term query.
-    pub(crate) fn phrase_match_query(&self, q: &str, slop: u32) -> Result<Vec<u32>> {
+    pub(crate) fn phrase_match_query(&self, q: &str, slop: u32, bitset: *mut c_void) -> Result<()> {
         // clone the tokenizer to make `match_query` thread-safe.
         let mut tokenizer = self
             .index
@@ -48,12 +50,12 @@ impl IndexReaderWrapper {
         if terms.len() <= 1 {
             // tantivy will panic when terms.len() <= 1, so we forward to text match instead.
             let query = BooleanQuery::new_multiterms_query(terms);
-            return self.search(&query);
+            return self.search(&query, bitset);
         }
 
         let terms_with_offset: Vec<_> = positions.into_iter().zip(terms.into_iter()).collect();
         let phrase_query = PhraseQuery::new_with_offset_and_slop(terms_with_offset, slop);
-        self.search(&phrase_query)
+        self.search(&phrase_query, bitset)
     }
 
     pub(crate) fn register_tokenizer(&self, tokenizer_name: String, tokenizer: TextAnalyzer) {
@@ -63,10 +65,12 @@ impl IndexReaderWrapper {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::c_void;
+
     use tantivy::query::TermQuery;
     use tempfile::TempDir;
 
-    use crate::{index_writer::IndexWriterWrapper, TantivyIndexVersion};
+    use crate::{index_writer::IndexWriterWrapper, util::set_bitset, TantivyIndexVersion};
     #[test]
     fn test_jeba() {
         let params = "{\"tokenizer\": \"jieba\"}".to_string();
@@ -90,13 +94,19 @@ mod tests {
         writer.commit().unwrap();
 
         let slop = 1;
-        let reader = writer.create_reader().unwrap();
-        let res = reader.phrase_match_query("网球滑雪", slop).unwrap();
+        let reader = writer.create_reader(set_bitset).unwrap();
+        let mut res: Vec<u32> = vec![];
+        reader
+            .phrase_match_query("网球滑雪", slop, &mut res as *mut _ as *mut c_void)
+            .unwrap();
         assert_eq!(res, vec![0]);
 
         let slop = 2;
-        let reader = writer.create_reader().unwrap();
-        let res = reader.phrase_match_query("网球滑雪", slop).unwrap();
+        let mut res: Vec<u32> = vec![];
+        let reader = writer.create_reader(set_bitset).unwrap();
+        reader
+            .phrase_match_query("网球滑雪", slop, &mut res as *mut _ as *mut c_void)
+            .unwrap();
         assert_eq!(res, vec![0, 1]);
     }
 
@@ -120,14 +130,17 @@ mod tests {
         }
         writer.commit().unwrap();
 
-        let reader = writer.create_reader().unwrap();
+        let reader = writer.create_reader(set_bitset).unwrap();
 
         let query = TermQuery::new(
             tantivy::Term::from_field_text(reader.field.clone(), "hello"),
             tantivy::schema::IndexRecordOption::Basic,
         );
 
-        let res = reader.search(&query).unwrap();
+        let mut res: Vec<u32> = vec![];
+        reader
+            .search(&query, &mut res as *mut _ as *mut c_void)
+            .unwrap();
         assert_eq!(res, (0..10000).collect::<Vec<u32>>());
     }
 }
