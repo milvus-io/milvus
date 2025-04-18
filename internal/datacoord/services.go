@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -537,7 +538,20 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// for compatibility issue , if len(channelName) not exist, skip the check
 	// Also avoid to handle segment not found error if not the owner of shard
 	if len(channelName) != 0 {
-		if !s.channelManager.Match(nodeID, channelName) {
+		// TODO: Current checker implementation is node id based, it cannot strictly promise when ABA channel assignment happens.
+		// Meanwhile the match operation is not protected with the global segment meta with the same lock,
+		// So the new recovery can happen with the old match operation concurrently, so it not safe enough to avoid double flush.
+		// Moreover, the Match operation may be called if the flusher is ready to work, but the channel manager on coord don't see the assignment success.
+		// So the match operation may be rejected and wait for retry.
+		// TODO: We need to make an idempotent operation to avoid the double flush strictly.
+		if streamingutil.IsStreamingServiceEnabled() {
+			targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channelName)
+			if err != nil || targetID != nodeID {
+				err := merr.WrapErrChannelNotFound(channelName, fmt.Sprintf("for node %d", nodeID))
+				log.Warn("failed to get latest wall allocated", zap.Error(err))
+				return merr.Status(err), nil
+			}
+		} else if !s.channelManager.Match(nodeID, channelName) {
 			err := merr.WrapErrChannelNotFound(channelName, fmt.Sprintf("for node %d", nodeID))
 			log.Warn("node is not matched with channel", zap.String("channel", channelName), zap.Error(err))
 			return merr.Status(err), nil
