@@ -14,7 +14,7 @@ func NewInterceptorBuilder() interceptors.InterceptorBuilder {
 type interceptorBuilder struct{}
 
 // Build creates a new flusher interceptor.
-func (b *interceptorBuilder) Build(param interceptors.InterceptorBuildParam) interceptors.Interceptor {
+func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	flusher := flusherimpl.RecoverWALFlusher(param)
 	return &flusherAppendInterceptor{
 		flusher: flusher,

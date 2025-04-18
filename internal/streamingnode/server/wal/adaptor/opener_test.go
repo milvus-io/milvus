@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
@@ -40,6 +41,7 @@ func TestOpenerAdaptorFailure(t *testing.T) {
 }
 
 func TestOpenerAdaptor(t *testing.T) {
+	resource.InitForTest(t)
 	// Build basic opener.
 	basicOpener := mock_walimpls.NewMockOpenerImpls(t)
 	basicOpener.EXPECT().Open(mock.Anything, mock.Anything).RunAndReturn(

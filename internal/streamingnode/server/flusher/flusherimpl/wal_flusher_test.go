@@ -76,9 +76,8 @@ func TestWALFlusher(t *testing.T) {
 	walImpl.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"})
 
 	l := newMockWAL(t, false)
-	param := interceptors.InterceptorBuildParam{
-		WALImpls: walImpl,
-		WAL:      syncutil.NewFuture[wal.WAL](),
+	param := &interceptors.InterceptorBuildParam{
+		WAL: syncutil.NewFuture[wal.WAL](),
 	}
 	param.WAL.Set(l)
 	flusher := RecoverWALFlusher(param)
