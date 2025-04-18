@@ -308,7 +308,12 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
 
     for (auto field_id_raw : plan_node_proto.output_field_ids()) {
         auto field_id = FieldId(field_id_raw);
-        plan->target_entries_.push_back(field_id);
+        // system fields shall be store separately
+        if (field_id.get() < START_USER_FIELDID) {
+            plan->system_entries_.push_back(field_id);
+        } else {
+            plan->target_entries_.push_back(field_id);
+        }
     }
     for (auto dynamic_field : plan_node_proto.dynamic_fields()) {
         plan->target_dynamic_fields_.push_back(dynamic_field);
