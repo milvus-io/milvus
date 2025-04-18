@@ -85,7 +85,7 @@ const (
 
 const (
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(1)
+	CurrentScalarIndexEngineVersion = int32(2)
 )
 
 // Endian is type alias of binary.LittleEndian.
