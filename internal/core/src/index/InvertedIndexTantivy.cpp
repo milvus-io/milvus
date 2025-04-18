@@ -218,7 +218,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
 
     std::vector<std::string> null_offset_files;
 
-    auto find_file = [&](const std::string& target) -> auto{
+    auto find_file = [&](const std::string& target) -> auto {
         return std::find_if(inverted_index_files.begin(),
                             inverted_index_files.end(),
                             [&](const std::string& filename) {
@@ -425,7 +425,7 @@ const TargetBitmap
 InvertedIndexTantivy<std::string>::Query(const DatasetPtr& dataset) {
     auto op = dataset->Get<OpType>(OPERATOR_TYPE);
     if (op == OpType::PrefixMatch) {
-        auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
+        auto prefix = dataset->Get<std::string>(MATCH_VALUE);
         return PrefixMatch(prefix);
     }
     return ScalarIndex<std::string>::Query(dataset);
