@@ -180,6 +180,11 @@ CreateIndex(CIndex* res_index,
         config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
             scalar_index_engine_version;
 
+        // check index encoding config
+        auto index_non_encoding_str =
+            config.value(milvus::index::INDEX_NON_ENCODING, "false");
+        bool index_non_encoding = index_non_encoding_str == "true";
+
         // init file manager
         milvus::storage::FieldDataMeta field_meta{
             build_index_info->collectionid(),
@@ -197,7 +202,7 @@ CreateIndex(CIndex* res_index,
             build_index_info->field_schema().name(),
             field_type,
             build_index_info->dim(),
-        };
+            index_non_encoding};
         auto chunk_manager =
             milvus::storage::CreateChunkManager(storage_config);
 

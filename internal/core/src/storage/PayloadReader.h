@@ -67,6 +67,9 @@ class PayloadReader {
         if (payload_buf_) {
             return payload_buf_->Size();
         }
+        if (field_data_) {
+            return field_data_->Size();
+        }
         return 0;
     }
 

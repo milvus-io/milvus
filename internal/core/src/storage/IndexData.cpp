@@ -48,7 +48,7 @@ IndexData::Serialize(StorageType medium) {
 
 std::vector<uint8_t>
 IndexData::serialize_to_remote_file() {
-    AssertInfo(field_data_meta_.has_value(), "field data not exist");
+    AssertInfo(field_data_meta_.has_value(), "field data meta not exist");
     AssertInfo(index_meta_.has_value(), "index meta not exist");
     // create descriptor event
     DescriptorEvent descriptor_event;
@@ -60,8 +60,11 @@ IndexData::serialize_to_remote_file() {
     des_fix_part.field_id = field_data_meta_->field_id;
     des_fix_part.start_timestamp = time_range_.first;
     des_fix_part.end_timestamp = time_range_.second;
-    des_fix_part.data_type =
-        milvus::proto::schema::DataType(milvus::proto::schema::DataType::None);
+    des_fix_part.data_type = index_meta_->index_non_encoding
+                                 ? milvus::proto::schema::DataType(
+                                       milvus::proto::schema::DataType::None)
+                                 : milvus::proto::schema::DataType(
+                                       payload_reader_->get_payload_datatype());
     for (auto i = int8_t(EventType::DescriptorEvent);
          i < int8_t(EventType::EventTypeEnd);
          i++) {

@@ -143,6 +143,51 @@ func (_c *MockVersionManager_GetCurrentScalarIndexEngineVersion_Call) RunAndRetu
 	return _c
 }
 
+// GetIndexNonEncoding provides a mock function with given fields:
+func (_m *MockVersionManager) GetIndexNonEncoding() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetIndexNonEncoding")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockVersionManager_GetIndexNonEncoding_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetIndexNonEncoding'
+type MockVersionManager_GetIndexNonEncoding_Call struct {
+	*mock.Call
+}
+
+// GetIndexNonEncoding is a helper method to define mock.On call
+func (_e *MockVersionManager_Expecter) GetIndexNonEncoding() *MockVersionManager_GetIndexNonEncoding_Call {
+	return &MockVersionManager_GetIndexNonEncoding_Call{Call: _e.mock.On("GetIndexNonEncoding")}
+}
+
+func (_c *MockVersionManager_GetIndexNonEncoding_Call) Run(run func()) *MockVersionManager_GetIndexNonEncoding_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockVersionManager_GetIndexNonEncoding_Call) Return(_a0 bool) *MockVersionManager_GetIndexNonEncoding_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockVersionManager_GetIndexNonEncoding_Call) RunAndReturn(run func() bool) *MockVersionManager_GetIndexNonEncoding_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetMinimalIndexEngineVersion provides a mock function with given fields:
 func (_m *MockVersionManager) GetMinimalIndexEngineVersion() int32 {
 	ret := _m.Called()

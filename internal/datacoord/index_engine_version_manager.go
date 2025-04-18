@@ -21,18 +21,21 @@ type IndexEngineVersionManager interface {
 
 	GetCurrentScalarIndexEngineVersion() int32
 	GetMinimalScalarIndexEngineVersion() int32
+	GetIndexNonEncoding() bool
 }
 
 type versionManagerImpl struct {
 	mu                  lock.Mutex
 	versions            map[int64]sessionutil.IndexEngineVersion
 	scalarIndexVersions map[int64]sessionutil.IndexEngineVersion
+	indexNonEncoding    map[int64]bool
 }
 
 func newIndexEngineVersionManager() IndexEngineVersionManager {
 	return &versionManagerImpl{
 		versions:            map[int64]sessionutil.IndexEngineVersion{},
 		scalarIndexVersions: map[int64]sessionutil.IndexEngineVersion{},
+		indexNonEncoding:    map[int64]bool{},
 	}
 }
 
@@ -58,6 +61,7 @@ func (m *versionManagerImpl) RemoveNode(session *sessionutil.Session) {
 
 	delete(m.versions, session.ServerID)
 	delete(m.scalarIndexVersions, session.ServerID)
+	delete(m.indexNonEncoding, session.ServerID)
 }
 
 func (m *versionManagerImpl) Update(session *sessionutil.Session) {
@@ -71,6 +75,7 @@ func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
 	log.Info("addOrUpdate version", zap.Int64("nodeId", session.ServerID), zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion), zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion))
 	m.versions[session.ServerID] = session.IndexEngineVersion
 	m.scalarIndexVersions[session.ServerID] = session.ScalarIndexEngineVersion
+	m.indexNonEncoding[session.ServerID] = session.IndexNonEncoding
 }
 
 func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
@@ -147,4 +152,19 @@ func (m *versionManagerImpl) GetMinimalScalarIndexEngineVersion() int32 {
 	}
 	log.Info("Merged minimal scalar index version", zap.Int32("minimal", minimal))
 	return minimal
+}
+
+func (m *versionManagerImpl) GetIndexNonEncoding() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.indexNonEncoding) == 0 {
+		log.Info("indexNonEncoding map is empty")
+		// by default, we fall back to old index format for safety
+		return false
+	}
+	noneEncoding := true
+	for _, encoding := range m.indexNonEncoding {
+		noneEncoding = noneEncoding && encoding
+	}
+	return noneEncoding
 }
