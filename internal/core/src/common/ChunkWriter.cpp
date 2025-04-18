@@ -12,11 +12,13 @@
 #include "common/ChunkWriter.h"
 #include <cstdint>
 #include <memory>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 #include "arrow/array/array_binary.h"
 #include "arrow/array/array_primitive.h"
 #include "arrow/record_batch.h"
+#include "arrow/type_fwd.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
@@ -27,15 +29,11 @@
 namespace milvus {
 
 void
-StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
+StringChunkWriter::write(const arrow::ArrayVector& array_vec) {
     auto size = 0;
     std::vector<std::string_view> strs;
-    std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
-    for (auto batch : *data) {
-        auto batch_data = batch.ValueOrDie();
-        batches.emplace_back(batch_data);
-        auto data = batch_data->column(0);
+    for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::StringArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
@@ -89,12 +87,11 @@ StringChunkWriter::finish() {
 }
 
 void
-JSONChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
+JSONChunkWriter::write(const arrow::ArrayVector& array_vec) {
     auto size = 0;
     std::vector<Json> jsons;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
-    for (auto batch : *data) {
-        auto data = batch.ValueOrDie()->column(0);
+    for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
@@ -148,14 +145,13 @@ JSONChunkWriter::finish() {
 }
 
 void
-ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
+ArrayChunkWriter::write(const arrow::ArrayVector& array_vec) {
     auto size = 0;
     auto is_string = IsStringDataType(element_type_);
     std::vector<Array> arrays;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
 
-    for (auto batch : *data) {
-        auto data = batch.ValueOrDie()->column(0);
+    for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
@@ -234,13 +230,11 @@ ArrayChunkWriter::finish() {
 }
 
 void
-SparseFloatVectorChunkWriter::write(
-    std::shared_ptr<arrow::RecordBatchReader> data) {
+SparseFloatVectorChunkWriter::write(const arrow::ArrayVector& array_vec) {
     auto size = 0;
     std::vector<std::string> strs;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
-    for (auto batch : *data) {
-        auto data = batch.ValueOrDie()->column(0);
+    for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
@@ -299,7 +293,7 @@ SparseFloatVectorChunkWriter::finish() {
 std::shared_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              int dim,
-             std::shared_ptr<arrow::RecordBatchReader> r) {
+             const arrow::ArrayVector& array_vec) {
     std::shared_ptr<ChunkWriterBase> w;
     bool nullable = field_meta.is_nullable();
 
@@ -392,7 +386,7 @@ create_chunk(const FieldMeta& field_meta,
             PanicInfo(Unsupported, "Unsupported data type");
     }
 
-    w->write(std::move(r));
+    w->write(array_vec);
     return w->finish();
 }
 
@@ -401,7 +395,7 @@ create_chunk(const FieldMeta& field_meta,
              int dim,
              File& file,
              size_t file_offset,
-             std::shared_ptr<arrow::RecordBatchReader> r) {
+             const arrow::ArrayVector& array_vec) {
     std::shared_ptr<ChunkWriterBase> w;
     bool nullable = field_meta.is_nullable();
 
@@ -496,8 +490,18 @@ create_chunk(const FieldMeta& field_meta,
             PanicInfo(Unsupported, "Unsupported data type");
     }
 
-    w->write(std::move(r));
+    w->write(array_vec);
     return w->finish();
+}
+
+arrow::ArrayVector
+read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader) {
+    arrow::ArrayVector array_vec;
+    for (auto batch : *reader) {
+        auto batch_data = batch.ValueOrDie();
+        array_vec.push_back(std::move(batch_data->column(0)));
+    }
+    return array_vec;
 }
 
 }  // namespace milvus

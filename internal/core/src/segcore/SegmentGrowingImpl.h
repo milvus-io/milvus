@@ -84,6 +84,19 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     CreateTextIndex(FieldId field_id) override;
 
+    void
+    load_field_data_internal(const LoadFieldDataInfo& load_info);
+
+    void
+    load_column_group_data_internal(const LoadFieldDataInfo& load_info);
+
+    void
+    load_field_data_common(FieldId field_id,
+                           size_t reserved_offset,
+                           const std::vector<FieldDataPtr>& field_data,
+                           FieldId primary_field_id,
+                           size_t num_rows);
+
  public:
     const InsertRecord<>&
     get_insert_record() const {

@@ -1192,18 +1192,20 @@ func (m *indexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID Uni
 	for _, index := range fieldIndexes {
 		if si, ok := segIndexInfos.Get(index.IndexID); !index.IsDeleted {
 			buildID := int64(-1)
-			if !ok {
+			serializedSize := int64(0)
+			if !ok || si == nil {
 				// the segment should be unindexed status if the segment index is not found within field indexes
 				isIndexed = false
 			} else {
 				buildID = si.BuildID
+				serializedSize = int64(si.IndexSerializedSize)
 			}
 
 			segmentIndexes = append(segmentIndexes, &metricsinfo.IndexedField{
-				IndexFieldID: index.IndexID,
+				IndexFieldID: index.FieldID,
 				IndexID:      index.IndexID,
 				BuildID:      buildID,
-				IndexSize:    int64(si.IndexSerializedSize),
+				IndexSize:    serializedSize,
 			})
 		}
 	}

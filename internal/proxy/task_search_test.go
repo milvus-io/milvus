@@ -2797,28 +2797,6 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			Fields: fields,
 		}
 		searchInfo := parseSearchInfo(normalParam, schema, nil)
-		assert.Nil(t, searchInfo.planInfo)
-		assert.ErrorIs(t, searchInfo.parseError, merr.ErrParameterInvalid)
-
-		normalParam = getValidSearchParams()
-		normalParam = append(normalParam, &commonpb.KeyValuePair{
-			Key:   GroupByFieldKey,
-			Value: "string_field",
-		})
-		fields = make([]*schemapb.FieldSchema, 0)
-		fields = append(fields, &schemapb.FieldSchema{
-			FieldID: int64(101),
-			Name:    "string_field",
-		})
-		fields = append(fields, &schemapb.FieldSchema{
-			FieldID:  int64(102),
-			Name:     "null_field",
-			Nullable: true,
-		})
-		schema = &schemapb.CollectionSchema{
-			Fields: fields,
-		}
-		searchInfo = parseSearchInfo(normalParam, schema, nil)
 		assert.NotNil(t, searchInfo.planInfo)
 		assert.NoError(t, searchInfo.parseError)
 	})

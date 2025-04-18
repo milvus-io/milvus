@@ -16,7 +16,9 @@
 
 #pragma once
 
+#include <optional>
 #include "common/QueryInfo.h"
+#include "common/Types.h"
 #include "knowhere/index/index_node.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -31,25 +33,30 @@ namespace exec {
 template <typename T>
 class DataGetter {
  public:
-    virtual T
+    virtual std::optional<T>
     Get(int64_t idx) const = 0;
 };
 
 template <typename T>
 class GrowingDataGetter : public DataGetter<T> {
  public:
-    const segcore::ConcurrentVector<T>* growing_raw_data_;
     GrowingDataGetter(const segcore::SegmentGrowingImpl& segment,
                       FieldId fieldId) {
         growing_raw_data_ = segment.get_insert_record().get_data<T>(fieldId);
+        valid_data_ = segment.get_insert_record().is_valid_data_exist(fieldId)
+                          ? segment.get_insert_record().get_valid_data(fieldId)
+                          : nullptr;
     }
 
     GrowingDataGetter(const GrowingDataGetter<T>& other)
         : growing_raw_data_(other.growing_raw_data_) {
     }
 
-    T
+    std::optional<T>
     Get(int64_t idx) const {
+        if (valid_data_ && !valid_data_->is_valid(idx)) {
+            return std::nullopt;
+        }
         if constexpr (std::is_same_v<std::string, T>) {
             if (growing_raw_data_->is_mmap()) {
                 // when scalar data is mapped, it's needed to get the scalar data view and reconstruct string from the view
@@ -58,6 +65,10 @@ class GrowingDataGetter : public DataGetter<T> {
         }
         return growing_raw_data_->operator[](idx);
     }
+
+ protected:
+    const segcore::ConcurrentVector<T>* growing_raw_data_;
+    segcore::ThreadSafeValidDataPtr valid_data_;
 };
 
 template <typename T>
@@ -69,6 +80,7 @@ class SealedDataGetter : public DataGetter<T> {
 
     mutable std::unordered_map<int64_t, std::vector<std::string_view>>
         str_view_map_;
+    mutable std::unordered_map<int64_t, FixedVector<bool>> valid_map_;
     // Getting str_view from segment is cpu-costly, this map is to cache this view for performance
  public:
     SealedDataGetter(const segcore::SegmentSealed& segment, FieldId& field_id)
@@ -84,7 +96,7 @@ class SealedDataGetter : public DataGetter<T> {
         }
     }
 
-    T
+    std::optional<T>
     Get(int64_t idx) const {
         if (from_data_) {
             auto id_offset_pair = segment_.get_chunk_by_offset(field_id_, idx);
@@ -92,22 +104,30 @@ class SealedDataGetter : public DataGetter<T> {
             auto inner_offset = id_offset_pair.second;
             if constexpr (std::is_same_v<T, std::string>) {
                 if (str_view_map_.find(chunk_id) == str_view_map_.end()) {
-                    // for now, search_group_by does not handle null values
-                    auto [str_chunk_view, _] =
+                    auto [str_chunk_view, valid_data] =
                         segment_.chunk_view<std::string_view>(field_id_,
                                                               chunk_id);
+                    valid_map_[chunk_id] = std::move(valid_data);
                     str_view_map_[chunk_id] = std::move(str_chunk_view);
                 }
-                auto& str_chunk_view = str_view_map_[chunk_id];
-                std::string_view str_val_view =
-                    str_chunk_view.operator[](inner_offset);
+                auto valid_data = valid_map_[chunk_id];
+                if (!valid_data.empty()) {
+                    if (!valid_map_[chunk_id][inner_offset]) {
+                        return std::nullopt;
+                    }
+                }
+                auto str_val_view = str_view_map_[chunk_id][inner_offset];
                 return std::string(str_val_view.data(), str_val_view.length());
             } else {
                 Span<T> span = segment_.chunk_data<T>(field_id_, chunk_id);
+                if (span.valid_data() && !span.valid_data()[inner_offset]) {
+                    return std::nullopt;
+                }
                 auto raw = span.operator[](inner_offset);
                 return raw;
             }
         } else {
+            // null is not supported for indexed fields
             auto& chunk_index = segment_.chunk_scalar_index<T>(field_id_, 0);
             auto raw = chunk_index.Reverse_Lookup(idx);
             AssertInfo(raw.has_value(), "field data not found");
@@ -160,7 +180,7 @@ GroupIteratorsByType(
 template <typename T>
 struct GroupByMap {
  private:
-    std::unordered_map<T, int> group_map_{};
+    std::unordered_map<std::optional<T>, int> group_map_{};
     int group_capacity_{0};
     int group_size_{0};
     int enough_group_count_{0};
@@ -185,7 +205,7 @@ struct GroupByMap {
         return enough;
     }
     bool
-    Push(const T& t) {
+    Push(const std::optional<T>& t) {
         if (group_map_.size() >= group_capacity_ &&
             group_map_.find(t) == group_map_.end()) {
             return false;
@@ -211,7 +231,6 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
                     int64_t group_size,
                     bool strict_group_size,
                     const DataGetter<T>& data_getter,
-                    std::vector<GroupByValueType>& group_by_values,
                     std::vector<int64_t>& offsets,
                     std::vector<float>& distances,
                     const knowhere::MetricType& metrics_type);

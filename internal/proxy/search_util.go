@@ -439,10 +439,6 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 		fields := schema.GetFields()
 		for _, field := range fields {
 			if field.Name == groupByFieldName {
-				if field.GetNullable() {
-					ret.err = merr.WrapErrParameterInvalidMsg(fmt.Sprintf("groupBy field(%s) not support nullable == true", groupByFieldName))
-					return ret
-				}
 				groupByFieldId = field.FieldID
 				break
 			}

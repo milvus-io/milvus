@@ -36,6 +36,8 @@
 #include <variant>
 #include <vector>
 
+#include "arrow/type.h"
+#include "arrow/type_fwd.h"
 #include "fmt/core.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
@@ -148,6 +150,50 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
     }
 }
 
+inline std::shared_ptr<arrow::DataType>
+GetArrowDataType(DataType data_type, int dim = 1) {
+    switch (data_type) {
+        case DataType::BOOL:
+            return arrow::boolean();
+        case DataType::INT8:
+            return arrow::int8();
+        case DataType::INT16:
+            return arrow::int16();
+        case DataType::INT32:
+            return arrow::int32();
+        case DataType::INT64:
+            return arrow::int64();
+        case DataType::FLOAT:
+            return arrow::float32();
+        case DataType::DOUBLE:
+            return arrow::float64();
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            return arrow::utf8();
+        case DataType::ARRAY:
+        case DataType::JSON:
+            return arrow::binary();
+        case DataType::VECTOR_FLOAT:
+            return arrow::fixed_size_binary(dim * 4);
+        case DataType::VECTOR_BINARY: {
+            return arrow::fixed_size_binary((dim + 7) / 8);
+        }
+        case DataType::VECTOR_FLOAT16:
+        case DataType::VECTOR_BFLOAT16:
+            return arrow::fixed_size_binary(dim * 2);
+        case DataType::VECTOR_SPARSE_FLOAT:
+            return arrow::binary();
+        case DataType::VECTOR_INT8:
+            return arrow::fixed_size_binary(dim);
+        default: {
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("failed to get data type, invalid type {}",
+                                  data_type));
+        }
+    }
+}
+
 template <typename T>
 inline size_t
 GetVecRowSize(int64_t dim) {
@@ -217,13 +263,13 @@ CalcPksSize(const PkType* data, size_t n) {
     return size;
 }
 
-using GroupByValueType = std::variant<std::monostate,
-                                      int8_t,
-                                      int16_t,
-                                      int32_t,
-                                      int64_t,
-                                      bool,
-                                      std::string>;
+using GroupByValueType = std::optional<std::variant<std::monostate,
+                                                    int8_t,
+                                                    int16_t,
+                                                    int32_t,
+                                                    int64_t,
+                                                    bool,
+                                                    std::string>>;
 using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
 using NullExprType = proto::plan::NullExpr_NullOp;
 
@@ -612,7 +658,7 @@ FromValCase(milvus::proto::plan::GenericValue::ValCase val_case) {
         case milvus::proto::plan::GenericValue::ValCase::kFloatVal:
             return DataType::DOUBLE;
         case milvus::proto::plan::GenericValue::ValCase::kStringVal:
-            return DataType::STRING;
+            return DataType::VARCHAR;
         case milvus::proto::plan::GenericValue::ValCase::kArrayVal:
             return DataType::ARRAY;
         default:

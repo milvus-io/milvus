@@ -18,12 +18,14 @@
 
 package lock
 
-import (
-	"github.com/sasha-s/go-deadlock"
-)
+import "sync"
+
+// The file originally used "github.com/sasha-s/go-deadlock" as deadlock detection tool in unit tests.
+// However, it is broken since go 1.23, as reported in https://github.com/sasha-s/go-deadlock/issues/35.
+// To restore deadlock detection, make sure the bug is fixed in go-deadlock, and use "go-deadlock" package instead.
 
 // use `deadlock.Mutex` for test build
-type Mutex = deadlock.Mutex
+type Mutex = sync.Mutex
 
 // use `deadlock.RWMutex` for test build
-type RWMutex = deadlock.RWMutex
+type RWMutex = sync.RWMutex

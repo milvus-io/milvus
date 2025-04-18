@@ -2835,19 +2835,17 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 
 	policies, err := c.meta.ListPolicy(ctx, util.DefaultTenant)
 	if err != nil {
-		errMsg := "fail to list policy"
-		ctxLog.Warn(errMsg, zap.Error(err))
+		ctxLog.Error("fail to list policy", zap.Error(err))
 		return &internalpb.ListPolicyResponse{
-			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
+			Status: merr.StatusWithErrorCode(fmt.Errorf("fail to list policy: %s", err.Error()), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
 	// expand privilege groups and turn to policies
 	allGroups, err := c.getDefaultAndCustomPrivilegeGroups(ctx)
 	if err != nil {
-		errMsg := "fail to get privilege groups"
-		ctxLog.Warn(errMsg, zap.Error(err))
+		ctxLog.Error("fail to get privilege groups", zap.Error(err))
 		return &internalpb.ListPolicyResponse{
-			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
+			Status: merr.StatusWithErrorCode(fmt.Errorf("fail to get privilege groups: %s", err.Error()), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
 	groups := lo.SliceToMap(allGroups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
@@ -2855,10 +2853,9 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	})
 	expandGrants, err := c.expandPrivilegeGroups(ctx, policies, groups)
 	if err != nil {
-		errMsg := "fail to expand privilege groups"
-		ctxLog.Warn(errMsg, zap.Error(err))
+		ctxLog.Error("fail to expand privilege groups", zap.Error(err))
 		return &internalpb.ListPolicyResponse{
-			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
+			Status: merr.StatusWithErrorCode(fmt.Errorf("fail to expand privilege groups: %s", err.Error()), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
 	expandPolicies := lo.Map(expandGrants, func(r *milvuspb.GrantEntity, _ int) string {
@@ -2867,10 +2864,9 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 
 	userRoles, err := c.meta.ListUserRole(ctx, util.DefaultTenant)
 	if err != nil {
-		errMsg := "fail to list user-role"
-		ctxLog.Warn(errMsg, zap.Any("in", in), zap.Error(err))
+		ctxLog.Error("fail to list user-role", zap.Any("in", in), zap.Error(err))
 		return &internalpb.ListPolicyResponse{
-			Status: merr.StatusWithErrorCode(errors.New(errMsg), commonpb.ErrorCode_ListPolicyFailure),
+			Status: merr.StatusWithErrorCode(fmt.Errorf("fail to list user-role: %s", err.Error()), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
 
