@@ -341,7 +341,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         collection.insert(pattern_documents)
         df = pd.DataFrame(pattern_documents)[["id", "text"]]
         log.info(f"Test data:\n {df}")
-
+        collection.flush()
         collection.create_index(
             field_name="text", index_params={"index_type": "INVERTED"}
         )
