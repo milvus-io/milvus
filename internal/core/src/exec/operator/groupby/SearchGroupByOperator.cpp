@@ -180,7 +180,7 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
     //2. do iteration until fill the whole map or run out of all data
     //note it may enumerate all data inside a segment and can block following
     //query and search possibly
-    std::vector<std::tuple<int64_t, float, T>> res;
+    std::vector<std::tuple<int64_t, float, std::optional<T>>> res;
     while (iterator->HasNext() && !groupMap.IsGroupResEnough()) {
         auto offset_dis_pair = iterator->Next();
         AssertInfo(
@@ -189,7 +189,7 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
             "tells hasNext, terminate groupBy operation");
         auto offset = offset_dis_pair.value().first;
         auto dis = offset_dis_pair.value().second;
-        T row_data = data_getter.Get(offset);
+        std::optional<T> row_data = data_getter.Get(offset);
         if (groupMap.Push(row_data)) {
             res.emplace_back(offset, dis, row_data);
         }

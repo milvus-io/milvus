@@ -176,10 +176,10 @@ struct SearchResult {
                     chunk_count, total_rows_until_chunk);
                 vector_iterators.emplace_back(vector_iterator);
             }
-            auto kw_iterator = kw_iterators[i];
+            const auto& kw_iterator = kw_iterators[i];
             vector_iterators[vec_iter_idx++]->AddIterator(kw_iterator);
         }
-        for (auto vector_iter : vector_iterators) {
+        for (const auto& vector_iter : vector_iterators) {
             vector_iter->seal();
         }
         this->vector_iterators_ = vector_iterators;

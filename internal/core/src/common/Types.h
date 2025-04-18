@@ -263,13 +263,13 @@ CalcPksSize(const PkType* data, size_t n) {
     return size;
 }
 
-using GroupByValueType = std::variant<std::monostate,
-                                      int8_t,
-                                      int16_t,
-                                      int32_t,
-                                      int64_t,
-                                      bool,
-                                      std::string>;
+using GroupByValueType = std::optional<std::variant<std::monostate,
+                                                    int8_t,
+                                                    int16_t,
+                                                    int32_t,
+                                                    int64_t,
+                                                    bool,
+                                                    std::string>>;
 using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
 using NullExprType = proto::plan::NullExpr_NullOp;
 
