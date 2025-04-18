@@ -228,13 +228,12 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
                                     field_params={"mmap.enabled": False})
         self.alter_collection_field(client, collection_name, field_name=array_field_name,
                                     field_params={"max_length": new_max_length})
+        self.alter_collection_field(client, collection_name, field_name=array_field_name,
+                                    field_params={"max_capacity": 20})
         error = {ct.err_code: 999, ct.err_msg: f"can not modify the maxlength for non-string types"}
         self.alter_collection_field(client, collection_name, field_name=vector_field_name,
                                     field_params={"max_length": new_max_length},
                                     check_task=CheckTasks.err_res, check_items=error)
-        # self.alter_collection_field(client, collection_name, field_name=array_field_name,
-        #                             field_params={"max_capacity": 20},
-        #                             check_task=CheckTasks.err_res, check_items=error)
         error = {ct.err_code: 999, ct.err_msg: "element_type does not allow update in collection field param"}
         self.alter_collection_field(client, collection_name, field_name=array_field_name,
                                     field_params={"element_type": DataType.INT64},
