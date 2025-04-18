@@ -25,6 +25,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -44,6 +45,7 @@ type Worker interface {
 	QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
 	QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error)
+	UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error)
 
 	IsHealthy() bool
 	Stop()
@@ -245,6 +247,11 @@ func (w *remoteWorker) QueryStreamSegments(ctx context.Context, req *querypb.Que
 func (w *remoteWorker) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
 	client := w.getClient()
 	return client.GetStatistics(ctx, req)
+}
+
+func (w *remoteWorker) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
+	client := w.getClient()
+	return client.UpdateSchema(ctx, req)
 }
 
 func (w *remoteWorker) IsHealthy() bool {

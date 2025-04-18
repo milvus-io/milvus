@@ -28,6 +28,9 @@ class Collection {
     void
     parseIndexMeta(const void* index_meta_proto_blob, const int64_t length);
 
+    void
+    parse_schema(const void* schema_proto_blob, const int64_t length);
+
  public:
     SchemaPtr&
     get_schema() {

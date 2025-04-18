@@ -186,7 +186,7 @@ func (impl *timeTickSyncOperator) blockUntilSyncTimeTickReady() error {
 			zap.Stringer("messageID", msgID))
 		capacity := int(paramtable.Get().StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
 		keepalive := paramtable.Get().StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse()
-		impl.writeAheadBuffer = wab.NewWirteAheadBuffer(
+		impl.writeAheadBuffer = wab.NewWriteAheadBuffer(
 			impl.Channel().Name,
 			impl.logger,
 			capacity,

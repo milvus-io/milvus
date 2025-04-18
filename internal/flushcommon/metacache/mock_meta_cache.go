@@ -545,6 +545,39 @@ func (_c *MockMetaCache_Schema_Call) RunAndReturn(run func() *schemapb.Collectio
 	return _c
 }
 
+// UpdateSchema provides a mock function with given fields: updatedSchema
+func (_m *MockMetaCache) UpdateSchema(updatedSchema *schemapb.CollectionSchema) {
+	_m.Called(updatedSchema)
+}
+
+// MockMetaCache_UpdateSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateSchema'
+type MockMetaCache_UpdateSchema_Call struct {
+	*mock.Call
+}
+
+// UpdateSchema is a helper method to define mock.On call
+//   - updatedSchema *schemapb.CollectionSchema
+func (_e *MockMetaCache_Expecter) UpdateSchema(updatedSchema interface{}) *MockMetaCache_UpdateSchema_Call {
+	return &MockMetaCache_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", updatedSchema)}
+}
+
+func (_c *MockMetaCache_UpdateSchema_Call) Run(run func(updatedSchema *schemapb.CollectionSchema)) *MockMetaCache_UpdateSchema_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*schemapb.CollectionSchema))
+	})
+	return _c
+}
+
+func (_c *MockMetaCache_UpdateSchema_Call) Return() *MockMetaCache_UpdateSchema_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockMetaCache_UpdateSchema_Call) RunAndReturn(run func(*schemapb.CollectionSchema)) *MockMetaCache_UpdateSchema_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateSegmentView provides a mock function with given fields: partitionID, newSegments, newSegmentsBF, allSegments
 func (_m *MockMetaCache) UpdateSegmentView(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*pkoracle.BloomFilterSet, allSegments map[int64]struct{}) {
 	_m.Called(partitionID, newSegments, newSegmentsBF, allSegments)

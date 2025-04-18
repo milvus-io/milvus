@@ -5,7 +5,10 @@ package cluster
 import (
 	context "context"
 
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
 	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+
 	mock "github.com/stretchr/testify/mock"
 
 	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -524,6 +527,65 @@ func (_c *MockWorker_Stop_Call) Return() *MockWorker_Stop_Call {
 }
 
 func (_c *MockWorker_Stop_Call) RunAndReturn(run func()) *MockWorker_Stop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateSchema provides a mock function with given fields: ctx, req
+func (_m *MockWorker) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSchema")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.UpdateSchemaRequest) (*commonpb.Status, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.UpdateSchemaRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.UpdateSchemaRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWorker_UpdateSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateSchema'
+type MockWorker_UpdateSchema_Call struct {
+	*mock.Call
+}
+
+// UpdateSchema is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *querypb.UpdateSchemaRequest
+func (_e *MockWorker_Expecter) UpdateSchema(ctx interface{}, req interface{}) *MockWorker_UpdateSchema_Call {
+	return &MockWorker_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", ctx, req)}
+}
+
+func (_c *MockWorker_UpdateSchema_Call) Run(run func(ctx context.Context, req *querypb.UpdateSchemaRequest)) *MockWorker_UpdateSchema_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.UpdateSchemaRequest))
+	})
+	return _c
+}
+
+func (_c *MockWorker_UpdateSchema_Call) Return(_a0 *commonpb.Status, _a1 error) *MockWorker_UpdateSchema_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWorker_UpdateSchema_Call) RunAndReturn(run func(context.Context, *querypb.UpdateSchemaRequest) (*commonpb.Status, error)) *MockWorker_UpdateSchema_Call {
 	_c.Call.Return(run)
 	return _c
 }
