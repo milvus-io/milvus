@@ -264,7 +264,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 			return nil
 		},
 		retryTimes: 1,
@@ -282,7 +282,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 			return nil
 		},
 		retryTimes: 1,
@@ -303,7 +303,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 			return nil
 		},
 		retryTimes: 1,
@@ -322,7 +322,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 			return nil
 		},
 		retryTimes: 2,
@@ -344,7 +344,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 			counter++
 			if counter == 1 {
 				return errors.New("fake error")
@@ -369,7 +369,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 			_, err := qn.Search(ctx, nil)
 			return err
 		},
@@ -391,7 +391,7 @@ func (s *LBPolicySuite) TestExecute() {
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 			return nil
 		},
 	})
@@ -404,7 +404,7 @@ func (s *LBPolicySuite) TestExecute() {
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 			// succeed in first execute
 			if counter.Add(1) == 1 {
 				return nil
@@ -426,7 +426,7 @@ func (s *LBPolicySuite) TestExecute() {
 		collectionName: s.collectionName,
 		collectionID:   s.collectionID,
 		nq:             1,
-		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error {
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 			return nil
 		},
 	})

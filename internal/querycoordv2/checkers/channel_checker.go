@@ -181,49 +181,23 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int64) []*meta.DmChannel {
 	log := log.Ctx(ctx).WithRateGroup("ChannelChecker.findRepeatedChannels", 1, 60)
 	replica := c.meta.Get(ctx, replicaID)
-	ret := make([]*meta.DmChannel, 0)
+	dupChannels := make([]*meta.DmChannel, 0)
 
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
-		return ret
+		return dupChannels
 	}
-	dist := c.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithReplica2Channel(replica))
 
-	versionsMap := make(map[string]*meta.DmChannel)
-	for _, ch := range dist {
-		leaderView := c.dist.LeaderViewManager.GetLeaderShardView(ch.Node, ch.GetChannelName())
-		if leaderView == nil {
-			log.Info("shard leader view is not ready, skip",
-				zap.Int64("collectionID", replica.GetCollectionID()),
-				zap.Int64("replicaID", replicaID),
-				zap.Int64("leaderID", ch.Node),
-				zap.String("channel", ch.GetChannelName()))
-			continue
-		}
-
-		if leaderView.UnServiceableError != nil {
-			log.RatedInfo(10, "replica has unavailable shard leader",
-				zap.Int64("collectionID", replica.GetCollectionID()),
-				zap.Int64("replicaID", replicaID),
-				zap.Int64("leaderID", ch.Node),
-				zap.String("channel", ch.GetChannelName()),
-				zap.Error(leaderView.UnServiceableError))
-			continue
-		}
-
-		maxVer, ok := versionsMap[ch.GetChannelName()]
-		if !ok {
-			versionsMap[ch.GetChannelName()] = ch
-			continue
-		}
-		if maxVer.Version <= ch.Version {
-			ret = append(ret, maxVer)
-			versionsMap[ch.GetChannelName()] = ch
-		} else {
-			ret = append(ret, ch)
+	delegatorList := c.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithReplica2Channel(replica))
+	for _, delegator := range delegatorList {
+		leader := c.dist.ChannelDistManager.GetShardLeader(delegator.GetChannelName(), replica)
+		// if channel's version is smaller than shard leader's version, it means that the channel is not up to date
+		if delegator.Version < leader.Version && delegator.Node != leader.Node {
+			dupChannels = append(dupChannels, delegator)
 		}
 	}
-	return ret
+
+	return dupChannels
 }
 
 func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {

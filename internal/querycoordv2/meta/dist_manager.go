@@ -25,16 +25,14 @@ import (
 )
 
 type DistributionManager struct {
-	*SegmentDistManager
-	*ChannelDistManager
-	*LeaderViewManager
+	SegmentDistManager SegmentDistManagerInterface
+	ChannelDistManager ChannelDistManagerInterface
 }
 
 func NewDistributionManager() *DistributionManager {
 	return &DistributionManager{
 		SegmentDistManager: NewSegmentDistManager(),
 		ChannelDistManager: NewChannelDistManager(),
-		LeaderViewManager:  NewLeaderViewManager(),
 	}
 }
 
@@ -43,9 +41,9 @@ func NewDistributionManager() *DistributionManager {
 // If there are no segments, channels, or leader views, it returns an empty string.
 // In case of an error during JSON marshaling, it returns the error.
 func (dm *DistributionManager) GetDistributionJSON(collectionID int64) string {
-	segments := dm.GetSegmentDist(collectionID)
-	channels := dm.GetChannelDist(collectionID)
-	leaderView := dm.GetLeaderView(collectionID)
+	segments := dm.SegmentDistManager.GetSegmentDist(collectionID)
+	channels := dm.ChannelDistManager.GetChannelDist(collectionID)
+	leaderView := dm.ChannelDistManager.GetLeaderView(collectionID)
 
 	dist := &metricsinfo.QueryCoordDist{
 		Segments:    segments,

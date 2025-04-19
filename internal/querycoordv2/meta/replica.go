@@ -8,6 +8,42 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// ReplicaInterface defines read operations for replica metadata
+type ReplicaInterface interface {
+	// Basic information
+	GetID() typeutil.UniqueID
+	GetCollectionID() typeutil.UniqueID
+	GetResourceGroup() string
+
+	// Node access
+	GetNodes() []int64
+	GetRONodes() []int64
+	GetRWNodes() []int64
+	GetROSQNodes() []int64
+	GetRWSQNodes() []int64
+
+	// Node iteration
+	RangeOverRWNodes(f func(node int64) bool)
+	RangeOverRONodes(f func(node int64) bool)
+	RangeOverRWSQNodes(f func(node int64) bool)
+	RangeOverROSQNodes(f func(node int64) bool)
+
+	// Node counting
+	RWNodesCount() int
+	RONodesCount() int
+	RWSQNodesCount() int
+	ROSQNodesCount() int
+	NodesCount() int
+
+	// Node existence checks
+	Contains(node int64) bool
+	ContainRONode(node int64) bool
+	ContainRWNode(node int64) bool
+	ContainSQNode(node int64) bool
+	ContainROSQNode(node int64) bool
+	ContainRWSQNode(node int64) bool
+}
+
 // NilReplica is used to represent a nil replica.
 var NilReplica = newReplica(&querypb.Replica{
 	ID: -1,

@@ -264,6 +264,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		channel.GetSeekPosition().GetTimestamp(),
 		node.queryHook,
 		node.chunkManager,
+		delegator.NewChannelQueryView(channel.GetUnflushedSegmentIds(), channel.GetFlushedSegmentIds(), req.GetPartitionIDs(), req.GetTargetVersion()),
 	)
 	if err != nil {
 		log.Warn("failed to create shard delegator", zap.Error(err))
@@ -768,6 +769,10 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 	defer node.lifetime.Done()
 
+	if !req.Req.GetEnablePartialResult() {
+		req.Req.PartialResultRequiredDataRatio = 1.0
+	}
+
 	resp := &internalpb.SearchResults{
 		Status: merr.Success(),
 	}
@@ -912,6 +917,10 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	}
 	defer node.lifetime.Done()
 
+	if !req.Req.GetEnablePartialResult() {
+		req.Req.PartialResultRequiredDataRatio = 1.0
+	}
+
 	toMergeResults := make([]*internalpb.RetrieveResults, len(req.GetDmlChannels()))
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 
@@ -943,6 +952,11 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		}, nil
 	}
 
+	// save accessed data ratio from first result before reduce
+	accessedDataRatio := float32(0)
+	if len(toMergeResults) > 0 {
+		accessedDataRatio = toMergeResults[0].GetAccessedDataRatio()
+	}
 	tr.RecordSpan()
 	reducer := segments.CreateInternalReducer(req, node.manager.Collection.Get(req.GetReq().GetCollectionID()).Schema())
 	ret, err := reducer.Reduce(ctx, toMergeResults)
@@ -951,6 +965,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 			Status: merr.Status(err),
 		}, nil
 	}
+	ret.AccessedDataRatio = accessedDataRatio
 	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()),
 		metrics.QueryLabel, metrics.ReduceShards, metrics.BatchReduce).
@@ -990,6 +1005,10 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 		return nil
 	}
 	defer node.lifetime.Done()
+
+	// disable partial result on query stream, cause we can't compute accessed data ratio for each sub result
+	// cause query stream is only used for delete, and delete is not supported partial result yet
+	req.Req.PartialResultRequiredDataRatio = 1.0
 
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 
@@ -1228,14 +1247,18 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			numOfGrowingRows += segment.InsertCount()
 		}
 
+		queryView := delegator.GetQueryView()
 		leaderViews = append(leaderViews, &querypb.LeaderView{
 			Collection:             delegator.Collection(),
 			Channel:                key,
 			SegmentDist:            sealedSegments,
 			GrowingSegments:        growingSegments,
-			TargetVersion:          delegator.GetTargetVersion(),
 			NumOfGrowingRows:       numOfGrowingRows,
 			PartitionStatsVersions: delegator.GetPartitionStatsVersions(ctx),
+			TargetVersion:          queryView.GetVersion(),
+			Status: &querypb.LeaderViewStatus{
+				Serviceable: queryView.Serviceable(),
+			},
 		})
 		return true
 	})
@@ -1327,16 +1350,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				return id, action.GetCheckpoint().Timestamp
 			})
 			shardDelegator.AddExcludedSegments(flushedInfo)
-			deleteCP := action.GetDeleteCP()
-			if deleteCP == nil {
-				// for compatible with 2.4, we use checkpoint as deleteCP when deleteCP is nil
-				deleteCP = action.GetCheckpoint()
-				log.Info("use checkpoint as deleteCP",
-					zap.String("channelName", req.GetChannel()),
-					zap.Time("deleteSeekPos", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())))
-			}
-			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), req.GetLoadMeta().GetPartitionIDs(), action.GetGrowingInTarget(),
-				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint(), deleteCP)
+			shardDelegator.SyncReadableTarget(action, req.GetLoadMeta().GetPartitionIDs())
 		case querypb.SyncType_UpdatePartitionStats:
 			log.Info("sync update partition stats versions")
 			shardDelegator.SyncPartitionStats(ctx, action.PartitionStatsVersions)

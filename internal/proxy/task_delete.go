@@ -461,7 +461,7 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, 
 // getStreamingQueryAndDelteFunc return query function used by LBPolicy
 // make sure it concurrent safe
 func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) executeFunc {
-	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 		log := log.Ctx(ctx).With(
 			zap.Int64("collectionID", dr.collectionID),
 			zap.Int64s("partitionIDs", dr.partitionIDs),
@@ -598,11 +598,12 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	}
 
 	err = dr.lb.Execute(ctx, CollectionWorkLoad{
-		db:             dr.req.GetDbName(),
-		collectionName: dr.req.GetCollectionName(),
-		collectionID:   dr.collectionID,
-		nq:             1,
-		exec:           dr.getStreamingQueryAndDelteFunc(plan),
+		db:                             dr.req.GetDbName(),
+		collectionName:                 dr.req.GetCollectionName(),
+		collectionID:                   dr.collectionID,
+		nq:                             1,
+		exec:                           dr.getStreamingQueryAndDelteFunc(plan),
+		partialResultRequiredDataRatio: 1.0, // disable partial result on delete request
 	})
 	dr.result.DeleteCnt = dr.count.Load()
 	dr.result.Timestamp = dr.sessionTS.Load()

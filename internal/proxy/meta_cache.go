@@ -104,6 +104,7 @@ type collectionInfo struct {
 	partitionKeyIsolation bool
 	replicateID           string
 	updateTimestamp       uint64
+	shardsNum             int32
 }
 
 type databaseInfo struct {
@@ -473,6 +474,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			consistencyLevel:      collection.ConsistencyLevel,
 			partitionKeyIsolation: isolation,
 			updateTimestamp:       collection.UpdateTimestamp,
+			shardsNum:             collection.ShardsNum,
 		}, nil
 	}
 	_, dbOk := m.collInfo[database]
@@ -491,6 +493,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		partitionKeyIsolation: isolation,
 		replicateID:           replicateID,
 		updateTimestamp:       collection.UpdateTimestamp,
+		shardsNum:             collection.ShardsNum,
 	}
 
 	log.Ctx(ctx).Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName),
@@ -979,7 +982,8 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 			commonpbutil.WithMsgType(commonpb.MsgType_GetShardLeaders),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		CollectionID: info.collID,
+		CollectionID:            info.collID,
+		WithUnserviceableShards: true,
 	}
 
 	tr := timerecord.NewTimeRecorder("UpdateShardCache")
@@ -1024,7 +1028,7 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 		qns := make([]nodeInfo, len(leaders.GetNodeIds()))
 
 		for j := range qns {
-			qns[j] = nodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j]}
+			qns[j] = nodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j], leaders.GetServiceable()[j]}
 		}
 
 		shard2QueryNodes[leaders.GetChannelName()] = qns
