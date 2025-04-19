@@ -251,6 +251,30 @@ func TestIndexClient(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("CreateTask", func(t *testing.T) {
+		mockIN.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.CreateTaskRequest{}
+		_, err := client.CreateTask(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("QueryTask", func(t *testing.T) {
+		mockIN.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.QueryTaskRequest{}
+		_, err := client.QueryTask(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("DropTask", func(t *testing.T) {
+		mockIN.EXPECT().DropTask(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.DropTaskRequest{}
+		_, err := client.DropTask(ctx, req)
+		assert.NoError(t, err)
+	})
+
 	err = client.Close()
 	assert.NoError(t, err)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -29,6 +30,8 @@ type insertTask struct {
 	Condition
 	insertMsg *BaseInsertTask
 	ctx       context.Context
+
+	mu sync.RWMutex
 
 	result          *milvuspb.MutationResult
 	idAllocator     *allocator.IDAllocator
@@ -64,6 +67,8 @@ func (it *insertTask) Type() commonpb.MsgType {
 }
 
 func (it *insertTask) BeginTs() Timestamp {
+	it.mu.RLock()
+	defer it.mu.RUnlock()
 	return it.insertMsg.BeginTimestamp
 }
 
@@ -73,6 +78,8 @@ func (it *insertTask) SetTs(ts Timestamp) {
 }
 
 func (it *insertTask) EndTs() Timestamp {
+	it.mu.RLock()
+	defer it.mu.RUnlock()
 	return it.insertMsg.EndTimestamp
 }
 
@@ -290,9 +297,13 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		log.Warn("fail to get collection id", zap.Error(err))
 		return err
 	}
+	beginTs := it.BeginTs()
+	endTs := it.EndTs()
 	it.insertMsg.CollectionID = collID
-	it.insertMsg.BeginTimestamp = it.BeginTs()
-	it.insertMsg.EndTimestamp = it.EndTs()
+	it.mu.Lock()
+	it.insertMsg.BeginTimestamp = beginTs
+	it.insertMsg.EndTimestamp = endTs
+	it.mu.Unlock()
 
 	getCacheDur := tr.RecordSpan()
 	stream, err := it.chMgr.getOrCreateDmlStream(ctx, collID)

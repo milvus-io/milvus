@@ -121,7 +121,7 @@ minio:
   # To share an MinIO instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them. For details, see Operation FAQs.
   # The data will be stored in the local Docker if Docker is used to start the MinIO service locally. Ensure that there is sufficient storage space.
   # A bucket name is globally unique in one MinIO or S3 instance.
-  bucketName: a-bucket
+  bucketName: milvus-bucket
   # Root prefix of the key to where Milvus stores data in MinIO or S3.
   # It is recommended to change this parameter before starting Milvus for the first time.
   # To share an MinIO instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them. For details, see Operation FAQs.

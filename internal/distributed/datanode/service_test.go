@@ -386,6 +386,32 @@ func TestIndexService(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
+	t.Run("CreateTask", func(t *testing.T) {
+		dn.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		req := &workerpb.CreateTaskRequest{}
+		resp, err := server.CreateTask(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("QueryTask", func(t *testing.T) {
+		dn.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status: merr.Success(),
+		}, nil)
+		req := &workerpb.QueryTaskRequest{}
+		resp, err := server.QueryTask(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("DropTask", func(t *testing.T) {
+		dn.EXPECT().DropTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		req := &workerpb.DropTaskRequest{}
+		resp, err := server.DropTask(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
 	server.datanode.(*mocks.MockDataNode).EXPECT().Stop().Return(nil)
 	err = server.Stop()
 	assert.NoError(t, err)

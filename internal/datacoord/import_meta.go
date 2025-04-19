@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"golang.org/x/exp/maps"
 
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
@@ -94,7 +95,7 @@ type importMeta struct {
 	catalog metastore.DataCoordCatalog
 }
 
-func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (ImportMeta, error) {
+func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, alloc allocator.Allocator, meta *meta) (ImportMeta, error) {
 	restoredPreImportTasks, err := catalog.ListPreImportTasks(ctx)
 	if err != nil {
 		return nil, err
@@ -109,18 +110,25 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (Imp
 	}
 
 	tasks := newImportTasks()
+	imeta := &importMeta{}
 
 	for _, task := range restoredPreImportTasks {
-		tasks.add(&preImportTask{
-			PreImportTask: task,
-			tr:            timerecord.NewTimeRecorder("preimport task"),
-		})
+		t := &preImportTask{
+			imeta: imeta,
+			tr:    timerecord.NewTimeRecorder("preimport task"),
+		}
+		t.task.Store(task)
+		tasks.add(t)
 	}
 	for _, task := range restoredImportTasks {
-		tasks.add(&importTask{
-			ImportTaskV2: task,
-			tr:           timerecord.NewTimeRecorder("import task"),
-		})
+		t := &importTask{
+			alloc: alloc,
+			meta:  meta,
+			imeta: imeta,
+			tr:    timerecord.NewTimeRecorder("import task"),
+		}
+		t.task.Store(task)
+		tasks.add(t)
 	}
 
 	jobs := make(map[int64]ImportJob)
@@ -131,11 +139,10 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (Imp
 		}
 	}
 
-	return &importMeta{
-		jobs:    jobs,
-		tasks:   tasks,
-		catalog: catalog,
-	}, nil
+	imeta.jobs = jobs
+	imeta.tasks = tasks
+	imeta.catalog = catalog
+	return imeta, nil
 }
 
 func (m *importMeta) AddJob(ctx context.Context, job ImportJob) error {
@@ -223,13 +230,13 @@ func (m *importMeta) AddTask(ctx context.Context, task ImportTask) error {
 	defer m.mu.Unlock()
 	switch task.GetType() {
 	case PreImportTaskType:
-		err := m.catalog.SavePreImportTask(ctx, task.(*preImportTask).PreImportTask)
+		err := m.catalog.SavePreImportTask(ctx, task.(*preImportTask).task.Load())
 		if err != nil {
 			return err
 		}
 		m.tasks.add(task)
 	case ImportTaskType:
-		err := m.catalog.SaveImportTask(ctx, task.(*importTask).ImportTaskV2)
+		err := m.catalog.SaveImportTask(ctx, task.(*importTask).task.Load())
 		if err != nil {
 			return err
 		}
@@ -248,17 +255,19 @@ func (m *importMeta) UpdateTask(ctx context.Context, taskID int64, actions ...Up
 		}
 		switch updatedTask.GetType() {
 		case PreImportTaskType:
-			err := m.catalog.SavePreImportTask(ctx, updatedTask.(*preImportTask).PreImportTask)
+			err := m.catalog.SavePreImportTask(ctx, updatedTask.(*preImportTask).task.Load())
 			if err != nil {
 				return err
 			}
-			m.tasks.add(updatedTask)
+			// update memory task
+			task.(*preImportTask).task.Store(updatedTask.(*preImportTask).task.Load())
 		case ImportTaskType:
-			err := m.catalog.SaveImportTask(ctx, updatedTask.(*importTask).ImportTaskV2)
+			err := m.catalog.SaveImportTask(ctx, updatedTask.(*importTask).task.Load())
 			if err != nil {
 				return err
 			}
-			m.tasks.add(updatedTask)
+			// update memory task
+			task.(*importTask).task.Store(updatedTask.(*importTask).task.Load())
 		}
 	}
 

@@ -224,7 +224,7 @@ func (s *IndexServiceSuite) Test_CreateIndexJob_Compatibility() {
 			for {
 				resp, err := s.in.QueryJobs(ctx, &workerpb.QueryJobsRequest{
 					ClusterID: "cluster1",
-					BuildIDs:  []int64{buildID},
+					TaskIDs:   []int64{buildID},
 				})
 				s.NoError(err)
 				err = merr.Error(resp.GetStatus())
@@ -239,7 +239,7 @@ func (s *IndexServiceSuite) Test_CreateIndexJob_Compatibility() {
 
 			status, err = s.in.DropJobs(ctx, &workerpb.DropJobsRequest{
 				ClusterID: "cluster1",
-				BuildIDs:  []int64{buildID},
+				TaskIDs:   []int64{buildID},
 			})
 			s.NoError(err)
 			err = merr.Error(status)
@@ -293,7 +293,7 @@ func (s *IndexServiceSuite) Test_CreateIndexJob_Compatibility() {
 			for {
 				resp, err := s.in.QueryJobs(ctx, &workerpb.QueryJobsRequest{
 					ClusterID: "cluster1",
-					BuildIDs:  []int64{buildID},
+					TaskIDs:   []int64{buildID},
 				})
 				s.NoError(err)
 				err = merr.Error(resp.GetStatus())
@@ -308,7 +308,7 @@ func (s *IndexServiceSuite) Test_CreateIndexJob_Compatibility() {
 
 			status, err = s.in.DropJobs(ctx, &workerpb.DropJobsRequest{
 				ClusterID: "cluster1",
-				BuildIDs:  []int64{buildID},
+				TaskIDs:   []int64{buildID},
 			})
 			s.NoError(err)
 			err = merr.Error(status)
@@ -368,7 +368,7 @@ func (s *IndexServiceSuite) Test_CreateIndexJob_Compatibility() {
 			for {
 				resp, err := s.in.QueryJobs(ctx, &workerpb.QueryJobsRequest{
 					ClusterID: "cluster1",
-					BuildIDs:  []int64{buildID},
+					TaskIDs:   []int64{buildID},
 				})
 				s.NoError(err)
 				err = merr.Error(resp.GetStatus())
@@ -383,7 +383,7 @@ func (s *IndexServiceSuite) Test_CreateIndexJob_Compatibility() {
 
 			status, err = s.in.DropJobs(ctx, &workerpb.DropJobsRequest{
 				ClusterID: "cluster1",
-				BuildIDs:  []int64{buildID},
+				TaskIDs:   []int64{buildID},
 			})
 			s.NoError(err)
 			err = merr.Error(status)
@@ -431,7 +431,7 @@ func (s *IndexServiceSuite) Test_CreateIndexJob_ScalarIndex() {
 		for {
 			resp, err := s.in.QueryJobs(ctx, &workerpb.QueryJobsRequest{
 				ClusterID: "cluster1",
-				BuildIDs:  []int64{buildID},
+				TaskIDs:   []int64{buildID},
 			})
 			s.NoError(err)
 			err = merr.Error(resp.GetStatus())
@@ -446,7 +446,7 @@ func (s *IndexServiceSuite) Test_CreateIndexJob_ScalarIndex() {
 
 		status, err = s.in.DropJobs(ctx, &workerpb.DropJobsRequest{
 			ClusterID: "cluster1",
-			BuildIDs:  []int64{buildID},
+			TaskIDs:   []int64{buildID},
 		})
 		s.NoError(err)
 		err = merr.Error(status)

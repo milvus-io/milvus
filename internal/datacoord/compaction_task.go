@@ -17,10 +17,12 @@
 package datacoord
 
 import (
+	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
 type CompactionTask interface {
+	task.Task
 	// Process performs the task's state machine
 	//
 	// Returns:
@@ -41,7 +43,7 @@ type CompactionTask interface {
 	ShadowClone(opts ...compactionTaskOpt) *datapb.CompactionTask
 
 	SetNodeID(UniqueID) error
-	NeedReAssignNodeID() bool
+	NeedReAssignNodeID() bool // TODO: sheep, remove this
 	SaveTaskMeta() error
 
 	PreparePlan() bool

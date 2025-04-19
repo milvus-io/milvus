@@ -764,6 +764,7 @@ func TestServer_GetIndexState(t *testing.T) {
 		fieldID    = UniqueID(10)
 		indexID    = UniqueID(100)
 		segID      = UniqueID(1000)
+		buildID    = UniqueID(10000)
 		indexName  = "default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
@@ -2402,6 +2403,14 @@ func TestServer_GetIndexInfos(t *testing.T) {
 }
 
 func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
+	var (
+		collID    = UniqueID(1)
+		partID    = UniqueID(2)
+		segID     = UniqueID(1000)
+		indexID   = UniqueID(100)
+		fieldID   = UniqueID(10)
+		indexName = "default_idx"
+	)
 	segments := map[UniqueID]*SegmentInfo{
 		segID: {
 			SegmentInfo: &datapb.SegmentInfo{
@@ -2474,10 +2483,12 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 	for id, segment := range segments {
 		m.segments.SetSegment(id, segment)
 	}
-	s := &Server{meta: m}
+	indexInspector := &indexInspector{
+		meta: m,
+	}
 
 	t.Run("normal", func(t *testing.T) {
-		segments := s.getUnIndexTaskSegments(context.TODO())
+		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
 		assert.Equal(t, 1, len(segments))
 		assert.Equal(t, segID, segments[0].ID)
 
@@ -2500,7 +2511,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segments := s.getUnIndexTaskSegments(context.TODO())
+		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
 		assert.Equal(t, 1, len(segments))
 		assert.Equal(t, segID, segments[0].ID)
 	})
@@ -2513,7 +2524,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segments := s.getUnIndexTaskSegments(context.TODO())
+		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
 		assert.Equal(t, 0, len(segments))
 	})
 }
@@ -2625,6 +2636,7 @@ func TestValidateIndexParams(t *testing.T) {
 }
 
 func TestJsonIndex(t *testing.T) {
+	collID := UniqueID(1)
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
 	mock0Allocator := newMockAllocator(t)

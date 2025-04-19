@@ -45,10 +45,9 @@ type ImportChecker interface {
 type importChecker struct {
 	meta                *meta
 	broker              broker.Broker
-	cluster             Cluster
 	alloc               allocator.Allocator
 	imeta               ImportMeta
-	sjm                 StatsJobManager
+	sjm                 StatsInspector
 	l0CompactionTrigger TriggerManager
 
 	closeOnce sync.Once
@@ -57,16 +56,14 @@ type importChecker struct {
 
 func NewImportChecker(meta *meta,
 	broker broker.Broker,
-	cluster Cluster,
 	alloc allocator.Allocator,
 	imeta ImportMeta,
-	sjm StatsJobManager,
+	sjm StatsInspector,
 	l0CompactionTrigger TriggerManager,
 ) ImportChecker {
 	return &importChecker{
 		meta:                meta,
 		broker:              broker,
-		cluster:             cluster,
 		alloc:               alloc,
 		imeta:               imeta,
 		sjm:                 sjm,
@@ -219,7 +216,7 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 	}
 	fileGroups := lo.Chunk(lacks, Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt())
 
-	newTasks, err := NewPreImportTasks(fileGroups, job, c.alloc)
+	newTasks, err := NewPreImportTasks(fileGroups, job, c.alloc, c.imeta)
 	if err != nil {
 		log.Warn("new preimport tasks failed", zap.Error(err))
 		return
@@ -262,7 +259,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 
 	allDiskIndex := c.meta.indexMeta.AreAllDiskIndex(job.GetCollectionID(), job.GetSchema())
 	groups := RegroupImportFiles(job, lacks, allDiskIndex)
-	newTasks, err := NewImportTasks(groups, job, c.alloc, c.meta)
+	newTasks, err := NewImportTasks(groups, job, c.alloc, c.meta, c.imeta)
 	if err != nil {
 		log.Warn("new import tasks failed", zap.Error(err))
 		return
