@@ -6,6 +6,7 @@ use crate::{
     cstr_to_str,
     data_type::TantivyDataType,
     error::Result,
+    index_reader_c::SetBitsetFn,
     index_writer::IndexWriterWrapper,
     util::{create_binding, free_binding},
     TantivyIndexVersion,
@@ -90,9 +91,12 @@ pub extern "C" fn tantivy_commit_index(ptr: *mut c_void) -> RustResult {
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_create_reader_from_writer(ptr: *mut c_void) -> RustResult {
+pub extern "C" fn tantivy_create_reader_from_writer(
+    ptr: *mut c_void,
+    set_bitset: SetBitsetFn,
+) -> RustResult {
     let writer = ptr as *mut IndexWriterWrapper;
-    let reader = unsafe { (*writer).create_reader() };
+    let reader = unsafe { (*writer).create_reader(set_bitset) };
     match reader {
         Ok(r) => RustResult::from_ptr(create_binding(r)),
         Err(e) => RustResult::from_error(e.to_string()),
