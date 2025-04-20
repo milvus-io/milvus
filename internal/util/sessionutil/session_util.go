@@ -103,6 +103,7 @@ type SessionRaw struct {
 	Version                  string             `json:"Version"`
 	IndexEngineVersion       IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
 	ScalarIndexEngineVersion IndexEngineVersion `json:"ScalarIndexEngineVersion,omitempty"`
+	IndexNonEncoding         bool               `json:"IndexNonEncoding,omitempty"`
 	LeaseID                  *clientv3.LeaseID  `json:"LeaseID,omitempty"`
 
 	HostName     string            `json:"HostName,omitempty"`
@@ -191,6 +192,12 @@ func WithScalarIndexEngineVersion(minimal, current int32) SessionOption {
 	return func(session *Session) {
 		session.ScalarIndexEngineVersion.MinimalIndexVersion = minimal
 		session.ScalarIndexEngineVersion.CurrentIndexVersion = current
+	}
+}
+
+func WithIndexNonEncoding() SessionOption {
+	return func(session *Session) {
+		session.IndexNonEncoding = true
 	}
 }
 
