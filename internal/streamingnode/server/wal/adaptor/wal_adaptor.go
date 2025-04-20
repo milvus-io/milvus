@@ -96,7 +96,7 @@ func (w *walAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel st
 	currentMVCC := mvccManager.GetMVCCOfVChannel(vchannel)
 	if !currentMVCC.Confirmed {
 		// if the mvcc is not confirmed, trigger a sync operation to make it confirmed as soon as possible.
-		resource.Resource().TimeTickInspector().TriggerSync(w.rwWALImpls.Channel())
+		resource.Resource().TimeTickInspector().TriggerSync(w.rwWALImpls.Channel(), false)
 	}
 	return currentMVCC.Timetick, nil
 }

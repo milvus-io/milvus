@@ -74,7 +74,7 @@ func TestTimeTickSyncOperator(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Nil(t, r)
 	// should not trigger any wal operation, but only update the timetick.
-	operator.Sync(ctx)
+	operator.Sync(ctx, false)
 	r, err = wb.ReadFromExclusiveTimeTick(context.Background(), ts)
 	assert.NoError(t, err)
 	// should not block because timetick updates.
@@ -82,6 +82,16 @@ func TestTimeTickSyncOperator(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, msg)
 	assert.Greater(t, msg.TimeTick(), ts)
+
+	// should trigger wal operation.
+	l.EXPECT().Append(mock.Anything, mock.Anything).Unset()
+	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+		return &types.AppendResult{
+			MessageID: walimplstest.NewTestMessageID(1),
+			TimeTick:  mm.TimeTick(),
+		}, nil
+	})
+	operator.Sync(ctx, true)
 }
 
 func shouldBlock(ch <-chan struct{}) {

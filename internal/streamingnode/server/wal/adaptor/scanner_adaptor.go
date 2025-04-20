@@ -129,6 +129,12 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 		if wb, err = resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer(s.Context()); err != nil {
 			return err
 		}
+		// Trigger a persisted time tick to make sure the timetick is pushed forward.
+		// because the underlying wal may be deleted because of retention policy.
+		// So we cannot get the timetick from the wal.
+		// Trigger the timetick inspector to append a new persisted timetick,
+		// then the catch up scanner can see the latest timetick and make a catchup.
+		resource.Resource().TimeTickInspector().TriggerSync(s.Channel(), true)
 	}
 
 	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)
