@@ -55,6 +55,11 @@ func (e *StreamingError) IsTxnUnavilable() bool {
 		e.Code == streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE
 }
 
+// IsTxnExpired returns true if the transaction is expired.
+func (e *StreamingError) IsTxnExpired() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED
+}
+
 // IsResourceAcquired returns true if the resource is acquired.
 func (e *StreamingError) IsResourceAcquired() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED
