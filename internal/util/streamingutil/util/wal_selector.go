@@ -8,16 +8,18 @@ import (
 )
 
 const (
-	walTypeDefault = "default"
-	walTypeRocksmq = "rocksmq"
-	walTypeKafka   = "kafka"
-	walTypePulsar  = "pulsar"
+	walTypeDefault    = "default"
+	walTypeRocksmq    = "rocksmq"
+	walTypeKafka      = "kafka"
+	walTypePulsar     = "pulsar"
+	walTypeWoodpecker = "woodpecker"
 )
 
 type walEnable struct {
-	Rocksmq bool
-	Pulsar  bool
-	Kafka   bool
+	Rocksmq    bool
+	Pulsar     bool
+	Kafka      bool
+	Woodpecker bool
 }
 
 // MustSelectWALName select wal name.
@@ -28,6 +30,7 @@ func MustSelectWALName() string {
 		params.RocksmqEnable(),
 		params.PulsarEnable(),
 		params.KafkaEnable(),
+		params.WoodpeckerEnable(),
 	})
 }
 
@@ -49,6 +52,9 @@ func mustSelectWALName(standalone bool, mqType string, enable walEnable) string 
 	}
 	if enable.Kafka {
 		return walTypeKafka
+	}
+	if enable.Woodpecker {
+		return walTypeWoodpecker
 	}
 	panic(errors.Errorf("no available wal config found, %s, enable: %+v", mqType, enable))
 }

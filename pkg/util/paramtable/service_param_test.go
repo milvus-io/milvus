@@ -96,6 +96,31 @@ func TestServiceParam(t *testing.T) {
 		SParams.init(bt)
 	})
 
+	t.Run("test woodpeckerConfig", func(t *testing.T) {
+		wpCfg := &SParams.WoodpeckerCfg
+		assert.Equal(t, wpCfg.MetaType.GetValue(), "etcd")
+		assert.Equal(t, wpCfg.MetaPrefix.GetValue(), "woodpecker")
+
+		assert.Equal(t, wpCfg.AppendQueueSize.GetAsInt(), 10000)
+		assert.Equal(t, wpCfg.AppendMaxRetries.GetAsInt(), 3)
+		assert.Equal(t, wpCfg.SegmentRollingMaxSize.GetAsInt(), 2000000000)
+		assert.Equal(t, wpCfg.SegmentRollingMaxTime.GetAsInt(), 600)
+		assert.Equal(t, wpCfg.AuditorMaxInterval.GetAsInt(), 10)
+
+		assert.Equal(t, wpCfg.SyncMaxInterval.GetAsInt(), 1000)
+		assert.Equal(t, wpCfg.SyncMaxEntries.GetAsInt(), 100000)
+		assert.Equal(t, wpCfg.SyncMaxBytes.GetAsInt(), 64000000)
+		assert.Equal(t, wpCfg.FlushMaxRetries.GetAsInt(), 5)
+		assert.Equal(t, wpCfg.FlushMaxSize.GetAsInt(), 8000000)
+		assert.Equal(t, wpCfg.FlushMaxThreads.GetAsInt(), 4)
+		assert.Equal(t, wpCfg.RetryInterval.GetAsInt(), 1000)
+		assert.Equal(t, wpCfg.FragmentCachedMaxBytes.GetAsInt64(), int64(1000000000))
+		assert.Equal(t, wpCfg.FragmentCachedInterval.GetAsInt(), 1000)
+
+		assert.Equal(t, wpCfg.StorageType.GetValue(), "minio")
+		assert.Equal(t, wpCfg.RootPath.GetValue(), "/var/lib/milvus/woodpecker")
+	})
+
 	t.Run("test pulsarConfig", func(t *testing.T) {
 		// test default value
 		{
