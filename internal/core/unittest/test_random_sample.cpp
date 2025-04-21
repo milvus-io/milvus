@@ -15,7 +15,7 @@
 #include "common/Types.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
-#include "plan/PlanNode.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -51,8 +51,7 @@ TEST_P(RandomSampleTest, SampleOnly) {
 
     const int64_t N = 3000;
     auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
-    SealedLoadFieldData(dataset, *segment);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
@@ -82,7 +81,6 @@ TEST_P(RandomSampleTest, SampleWithUnaryFiler) {
 
     const int64_t N = 3000;
     auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
 
     auto size = dataset.raw_->mutable_fields_data()->size();
     auto i64_col = dataset.raw_->mutable_fields_data()
@@ -100,7 +98,7 @@ TEST_P(RandomSampleTest, SampleWithUnaryFiler) {
         }
     }
 
-    SealedLoadFieldData(dataset, *segment);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
     milvus::proto::plan::GenericValue val;
     val.set_int64_val(1);
@@ -143,9 +141,7 @@ TEST(RandomSampleTest, SampleWithEmptyInput) {
 
     const int64_t N = 3000;
     auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
-
-    SealedLoadFieldData(dataset, *segment);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
     milvus::proto::plan::GenericValue val;
     val.set_int64_val(0);

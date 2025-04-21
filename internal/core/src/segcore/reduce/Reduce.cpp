@@ -15,9 +15,10 @@
 #include <cstdint>
 #include <vector>
 
+#include "common/EasyAssert.h"
+#include "monitor/prometheus_client.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
-#include "common/EasyAssert.h"
 #include "segcore/pkVisitor.h"
 #include "segcore/ReduceUtils.h"
 

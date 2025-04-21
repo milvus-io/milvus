@@ -36,7 +36,6 @@
 
 #include "PbHelper.h"
 #include "segcore/collection_c.h"
-#include "segcore/SegmentSealed.h"
 #include "common/Types.h"
 #include "storage/BinlogReader.h"
 #include "storage/Event.h"
@@ -46,6 +45,10 @@
 #include "milvus-storage/common/constants.h"
 
 using boost::algorithm::starts_with;
+
+constexpr int64_t kCollectionID = 1;
+constexpr int64_t kPartitionID = 1;
+constexpr int64_t kSegmentID = 1;
 
 namespace milvus::segcore {
 
@@ -950,7 +953,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                                        int64_t dim) {
         field_data = storage::CreateFieldData(data_type, true, dim);
         int byteSize = (raw_count + 7) / 8;
-        uint8_t* valid_data = new uint8_t[byteSize];
+        std::vector<uint8_t> valid_data(byteSize);
         for (int i = 0; i < raw_count; i++) {
             bool value = raw_valid_data[i];
             int byteIndex = i / 8;
@@ -961,8 +964,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 valid_data[byteIndex] &= ~(1 << bitIndex);
             }
         }
-        field_data->FillFieldData(raw_data, valid_data, raw_count);
-        delete[] valid_data;
+        field_data->FillFieldData(raw_data, valid_data.data(), raw_count);
     };
 
     if (field_meta.is_vector()) {
@@ -1144,80 +1146,6 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
     }
 
     return field_data;
-}
-
-inline void
-SealedLoadFieldData(const GeneratedData& dataset,
-                    SegmentSealed& seg,
-                    const std::set<int64_t>& exclude_fields = {},
-                    bool with_mmap = false) {
-    auto row_count = dataset.row_ids_.size();
-    {
-        auto field_data = std::make_shared<milvus::FieldData<int64_t>>(
-            DataType::INT64, false);
-        field_data->FillFieldData(dataset.row_ids_.data(), row_count);
-
-        auto arrow_data_wrapper =
-            storage::ConvertFieldDataToArrowDataWrapper(field_data);
-
-        auto field_data_info = FieldDataInfo(
-            RowFieldID.get(),
-            row_count,
-            std::vector<std::shared_ptr<milvus::ArrowDataWrapper>>{
-                arrow_data_wrapper});
-        seg.LoadFieldData(RowFieldID, field_data_info);
-    }
-    {
-        auto field_data = std::make_shared<milvus::FieldData<int64_t>>(
-            DataType::INT64, false);
-        field_data->FillFieldData(dataset.timestamps_.data(), row_count);
-        auto arrow_data_wrapper =
-            storage::ConvertFieldDataToArrowDataWrapper(field_data);
-        auto field_data_info = FieldDataInfo(
-            TimestampFieldID.get(),
-            row_count,
-            std::vector<std::shared_ptr<milvus::ArrowDataWrapper>>{
-                arrow_data_wrapper});
-        seg.LoadFieldData(TimestampFieldID, field_data_info);
-    }
-    for (auto& iter : dataset.schema_->get_fields()) {
-        int64_t field_id = iter.first.get();
-        if (exclude_fields.find(field_id) != exclude_fields.end()) {
-            continue;
-        }
-    }
-    auto fields = dataset.schema_->get_fields();
-    for (auto& field_data : dataset.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-        if (exclude_fields.find(field_id) != exclude_fields.end()) {
-            continue;
-        }
-        FieldDataInfo info;
-        if (with_mmap) {
-            info.mmap_dir_path = "./data/mmap-test";
-        }
-        info.field_id = field_data.field_id();
-        info.row_count = row_count;
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(row_count, &field_data, field_meta));
-
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        if (with_mmap) {
-            seg.MapFieldData(FieldId(field_id), info);
-        } else {
-            seg.LoadFieldData(FieldId(field_id), info);
-        }
-    }
-}
-
-inline std::unique_ptr<SegmentSealed>
-SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
-    auto segment = CreateSealedSegment(schema);
-    SealedLoadFieldData(dataset, *segment);
-    return segment;
 }
 
 inline std::unique_ptr<milvus::index::VectorIndex>

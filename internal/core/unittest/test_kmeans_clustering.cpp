@@ -182,7 +182,7 @@ test_run() {
     int64_t nb = 10000;
 
     auto field_meta =
-        gen_field_meta(collection_id, partition_id, segment_id, field_id);
+        gen_field_data_meta(collection_id, partition_id, segment_id, field_id);
     auto index_meta =
         gen_index_meta(segment_id, field_id, index_build_id, index_version);
 

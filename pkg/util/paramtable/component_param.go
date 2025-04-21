@@ -2686,6 +2686,10 @@ type queryNodeConfig struct {
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
+	// TODO this should be refreshable?
+	TieredStorageEnableGlobal          ParamItem `refreshable:"false"`
+	TieredStorageMemoryAllocationRatio ParamItem `refreshable:"false"`
+	TieredStorageDiskAllocationRatio   ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -2822,6 +2826,47 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.StatsPublishInterval.Init(base.mgr)
+
+	p.TieredStorageEnableGlobal = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.enableGlobally",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "Whether or not to turn on Tiered Storage globally in this cluster.",
+		Export:       true,
+	}
+	p.TieredStorageEnableGlobal.Init(base.mgr)
+
+	p.TieredStorageMemoryAllocationRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.memoryAllocationRatio",
+		Version:      "2.6.0",
+		DefaultValue: "0.5",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio < 0 || ratio > 1 {
+				return "0.5"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Doc:    "The ratio of memory allocation for Tiered Storage.",
+		Export: true,
+	}
+	p.TieredStorageMemoryAllocationRatio.Init(base.mgr)
+
+	p.TieredStorageDiskAllocationRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.diskAllocationRatio",
+		Version:      "2.6.0",
+		DefaultValue: "0.5",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio < 0 || ratio > 1 {
+				return "0.5"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Doc:    "The ratio of disk allocation for Tiered Storage.",
+		Export: true,
+	}
+	p.TieredStorageDiskAllocationRatio.Init(base.mgr)
 
 	p.KnowhereThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereThreadPoolNumRatio",

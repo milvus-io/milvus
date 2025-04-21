@@ -16,6 +16,8 @@
 
 #include "FilterBitsNode.h"
 
+#include "monitor/prometheus_client.h"
+
 namespace milvus {
 namespace exec {
 PhyFilterBitsNode::PhyFilterBitsNode(

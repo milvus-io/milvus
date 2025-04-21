@@ -28,5 +28,8 @@ main(int argc, char** argv) {
         get_default_local_storage_config());
     milvus::storage::MmapManager::GetInstance().Init(get_default_mmap_config());
 
+    milvus::cachinglayer::Manager::ConfigureTieredStorage(
+        true, 1024 * 1024 * 1024, 1024 * 1024 * 1024);
+
     return RUN_ALL_TESTS();
 }

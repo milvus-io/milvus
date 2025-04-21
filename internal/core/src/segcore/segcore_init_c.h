@@ -62,6 +62,11 @@ GetMinimalIndexVersion();
 void
 SetThreadName(const char*);
 
+void
+ConfigureTieredStorage(const bool enabled_globally,
+                       const int64_t memory_limit_bytes,
+                       const int64_t disk_limit_bytes);
+
 #ifdef __cplusplus
 }
 #endif

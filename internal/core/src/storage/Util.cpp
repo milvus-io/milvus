@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "arrow/array/builder_binary.h"
+#include "arrow/scalar.h"
 #include "arrow/type_fwd.h"
 #include "fmt/format.h"
 #include "log/Log.h"
@@ -323,6 +324,42 @@ CreateArrowBuilder(DataType data_type, int dim) {
             PanicInfo(
                 DataTypeInvalid, "unsupported vector data type {}", data_type);
         }
+    }
+}
+
+std::shared_ptr<arrow::Scalar>
+CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
+    auto default_var = field_meta.default_value();
+    AssertInfo(default_var.has_value(),
+               "cannot create Arrow Scalar from empty default value");
+    auto default_value = default_var.value();
+    switch (field_meta.get_data_type()) {
+        case DataType::BOOL:
+            return std::make_shared<arrow::BooleanScalar>(
+                default_value.bool_data());
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+            return std::make_shared<arrow::Int32Scalar>(
+                default_value.int_data());
+        case DataType::INT64:
+            return std::make_shared<arrow::Int64Scalar>(
+                default_value.long_data());
+        case DataType::FLOAT:
+            return std::make_shared<arrow::FloatScalar>(
+                default_value.float_data());
+        case DataType::DOUBLE:
+            return std::make_shared<arrow::DoubleScalar>(
+                default_value.double_data());
+        case DataType::VARCHAR:
+        case DataType::STRING:
+        case DataType::TEXT:
+            return std::make_shared<arrow::StringScalar>(
+                default_value.string_data());
+        default:
+            PanicInfo(DataTypeInvalid,
+                      "unsupported default value data type {}",
+                      field_meta.get_data_type());
     }
 }
 
@@ -647,31 +684,6 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
     chunk_manager->Write(
         object_key, serialized_index_data.data(), serialized_index_size);
     return std::make_pair(std::move(object_key), serialized_index_size);
-}
-
-std::pair<std::string, size_t>
-EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
-                          void* buf,
-                          int64_t element_count,
-                          FieldDataMeta field_data_meta,
-                          const FieldMeta& field_meta,
-                          std::string object_key) {
-    // dim should not be used for sparse float vector field
-    auto dim = IsSparseFloatVectorDataType(field_meta.get_data_type())
-                   ? -1
-                   : field_meta.get_dim();
-    auto field_data =
-        CreateFieldData(field_meta.get_data_type(), false, dim, 0);
-    field_data->FillFieldData(buf, element_count);
-    auto payload_reader = std::make_shared<PayloadReader>(field_data);
-    auto insertData = std::make_shared<InsertData>(payload_reader);
-    insertData->SetFieldDataMeta(field_data_meta);
-    auto serialized_inserted_data = insertData->serialize_to_remote_file();
-    auto serialized_inserted_data_size = serialized_inserted_data.size();
-    chunk_manager->Write(object_key,
-                         serialized_inserted_data.data(),
-                         serialized_inserted_data_size);
-    return std::make_pair(std::move(object_key), serialized_inserted_data_size);
 }
 
 std::vector<std::future<std::unique_ptr<DataCodec>>>

@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "common/Types.h"
+
 namespace milvus::segcore {
 
 template <typename RecordType>

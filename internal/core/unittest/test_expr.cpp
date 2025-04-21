@@ -30,7 +30,6 @@
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
-#include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
@@ -41,23 +40,19 @@
 #include "pb/schema.pb.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
-#include "query/PlanProto.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "simdjson/padded_string.h"
-#include "segcore/segment_c.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/storage_test_utils.h"
 #include "index/IndexFactory.h"
-#include "exec/expression/Expr.h"
 #include "exec/Task.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "expr/ITypeExpr.h"
-#include "index/BitmapIndex.h"
-#include "index/InvertedIndexTantivy.h"
 #include "mmap/Types.h"
 
 using namespace milvus;
@@ -3478,22 +3473,7 @@ TEST_P(ExprTest, test_term_pk_with_sorted) {
         schema, nullptr, 1, SegcoreConfig::default_config(), false, true);
     int N = 100000;
     auto raw_data = DataGen(schema, N);
-
-    // load field data
-    auto fields = schema->get_fields();
-
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     std::vector<proto::plan::GenericValue> retrieve_ints;
     for (int i = 0; i < 10; ++i) {
@@ -3573,19 +3553,7 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
     auto seg = CreateSealedSegment(schema);
     size_t N = 1000;
     auto raw_data = DataGen(schema, N);
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
     auto build_expr = [&](enum DataType type) -> expr::TypedExprPtr {
@@ -3724,19 +3692,7 @@ TEST_P(ExprTest, TestReorder) {
     auto seg = CreateSealedSegment(schema);
     size_t N = 1000;
     auto raw_data = DataGen(schema, N);
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
 
@@ -3870,19 +3826,7 @@ TEST_P(ExprTest, TestCompareExprNullable) {
     auto seg = CreateSealedSegment(schema);
     size_t N = 1000;
     auto raw_data = DataGen(schema, N);
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
     auto build_expr = [&](enum DataType type) -> expr::TypedExprPtr {
@@ -4027,19 +3971,7 @@ TEST_P(ExprTest, TestCompareExprNullable2) {
     auto seg = CreateSealedSegment(schema);
     size_t N = 1000;
     auto raw_data = DataGen(schema, N);
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
     auto build_expr = [&](enum DataType type) -> expr::TypedExprPtr {
@@ -4178,19 +4110,7 @@ TEST_P(ExprTest, TestMutiInConvert) {
     auto seg = CreateSealedSegment(schema);
     size_t N = 1000;
     auto raw_data = DataGen(schema, N);
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
 
@@ -4267,19 +4187,7 @@ TEST(Expr, TestExprPerformance) {
     auto raw_data = DataGen(schema, N);
 
     // load field data
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     enum ExprType {
         UnaryRangeExpr = 0,
@@ -4646,19 +4554,7 @@ TEST(Expr, TestExprNOT) {
     valid_data_double = raw_data.get_col_valid(double_fid);
 
     // load field data
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     enum ExprType {
         UnaryRangeExpr = 0,
@@ -5004,22 +4900,7 @@ TEST_P(ExprTest, test_term_pk) {
     auto seg = CreateSealedSegment(schema);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
-
-    // load field data
-    auto fields = schema->get_fields();
-
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     std::vector<proto::plan::GenericValue> retrieve_ints;
     for (int i = 0; i < 10; ++i) {
@@ -5151,19 +5032,7 @@ TEST_P(ExprTest, TestConjuctExpr) {
     int N = 1000;
     auto raw_data = DataGen(schema, N);
     // load field data
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
 
     auto build_expr = [&](int l, int r) -> expr::TypedExprPtr {
@@ -5241,20 +5110,8 @@ TEST_P(ExprTest, TestConjuctExprNullable) {
     auto seg = CreateSealedSegment(schema);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
-    // load field data
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        info.arrow_reader_channel->push(
-            storage::ConvertFieldDataToArrowDataWrapper(
-                CreateFieldDataFromDataArray(N, &field_data, field_meta)));
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
 
     auto build_expr = [&](int l, int r) -> expr::TypedExprPtr {
@@ -5330,19 +5187,7 @@ TEST_P(ExprTest, TestUnaryBenchTest) {
     auto raw_data = DataGen(schema, N);
 
     // load field data
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
 
@@ -5403,19 +5248,7 @@ TEST_P(ExprTest, TestBinaryRangeBenchTest) {
     auto raw_data = DataGen(schema, N);
 
     // load field data
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
 
@@ -5484,19 +5317,7 @@ TEST_P(ExprTest, TestLogicalUnaryBenchTest) {
     auto raw_data = DataGen(schema, N);
 
     // load field data
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
 
@@ -5560,19 +5381,7 @@ TEST_P(ExprTest, TestBinaryLogicalBenchTest) {
     auto raw_data = DataGen(schema, N);
 
     // load field data
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
 
@@ -5645,21 +5454,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeBenchExpr) {
     auto seg = CreateSealedSegment(schema);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
-
-    // load field data
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(
-                N, &field_data, fields.at(FieldId(field_id))));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
 
@@ -5768,20 +5563,7 @@ TEST(Expr, TestExprNull) {
 
     FixedVector<bool> valid_data_all_true(N, true);
 
-    // load field data
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(
-                N, &field_data, fields.at(FieldId(field_id))));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     auto build_nullable_expr = [&](DataType data_type,
                                    NullExprType op) -> expr::TypedExprPtr {
@@ -5958,21 +5740,7 @@ TEST_P(ExprTest, TestCompareExprBenchTest) {
     int N = 1000;
     auto raw_data = DataGen(schema, N);
 
-    // load field data
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(
-                N, &field_data, fields.at(FieldId(field_id))));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
 
@@ -6030,20 +5798,7 @@ TEST_P(ExprTest, TestRefactorExprs) {
     int N = 1000;
     auto raw_data = DataGen(schema, N);
 
-    // load field data
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(
-                N, &field_data, fields.at(FieldId(field_id))));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
 
     enum ExprType {
         UnaryRangeExpr = 0,
@@ -6069,13 +5824,6 @@ TEST_P(ExprTest, TestRefactorExprs) {
             }
             case TermExprImpl: {
                 std::vector<proto::plan::GenericValue> retrieve_ints;
-                // for (int i = 0; i < n; ++i) {
-                //     retrieve_ints.push_back("xxxxxx" + std::to_string(i % 10));
-                // }
-                // return std::make_shared<query::TermExprImpl<std::string>>(
-                //     ColumnInfo(str1_fid, DataType::VARCHAR),
-                //     retrieve_ints,
-                //     proto::plan::GenericValue::ValCase::kStringVal);
                 for (int i = 0; i < n; ++i) {
                     proto::plan::GenericValue val;
                     val.set_float_val(i);
@@ -10847,6 +10595,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
     auto seg = CreateSealedSegment(schema);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
     segcore::LoadIndexInfo load_index_info;
 
     // load index for int8 field
@@ -11579,6 +11328,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
     auto seg = CreateSealedSegment(schema);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
     segcore::LoadIndexInfo load_index_info;
 
     auto i8_valid_data = raw_data.get_col_valid(i8_nullable_fid);
@@ -16634,11 +16384,11 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
     load_index_info.index_params = {{JSON_PATH, this->json_path}};
     seg->LoadIndex(load_index_info);
 
-    auto json_field_data_info = FieldDataInfo(
-        json_fid.get(),
-        N,
-        {storage::ConvertFieldDataToArrowDataWrapper(json_field)});
-    seg->LoadFieldData(json_fid, json_field_data_info);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    seg->LoadFieldData(load_info);
 
     auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
         expr::ColumnInfo(json_fid, DataType::JSON, {this->json_path.substr(1)}),
@@ -16768,14 +16518,11 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     load_index_info.index_params = {{JSON_PATH, "/a"}};
     seg->LoadIndex(load_index_info);
 
-    auto json_field_data_info =
-        FieldDataInfo(json_fid.get(), 2 * json_strs.size());
-    json_field_data_info.arrow_reader_channel->push(
-        storage::ConvertFieldDataToArrowDataWrapper(json_field));
-    json_field_data_info.arrow_reader_channel->push(
-        storage::ConvertFieldDataToArrowDataWrapper(json_field2));
-    json_field_data_info.arrow_reader_channel->close();
-    seg->LoadFieldData(json_fid, json_field_data_info);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field, json_field2}, cm);
+    seg->LoadFieldData(load_info);
 
     proto::plan::GenericValue val;
     val.set_int64_val(1);
@@ -16874,11 +16621,11 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
     load_index_info.index_params = {{JSON_PATH, json_index_path}};
     seg->LoadIndex(load_index_info);
 
-    auto json_field_data_info = FieldDataInfo(json_fid.get(), json_strs.size());
-    json_field_data_info.arrow_reader_channel->push(
-        storage::ConvertFieldDataToArrowDataWrapper(json_field));
-    json_field_data_info.arrow_reader_channel->close();
-    seg->LoadFieldData(json_fid, json_field_data_info);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    seg->LoadFieldData(load_info);
 
     for (auto& [nested_path, exists, expect] : test_cases) {
         BitsetType expect_res;
@@ -17052,12 +16799,11 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
     load_index_info.index_params = {{JSON_PATH, "/a"}};
     seg->LoadIndex(load_index_info);
 
-    auto json_field_data_info = FieldDataInfo(
-        json_fid.get(),
-        json_strs.size(),
-        {storage::ConvertFieldDataToArrowDataWrapper(json_field)});
-
-    seg->LoadFieldData(json_fid, json_field_data_info);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, json_fid.get(), {json_field}, cm);
+    seg->LoadFieldData(load_info);
 
     for (auto& [lower, upper, lower_inclusive, upper_inclusive, result] :
          test_cases) {

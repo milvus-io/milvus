@@ -20,7 +20,6 @@
 #include <index/Index.h>
 #include <index/ScalarIndex.h>
 
-#include "AckResponder.h"
 #include "InsertRecord.h"
 #include "common/FieldMeta.h"
 #include "common/Schema.h"
@@ -29,6 +28,7 @@
 #include "knowhere/config.h"
 #include "log/Log.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/InsertRecord.h"
 #include "index/VectorIndex.h"
 
 namespace milvus::segcore {
@@ -306,13 +306,12 @@ class IndexingRecord {
     }
 
     // concurrent, reentrant
-    template <bool is_sealed>
     void
     AppendingIndex(int64_t reserved_offset,
                    int64_t size,
                    FieldId fieldId,
                    const DataArray* stream_data,
-                   const InsertRecord<is_sealed>& record) {
+                   const InsertRecord<false>& record) {
         if (!is_in(fieldId)) {
             return;
         }
@@ -339,13 +338,12 @@ class IndexingRecord {
     }
 
     // concurrent, reentrant
-    template <bool is_sealed>
     void
     AppendingIndex(int64_t reserved_offset,
                    int64_t size,
                    FieldId fieldId,
                    const FieldDataPtr data,
-                   const InsertRecord<is_sealed>& record) {
+                   const InsertRecord<false>& record) {
         if (!is_in(fieldId)) {
             return;
         }

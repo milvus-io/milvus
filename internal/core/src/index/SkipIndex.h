@@ -10,13 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <cstddef>
+
 #include <unordered_map>
 
 #include "common/Types.h"
-#include "log/Log.h"
-#include "mmap/Column.h"
-#include "mmap/ChunkedColumn.h"
 
 namespace milvus {
 
@@ -308,15 +305,15 @@ class SkipIndex {
         if (start > num_rows - 1) {
             return {std::string(), std::string(), num_rows};
         }
-        std::string_view min_string = var_column.RawAt(start);
-        std::string_view max_string = var_column.RawAt(start);
+        std::string min_string = var_column.RawAt(start);
+        std::string max_string = min_string;
         int64_t null_count = start;
         for (int64_t i = start; i < num_rows; i++) {
-            const auto& val = var_column.RawAt(i);
             if (!var_column.IsValid(i)) {
                 null_count++;
                 continue;
             }
+            const auto& val = var_column.RawAt(i);
             if (val < min_string) {
                 min_string = val;
             }
@@ -325,7 +322,7 @@ class SkipIndex {
             }
         }
         // The field data may be released, so we need to copy the string to avoid invalid memory access.
-        return {std::string(min_string), std::string(max_string), null_count};
+        return {min_string, max_string, null_count};
     }
 
  private:

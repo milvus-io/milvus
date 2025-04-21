@@ -20,19 +20,14 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <queue>
 
 #include "TimestampIndex.h"
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/Types.h"
-#include "fmt/format.h"
 #include "mmap/ChunkedColumn.h"
-#include "mmap/Column.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
-#include "segcore/Record.h"
-#include "storage/MmapManager.h"
 
 namespace milvus::segcore {
 
@@ -279,39 +274,35 @@ class OffsetOrderedArray : public OffsetMap {
     std::vector<std::pair<T, int32_t>> array_;
 };
 
-template <bool is_sealed = false>
+template <bool is_sealed>
 struct InsertRecord {
+ public:
     InsertRecord(
         const Schema& schema,
         const int64_t size_per_chunk,
-        const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
+        const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
+        bool called_from_subclass = false)
         : timestamps_(size_per_chunk), mmap_descriptor_(mmap_descriptor) {
+        if (called_from_subclass) {
+            return;
+        }
         std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
-
+        // for sealed segment, only pk field is added.
         for (auto& field : schema) {
             auto field_id = field.first;
             auto& field_meta = field.second;
-            if (pk2offset_ == nullptr && pk_field_id.has_value() &&
-                pk_field_id.value() == field_id) {
+            if (pk_field_id.has_value() && pk_field_id.value() == field_id) {
+                AssertInfo(!field_meta.is_nullable(),
+                           "Primary key should not be nullable");
                 switch (field_meta.get_data_type()) {
                     case DataType::INT64: {
-                        if constexpr (is_sealed) {
-                            pk2offset_ =
-                                std::make_unique<OffsetOrderedArray<int64_t>>();
-                        } else {
-                            pk2offset_ =
-                                std::make_unique<OffsetOrderedMap<int64_t>>();
-                        }
+                        pk2offset_ =
+                            std::make_unique<OffsetOrderedArray<int64_t>>();
                         break;
                     }
                     case DataType::VARCHAR: {
-                        if constexpr (is_sealed) {
-                            pk2offset_ = std::make_unique<
-                                OffsetOrderedArray<std::string>>();
-                        } else {
-                            pk2offset_ = std::make_unique<
-                                OffsetOrderedMap<std::string>>();
-                        }
+                        pk2offset_ =
+                            std::make_unique<OffsetOrderedArray<std::string>>();
                         break;
                     }
                     default: {
@@ -321,7 +312,6 @@ struct InsertRecord {
                     }
                 }
             }
-            append_field_meta(field_id, field_meta, size_per_chunk);
         }
     }
 
@@ -344,18 +334,16 @@ struct InsertRecord {
     }
 
     void
-    insert_pks(milvus::DataType data_type,
-               const std::shared_ptr<ChunkedColumnBase>& data) {
+    insert_pks(milvus::DataType data_type, ChunkedColumnBase* data) {
         std::lock_guard lck(shared_mutex_);
         int64_t offset = 0;
         switch (data_type) {
             case DataType::INT64: {
-                auto column = std::dynamic_pointer_cast<ChunkedColumn>(data);
-                auto num_chunk = column->num_chunks();
+                auto num_chunk = data->num_chunks();
                 for (int i = 0; i < num_chunk; ++i) {
-                    auto pks =
-                        reinterpret_cast<const int64_t*>(column->Data(i));
-                    auto chunk_num_rows = column->chunk_row_nums(i);
+                    auto pw = data->DataOfChunk(i);
+                    auto pks = reinterpret_cast<const int64_t*>(pw.get());
+                    auto chunk_num_rows = data->chunk_row_nums(i);
                     for (int j = 0; j < chunk_num_rows; ++j) {
                         pk2offset_->insert(pks[j], offset++);
                     }
@@ -363,12 +351,10 @@ struct InsertRecord {
                 break;
             }
             case DataType::VARCHAR: {
-                auto column = std::dynamic_pointer_cast<
-                    ChunkedVariableColumn<std::string>>(data);
-
-                auto num_chunk = column->num_chunks();
+                auto num_chunk = data->num_chunks();
                 for (int i = 0; i < num_chunk; ++i) {
-                    auto pks = column->StringViews(i).first;
+                    auto pw = data->StringViews(i);
+                    auto pks = pw.get().first;
                     for (auto& pk : pks) {
                         pk2offset_->insert(std::string(pk), offset++);
                     }
@@ -380,6 +366,90 @@ struct InsertRecord {
                           fmt::format("unsupported primary key data type",
                                       data_type));
             }
+        }
+    }
+
+    bool
+    empty_pks() const {
+        std::shared_lock lck(shared_mutex_);
+        return pk2offset_->empty();
+    }
+
+    void
+    seal_pks() {
+        std::lock_guard lck(shared_mutex_);
+        pk2offset_->seal();
+    }
+
+    const ConcurrentVector<Timestamp>&
+    timestamps() const {
+        return timestamps_;
+    }
+
+    virtual void
+    clear() {
+        timestamps_.clear();
+        timestamp_index_ = TimestampIndex();
+        pk2offset_->clear();
+        reserved = 0;
+    }
+
+    size_t
+    CellByteSize() const {
+        return 0;
+    }
+
+ public:
+    ConcurrentVector<Timestamp> timestamps_;
+
+    std::atomic<int64_t> reserved = 0;
+
+    // used for timestamps index of sealed segment
+    TimestampIndex timestamp_index_;
+
+    // pks to row offset
+    std::unique_ptr<OffsetMap> pk2offset_;
+
+ protected:
+    storage::MmapChunkDescriptorPtr mmap_descriptor_;
+    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
+    mutable std::shared_mutex shared_mutex_{};
+};
+
+template <>
+struct InsertRecord<false> : public InsertRecord<true> {
+ public:
+    InsertRecord(
+        const Schema& schema,
+        const int64_t size_per_chunk,
+        const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr)
+        : InsertRecord<true>(schema, size_per_chunk, mmap_descriptor, true) {
+        std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
+        for (auto& field : schema) {
+            auto field_id = field.first;
+            auto& field_meta = field.second;
+            if (pk_field_id.has_value() && pk_field_id.value() == field_id) {
+                AssertInfo(!field_meta.is_nullable(),
+                           "Primary key should not be nullable");
+                switch (field_meta.get_data_type()) {
+                    case DataType::INT64: {
+                        pk2offset_ =
+                            std::make_unique<OffsetOrderedMap<int64_t>>();
+                        break;
+                    }
+                    case DataType::VARCHAR: {
+                        pk2offset_ =
+                            std::make_unique<OffsetOrderedMap<std::string>>();
+                        break;
+                    }
+                    default: {
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format("unsupported pk type",
+                                              field_meta.get_data_type()));
+                    }
+                }
+            }
+            append_field_meta(field_id, field_meta, size_per_chunk);
         }
     }
 
@@ -414,103 +484,6 @@ struct InsertRecord {
                 }
             }
         }
-    }
-
-    std::vector<SegOffset>
-    search_pk(const PkType& pk, int64_t insert_barrier) const {
-        std::shared_lock lck(shared_mutex_);
-        std::vector<SegOffset> res_offsets;
-        auto offset_iter = pk2offset_->find(pk);
-        for (auto offset : offset_iter) {
-            if (offset < insert_barrier) {
-                res_offsets.emplace_back(offset);
-            }
-        }
-        return res_offsets;
-    }
-
-    void
-    insert_pk(const PkType& pk, int64_t offset) {
-        std::lock_guard lck(shared_mutex_);
-        pk2offset_->insert(pk, offset);
-    }
-
-    bool
-    empty_pks() const {
-        std::shared_lock lck(shared_mutex_);
-        return pk2offset_->empty();
-    }
-
-    void
-    seal_pks() {
-        std::lock_guard lck(shared_mutex_);
-        pk2offset_->seal();
-    }
-
-    // get data without knowing the type
-    VectorBase*
-    get_data_base(FieldId field_id) const {
-        AssertInfo(data_.find(field_id) != data_.end(),
-                   "Cannot find field_data with field_id: " +
-                       std::to_string(field_id.get()));
-        AssertInfo(data_.at(field_id) != nullptr,
-                   "data_ at i is null" + std::to_string(field_id.get()));
-        return data_.at(field_id).get();
-    }
-
-    // get field data in given type, const version
-    template <typename Type>
-    const ConcurrentVector<Type>*
-    get_data(FieldId field_id) const {
-        auto base_ptr = get_data_base(field_id);
-        auto ptr = dynamic_cast<const ConcurrentVector<Type>*>(base_ptr);
-        Assert(ptr);
-        return ptr;
-    }
-
-    // get field data in given type, non-const version
-    template <typename Type>
-    ConcurrentVector<Type>*
-    get_data(FieldId field_id) {
-        auto base_ptr = get_data_base(field_id);
-        auto ptr = dynamic_cast<ConcurrentVector<Type>*>(base_ptr);
-        Assert(ptr);
-        return ptr;
-    }
-
-    ThreadSafeValidDataPtr
-    get_valid_data(FieldId field_id) const {
-        AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
-                   "Cannot find valid_data with field_id: " +
-                       std::to_string(field_id.get()));
-        AssertInfo(valid_data_.at(field_id) != nullptr,
-                   "valid_data_ at i is null" + std::to_string(field_id.get()));
-        return valid_data_.at(field_id);
-    }
-
-    bool
-    is_data_exist(FieldId field_id) const {
-        return data_.find(field_id) != data_.end();
-    }
-
-    bool
-    is_valid_data_exist(FieldId field_id) const {
-        return valid_data_.find(field_id) != valid_data_.end();
-    }
-
-    SpanBase
-    get_span_base(FieldId field_id, int64_t chunk_id) const {
-        auto data = get_data_base(field_id);
-        if (is_valid_data_exist(field_id)) {
-            auto size = data->get_chunk_size(chunk_id);
-            auto element_offset = data->get_element_offset(chunk_id);
-            return SpanBase(
-                data->get_chunk_data(chunk_id),
-                get_valid_data(field_id)->get_chunk_data(element_offset),
-                size,
-                data->get_element_size());
-        }
-        return data->get_span_base(chunk_id);
     }
 
     void
@@ -602,18 +575,76 @@ struct InsertRecord {
         }
     }
 
-    // append a column of scalar or sparse float vector type
-    template <typename Type>
     void
-    append_data(FieldId field_id, int64_t size_per_chunk) {
-        static_assert(IsScalar<Type> || IsSparse<Type>);
-        data_.emplace(
-            field_id,
-            std::make_unique<ConcurrentVector<Type>>(
-                size_per_chunk,
-                mmap_descriptor_,
-                is_valid_data_exist(field_id) ? get_valid_data(field_id)
-                                              : nullptr));
+    insert_pk(const PkType& pk, int64_t offset) {
+        std::lock_guard lck(shared_mutex_);
+        pk2offset_->insert(pk, offset);
+    }
+
+    // get data without knowing the type
+    VectorBase*
+    get_data_base(FieldId field_id) const {
+        AssertInfo(data_.find(field_id) != data_.end(),
+                   "Cannot find field_data with field_id: " +
+                       std::to_string(field_id.get()));
+        AssertInfo(data_.at(field_id) != nullptr,
+                   "data_ at i is null" + std::to_string(field_id.get()));
+        return data_.at(field_id).get();
+    }
+
+    // get field data in given type, const version
+    template <typename Type>
+    const ConcurrentVector<Type>*
+    get_data(FieldId field_id) const {
+        auto base_ptr = get_data_base(field_id);
+        auto ptr = dynamic_cast<const ConcurrentVector<Type>*>(base_ptr);
+        Assert(ptr);
+        return ptr;
+    }
+
+    // get field data in given type, non-const version
+    template <typename Type>
+    ConcurrentVector<Type>*
+    get_data(FieldId field_id) {
+        auto base_ptr = get_data_base(field_id);
+        auto ptr = dynamic_cast<ConcurrentVector<Type>*>(base_ptr);
+        Assert(ptr);
+        return ptr;
+    }
+
+    ThreadSafeValidDataPtr
+    get_valid_data(FieldId field_id) const {
+        AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
+                   "Cannot find valid_data with field_id: " +
+                       std::to_string(field_id.get()));
+        AssertInfo(valid_data_.at(field_id) != nullptr,
+                   "valid_data_ at i is null" + std::to_string(field_id.get()));
+        return valid_data_.at(field_id);
+    }
+
+    bool
+    is_data_exist(FieldId field_id) const {
+        return data_.find(field_id) != data_.end();
+    }
+
+    bool
+    is_valid_data_exist(FieldId field_id) const {
+        return valid_data_.find(field_id) != valid_data_.end();
+    }
+
+    SpanBase
+    get_span_base(FieldId field_id, int64_t chunk_id) const {
+        auto data = get_data_base(field_id);
+        if (is_valid_data_exist(field_id)) {
+            auto size = data->get_chunk_size(chunk_id);
+            auto element_offset = data->get_element_offset(chunk_id);
+            return SpanBase(
+                data->get_chunk_data(chunk_id),
+                get_valid_data(field_id)->get_chunk_data(element_offset),
+                size,
+                data->get_element_size());
+        }
+        return data->get_span_base(chunk_id);
     }
 
     // append a column of scalar type
@@ -633,15 +664,24 @@ struct InsertRecord {
                           dim, size_per_chunk, mmap_descriptor_));
     }
 
+    // append a column of scalar or sparse float vector type
+    template <typename Type>
+    void
+    append_data(FieldId field_id, int64_t size_per_chunk) {
+        static_assert(IsScalar<Type> || IsSparse<Type>);
+        data_.emplace(
+            field_id,
+            std::make_unique<ConcurrentVector<Type>>(
+                size_per_chunk,
+                mmap_descriptor_,
+                is_valid_data_exist(field_id) ? get_valid_data(field_id)
+                                              : nullptr));
+    }
+
     void
     drop_field_data(FieldId field_id) {
         data_.erase(field_id);
         valid_data_.erase(field_id);
-    }
-
-    const ConcurrentVector<Timestamp>&
-    timestamps() const {
-        return timestamps_;
     }
 
     int64_t
@@ -649,39 +689,23 @@ struct InsertRecord {
         return ack_responder_.GetAck();
     }
 
-    void
-    clear() {
-        timestamps_.clear();
-        reserved = 0;
-        ack_responder_.clear();
-        timestamp_index_ = TimestampIndex();
-        pk2offset_->clear();
-        data_.clear();
-    }
-
     bool
     empty() const {
         return pk2offset_->empty();
     }
+    void
+    clear() override {
+        InsertRecord<true>::clear();
+        data_.clear();
+        ack_responder_.clear();
+    }
 
  public:
-    ConcurrentVector<Timestamp> timestamps_;
-
     // used for preInsert of growing segment
-    std::atomic<int64_t> reserved = 0;
     AckResponder ack_responder_;
 
-    // used for timestamps index of sealed segment
-    TimestampIndex timestamp_index_;
-
-    // pks to row offset
-    std::unique_ptr<OffsetMap> pk2offset_;
-
  private:
-    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
     std::unordered_map<FieldId, ThreadSafeValidDataPtr> valid_data_{};
-    mutable std::shared_mutex shared_mutex_{};
-    storage::MmapChunkDescriptorPtr mmap_descriptor_;
 };
 
 }  // namespace milvus::segcore

@@ -19,13 +19,9 @@
 #include <vector>
 #include <folly/ConcurrentSkipList.h>
 
-#include "AckResponder.h"
-#include "common/Schema.h"
+#include "cachinglayer/CacheSlot.h"
 #include "common/Types.h"
-#include "segcore/Record.h"
 #include "segcore/InsertRecord.h"
-#include "segcore/SegmentInterface.h"
-#include "ConcurrentVector.h"
 
 namespace milvus::segcore {
 
@@ -52,7 +48,12 @@ static int32_t DELETE_PAIR_SIZE = sizeof(std::pair<Timestamp, Offset>);
 template <bool is_sealed = false>
 class DeletedRecord {
  public:
-    DeletedRecord(InsertRecord<is_sealed>* insert_record,
+    using InsertRecordType = std::conditional_t<
+        is_sealed,
+        std::shared_ptr<milvus::cachinglayer::CacheSlot<InsertRecord<true>>>,
+        InsertRecord<false>*>;
+
+    DeletedRecord(InsertRecordType insert_record,
                   std::function<std::vector<SegOffset>(
                       const PkType& pk, Timestamp timestamp)> search_pk_func,
                   int64_t segment_id)
@@ -108,6 +109,18 @@ class DeletedRecord {
         Timestamp max_timestamp = 0;
 
         SortedDeleteList::Accessor accessor(deleted_lists_);
+        InsertRecord<is_sealed>* insert_record = nullptr;
+        std::shared_ptr<
+            milvus::cachinglayer::CellAccessor<InsertRecord<is_sealed>>>
+            cell_accessor{nullptr};
+        if constexpr (is_sealed) {
+            cell_accessor = insert_record_->PinCells({0})
+                                .via(&folly::InlineExecutor::instance())
+                                .get();
+            insert_record = cell_accessor->get_cell_of(0);
+        } else {
+            insert_record = insert_record_;
+        }
         for (size_t i = 0; i < pks.size(); ++i) {
             auto deleted_pk = pks[i];
             auto deleted_ts = timestamps[i];
@@ -124,7 +137,7 @@ class DeletedRecord {
                 }
                 // if insert record and delete record is same timestamp,
                 // delete not take effect on this record.
-                if (deleted_ts == insert_record_->timestamps_[row_id]) {
+                if (deleted_ts == insert_record->timestamps_[row_id]) {
                     continue;
                 }
                 accessor.insert(std::make_pair(deleted_ts, row_id));
@@ -133,7 +146,7 @@ class DeletedRecord {
                     deleted_mask_.set(row_id);
                 } else {
                     // need to add mask size firstly for growing segment
-                    deleted_mask_.resize(insert_record_->size());
+                    deleted_mask_.resize(insert_record->size());
                     deleted_mask_.set(row_id);
                 }
                 removed_num++;
@@ -322,7 +335,7 @@ class DeletedRecord {
  public:
     std::atomic<int64_t> n_ = 0;
     std::atomic<int64_t> mem_size_ = 0;
-    InsertRecord<is_sealed>* insert_record_;
+    InsertRecordType insert_record_;
     std::function<std::vector<SegOffset>(const PkType& pk, Timestamp timestamp)>
         search_pk_func_;
     int64_t segment_id_{0};

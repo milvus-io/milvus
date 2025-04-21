@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <variant>
 
+#include "cachinglayer/CacheSlot.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
@@ -45,6 +46,8 @@
 #include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::segcore {
+
+using namespace milvus::cachinglayer;
 
 int64_t
 SegmentGrowingImpl::PreInsert(int64_t size) {
@@ -509,8 +512,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
 }
 
 SegcoreError
-SegmentGrowingImpl::Delete(int64_t reserved_begin,
-                           int64_t size,
+SegmentGrowingImpl::Delete(int64_t size,
                            const IdArray* ids,
                            const Timestamp* timestamps_raw) {
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
@@ -573,12 +575,13 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     deleted_record_.LoadPush(pks, timestamps);
 }
 
-SpanBase
+PinWrapper<SpanBase>
 SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
-    return get_insert_record().get_span_base(field_id, chunk_id);
+    return PinWrapper<SpanBase>(
+        get_insert_record().get_span_base(field_id, chunk_id));
 }
 
-std::pair<std::vector<std::string_view>, FixedVector<bool>>
+PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_string_view_impl(
     FieldId field_id,
     int64_t chunk_id,
@@ -588,7 +591,7 @@ SegmentGrowingImpl::chunk_string_view_impl(
               "chunk string view impl not implement for growing segment");
 }
 
-std::pair<std::vector<ArrayView>, FixedVector<bool>>
+PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_array_view_impl(
     FieldId field_id,
     int64_t chunk_id,
@@ -598,7 +601,7 @@ SegmentGrowingImpl::chunk_array_view_impl(
               "chunk array view impl not implement for growing segment");
 }
 
-std::pair<std::vector<std::string_view>, FixedVector<bool>>
+PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_view_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
@@ -1154,7 +1157,7 @@ SegmentGrowingImpl::CreateJSONIndex(FieldId field_id) {
     json_indexes_[field_id] = std::move(index);
 }
 
-std::pair<std::string_view, bool>
+std::pair<milvus::Json, bool>
 SegmentGrowingImpl::GetJsonData(FieldId field_id, size_t offset) const {
     auto vec_ptr = dynamic_cast<const ConcurrentVector<Json>*>(
         insert_record_.get_data_base(field_id));
@@ -1162,10 +1165,9 @@ SegmentGrowingImpl::GetJsonData(FieldId field_id, size_t offset) const {
     auto& field_meta = schema_->operator[](field_id);
     if (field_meta.is_nullable()) {
         auto valid_data_ptr = insert_record_.get_valid_data(field_id);
-        return std::make_pair(std::string_view(src[offset]),
-                              valid_data_ptr->is_valid(offset));
+        return std::make_pair(src[offset], valid_data_ptr->is_valid(offset));
     }
-    return std::make_pair(std::string_view(src[offset]), true);
+    return std::make_pair(src[offset], true);
 }
 
 void

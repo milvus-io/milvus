@@ -22,6 +22,7 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "segcore/Record.h"
 #include "common/Exception.h"
 #include "knowhere/sparse_utils.h"
 #include "pb/schema.pb.h"
@@ -63,7 +64,7 @@ TEST(Util, GetDeleteBitmap) {
     schema->set_primary_field_id(i64_fid);
     auto N = 10;
     uint64_t seg_id = 101;
-    InsertRecord insert_record(*schema, N);
+    InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
         [&insert_record](const PkType& pk, Timestamp timestamp) {

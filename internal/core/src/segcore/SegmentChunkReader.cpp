@@ -39,20 +39,24 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
             };
         }
     }
-    auto chunk_info = segment_->chunk_data<T>(field_id, current_chunk_id);
+    // pw is captured by value, each time we need to access a new chunk, we need to
+    // pin a new Chunk.
+    auto pw = segment_->chunk_data<T>(field_id, current_chunk_id);
+    auto chunk_info = pw.get();
     auto chunk_data = chunk_info.data();
     auto chunk_valid_data = chunk_info.valid_data();
     auto current_chunk_size = segment_->chunk_size(field_id, current_chunk_id);
     return [=,
+            pw = std::move(pw),
             &current_chunk_id,
             &current_chunk_pos]() mutable -> const data_access_type {
         if (current_chunk_pos >= current_chunk_size) {
             current_chunk_id++;
             current_chunk_pos = 0;
-            auto chunk_info =
-                segment_->chunk_data<T>(field_id, current_chunk_id);
-            chunk_data = chunk_info.data();
-            chunk_valid_data = chunk_info.valid_data();
+            // the old chunk will be unpinned, pw will now pin the new chunk.
+            pw = segment_->chunk_data<T>(field_id, current_chunk_id);
+            chunk_data = pw.get().data();
+            chunk_valid_data = pw.get().valid_data();
             current_chunk_size =
                 segment_->chunk_size(field_id, current_chunk_id);
         }
@@ -92,26 +96,28 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
         !storage::MmapManager::GetInstance()
              .GetMmapConfig()
              .growing_enable_mmap) {
-        auto chunk_info =
-            segment_->chunk_data<std::string>(field_id, current_chunk_id);
+        auto pw = segment_->chunk_data<std::string>(field_id, current_chunk_id);
+        auto chunk_info = pw.get();
         auto chunk_data = chunk_info.data();
         auto chunk_valid_data = chunk_info.valid_data();
         auto current_chunk_size =
             segment_->chunk_size(field_id, current_chunk_id);
-        return [=,
+        return [pw = std::move(pw),
+                this,
+                field_id,
+                chunk_data,
+                chunk_valid_data,
+                current_chunk_size,
+                // pw = std::move(pw),
                 &current_chunk_id,
                 &current_chunk_pos]() mutable -> const data_access_type {
             if (current_chunk_pos >= current_chunk_size) {
                 current_chunk_id++;
                 current_chunk_pos = 0;
-                chunk_data =
-                    segment_
-                        ->chunk_data<std::string>(field_id, current_chunk_id)
-                        .data();
-                chunk_valid_data =
-                    segment_
-                        ->chunk_data<std::string>(field_id, current_chunk_id)
-                        .valid_data();
+                pw = segment_->chunk_data<std::string>(field_id,
+                                                       current_chunk_id);
+                chunk_data = pw.get().data();
+                chunk_valid_data = pw.get().valid_data();
                 current_chunk_size =
                     segment_->chunk_size(field_id, current_chunk_id);
             }
@@ -122,24 +128,24 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
             return chunk_data[current_chunk_pos++];
         };
     } else {
-        auto chunk_info =
+        auto pw =
             segment_->chunk_view<std::string_view>(field_id, current_chunk_id);
-
         auto current_chunk_size =
             segment_->chunk_size(field_id, current_chunk_id);
         return [=,
+                pw = std::move(pw),
                 &current_chunk_id,
                 &current_chunk_pos]() mutable -> const data_access_type {
             if (current_chunk_pos >= current_chunk_size) {
                 current_chunk_id++;
                 current_chunk_pos = 0;
-                chunk_info = segment_->chunk_view<std::string_view>(
-                    field_id, current_chunk_id);
+                pw = segment_->chunk_view<std::string_view>(field_id,
+                                                            current_chunk_id);
                 current_chunk_size =
                     segment_->chunk_size(field_id, current_chunk_id);
             }
-            auto& chunk_data = chunk_info.first;
-            auto& chunk_valid_data = chunk_info.second;
+            auto& chunk_data = pw.get().first;
+            auto& chunk_valid_data = pw.get().second;
             if (current_chunk_pos < chunk_valid_data.size() &&
                 !chunk_valid_data[current_chunk_pos]) {
                 current_chunk_pos++;
@@ -204,10 +210,11 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
             };
         }
     }
-    auto chunk_data = segment_->chunk_data<T>(field_id, chunk_id).data();
-    auto chunk_valid_data =
-        segment_->chunk_data<T>(field_id, chunk_id).valid_data();
-    return [chunk_data, chunk_valid_data](int i) -> const data_access_type {
+    auto pw = segment_->chunk_data<T>(field_id, chunk_id);
+    return [pw = std::move(pw)](int i) mutable -> const data_access_type {
+        auto chunk_info = pw.get();
+        auto chunk_data = chunk_info.data();
+        auto chunk_valid_data = chunk_info.valid_data();
         if (chunk_valid_data && !chunk_valid_data[i]) {
             return std::nullopt;
         }
@@ -237,22 +244,20 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(FieldId field_id,
         !storage::MmapManager::GetInstance()
              .GetMmapConfig()
              .growing_enable_mmap) {
-        auto chunk_data =
-            segment_->chunk_data<std::string>(field_id, chunk_id).data();
-        auto chunk_valid_data =
-            segment_->chunk_data<std::string>(field_id, chunk_id).valid_data();
-        return [chunk_data, chunk_valid_data](int i) -> const data_access_type {
+        auto pw = segment_->chunk_data<std::string>(field_id, chunk_id);
+        return [pw = std::move(pw)](int i) mutable -> const data_access_type {
+            auto chunk_data = pw.get().data();
+            auto chunk_valid_data = pw.get().valid_data();
             if (chunk_valid_data && !chunk_valid_data[i]) {
                 return std::nullopt;
             }
             return chunk_data[i];
         };
     } else {
-        auto chunk_info =
-            segment_->chunk_view<std::string_view>(field_id, chunk_id);
-        return [chunk_data = std::move(chunk_info.first),
-                chunk_valid_data = std::move(chunk_info.second)](
-                   int i) -> const data_access_type {
+        auto pw = segment_->chunk_view<std::string_view>(field_id, chunk_id);
+        return [pw = std::move(pw)](int i) mutable -> const data_access_type {
+            auto chunk_data = pw.get().first;
+            auto chunk_valid_data = pw.get().second;
             if (i < chunk_valid_data.size() && !chunk_valid_data[i]) {
                 return std::nullopt;
             }

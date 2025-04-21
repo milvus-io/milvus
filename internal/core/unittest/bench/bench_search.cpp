@@ -12,9 +12,12 @@
 #include <cstdint>
 #include <benchmark/benchmark.h>
 #include <string>
+#include "common/type_c.h"
+#include "segcore/segment_c.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -109,7 +112,12 @@ Search_Sealed(benchmark::State& state) {
         auto dataset_ = DataGen(schema, N);
         return dataset_;
     }();
-    SealedLoadFieldData(dataset_, *segment);
+    auto storage_config = get_default_local_storage_config();
+    auto cm = storage::CreateChunkManager(storage_config);
+    auto load_info = PrepareInsertBinlog(1, 1, 1, dataset_, cm);
+    auto segment_ptr = segment.get();
+    auto status = LoadFieldData(segment_ptr, &load_info);
+    ASSERT_EQ(status.error_code, Success);
     auto choice = state.range(0);
     if (choice == 0) {
         // Brute Force

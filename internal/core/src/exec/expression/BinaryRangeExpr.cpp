@@ -720,8 +720,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 if (lower_inclusive && upper_inclusive) {
                     if (type == uint8_t(milvus::index::JSONType::STRING) ||
                         type == uint8_t(milvus::index::JSONType::DOUBLE) ||

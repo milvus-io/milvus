@@ -449,6 +449,12 @@ queryNode:
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
+    tieredStorage:
+      # at a later version, we'll allow the user to enable/disable tiered storage on a per-collection/field/index basis.
+      # for now, we only support enabling/disabling it globally.
+      enableGlobally: true
+      memoryAllocationRatio: 0.8 # The ratio of memory allocation for tiered storage
+      diskAllocationRatio: 0.8 # The ratio of disk allocation for tiered storage
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95

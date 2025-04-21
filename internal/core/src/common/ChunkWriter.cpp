@@ -76,14 +76,14 @@ StringChunkWriter::write(const arrow::ArrayVector& array_vec) {
     }
 }
 
-std::shared_ptr<Chunk>
+std::unique_ptr<Chunk>
 StringChunkWriter::finish() {
     // write padding, maybe not needed anymore
     // FIXME
     char padding[MMAP_STRING_PADDING];
     target_->write(padding, MMAP_STRING_PADDING);
     auto [data, size] = target_->get();
-    return std::make_shared<StringChunk>(row_nums_, data, size, nullable_);
+    return std::make_unique<StringChunk>(row_nums_, data, size, nullable_);
 }
 
 void
@@ -135,13 +135,13 @@ JSONChunkWriter::write(const arrow::ArrayVector& array_vec) {
     }
 }
 
-std::shared_ptr<Chunk>
+std::unique_ptr<Chunk>
 JSONChunkWriter::finish() {
     char padding[simdjson::SIMDJSON_PADDING];
     target_->write(padding, simdjson::SIMDJSON_PADDING);
 
     auto [data, size] = target_->get();
-    return std::make_shared<JSONChunk>(row_nums_, data, size, nullable_);
+    return std::make_unique<JSONChunk>(row_nums_, data, size, nullable_);
 }
 
 void
@@ -219,13 +219,13 @@ ArrayChunkWriter::write(const arrow::ArrayVector& array_vec) {
     }
 }
 
-std::shared_ptr<Chunk>
+std::unique_ptr<Chunk>
 ArrayChunkWriter::finish() {
     char padding[MMAP_ARRAY_PADDING];
     target_->write(padding, MMAP_ARRAY_PADDING);
 
     auto [data, size] = target_->get();
-    return std::make_shared<ArrayChunk>(
+    return std::make_unique<ArrayChunk>(
         row_nums_, data, size, element_type_, nullable_);
 }
 
@@ -283,14 +283,14 @@ SparseFloatVectorChunkWriter::write(const arrow::ArrayVector& array_vec) {
     }
 }
 
-std::shared_ptr<Chunk>
+std::unique_ptr<Chunk>
 SparseFloatVectorChunkWriter::finish() {
     auto [data, size] = target_->get();
-    return std::make_shared<SparseFloatVectorChunk>(
+    return std::make_unique<SparseFloatVectorChunk>(
         row_nums_, data, size, nullable_);
 }
 
-std::shared_ptr<Chunk>
+std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              int dim,
              const arrow::ArrayVector& array_vec) {
@@ -390,7 +390,7 @@ create_chunk(const FieldMeta& field_meta,
     return w->finish();
 }
 
-std::shared_ptr<Chunk>
+std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              int dim,
              File& file,

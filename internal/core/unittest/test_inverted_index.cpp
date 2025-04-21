@@ -27,13 +27,13 @@ using namespace milvus;
 
 namespace milvus::test {
 auto
-gen_field_meta(int64_t collection_id = 1,
-               int64_t partition_id = 2,
-               int64_t segment_id = 3,
-               int64_t field_id = 101,
-               DataType data_type = DataType::NONE,
-               DataType element_type = DataType::NONE,
-               bool nullable = false) -> storage::FieldDataMeta {
+gen_field_data_meta(int64_t collection_id = 1,
+                    int64_t partition_id = 2,
+                    int64_t segment_id = 3,
+                    int64_t field_id = 101,
+                    DataType data_type = DataType::NONE,
+                    DataType element_type = DataType::NONE,
+                    bool nullable = false) -> storage::FieldDataMeta {
     auto meta = storage::FieldDataMeta{
         .collection_id = collection_id,
         .partition_id = partition_id,
@@ -109,13 +109,13 @@ test_run() {
     int64_t index_version = 4000;
     int64_t lack_binlog_row = 100;
 
-    auto field_meta = test::gen_field_meta(collection_id,
-                                           partition_id,
-                                           segment_id,
-                                           field_id,
-                                           dtype,
-                                           element_type,
-                                           nullable);
+    auto field_meta = test::gen_field_data_meta(collection_id,
+                                                partition_id,
+                                                segment_id,
+                                                field_id,
+                                                dtype,
+                                                element_type,
+                                                nullable);
     auto index_meta = test::gen_index_meta(
         segment_id, field_id, index_build_id, index_version);
 
@@ -518,13 +518,13 @@ test_string() {
     int64_t index_version = 4001;
     int64_t lack_binlog_row = 100;
 
-    auto field_meta = test::gen_field_meta(collection_id,
-                                           partition_id,
-                                           segment_id,
-                                           field_id,
-                                           dtype,
-                                           DataType::NONE,
-                                           nullable);
+    auto field_meta = test::gen_field_data_meta(collection_id,
+                                                partition_id,
+                                                segment_id,
+                                                field_id,
+                                                dtype,
+                                                DataType::NONE,
+                                                nullable);
     auto index_meta = test::gen_index_meta(
         segment_id, field_id, index_build_id, index_version);
 

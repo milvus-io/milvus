@@ -47,10 +47,9 @@
 #include "plan/PlanNode.h"
 #include "segcore/load_index_c.h"
 #include "test_utils/c_api_test_utils.h"
+#include "test_utils/DataGen.h"
 #include "segcore/vector_index_c.h"
 #include "common/jsmn.h"
-
-namespace chrono = std::chrono;
 
 using namespace milvus;
 using namespace milvus::test;
@@ -437,13 +436,8 @@ TEST(CApiTest, DeleteTest) {
     auto delete_data = serialize(ids.get());
     uint64_t delete_timestamps[] = {0, 0, 0};
 
-    auto offset = 0;
-    auto del_res = Delete(segment,
-                          offset,
-                          3,
-                          delete_data.data(),
-                          delete_data.size(),
-                          delete_timestamps);
+    auto del_res = Delete(
+        segment, 3, delete_data.data(), delete_data.size(), delete_timestamps);
     ASSERT_EQ(del_res.error_code, Success);
 
     DeleteCollection(collection);
@@ -480,9 +474,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
                                                delete_pks.end());
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(1, dataset.timestamps_[N - 1]);
-    offset = 0;
     auto del_res = Delete(segment,
-                          offset,
                           1,
                           delete_data.data(),
                           delete_data.size(),
@@ -546,9 +538,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
                                                delete_pks.end());
     delete_data = serialize(ids.get());
     delete_timestamps[0]++;
-    offset = 0;
     del_res = Delete(segment,
-                     offset,
                      1,
                      delete_data.data(),
                      delete_data.size(),
@@ -598,7 +588,11 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
     auto segment_interface = reinterpret_cast<SegmentInterface*>(segment);
     auto sealed_segment = dynamic_cast<SegmentSealed*>(segment_interface);
-    SealedLoadFieldData(dataset, *sealed_segment);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm);
+    sealed_segment->LoadFieldData(load_info);
 
     // delete data pks = {1}
     std::vector<int64_t> delete_pks = {1};
@@ -607,9 +601,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
                                                delete_pks.end());
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(1, dataset.timestamps_[N - 1]);
-    auto offset = 0;
     auto del_res = Delete(segment,
-                          offset,
                           1,
                           delete_data.data(),
                           delete_data.size(),
@@ -674,9 +666,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
                                                delete_pks.end());
     delete_data = serialize(ids.get());
     delete_timestamps[0]++;
-    offset = 0;
     del_res = Delete(segment,
-                     offset,
                      1,
                      delete_data.data(),
                      delete_data.size(),
@@ -774,9 +764,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
-    offset = 0;
     auto del_res = Delete(segment,
-                          offset,
                           3,
                           delete_data.data(),
                           delete_data.size(),
@@ -814,7 +802,11 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
 
     auto segment_interface = reinterpret_cast<SegmentInterface*>(segment);
     auto sealed_segment = dynamic_cast<SegmentSealed*>(segment_interface);
-    SealedLoadFieldData(dataset, *sealed_segment);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm);
+    sealed_segment->LoadFieldData(load_info);
 
     std::vector<proto::plan::GenericValue> retrive_row_ids;
     // create retrieve plan pks in {1, 2, 3}
@@ -856,10 +848,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
-    auto offset = 0;
-
     auto del_res = Delete(segment,
-                          offset,
                           3,
                           delete_data.data(),
                           delete_data.size(),
@@ -984,10 +973,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
-    offset = 0;
-
     auto del_res = Delete(segment,
-                          offset,
                           3,
                           delete_data.data(),
                           delete_data.size(),
@@ -1071,8 +1057,11 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     // insert data with pks = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4} , timestamps = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     auto segment_interface = reinterpret_cast<SegmentInterface*>(segment);
     auto sealed_segment = dynamic_cast<SegmentSealed*>(segment_interface);
-    SealedLoadFieldData(dataset, *sealed_segment);
-    sealed_segment->get_insert_record().seal_pks();
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm);
+    sealed_segment->LoadFieldData(load_info);
 
     // delete data pks = {1, 2, 3}, timestamps = {4, 4, 4}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
@@ -1082,10 +1071,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[4]);
 
-    auto offset = 0;
-
     auto del_res = Delete(segment,
-                          offset,
                           3,
                           delete_data.data(),
                           delete_data.size(),
@@ -1372,14 +1358,8 @@ TEST(CApiTest, GetDeletedCountTest) {
     auto delete_data = serialize(ids.get());
     uint64_t delete_timestamps[] = {0, 0, 0};
 
-    auto offset = 0;
-
-    auto del_res = Delete(segment,
-                          offset,
-                          3,
-                          delete_data.data(),
-                          delete_data.size(),
-                          delete_timestamps);
+    auto del_res = Delete(
+        segment, 3, delete_data.data(), delete_data.size(), delete_timestamps);
     ASSERT_EQ(del_res.error_code, Success);
 
     // TODO: assert(deleted_count == len(delete_row_ids))
@@ -1453,14 +1433,8 @@ TEST(CApiTest, GetRealCount) {
                                     dataset.timestamps_[N - 1] + 2,
                                     dataset.timestamps_[N - 1] + 3};
 
-    auto del_offset = 0;
-
-    auto del_res = Delete(segment,
-                          del_offset,
-                          3,
-                          delete_data.data(),
-                          delete_data.size(),
-                          delete_timestamps);
+    auto del_res = Delete(
+        segment, 3, delete_data.data(), delete_data.size(), delete_timestamps);
     ASSERT_EQ(del_res.error_code, Success);
 
     auto real_count = GetRealCount(segment);
@@ -2097,7 +2071,7 @@ Test_Indexing_Without_Predicate() {
         knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -2254,7 +2228,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -2432,7 +2406,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -2612,7 +2586,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -2784,7 +2758,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -2957,7 +2931,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -3138,7 +3112,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -3319,7 +3293,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -3494,7 +3468,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -3692,7 +3666,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -3741,27 +3715,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     DeleteSearchResultDataBlobs(cSearchResultData);
 }
 
-TEST(CApiTest, SealedSegmentTest) {
-    auto collection = NewCollection(get_default_schema_config().c_str());
-    CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment, false);
-    ASSERT_EQ(status.error_code, Success);
-
-    int N = 1000;
-    std::default_random_engine e(67);
-    auto ages = std::vector<int64_t>(N);
-    for (auto& age : ages) {
-        age = e() % 2000;
-    }
-    auto res = LoadFieldRawData(segment, 101, ages.data(), N);
-    ASSERT_EQ(res.error_code, Success);
-    auto count = GetRowCount(segment);
-    ASSERT_EQ(count, N);
-
-    DeleteCollection(collection);
-    DeleteSegment(segment);
-}
-
 TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     constexpr auto TOPK = 5;
 
@@ -3777,8 +3730,6 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(FieldId(100));
     auto query_ptr = vec_col.data() + BIAS * DIM;
-
-    auto counter_col = dataset.get_col<int64_t>(FieldId(101));
 
     const char* raw_plan = R"(vector_anns: <
                                 field_id: 100
@@ -3880,17 +3831,21 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     vec_index->Query(query_dataset, search_info, nullptr, result_on_index);
     EXPECT_EQ(result_on_index.distances_.size(), num_queries * TOPK);
 
-    status = LoadFieldRawData(segment, 101, counter_col.data(), N);
-    ASSERT_EQ(status.error_code, Success);
-
-    status = LoadFieldRawData(segment, 0, dataset.row_ids_.data(), N);
-    ASSERT_EQ(status.error_code, Success);
-
-    status = LoadFieldRawData(segment, 1, dataset.timestamps_.data(), N);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto excluded_field_ids = GetExcludedFieldIds(dataset.schema_, {0, 1, 101});
+    auto load_info = PrepareInsertBinlog(kCollectionID,
+                                         kPartitionID,
+                                         kSegmentID,
+                                         dataset,
+                                         cm,
+                                         "",
+                                         excluded_field_ids);
+    status = LoadFieldData(segment, &load_info);
     ASSERT_EQ(status.error_code, Success);
 
     // load index for vec field, load raw data for scalar field
-    auto sealed_segment = SealedCreator(schema, dataset);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
@@ -3917,7 +3872,6 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 }
 
 TEST(CApiTest, SealedSegment_search_without_predicates) {
-    constexpr auto TOPK = 5;
     std::string schema_string = generate_collection_schema<milvus::FloatVector>(
         knowhere::metric::L2, DIM);
     auto collection = NewCollection(schema_string.c_str());
@@ -3926,16 +3880,8 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     auto status = NewSegment(collection, Sealed, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
 
-    auto N = ROW_COUNT;
     uint64_t ts_offset = 1000;
-    auto dataset = DataGen(schema, N, ts_offset);
-    auto vec_col = dataset.get_col<float>(FieldId(100));
-    auto query_ptr = vec_col.data() + BIAS * DIM;
-
-    auto vec_array = dataset.get_col(FieldId(100));
-    auto vec_data = serialize(vec_array.get());
-
-    auto counter_col = dataset.get_col<int64_t>(FieldId(101));
+    auto dataset = DataGen(schema, ROW_COUNT, ts_offset);
 
     const char* raw_plan = R"(vector_anns: <
                                 field_id: 100
@@ -3949,16 +3895,18 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
         >)";
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
 
-    status = LoadFieldRawData(segment, 100, vec_data.data(), N);
-    ASSERT_EQ(status.error_code, Success);
-
-    status = LoadFieldRawData(segment, 101, counter_col.data(), N);
-    ASSERT_EQ(status.error_code, Success);
-
-    status = LoadFieldRawData(segment, 0, dataset.row_ids_.data(), N);
-    ASSERT_EQ(status.error_code, Success);
-
-    status = LoadFieldRawData(segment, 1, dataset.timestamps_.data(), N);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto excluded_field_ids =
+        GetExcludedFieldIds(dataset.schema_, {0, 1, 100, 101});
+    auto load_info = PrepareInsertBinlog(kCollectionID,
+                                         kPartitionID,
+                                         kSegmentID,
+                                         dataset,
+                                         cm,
+                                         "",
+                                         excluded_field_ids);
+    status = LoadFieldData(segment, &load_info);
     ASSERT_EQ(status.error_code, Success);
 
     int num_queries = 10;
@@ -3977,14 +3925,17 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
     CSearchResult search_result;
-    auto res =
-        CSearch(segment, plan, placeholderGroup, N + ts_offset, &search_result);
+    auto res = CSearch(
+        segment, plan, placeholderGroup, ROW_COUNT + ts_offset, &search_result);
     std::cout << res.error_msg << std::endl;
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
-    auto res2 = CSearch(
-        segment, plan, placeholderGroup, N + ts_offset, &search_result2);
+    auto res2 = CSearch(segment,
+                        plan,
+                        placeholderGroup,
+                        ROW_COUNT + ts_offset,
+                        &search_result2);
     ASSERT_EQ(res2.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -4002,9 +3953,6 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         knowhere::metric::L2, DIM);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    CSegmentInterface segment;
-    auto status = NewSegment(collection, Sealed, -1, &segment, false);
-    ASSERT_EQ(status.error_code, Success);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -4062,7 +4010,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    status = CreateSearchPlanByExpr(
+    auto status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -4103,18 +4051,10 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         knowhere::Version::GetCurrentVersion().VersionNumber());
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
     // load vec index
-    status = UpdateSealedSegmentIndex(segment, c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-
-    // load raw data
-    status = LoadFieldRawData(segment, 101, counter_col.data(), N);
-    ASSERT_EQ(status.error_code, Success);
-
-    status = LoadFieldRawData(segment, 0, dataset.row_ids_.data(), N);
-    ASSERT_EQ(status.error_code, Success);
-
-    status = LoadFieldRawData(segment, 1, dataset.timestamps_.data(), N);
+    status = UpdateSealedSegmentIndex(segment.get(), c_load_index_info);
     ASSERT_EQ(status.error_code, Success);
 
     // gen query dataset
@@ -4133,7 +4073,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     }
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = CSearch(segment,
+    auto res_after_load_index = CSearch(segment.get(),
                                         plan,
                                         placeholderGroup,
                                         timestamp,
@@ -4151,39 +4091,6 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
-    DeleteSegment(segment);
-}
-
-TEST(CApiTest, SealedSegment_Update_Field_Size) {
-    auto schema = std::make_shared<Schema>();
-    auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    auto vec_fid = schema->AddDebugField(
-        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
-    schema->set_primary_field_id(str_fid);
-
-    auto segment = CreateSealedSegment(schema).release();
-
-    auto N = ROW_COUNT;
-    int row_size = 10;
-
-    // update row_size =10 with n rows
-    auto status =
-        UpdateFieldRawDataSize(segment, str_fid.get(), N, N * row_size);
-    ASSERT_EQ(status.error_code, Success);
-    ASSERT_EQ(segment->get_field_avg_size(str_fid), row_size);
-
-    // load data and update avg field size
-    std::vector<std::string> str_datas;
-    int64_t total_size = 0;
-    for (int i = 0; i < N; ++i) {
-        auto str = "string_data_" + std::to_string(i);
-        total_size += str.size() + sizeof(uint32_t);
-        str_datas.emplace_back(str);
-    }
-    auto res = LoadFieldRawData(segment, str_fid.get(), str_datas.data(), N);
-    ASSERT_EQ(res.error_code, Success);
-
-    DeleteSegment(segment);
 }
 
 TEST(CApiTest, GrowingSegment_Load_Field_Data) {
@@ -4207,13 +4114,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data) {
 
     auto storage_config = get_default_local_storage_config();
     auto cm = storage::CreateChunkManager(storage_config);
-    auto load_info =
-        PrepareInsertBinlog(1,
-                            2,
-                            3,
-                            storage_config.root_path + "/" + "test_load_sealed",
-                            raw_data,
-                            cm);
+    auto load_info = PrepareInsertBinlog(1, 2, 3, raw_data, cm);
 
     auto status = LoadFieldData(segment, &load_info);
     ASSERT_EQ(status.error_code, Success);
@@ -4266,13 +4167,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
 
     auto storage_config = get_default_local_storage_config();
     auto cm = storage::CreateChunkManager(storage_config);
-    auto load_info =
-        PrepareInsertBinlog(1,
-                            2,
-                            3,
-                            storage_config.root_path + "/" + "test_load_sealed",
-                            raw_data,
-                            cm);
+    auto load_info = PrepareInsertBinlog(1, 2, 3, raw_data, cm);
     raw_data.raw_->mutable_fields_data()->AddAllocated(array.release());
 
     load_info.field_infos.emplace(
@@ -4342,13 +4237,7 @@ TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
 
     auto storage_config = get_default_local_storage_config();
     auto cm = storage::CreateChunkManager(storage_config);
-    auto load_info =
-        PrepareInsertBinlog(1,
-                            2,
-                            3,
-                            storage_config.root_path + "/" + "test_load_sealed",
-                            raw_data,
-                            cm);
+    auto load_info = PrepareInsertBinlog(1, 2, 3, raw_data, cm);
     raw_data.raw_->mutable_fields_data()->AddAllocated(array.release());
 
     load_info.field_infos.emplace(
@@ -4375,7 +4264,7 @@ TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
+TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
     auto schema = std::make_shared<Schema>();
     auto i8_fid = schema->AddDebugField("age8", DataType::INT8);
     auto i16_fid = schema->AddDebugField("age16", DataType::INT16);
@@ -4391,26 +4280,19 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     auto raw_data = DataGen(schema, N);
     LoadIndexInfo load_index_info;
 
-    // load timestamp field
-    auto res = LoadFieldRawData(
-        segment, TimestampFieldID.get(), raw_data.timestamps_.data(), N);
-    ASSERT_EQ(res.error_code, Success);
-    auto count = GetRowCount(segment);
-    ASSERT_EQ(count, N);
-
-    // load rowid field
-    res = LoadFieldRawData(
-        segment, RowFieldID.get(), raw_data.row_ids_.data(), N);
-    ASSERT_EQ(res.error_code, Success);
-    count = GetRowCount(segment);
-    ASSERT_EQ(count, N);
-
-    // load int64 field
-    res = LoadFieldRawData(
-        segment, i64_fid.get(), raw_data.get_col<int64_t>(i64_fid).data(), N);
-    ASSERT_EQ(res.error_code, Success);
-    count = GetRowCount(segment);
-    ASSERT_EQ(count, N);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto excluded_field_ids =
+        GetExcludedFieldIds(raw_data.schema_, {0, 1, i64_fid.get()});
+    auto load_info = PrepareInsertBinlog(kCollectionID,
+                                         kPartitionID,
+                                         kSegmentID,
+                                         raw_data,
+                                         cm,
+                                         "",
+                                         excluded_field_ids);
+    auto status = LoadFieldData(segment, &load_info);
+    ASSERT_EQ(status.error_code, Success);
 
     // load index for int8 field
     auto age8_col = raw_data.get_col<int8_t>(i8_fid);
@@ -4492,7 +4374,7 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult* retrieve_result = nullptr;
-    res = CRetrieve(
+    auto res = CRetrieve(
         segment, plan.get(), raw_data.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();

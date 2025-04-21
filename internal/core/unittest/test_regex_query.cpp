@@ -11,24 +11,19 @@
 
 #include <gtest/gtest.h>
 #include <boost/format.hpp>
-#include <regex>
 
 #include "pb/plan.pb.h"
-#include "segcore/segcore_init_c.h"
 #include "segcore/SegmentSealed.h"
 
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "pb/schema.pb.h"
 #include "test_utils/DataGen.h"
-#include "index/IndexFactory.h"
-#include "query/Plan.h"
-#include "knowhere/comp/brute_force.h"
 #include "test_utils/GenExprProto.h"
 #include "query/PlanProto.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "index/InvertedIndexTantivy.h"
-
+#include "test_utils/storage_test_utils.h"
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
@@ -199,7 +194,6 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
     void
     SetUp() override {
         schema = GenTestSchema();
-        seg = CreateSealedSegment(schema);
         raw_str = {
             "b\n",
             "a\n",
@@ -238,7 +232,7 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
             json_col->at(i) = raw_json[i];
         }
 
-        SealedLoadFieldData(raw_data, *seg);
+        seg = CreateSealedWithFieldDataLoaded(schema, raw_data);
     }
 
     void
