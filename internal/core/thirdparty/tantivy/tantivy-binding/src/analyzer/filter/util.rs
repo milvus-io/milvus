@@ -1,7 +1,7 @@
 use serde_json as json;
 
-use crate::error::{Result,TantivyBindingError};
-use crate::analyzer::stop_words;
+use super::stop_words;
+use crate::error::{Result, TantivyBindingError};
 
 pub(crate) fn get_string_list(value: &json::Value, label: &str) -> Result<Vec<String>> {
     if !value.is_array() {
@@ -29,14 +29,14 @@ pub(crate) fn get_stop_words_list(str_list: Vec<String>) -> Vec<String> {
     let mut stop_words = Vec::new();
     for str in str_list {
         if str.len() > 0 && str.chars().nth(0).unwrap() == '_' {
-            match str.as_str() {
-                "_english_" => {
-                    for word in stop_words::ENGLISH {
+            match stop_words::fetch_language_stop_words(str.as_str()) {
+                Some(words) => {
+                    for word in words {
                         stop_words.push(word.to_string());
                     }
                     continue;
                 }
-                _other => {}
+                None => {}
             }
         }
         stop_words.push(str);

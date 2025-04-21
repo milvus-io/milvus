@@ -1,8 +1,8 @@
 use serde_json as json;
 use tantivy::tokenizer::*;
 
-use crate::error::{Result,TantivyBindingError};
-use crate::analyzer::util::*;
+use super::util::*;
+use crate::error::{Result, TantivyBindingError};
 
 pub(crate) enum SystemFilter {
     Invalid,

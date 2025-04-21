@@ -2,9 +2,7 @@ use serde_json as json;
 use std::collections::HashMap;
 use tantivy::tokenizer::*;
 
-use crate::analyzer::{
-    build_in_analyzer::*, filter::*, tokenizers::get_builder_with_tokenizer, util::*,
-};
+use super::{build_in_analyzer::*, filter::*, tokenizers::get_builder_with_tokenizer};
 use crate::error::Result;
 use crate::error::TantivyBindingError;
 
