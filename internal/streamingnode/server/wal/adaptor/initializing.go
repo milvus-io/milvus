@@ -29,7 +29,7 @@ func buildInterceptorParams(ctx context.Context, underlyingWALImpls walimpls.WAL
 
 	capacity := int(paramtable.Get().StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
 	keepalive := paramtable.Get().StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse()
-	writeAheadBuffer := wab.NewWirteAheadBuffer(
+	writeAheadBuffer := wab.NewWriteAheadBuffer(
 		underlyingWALImpls.Channel().Name,
 		resource.Resource().Logger().With(),
 		capacity,
