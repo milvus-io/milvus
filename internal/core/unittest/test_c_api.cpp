@@ -302,7 +302,8 @@ TEST(CApiTest, UpdateSchemaTest) {
     ASSERT_NE(status.error_code, Success);
 
     DeleteCollection(collection);
-    delete(status.error_msg);
+    // free error msg, which shall be responsible for go side to call C.free()
+    free(const_cast<char*>(status.error_msg));
 }
 
 TEST(CApiTest, LoadInfoTest) {

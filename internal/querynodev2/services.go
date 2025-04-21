@@ -509,6 +509,12 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
 	defer node.updateDistributionModifyTS()
 
+	// check node healthy
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return merr.Status(err), nil
+	}
+	defer node.lifetime.Done()
+
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)

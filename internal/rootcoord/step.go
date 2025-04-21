@@ -533,39 +533,53 @@ func (s *WriteSchemaChangeWALStep) Execute(ctx context.Context) ([]nestedStep, e
 		EnableDynamicField: s.collection.EnableDynamicField,
 		Properties:         s.collection.Properties,
 	}
-	msgs := make([]message.MutableMessage, 0, len(vchannels))
-	for _, vchannel := range vchannels {
-		schemaMsg, err := message.NewSchemaChangeMessageBuilderV2().
-			WithVChannel(vchannel).
-			WithHeader(&message.SchemaChangeMessageHeader{
-				CollectionId: s.collection.CollectionID,
-			}).
-			WithBody(&message.SchemaChangeMessageBody{
-				Schema:   schema,
-				ModifyTs: s.ts,
-			}).
-			BuildMutable()
-		if err != nil {
-			return nil, err
-		}
-		msgs = append(msgs, schemaMsg)
-		// compose flush message
-		flushMsg, err := message.NewManualFlushMessageBuilderV2().
-			WithVChannel(vchannel).
-			// With
-			WithHeader(&messagespb.ManualFlushMessageHeader{
-				CollectionId: s.collection.CollectionID,
-				FlushTs:      s.ts,
-			}).
-			WithBody(&message.ManualFlushMessageBody{}).BuildMutable()
-		if err != nil {
-			return nil, err
-		}
-		msgs = append(msgs, flushMsg)
-	}
-	if err := streaming.WAL().AppendMessages(ctx, msgs...).UnwrapFirstError(); err != nil {
+
+	schemaMsg, err := message.NewSchemaChangeMessageBuilderV2().
+		WithBroadcast(vchannels).
+		WithHeader(&message.SchemaChangeMessageHeader{
+			CollectionId: s.collection.CollectionID,
+		}).
+		WithBody(&message.SchemaChangeMessageBody{
+			Schema:   schema,
+			ModifyTs: s.ts,
+		}).BuildBroadcast()
+	if err != nil {
 		return nil, err
 	}
+
+	resp, err := streaming.WAL().Broadcast().Append(ctx, schemaMsg)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Ctx(ctx).Info(
+		"broadcast schema change success",
+		zap.Uint64("broadcastID", resp.BroadcastID),
+		zap.Any("appendResults", resp.AppendResults),
+	)
+
+	flushMsg, err := message.NewManualFlushMessageBuilderV2().
+		WithBroadcast(vchannels).
+		WithHeader(&messagespb.ManualFlushMessageHeader{
+			CollectionId: s.collection.CollectionID,
+			FlushTs:      s.ts,
+		}).
+		WithBody(&message.ManualFlushMessageBody{}).BuildBroadcast()
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err = streaming.WAL().Broadcast().Append(ctx, flushMsg)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Ctx(ctx).Info(
+		"broadcast schema change success",
+		zap.Uint64("broadcastID", resp.BroadcastID),
+		zap.Any("appendResults", resp.AppendResults),
+	)
+
 	return nil, nil
 }
 

@@ -859,9 +859,14 @@ func (sd *shardDelegator) GetTSafe() uint64 {
 }
 
 func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema) error {
-	log := log.Ctx(ctx).With(
-		zap.String("shard", sd.vchannelName),
-	)
+	log := sd.getLogger(ctx)
+	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
+		return err
+	}
+	defer sd.lifetime.Done()
+
+	log.Info("delegator recieved update schema event")
+
 	sealed, growing, version, err := sd.distribution.PinReadableSegments()
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
