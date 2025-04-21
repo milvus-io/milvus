@@ -75,9 +75,9 @@ var _ types.IndexNodeComponent = (*IndexNode)(nil)
 var Params *paramtable.ComponentParam = paramtable.Get()
 
 func getCurrentIndexVersion(v int32) int32 {
-	cCurrent := int32(C.GetCurrentIndexVersion())
-	if cCurrent < v {
-		return cCurrent
+	cMaximum := int32(C.GetMaximumIndexVersion())
+	if cMaximum < v {
+		return cMaximum
 	}
 	return v
 }

@@ -2050,6 +2050,13 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	couldDo = trigger.ShouldDoSingleCompaction(info5, &compactTime{expireTime: 300})
 	assert.False(t, couldDo)
 
+	Params.Save(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key, "true")
+	defer Params.Save(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key, "false")
+	Params.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, "5")
+	defer Params.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, "-1")
+	couldDo = trigger.ShouldDoSingleCompaction(info5, &compactTime{expireTime: 300})
+	assert.True(t, couldDo)
+
 	indexMeta.updateSegmentIndex(&model.SegmentIndex{
 		SegmentID:           1,
 		IndexID:             101,

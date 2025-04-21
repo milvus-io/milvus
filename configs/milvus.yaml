@@ -562,6 +562,11 @@ dataCoord:
       # exceeds this threshold, the earliest growing segments will be sealed.
       blockingL0SizeInMB: 64
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
+  forceRebuildSegmentIndex: false # force rebuild segment index to specify index engine's version
+  # if param forceRebuildSegmentIndex is enabled, the vector index will be rebuilt to aligned with targetVecIndexVersion.
+  # if param forceRebuildSegmentIndex is not enabled, the newly created vector index will be aligned with the newer one of index engine's version and targetVecIndexVersion.
+  # if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version 
+  targetVecIndexVersion: -1
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
   # Switch value to control if to enable segment compaction. 
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.

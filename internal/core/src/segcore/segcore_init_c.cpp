@@ -157,6 +157,11 @@ GetMinimalIndexVersion() {
     return milvus::config::GetMinimalIndexVersion();
 }
 
+extern "C" int32_t
+GetMaximumIndexVersion() {
+    return milvus::config::GetMaximumIndexVersion();
+}
+
 extern "C" void
 SetThreadName(const char* name) {
 #ifdef __linux__
