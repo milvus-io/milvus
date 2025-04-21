@@ -75,7 +75,12 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 
 	// 1. check shard number
 	shardsNum := t.Req.GetShardsNum()
-	cfgMaxShardNum := Params.RootCoordCfg.DmlChannelNum.GetAsInt32()
+	var cfgMaxShardNum int32
+	if Params.CommonCfg.PreCreatedTopicEnabled.GetAsBool() {
+		cfgMaxShardNum = int32(len(Params.CommonCfg.TopicNames.GetAsStrings()))
+	} else {
+		cfgMaxShardNum = Params.RootCoordCfg.DmlChannelNum.GetAsInt32()
+	}
 	if shardsNum > cfgMaxShardNum {
 		return fmt.Errorf("shard num (%d) exceeds max configuration (%d)", shardsNum, cfgMaxShardNum)
 	}
