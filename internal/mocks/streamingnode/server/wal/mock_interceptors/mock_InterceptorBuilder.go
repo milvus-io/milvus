@@ -21,7 +21,7 @@ func (_m *MockInterceptorBuilder) EXPECT() *MockInterceptorBuilder_Expecter {
 }
 
 // Build provides a mock function with given fields: param
-func (_m *MockInterceptorBuilder) Build(param interceptors.InterceptorBuildParam) interceptors.Interceptor {
+func (_m *MockInterceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	ret := _m.Called(param)
 
 	if len(ret) == 0 {
@@ -29,7 +29,7 @@ func (_m *MockInterceptorBuilder) Build(param interceptors.InterceptorBuildParam
 	}
 
 	var r0 interceptors.Interceptor
-	if rf, ok := ret.Get(0).(func(interceptors.InterceptorBuildParam) interceptors.Interceptor); ok {
+	if rf, ok := ret.Get(0).(func(*interceptors.InterceptorBuildParam) interceptors.Interceptor); ok {
 		r0 = rf(param)
 	} else {
 		if ret.Get(0) != nil {
@@ -46,14 +46,14 @@ type MockInterceptorBuilder_Build_Call struct {
 }
 
 // Build is a helper method to define mock.On call
-//   - param interceptors.InterceptorBuildParam
+//   - param *interceptors.InterceptorBuildParam
 func (_e *MockInterceptorBuilder_Expecter) Build(param interface{}) *MockInterceptorBuilder_Build_Call {
 	return &MockInterceptorBuilder_Build_Call{Call: _e.mock.On("Build", param)}
 }
 
-func (_c *MockInterceptorBuilder_Build_Call) Run(run func(param interceptors.InterceptorBuildParam)) *MockInterceptorBuilder_Build_Call {
+func (_c *MockInterceptorBuilder_Build_Call) Run(run func(param *interceptors.InterceptorBuildParam)) *MockInterceptorBuilder_Build_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(interceptors.InterceptorBuildParam))
+		run(args[0].(*interceptors.InterceptorBuildParam))
 	})
 	return _c
 }
@@ -63,7 +63,7 @@ func (_c *MockInterceptorBuilder_Build_Call) Return(_a0 interceptors.Interceptor
 	return _c
 }
 
-func (_c *MockInterceptorBuilder_Build_Call) RunAndReturn(run func(interceptors.InterceptorBuildParam) interceptors.Interceptor) *MockInterceptorBuilder_Build_Call {
+func (_c *MockInterceptorBuilder_Build_Call) RunAndReturn(run func(*interceptors.InterceptorBuildParam) interceptors.Interceptor) *MockInterceptorBuilder_Build_Call {
 	_c.Call.Return(run)
 	return _c
 }
