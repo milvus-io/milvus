@@ -48,7 +48,7 @@ func TestTimeTickSyncOperator(t *testing.T) {
 		WAL:                  walFuture,
 		InitializedTimeTick:  ts,
 		InitializedMessageID: msgID,
-		WriteAheadBuffer: wab.NewWirteAheadBuffer(
+		WriteAheadBuffer: wab.NewWriteAheadBuffer(
 			channel.Name,
 			resource.Resource().Logger().With(),
 			1024,
