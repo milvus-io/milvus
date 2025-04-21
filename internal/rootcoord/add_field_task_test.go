@@ -28,7 +28,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -74,6 +76,10 @@ func Test_AddCollectionFieldTask_Prepare(t *testing.T) {
 }
 
 func Test_AddCollectionFieldTask_Execute(t *testing.T) {
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(streaming.AppendResponses{})
+	streaming.SetWALForTest(wal)
+
 	t.Run("failed to get collection", func(t *testing.T) {
 		metaTable := mockrootcoord.NewIMetaTable(t)
 		metaTable.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, "not_existed_coll", mock.Anything).Return(nil, merr.WrapErrCollectionNotFound("not_existed_coll"))

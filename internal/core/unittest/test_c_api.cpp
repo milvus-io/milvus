@@ -302,6 +302,7 @@ TEST(CApiTest, UpdateSchemaTest) {
     ASSERT_NE(status.error_code, Success);
 
     DeleteCollection(collection);
+    delete(status.error_msg);
 }
 
 TEST(CApiTest, LoadInfoTest) {
