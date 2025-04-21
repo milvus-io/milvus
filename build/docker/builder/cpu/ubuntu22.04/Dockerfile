@@ -46,7 +46,7 @@ ENV GOPATH /go
 ENV GOROOT /usr/local/go
 ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.21.11.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.1.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
     mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
     go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
