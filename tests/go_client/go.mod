@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus/tests/go_client
 
-go 1.21
+go 1.24.1
 
 toolchain go1.21.11
 
