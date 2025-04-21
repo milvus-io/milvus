@@ -865,7 +865,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	}
 	defer sd.lifetime.Done()
 
-	log.Info("delegator recieved update schema event")
+	log.Info("delegator received update schema event")
 
 	sealed, growing, version, err := sd.distribution.PinReadableSegments()
 	if err != nil {
