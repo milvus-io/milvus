@@ -16,6 +16,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // CreateCCollectionRequest is a request to create a CCollection.
@@ -86,6 +87,10 @@ func (c *CCollection) IndexMeta() *segcorepb.CollectionIndexMeta {
 }
 
 func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema) error {
+	if sch == nil {
+		return merr.WrapErrServiceInternal("update collection schema with nil")
+	}
+
 	schemaBlob, err := proto.Marshal(sch)
 	if err != nil {
 		return err
