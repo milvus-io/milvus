@@ -242,7 +242,7 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
                                  check_items={str_field_name: {"max_length": new_max_length, "mmap_enabled": False},
                                               vector_field_name: {"mmap_enabled": False},
                                               json_field_name: {"mmap_enabled": True},
-                                              array_field_name: {"max_length": new_max_length, "max_capacity": 10}})
+                                              array_field_name: {"max_length": new_max_length, "max_capacity": 20}})
 
         # verify that cannot insert data with the old max_length
         for alter_field in [pk_field_name, str_field_name, array_field_name]:

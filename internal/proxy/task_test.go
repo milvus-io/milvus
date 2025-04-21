@@ -4663,7 +4663,7 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
 }
 
-func TestAlterCollectionField1(t *testing.T) {
+func TestAlterCollectionField(t *testing.T) {
 	qc := NewMixCoordMock()
 	InitMetaCache(context.Background(), qc, nil)
 	collectionName := "test_alter_collection_field"
@@ -4785,6 +4785,15 @@ func TestAlterCollectionField1(t *testing.T) {
 			fieldName: "array_field",
 			properties: []*commonpb.KeyValuePair{
 				{Key: common.MaxCapacityKey, Value: "0"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:      "max_capacity invalid type",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "3"},
 			},
 			expectError: true,
 			errCode:     merr.Code(merr.ErrParameterInvalid),

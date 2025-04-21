@@ -1332,16 +1332,15 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 		case common.MaxLengthKey:
 			IsStringType := false
 			fieldName := ""
-			var dataType int32
 			for _, field := range collSchema.Fields {
 				if field.GetName() == t.FieldName && (typeutil.IsStringType(field.DataType) || typeutil.IsArrayContainStringElementType(field.DataType, field.ElementType)) {
 					IsStringType = true
 					fieldName = field.GetName()
-					dataType = int32(field.DataType)
+					break
 				}
 			}
 			if !IsStringType {
-				return merr.WrapErrParameterInvalidMsg(fieldName, "%s can not modify the maxlength for non-string types", schemapb.DataType_name[dataType])
+				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxlength for non-string types", fieldName)
 			}
 			value, err := strconv.Atoi(prop.Value)
 			if err != nil {
@@ -1359,6 +1358,7 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 				if field.GetName() == t.FieldName && typeutil.IsArrayType(field.DataType) {
 					IsArrayType = true
 					fieldName = field.GetName()
+					break
 				}
 			}
 			if !IsArrayType {
