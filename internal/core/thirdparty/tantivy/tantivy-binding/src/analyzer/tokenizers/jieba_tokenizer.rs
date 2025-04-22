@@ -1,5 +1,6 @@
 use core::{option::Option::Some, result::Result::Ok};
 use jieba_rs;
+use std::io::BufReader;
 use lazy_static::lazy_static;
 use serde_json as json;
 use std::borrow::Cow;
@@ -11,6 +12,9 @@ lazy_static! {
     static ref JIEBA: jieba_rs::Jieba = jieba_rs::Jieba::new();
 }
 
+static EXTEND_DEFAULT_DICT: &str = include_str!("../data/jieba/dict.txt.big");
+
+#[allow(dead_code)]
 #[derive(Clone)]
 pub enum JiebaMode {
     Exact,
@@ -48,7 +52,7 @@ impl TokenStream for JiebaTokenStream {
     }
 }
 
-fn get_jieba_dict(params: &json::Map<String, json::Value>) -> Result<(Vec<String>, bool)> {
+fn get_jieba_dict(params: &json::Map<String, json::Value>) -> Result<(Vec<String>, Option<String>)> {
     match params.get("dict") {
         Some(value) => {
             if !value.is_array() {
@@ -57,8 +61,8 @@ fn get_jieba_dict(params: &json::Map<String, json::Value>) -> Result<(Vec<String
                 )));
             }
             let mut dict = Vec::<String>::new();
-            let mut use_default = false;
-            // value
+            let mut system_dict = None;
+
             for word in value.as_array().unwrap() {
                 if !word.is_string() {
                     return Err(TantivyBindingError::InvalidArgument(format!(
@@ -66,17 +70,21 @@ fn get_jieba_dict(params: &json::Map<String, json::Value>) -> Result<(Vec<String
                     )));
                 }
                 let text = word.as_str().unwrap().to_string();
-                if text == "_default_" {
-                    use_default = true;
-                } else {
+                if text == "_default_" || text == "_extend_default_" {
+                    if system_dict.is_some() {
+                        return Err(TantivyBindingError::InvalidArgument(format!(
+                            "jieba tokenizer dict can only set one default dict"
+                        )));
+                    }
+                    system_dict = Some(text)
+                } else{
                     dict.push(text);
                 }
             }
-            Ok((dict, use_default))
+            Ok((dict, system_dict))
         }
         _ => {
-            // tokenizer.load_dict(dict)
-            Ok((vec![], true))
+            Ok((vec![], Some("_default_".to_string())))
         }
     }
 }
@@ -128,13 +136,23 @@ impl<'a> JiebaTokenizer<'a> {
     }
 
     pub fn from_json(params: &json::Map<String, json::Value>) -> Result<JiebaTokenizer<'a>> {
-        let mut tokenizer: jieba_rs::Jieba;
-        let (dict, use_default) = get_jieba_dict(params)?;
-        if use_default {
-            tokenizer = jieba_rs::Jieba::new()
-        } else {
-            tokenizer = jieba_rs::Jieba::empty()
-        }
+        let (dict, system_dict) = get_jieba_dict(params)?;
+
+        let mut tokenizer = system_dict.map_or(Ok(jieba_rs::Jieba::empty()), |name| {
+            match name.as_str() {
+                "_default_" => Ok(jieba_rs::Jieba::new()),
+                "_extend_default_" => {
+                    let mut buf = BufReader::new(EXTEND_DEFAULT_DICT.as_bytes());
+                    jieba_rs::Jieba::with_dict(&mut buf).map_err(|e|
+                        TantivyBindingError::InternalError(format!("failed to load extend default system dict: {}", e))
+                    )
+                },
+                _ => Err(TantivyBindingError::InternalError(format!(
+                    "invalid system dict name: {}",
+                    name
+                )))
+            }
+        })?;
 
         for word in dict {
             tokenizer.add_word(word.as_str(), None, None);
@@ -232,6 +250,29 @@ mod tests {
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
         let mut bining = tokenizer.unwrap();
         let mut stream = bining.token_stream("milvus结巴分词器中文测试");
+
+        let mut results = Vec::<String>::new();
+        while stream.advance() {
+            let token = stream.token();
+            results.push(token.text.clone());
+        }
+
+        print!("test tokens :{:?}\n", results)
+    }
+
+    #[test]
+    fn test_jieba_tokenizer_with_extend_default_dict() {
+        let params = r#"{
+            "type": "jieba",
+            "dict": ["_extend_default_"]
+        }"#;
+        let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
+        assert!(json_param.is_ok());
+
+        let tokenizer = JiebaTokenizer::from_json(&json_param.unwrap());
+        assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
+        let mut bining = tokenizer.unwrap();
+        let mut stream = bining.token_stream("milvus結巴分詞器中文測試");
 
         let mut results = Vec::<String>::new();
         while stream.advance() {
