@@ -2069,7 +2069,7 @@ func TestDML(t *testing.T) {
 		if matchCountRule(req.OutputFields) {
 			for _, pair := range req.QueryParams {
 				if pair.GetKey() == ParamLimit {
-					return nil, fmt.Errorf("mock error")
+					return nil, errors.New("mock error")
 				}
 			}
 		}

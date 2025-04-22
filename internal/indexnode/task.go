@@ -18,14 +18,15 @@ package indexnode
 
 import (
 	"context"
-	"fmt"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
 var (
-	errCancel      = fmt.Errorf("canceled")
+	errCancel      = errors.New("canceled")
 	diskUsageRatio = 4.0
 )
 

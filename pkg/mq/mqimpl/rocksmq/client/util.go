@@ -12,10 +12,9 @@
 package client
 
 import (
-	"fmt"
-
 	"google.golang.org/protobuf/proto"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
@@ -30,14 +29,14 @@ func MarshalHeader(header *commonpb.MsgHeader) ([]byte, error) {
 func UnmarshalHeader(headerbyte []byte) (*commonpb.MsgHeader, error) {
 	header := commonpb.MsgHeader{}
 	if headerbyte == nil {
-		return &header, fmt.Errorf("failed to unmarshal message header, payload is empty")
+		return &header, errors.New("failed to unmarshal message header, payload is empty")
 	}
 	err := proto.Unmarshal(headerbyte, &header)
 	if err != nil {
 		return &header, err
 	}
 	if header.Base == nil {
-		return nil, fmt.Errorf("failed to unmarshal message, header is uncomplete")
+		return nil, errors.New("failed to unmarshal message, header is uncomplete")
 	}
 	return &header, nil
 }

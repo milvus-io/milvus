@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/tidwall/gjson"
@@ -710,7 +711,7 @@ func convertToIntArray(dataType schemapb.DataType, arr interface{}) []int32 {
 func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema, inInsert bool) ([]*schemapb.FieldData, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
-		return []*schemapb.FieldData{}, fmt.Errorf("no row need to be convert to columns")
+		return []*schemapb.FieldData{}, errors.New("no row need to be convert to columns")
 	}
 
 	isDynamic := sch.EnableDynamicField
@@ -1292,7 +1293,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				stringPks := ids.GetStrId().GetData()
 				rowsNum = int64(len(stringPks))
 			default:
-				return nil, fmt.Errorf("the type of primary key(id) is not supported, use other sdk please")
+				return nil, errors.New("the type of primary key(id) is not supported, use other sdk please")
 			}
 		}
 	}
@@ -1427,7 +1428,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				stringPks := ids.GetStrId().GetData()
 				row[DefaultPrimaryFieldName] = stringPks[i]
 			default:
-				return nil, fmt.Errorf("the type of primary key(id) is not supported, use other sdk please")
+				return nil, errors.New("the type of primary key(id) is not supported, use other sdk please")
 			}
 		}
 		if scores != nil && int64(len(scores)) > i {

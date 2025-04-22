@@ -40,6 +40,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -163,7 +164,7 @@ func (node *QueryNode) initSession() error {
 		sessionutil.WithScalarIndexEngineVersion(common.MinimalScalarIndexEngineVersion, common.CurrentScalarIndexEngineVersion),
 		sessionutil.WithIndexNonEncoding())
 	if node.session == nil {
-		return fmt.Errorf("session is nil, the etcd client connection may have failed")
+		return errors.New("session is nil, the etcd client connection may have failed")
 	}
 	node.session.Init(typeutil.QueryNodeRole, node.address, false, true)
 	sessionutil.SaveServerInfo(typeutil.QueryNodeRole, node.session.ServerID)
@@ -548,7 +549,7 @@ func (node *QueryNode) initHook() error {
 	log := log.Ctx(node.ctx)
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
 	if path == "" {
-		return fmt.Errorf("fail to set the plugin path")
+		return errors.New("fail to set the plugin path")
 	}
 	log.Info("start to load plugin", zap.String("path", path))
 
@@ -565,7 +566,7 @@ func (node *QueryNode) initHook() error {
 
 	hoo, ok := h.(optimizers.QueryHook)
 	if !ok {
-		return fmt.Errorf("fail to convert the `Hook` interface")
+		return errors.New("fail to convert the `Hook` interface")
 	}
 	if err = hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())

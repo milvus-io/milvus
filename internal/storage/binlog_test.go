@@ -1477,7 +1477,7 @@ type testEvent struct {
 
 func (e *testEvent) Finish() error {
 	if e.finishError {
-		return fmt.Errorf("finish error")
+		return errors.New("finish error")
 	}
 	return nil
 }
@@ -1487,21 +1487,21 @@ func (e *testEvent) Close() {
 
 func (e *testEvent) Write(buffer *bytes.Buffer) error {
 	if e.writeError {
-		return fmt.Errorf("write error")
+		return errors.New("write error")
 	}
 	return nil
 }
 
 func (e *testEvent) GetMemoryUsageInBytes() (int32, error) {
 	if e.getMemoryError {
-		return -1, fmt.Errorf("getMemory error")
+		return -1, errors.New("getMemory error")
 	}
 	return 0, nil
 }
 
 func (e *testEvent) GetPayloadLengthFromWriter() (int, error) {
 	if e.getPayloadLengthError {
-		return -1, fmt.Errorf("getPayloadLength error")
+		return -1, errors.New("getPayloadLength error")
 	}
 	return 0, nil
 }

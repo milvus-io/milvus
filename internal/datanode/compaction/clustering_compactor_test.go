@@ -487,7 +487,7 @@ func (s *ClusteringCompactionTaskSuite) TestGenerateBM25Stats() {
 	s.Run("alloc ID failed", func() {
 		segmentID := int64(1)
 		mockAlloc := allocator.NewMockAllocator(s.T())
-		mockAlloc.EXPECT().Alloc(mock.Anything).Return(0, 0, fmt.Errorf("mock error")).Once()
+		mockAlloc.EXPECT().Alloc(mock.Anything).Return(0, 0, errors.New("mock error")).Once()
 
 		task := &clusteringCompactionTask{
 			collectionID: 111,
@@ -507,7 +507,7 @@ func (s *ClusteringCompactionTaskSuite) TestGenerateBM25Stats() {
 	s.Run("upload failed", func() {
 		segmentID := int64(1)
 		mockBinlogIO := io.NewMockBinlogIO(s.T())
-		mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
+		mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		task := &clusteringCompactionTask{
 			collectionID: 111,
@@ -544,7 +544,7 @@ func (s *ClusteringCompactionTaskSuite) TestGeneratePkStats() {
 	})
 
 	s.Run("download binlogs failed", func() {
-		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 		task := &clusteringCompactionTask{
 			binlogIO:        s.mockBinlogIO,
 			primaryKeyField: pkField,
@@ -584,7 +584,7 @@ func (s *ClusteringCompactionTaskSuite) TestGeneratePkStats() {
 		s.NoError(err)
 		mockBinlogIO := io.NewMockBinlogIO(s.T())
 		mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)
-		mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
+		mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 		task := &clusteringCompactionTask{
 			collectionID: CollectionID,
 			partitionID:  PartitionID,

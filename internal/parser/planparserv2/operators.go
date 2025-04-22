@@ -1,8 +1,9 @@
 package planparserv2
 
 import (
-	"fmt"
 	"math"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
@@ -182,21 +183,21 @@ func Divide(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	}
 
 	if IsBool(a) || IsBool(b) {
-		return nil, fmt.Errorf("divide cannot apply on bool field")
+		return nil, errors.New("divide cannot apply on bool field")
 	}
 
 	if IsString(a) || IsString(b) {
-		return nil, fmt.Errorf("divide cannot apply on string field")
+		return nil, errors.New("divide cannot apply on string field")
 	}
 
 	aFloat, bFloat, aInt, bInt := IsFloating(a), IsFloating(b), IsInteger(a), IsInteger(b)
 
 	if bFloat && b.GetFloatVal() == 0 {
-		return nil, fmt.Errorf("cannot divide by zero")
+		return nil, errors.New("cannot divide by zero")
 	}
 
 	if bInt && b.GetInt64Val() == 0 {
-		return nil, fmt.Errorf("cannot divide by zero")
+		return nil, errors.New("cannot divide by zero")
 	}
 
 	if aFloat && bFloat {
@@ -228,12 +229,12 @@ func Modulo(a, b *planpb.GenericValue) (*ExprWithType, error) {
 
 	aInt, bInt := IsInteger(a), IsInteger(b)
 	if !aInt || !bInt {
-		return nil, fmt.Errorf("modulo can only apply on integer")
+		return nil, errors.New("modulo can only apply on integer")
 	}
 
 	// aInt && bInt
 	if b.GetInt64Val() == 0 {
-		return nil, fmt.Errorf("cannot modulo by zero")
+		return nil, errors.New("cannot modulo by zero")
 	}
 
 	ret.dataType = schemapb.DataType_Int64
@@ -281,29 +282,29 @@ func Power(a, b *planpb.GenericValue) *ExprWithType {
 }
 
 func BitAnd(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, fmt.Errorf("todo: unsupported")
+	return nil, errors.New("todo: unsupported")
 }
 
 func BitOr(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, fmt.Errorf("todo: unsupported")
+	return nil, errors.New("todo: unsupported")
 }
 
 func BitXor(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, fmt.Errorf("todo: unsupported")
+	return nil, errors.New("todo: unsupported")
 }
 
 func ShiftLeft(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, fmt.Errorf("todo: unsupported")
+	return nil, errors.New("todo: unsupported")
 }
 
 func ShiftRight(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, fmt.Errorf("todo: unsupported")
+	return nil, errors.New("todo: unsupported")
 }
 
 func And(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	aBool, bBool := IsBool(a), IsBool(b)
 	if !aBool || !bBool {
-		return nil, fmt.Errorf("and can only apply on boolean")
+		return nil, errors.New("and can only apply on boolean")
 	}
 	return &ExprWithType{
 		dataType: schemapb.DataType_Bool,
@@ -320,7 +321,7 @@ func And(a, b *planpb.GenericValue) (*ExprWithType, error) {
 func Or(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	aBool, bBool := IsBool(a), IsBool(b)
 	if !aBool || !bBool {
-		return nil, fmt.Errorf("or can only apply on boolean")
+		return nil, errors.New("or can only apply on boolean")
 	}
 	return &ExprWithType{
 		dataType: schemapb.DataType_Bool,
@@ -335,7 +336,7 @@ func Or(a, b *planpb.GenericValue) (*ExprWithType, error) {
 }
 
 func BitNot(a *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, fmt.Errorf("todo: unsupported")
+	return nil, errors.New("todo: unsupported")
 }
 
 func Negative(a *planpb.GenericValue) *ExprWithType {
@@ -419,7 +420,7 @@ func less() relationalFn {
 			return a.GetInt64Val() < b.GetInt64Val(), nil
 		}
 
-		return false, fmt.Errorf("incompatible data type")
+		return false, errors.New("incompatible data type")
 	}
 }
 

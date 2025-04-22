@@ -66,7 +66,7 @@ func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *
 		}, nil
 	}
 	if p.returnGrpcError {
-		return nil, fmt.Errorf("grpc error")
+		return nil, errors.New("grpc error")
 	}
 	p.collArray = append(p.collArray, request.CollectionName)
 	p.collIDs = append(p.collIDs, request.CollectionID)
@@ -95,7 +95,7 @@ func (p *proxyMock) InvalidateCredentialCache(ctx context.Context, request *prox
 		}, nil
 	}
 	if p.returnGrpcError {
-		return nil, fmt.Errorf("grpc error")
+		return nil, errors.New("grpc error")
 	}
 	return merr.Success(), nil
 }

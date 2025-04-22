@@ -1364,7 +1364,7 @@ func (t *clusteringCompactionTask) checkBuffersAfterCompaction() error {
 			log.Warn("there are some binlogs have leaked, please check", zap.Int("buffer id", buffer.id),
 				zap.Int64s("leak segments", lo.Keys(buffer.flushedBinlogs)))
 			log.Debug("leak binlogs", zap.Any("buffer flushedBinlogs", buffer.flushedBinlogs))
-			return fmt.Errorf("there are some binlogs have leaked")
+			return errors.New("there are some binlogs have leaked")
 		}
 	}
 	return nil

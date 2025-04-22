@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -200,7 +201,7 @@ func (t *timetickSync) updateTimeTick(in *internalpb.ChannelTimeTickMsg, reason 
 		return nil
 	}
 	if len(in.Timestamps) != len(in.ChannelNames) {
-		return fmt.Errorf("invalid TimeTickMsg, timestamp and channelname size mismatch")
+		return errors.New("invalid TimeTickMsg, timestamp and channelname size mismatch")
 	}
 
 	prev, ok := t.sess2ChanTsMap[in.Base.SourceID]

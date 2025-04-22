@@ -63,7 +63,7 @@ func Test_alterAliasTask_Execute(t *testing.T) {
 		mockMeta := mockrootcoord.NewIMetaTable(t)
 		mockMeta.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(111)
 		mockMeta.EXPECT().AlterAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			Return(fmt.Errorf("failed to alter alias"))
+			Return(errors.New("failed to alter alias"))
 		core := newTestCore(withValidProxyManager(), withMeta(mockMeta))
 		task := &alterAliasTask{
 			baseTask: newBaseTask(context.Background(), core),

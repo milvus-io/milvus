@@ -18,8 +18,8 @@ package grpcrootcoordclient
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	grpcCodes "google.golang.org/grpc/codes"
@@ -58,7 +58,7 @@ type Client struct {
 func NewClient(ctx context.Context) (types.RootCoordClient, error) {
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("New RootCoord Client failed", zap.Error(err))
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func (c *Client) getRootCoordAddr() (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Warn("RootCoordClient mess key not exist", zap.Any("key", key))
-		return "", fmt.Errorf("find no available rootcoord, check rootcoord state")
+		return "", errors.New("find no available rootcoord, check rootcoord state")
 	}
 	log.Debug("RootCoordClient GetSessions success",
 		zap.String("address", ms.Address),

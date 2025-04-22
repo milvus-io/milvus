@@ -147,7 +147,7 @@ func (s *UpsertSuite) TestUpsertAutoIDFalse() {
 	searchResult, _ := c.Proxy.Search(ctx, searchReq)
 	checkFunc := func(data int) error {
 		if data < start || data > start+rowNum {
-			return fmt.Errorf("upsert check pk fail")
+			return errors.New("upsert check pk fail")
 		}
 		return nil
 	}
@@ -279,7 +279,7 @@ func (s *UpsertSuite) TestUpsertAutoIDTrue() {
 	searchResult, _ := c.Proxy.Search(ctx, searchReq)
 	checkFunc := func(data int) error {
 		if data >= start && data <= start+rowNum {
-			return fmt.Errorf("upsert check pk fail")
+			return errors.New("upsert check pk fail")
 		}
 		return nil
 	}

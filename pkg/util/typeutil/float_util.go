@@ -20,6 +20,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+
+	"github.com/cockroachdb/errors"
 )
 
 func bfloat16IsNaN(f uint16) bool {
@@ -79,13 +81,13 @@ func VerifyFloats64(values []float64) error {
 
 func VerifyFloats16(value []byte) error {
 	if len(value)%2 != 0 {
-		return fmt.Errorf("The length of float16 is not aligned to 2.")
+		return errors.New("The length of float16 is not aligned to 2.")
 	}
 	dataSize := len(value) / 2
 	for i := 0; i < dataSize; i++ {
 		v := binary.LittleEndian.Uint16(value[i*2:])
 		if float16IsNaN(v) || float16IsInf(v, -1) || float16IsInf(v, 1) {
-			return fmt.Errorf("float16 vector contain nan or infinity value.")
+			return errors.New("float16 vector contain nan or infinity value.")
 		}
 	}
 	return nil
@@ -93,13 +95,13 @@ func VerifyFloats16(value []byte) error {
 
 func VerifyBFloats16(value []byte) error {
 	if len(value)%2 != 0 {
-		return fmt.Errorf("The length of bfloat16 in not aligned to 2")
+		return errors.New("The length of bfloat16 in not aligned to 2")
 	}
 	dataSize := len(value) / 2
 	for i := 0; i < dataSize; i++ {
 		v := binary.LittleEndian.Uint16(value[i*2:])
 		if bfloat16IsNaN(v) || bfloat16IsInf(v, -1) || bfloat16IsInf(v, 1) {
-			return fmt.Errorf("bfloat16 vector contain nan or infinity value.")
+			return errors.New("bfloat16 vector contain nan or infinity value.")
 		}
 	}
 	return nil

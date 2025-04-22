@@ -139,7 +139,7 @@ func (cit *createIndexTask) parseFunctionParamsToIndex(indexParamsMap map[string
 
 	switch cit.functionSchema.GetType() {
 	case schemapb.FunctionType_Unknown:
-		return fmt.Errorf("unknown function type encountered")
+		return errors.New("unknown function type encountered")
 
 	case schemapb.FunctionType_BM25:
 		// set default BM25 params if not provided in index params
@@ -301,12 +301,12 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 
 				if len(indexParamsMap) > numberParams+1 {
-					return fmt.Errorf("only metric type can be passed when use AutoIndex")
+					return errors.New("only metric type can be passed when use AutoIndex")
 				}
 
 				if len(indexParamsMap) == numberParams+1 {
 					if !metricTypeExist {
-						return fmt.Errorf("only metric type can be passed when use AutoIndex")
+						return errors.New("only metric type can be passed when use AutoIndex")
 					}
 
 					// only metric type is passed.
@@ -349,7 +349,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 
 		indexType, exist := indexParamsMap[common.IndexTypeKey]
 		if !exist {
-			return fmt.Errorf("IndexType not specified")
+			return errors.New("IndexType not specified")
 		}
 		//  index parameters defined in the YAML file are merged with the user-provided parameters during create stage
 		if Params.KnowhereConfig.Enable.GetAsBool() {
@@ -459,7 +459,7 @@ func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) e
 	params = append(params, field.GetIndexParams()...)
 	dimensionInSchema, err := funcutil.GetAttrByKeyFromRepeatedKV(DimKey, params)
 	if err != nil {
-		return fmt.Errorf("dimension not found in schema")
+		return errors.New("dimension not found in schema")
 	}
 	dimension, exist := indexParams[DimKey]
 	if exist {

@@ -20,6 +20,7 @@ package expr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"unsafe"
 
@@ -66,16 +67,16 @@ func Exec(code, auth string) (res string, err error) {
 		}
 	}()
 	if v == nil {
-		return "", fmt.Errorf("the expr isn't inited")
+		return "", errors.New("the expr isn't inited")
 	}
 	if code == "" {
-		return "", fmt.Errorf("the expr code is empty")
+		return "", errors.New("the expr code is empty")
 	}
 	if auth == "" {
-		return "", fmt.Errorf("the expr auth is empty")
+		return "", errors.New("the expr auth is empty")
 	}
 	if authKey != auth {
-		return "", fmt.Errorf("the expr auth is invalid")
+		return "", errors.New("the expr auth is invalid")
 	}
 	program, err := expr.Compile(code, expr.Env(env), expr.WithContext("ctx"))
 	if err != nil {

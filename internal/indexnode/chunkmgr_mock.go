@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"golang.org/x/exp/mmap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -28,7 +29,7 @@ const (
 )
 
 var (
-	errNotImplErr = fmt.Errorf("not implemented error")
+	errNotImplErr = errors.New("not implemented error")
 
 	collschema = &schemapb.CollectionSchema{
 		Name:        "mock_collection",
@@ -125,7 +126,7 @@ func (c *mockChunkmgr) Exist(ctx context.Context, filePath string) (bool, error)
 func (c *mockChunkmgr) Read(ctx context.Context, filePath string) ([]byte, error) {
 	value, ok := c.segmentData.Load(filePath)
 	if !ok {
-		return nil, fmt.Errorf("data not exists")
+		return nil, errors.New("data not exists")
 	}
 	return value.(*storage.Blob).Value, nil
 }
@@ -224,7 +225,7 @@ func (f *mockFactory) NewPersistentStorageChunkManager(context.Context) (storage
 	if f.chunkMgr != nil {
 		return f.chunkMgr, nil
 	}
-	return nil, fmt.Errorf("factory not inited")
+	return nil, errors.New("factory not inited")
 }
 
 func (f *mockFactory) Init(*paramtable.ComponentParam) {

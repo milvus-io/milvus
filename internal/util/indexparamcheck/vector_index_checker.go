@@ -13,6 +13,7 @@ import (
 	"math"
 	"unsafe"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -57,7 +58,7 @@ func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, params map[stri
 	indexType, exist := params[common.IndexTypeKey]
 
 	if !exist {
-		return fmt.Errorf("no indexType is specified")
+		return errors.New("no indexType is specified")
 	}
 
 	if !vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) {
@@ -94,7 +95,7 @@ func (c vecIndexChecker) CheckTrain(dataType schemapb.DataType, params map[strin
 
 	if typeutil.IsFixDimVectorType(dataType) {
 		if !CheckIntByRange(params, DIM, 1, math.MaxInt) {
-			return fmt.Errorf("failed to check vector dimension, should be larger than 0 and smaller than math.MaxInt")
+			return errors.New("failed to check vector dimension, should be larger than 0 and smaller than math.MaxInt")
 		}
 	}
 

@@ -24,6 +24,8 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
@@ -786,7 +788,7 @@ func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReader[*DeleteLog],
 	return NewDeserializeReader(reader, func(r Record, v []*DeleteLog) error {
 		rec, ok := r.(*simpleArrowRecord)
 		if !ok {
-			return fmt.Errorf("can not cast to simple arrow record")
+			return errors.New("can not cast to simple arrow record")
 		}
 		fields := rec.r.Schema().Fields()
 		switch fields[0].Type.ID() {

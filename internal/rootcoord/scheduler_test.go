@@ -258,7 +258,7 @@ func Test_scheduler_updateDdlMinTsLoop(t *testing.T) {
 			return 100, nil
 		}
 		tsoAlloc.GenerateTSOF = func(count uint32) (uint64, error) {
-			return 0, fmt.Errorf("error mock GenerateTSO")
+			return 0, errors.New("error mock GenerateTSO")
 		}
 		ctx := context.Background()
 		s := newScheduler(ctx, idAlloc, tsoAlloc)

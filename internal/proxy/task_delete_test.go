@@ -447,7 +447,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 				CollectionName: s.collectionName,
 			},
 		}
-		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 		globalMetaCache = s.mockCache
 
 		s.Error(dr.Init(context.Background()))
@@ -460,7 +460,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 		}
 		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
-			Return(int64(0), fmt.Errorf("mock get collectionID error"))
+			Return(int64(0), errors.New("mock get collectionID error"))
 
 		globalMetaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
@@ -647,7 +647,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		s.mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"part1", "part2"}, nil)
 		s.mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"part1": 100, "part2": 101}, nil)
-		mockChMgr.EXPECT().getVChannels(mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		mockChMgr.EXPECT().getVChannels(mock.Anything).Return(nil, errors.New("mock error"))
 
 		globalMetaCache = s.mockCache
 		s.Error(dr.Init(context.Background()))
@@ -735,7 +735,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		stream := msgstream.NewMockMsgStream(t)
 		mockMgr.EXPECT().getOrCreateDmlStream(mock.Anything, mock.Anything).Return(stream, nil)
 		mockMgr.EXPECT().getChannels(collectionID).Return(channels, nil)
-		stream.EXPECT().Produce(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
+		stream.EXPECT().Produce(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 
 		assert.Error(t, dr.Run(context.Background()))
 		assert.Equal(t, int64(0), dr.result.DeleteCnt)

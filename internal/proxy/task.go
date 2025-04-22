@@ -273,7 +273,7 @@ func (t *createCollectionTask) validatePartitionKey(ctx context.Context) error {
 
 	if idx == -1 {
 		if t.GetNumPartitions() != 0 {
-			return fmt.Errorf("num_partitions should only be specified with partition key field enabled")
+			return errors.New("num_partitions should only be specified with partition key field enabled")
 		}
 	} else {
 		log.Ctx(ctx).Info("create collection with partition key mode",

@@ -202,7 +202,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			compactionHandler := NewMockCompactionPlanContext(s.T())
 			compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
 
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("error")).Once()
+			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("error")).Once()
 			s.Error(st.UpdateVersion(context.Background(), 1, s.mt, compactionHandler))
 		})
 	})
@@ -217,7 +217,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		})
 
 		s.Run("update error", func() {
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("error")).Once()
+			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("error")).Once()
 			s.Error(st.UpdateMetaBuildingState(s.mt))
 		})
 	})
@@ -251,7 +251,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			s.mt.segments.segments[s.segID].IsSorted = false
 
 			handler := NewNMockHandler(s.T())
-			handler.EXPECT().GetCollection(context.Background(), collID).Return(nil, fmt.Errorf("mock error")).Once()
+			handler.EXPECT().GetCollection(context.Background(), collID).Return(nil, errors.New("mock error")).Once()
 			checkPass := st.PreCheck(context.Background(), &taskScheduler{
 				meta:    s.mt,
 				handler: handler,
@@ -299,7 +299,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 
 		s.Run("alloc failed", func() {
 			alloc := allocator.NewMockAllocator(s.T())
-			alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, fmt.Errorf("mock error"))
+			alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, errors.New("mock error"))
 
 			handler := NewNMockHandler(s.T())
 			handler.EXPECT().GetCollection(context.Background(), collID).Return(&collectionInfo{
@@ -579,7 +579,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 		s.Run("set target segment failed", func() {
 			catalog := catalogmocks.NewDataCoordCatalog(s.T())
 			s.mt.catalog = catalog
-			catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
+			catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
 			s.Error(st.SetJobInfo(s.mt))
 		})
 
@@ -588,7 +588,7 @@ func (s *statsTaskSuite) TestTaskStats_PreCheck() {
 			s.mt.catalog = catalog
 			s.mt.statsTaskMeta.catalog = catalog
 			catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
+			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 
 			s.Error(st.SetJobInfo(s.mt))
 		})

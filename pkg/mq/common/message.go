@@ -17,6 +17,7 @@
 package common
 
 import (
+	"errors"
 	"fmt"
 
 	"google.golang.org/protobuf/proto"
@@ -87,14 +88,14 @@ func GetMsgType(msg Message) (commonpb.MsgType, error) {
 	if msgType == commonpb.MsgType_Undefined {
 		header := commonpb.MsgHeader{}
 		if msg.Payload() == nil {
-			return msgType, fmt.Errorf("failed to unmarshal message header, payload is empty")
+			return msgType, errors.New("failed to unmarshal message header, payload is empty")
 		}
 		err := proto.Unmarshal(msg.Payload(), &header)
 		if err != nil {
 			return msgType, fmt.Errorf("failed to unmarshal message header, err %s", err.Error())
 		}
 		if header.Base == nil {
-			return msgType, fmt.Errorf("failed to unmarshal message, header is uncomplete")
+			return msgType, errors.New("failed to unmarshal message, header is uncomplete")
 		}
 		msgType = header.Base.MsgType
 	}

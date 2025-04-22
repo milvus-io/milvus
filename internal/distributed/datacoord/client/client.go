@@ -18,7 +18,6 @@ package grpcdatacoordclient
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -58,7 +57,7 @@ type Client struct {
 func NewClient(ctx context.Context) (types.DataCoordClient, error) {
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("DataCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
@@ -102,7 +101,7 @@ func (c *Client) getDataCoordAddr() (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Debug("DataCoordClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
-		return "", fmt.Errorf("find no available datacoord, check datacoord state")
+		return "", errors.New("find no available datacoord, check datacoord state")
 	}
 	log.Debug("DataCoordClient GetSessions success",
 		zap.String("address", ms.Address),

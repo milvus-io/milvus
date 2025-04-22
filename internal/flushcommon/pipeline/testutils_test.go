@@ -833,7 +833,7 @@ func (m *RootCoordFactory) AllocTimestamp(ctx context.Context, in *rootcoordpb.A
 	v := ctx.Value(ctxKey{})
 	if v != nil && v.(string) == returnError {
 		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		return resp, fmt.Errorf("injected error")
+		return resp, errors.New("injected error")
 	}
 
 	return resp, nil
@@ -876,7 +876,7 @@ func (m *RootCoordFactory) ShowPartitions(ctx context.Context, req *milvuspb.Sho
 	if m.ShowPartitionsErr {
 		return &milvuspb.ShowPartitionsResponse{
 			Status: merr.Success(),
-		}, fmt.Errorf("mock show partitions error")
+		}, errors.New("mock show partitions error")
 	}
 
 	if m.ShowPartitionsNotSuccess {

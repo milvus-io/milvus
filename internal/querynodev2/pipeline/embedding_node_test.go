@@ -253,6 +253,7 @@ func (suite *EmbeddingNodeSuite) TestBM25Embedding() {
 
 		runner := function.NewMockFunctionRunner(suite.T())
 		runner.EXPECT().BatchRun(mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		runner.EXPECT().GetSchema().Return(suite.collectionSchema.GetFunctions()[0]).Maybe()
 		runner.EXPECT().GetOutputFields().Return([]*schemapb.FieldSchema{suite.collectionSchema.Fields[3]})
 		runner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{suite.collectionSchema.Fields[2]})
 

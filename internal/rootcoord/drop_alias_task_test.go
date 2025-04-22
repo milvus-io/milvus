@@ -69,7 +69,7 @@ func Test_dropAliasTask_Execute(t *testing.T) {
 		mockMeta := mockrootcoord.NewIMetaTable(t)
 		mockMeta.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(111)
 		mockMeta.EXPECT().DropAlias(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			Return(fmt.Errorf("failed to alter alias"))
+			Return(errors.New("failed to alter alias"))
 		core := newTestCore(withValidProxyManager(), withMeta(mockMeta))
 		alias := funcutil.GenRandomStr()
 		task := &dropAliasTask{

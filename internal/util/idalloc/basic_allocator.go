@@ -94,7 +94,7 @@ func (ta *tsoAllocator) batchAllocate(ctx context.Context, count uint32) (uint64
 		return 0, 0, fmt.Errorf("syncTimeStamp Failed:%s", resp.GetStatus().GetReason())
 	}
 	if resp == nil {
-		return 0, 0, fmt.Errorf("empty AllocTimestampResponse")
+		return 0, 0, errors.New("empty AllocTimestampResponse")
 	}
 	return resp.GetTimestamp(), int(resp.GetCount()), nil
 }
@@ -138,7 +138,7 @@ func (ta *idAllocator) batchAllocate(ctx context.Context, count uint32) (uint64,
 		return 0, 0, fmt.Errorf("AllocID Failed:%s", resp.GetStatus().GetReason())
 	}
 	if resp == nil {
-		return 0, 0, fmt.Errorf("empty AllocID")
+		return 0, 0, errors.New("empty AllocID")
 	}
 	if resp.GetID() < 0 {
 		panic("get unexpected negative id")

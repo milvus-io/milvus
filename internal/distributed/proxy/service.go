@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/soheilhy/cmux"
@@ -301,7 +302,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		}
 		if !certPool.AppendCertsFromPEM(rootBuf) {
 			log.Warn("fail to append ca to cert")
-			errChan <- fmt.Errorf("fail to append ca to cert")
+			errChan <- errors.New("fail to append ca to cert")
 			return
 		}
 

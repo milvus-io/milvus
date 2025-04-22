@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -143,7 +144,7 @@ func (r *Runner) checkMySelf() error {
 	}
 	for _, session := range sessions {
 		if session.Address != r.address {
-			return fmt.Errorf("other migration is running")
+			return errors.New("other migration is running")
 		}
 	}
 	return nil

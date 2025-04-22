@@ -50,7 +50,7 @@ func CheckLogID(fieldBinlogs []*datapb.FieldBinlog) error {
 	for _, fieldBinlog := range fieldBinlogs {
 		for _, l := range fieldBinlog.GetBinlogs() {
 			if l.GetLogID() == 0 {
-				return fmt.Errorf("unexpected log id 0")
+				return errors.New("unexpected log id 0")
 			}
 		}
 	}

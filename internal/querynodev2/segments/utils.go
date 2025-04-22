@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -126,7 +127,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				}
 			}
 		case schemapb.DataType_SparseFloatVector:
-			return nil, fmt.Errorf("SparseFloatVector not support in row based message")
+			return nil, errors.New("SparseFloatVector not support in row based message")
 		}
 	}
 

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -116,12 +117,12 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 
 func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 	if len(inputs) > 1 {
-		return nil, fmt.Errorf("BM25 function received more than one input column")
+		return nil, errors.New("BM25 function received more than one input column")
 	}
 
 	text, ok := inputs[0].([]string)
 	if !ok {
-		return nil, fmt.Errorf("BM25 function batch input not string list")
+		return nil, errors.New("BM25 function batch input not string list")
 	}
 
 	rowNum := len(text)

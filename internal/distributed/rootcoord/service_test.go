@@ -115,7 +115,7 @@ func (m *mockCore) Start() error {
 }
 
 func (m *mockCore) Stop() error {
-	return fmt.Errorf("stop error")
+	return errors.New("stop error")
 }
 
 func (m *mockCore) GracefulStop() {

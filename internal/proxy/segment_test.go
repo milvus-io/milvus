@@ -237,7 +237,7 @@ func (mockD *mockDataCoord5) AssignSegmentID(ctx context.Context, req *datapb.As
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "Just For Test",
 		},
-	}, fmt.Errorf("just for test")
+	}, errors.New("just for test")
 }
 
 func TestSegmentAllocator5(t *testing.T) {
