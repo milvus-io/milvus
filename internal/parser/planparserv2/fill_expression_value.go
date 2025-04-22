@@ -3,6 +3,8 @@ package planparserv2
 import (
 	"fmt"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -129,11 +131,11 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 
 	if !(expr.GetLowerInclusive() && expr.GetUpperInclusive()) {
 		if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-			return fmt.Errorf("invalid range: lowerbound is greater than upperbound")
+			return errors.New("invalid range: lowerbound is greater than upperbound")
 		}
 	} else {
 		if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-			return fmt.Errorf("invalid range: lowerbound is greater than upperbound")
+			return errors.New("invalid range: lowerbound is greater than upperbound")
 		}
 	}
 
@@ -168,7 +170,7 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 		}
 
 		if operand.GetArrayVal() != nil {
-			return fmt.Errorf("can not comparisons array directly")
+			return errors.New("can not comparisons array directly")
 		}
 
 		dataType, err = getTargetType(lDataType, rDataType)

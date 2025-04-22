@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
@@ -87,7 +88,7 @@ func initHook() error {
 	var ok bool
 	hookVal, ok = h.(hook.Hook)
 	if !ok {
-		return fmt.Errorf("fail to convert the `Hook` interface")
+		return errors.New("fail to convert the `Hook` interface")
 	}
 	if err = hookVal.Init(paramtable.GetHookParams().SoConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
@@ -113,7 +114,7 @@ func initHook() error {
 	var extVal hook.Extension
 	extVal, ok = e.(hook.Extension)
 	if !ok {
-		return fmt.Errorf("fail to convert the `Extension` interface")
+		return errors.New("fail to convert the `Extension` interface")
 	}
 	storeExtension(extVal)
 

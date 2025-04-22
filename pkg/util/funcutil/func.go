@@ -282,7 +282,7 @@ func GetVirtualChannel(pchannel string, collectionID int64, idx int) string {
 // ConvertChannelName assembles channel name according to parameters.
 func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (string, error) {
 	if tokenFrom == "" {
-		return "", fmt.Errorf("the tokenFrom is empty")
+		return "", errors.New("the tokenFrom is empty")
 	}
 	if !strings.Contains(chanName, tokenFrom) {
 		return "", fmt.Errorf("cannot find token '%s' in '%s'", tokenFrom, chanName)

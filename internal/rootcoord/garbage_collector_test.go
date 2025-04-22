@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -283,7 +282,7 @@ func TestGarbageCollectorCtx_RemoveCreatingCollection(t *testing.T) {
 		).Return(func(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
 			removeCollectionCalled = true
 			removeCollectionChan <- struct{}{}
-			return fmt.Errorf("error mock RemoveCollection")
+			return errors.New("error mock RemoveCollection")
 		})
 
 		core := newTestCore(withTtSynchronizer(ticker), withMeta(meta), withTsoAllocator(tsoAllocator))
@@ -490,7 +489,7 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 
 		qc := mocks.NewMixCoord(t)
 		qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).
-			Return(merr.Success(), fmt.Errorf("mock err")).
+			Return(merr.Success(), errors.New("mock err")).
 			Run(func(ctx context.Context, req *querypb.ReleasePartitionsRequest) {
 				signal <- struct{}{}
 			})
@@ -517,7 +516,7 @@ func TestGarbageCollector_RemoveCreatingPartition(t *testing.T) {
 		signal := make(chan struct{}, 1)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().RemovePartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			Return(fmt.Errorf("mock err")).
+			Return(errors.New("mock err")).
 			Run(func(ctx context.Context, dbID, collectionID int64, partitionID int64, ts uint64) {
 				signal <- struct{}{}
 			})

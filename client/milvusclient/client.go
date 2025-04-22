@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -162,7 +163,7 @@ func (c *Client) setIdentifier(identifier string) {
 
 func (c *Client) connect(ctx context.Context, addr string, options ...grpc.DialOption) error {
 	if addr == "" {
-		return fmt.Errorf("address is empty")
+		return errors.New("address is empty")
 	}
 	conn, err := grpc.DialContext(ctx, addr, options...)
 	if err != nil {

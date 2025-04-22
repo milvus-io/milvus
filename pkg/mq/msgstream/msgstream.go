@@ -18,11 +18,11 @@ package msgstream
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"strconv"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -225,39 +225,39 @@ func NewMarshaledMsg(msg common.Message, group string) (ConsumeMsg, error) {
 	properties := msg.Properties()
 	vchannel, ok := properties[common.ChannelTypeKey]
 	if !ok {
-		return nil, fmt.Errorf("get channel name from msg properties failed")
+		return nil, errors.New("get channel name from msg properties failed")
 	}
 
 	collID, ok := properties[common.CollectionIDTypeKey]
 	if !ok {
-		return nil, fmt.Errorf("get collection ID from msg properties failed")
+		return nil, errors.New("get collection ID from msg properties failed")
 	}
 
 	tsStr, ok := properties[common.TimestampTypeKey]
 	if !ok {
-		return nil, fmt.Errorf("get minTs from msg properties failed")
+		return nil, errors.New("get minTs from msg properties failed")
 	}
 
 	timestamp, err := strconv.ParseUint(tsStr, 10, 64)
 	if err != nil {
 		log.Warn("parse message properties minTs failed, unknown message", zap.Error(err))
-		return nil, fmt.Errorf("parse minTs from msg properties failed")
+		return nil, errors.New("parse minTs from msg properties failed")
 	}
 
 	idStr, ok := properties[common.MsgIdTypeKey]
 	if !ok {
-		return nil, fmt.Errorf("get msgType from msg properties failed")
+		return nil, errors.New("get msgType from msg properties failed")
 	}
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		log.Warn("parse message properties minTs failed, unknown message", zap.Error(err))
-		return nil, fmt.Errorf("parse minTs from msg properties failed")
+		return nil, errors.New("parse minTs from msg properties failed")
 	}
 
 	val, ok := properties[common.MsgTypeKey]
 	if !ok {
-		return nil, fmt.Errorf("get msgType from msg properties failed")
+		return nil, errors.New("get msgType from msg properties failed")
 	}
 	msgType := commonpb.MsgType(commonpb.MsgType_value[val])
 

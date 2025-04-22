@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -2069,7 +2070,7 @@ func TestDML(t *testing.T) {
 		if matchCountRule(req.OutputFields) {
 			for _, pair := range req.QueryParams {
 				if pair.GetKey() == ParamLimit {
-					return nil, fmt.Errorf("mock error")
+					return nil, errors.New("mock error")
 				}
 			}
 		}

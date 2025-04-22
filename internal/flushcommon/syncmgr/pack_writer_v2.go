@@ -23,6 +23,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -181,7 +182,7 @@ func (bw *BulkPackWriterV2) splitInsertData(insertData []*storage.InsertData, sp
 	}
 	uniqueRows := lo.Uniq(lo.Values(rowNums))
 	if len(uniqueRows) != 1 || uniqueRows[0] == 0 {
-		return nil, fmt.Errorf("row num is not equal for each field")
+		return nil, errors.New("row num is not equal for each field")
 	}
 	for i, field := range bw.metaCache.Schema().GetFields() {
 		if _, ok := memorySizes[field.FieldID]; !ok {

@@ -19,9 +19,9 @@
 package function
 
 import (
-	"fmt"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -73,7 +73,7 @@ func createBedrockProvider(schema *schemapb.FieldSchema, providerName string, di
 	case bedrockProvider:
 		return NewBedrockEmbeddingProvider(schema, functionSchema, &MockBedrockClient{dim: dim}, map[string]string{})
 	default:
-		return nil, fmt.Errorf("Unknow provider")
+		return nil, errors.New("Unknow provider")
 	}
 }
 

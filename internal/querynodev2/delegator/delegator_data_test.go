@@ -611,7 +611,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 			s.loader.ExpectedCalls = nil
 		}()
 
-		s.loader.EXPECT().LoadBM25Stats(mock.Anything, s.collectionID, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		s.loader.EXPECT().LoadBM25Stats(mock.Anything, s.collectionID, mock.Anything).Return(nil, errors.New("mock error"))
 
 		workers := make(map[int64]*cluster.MockWorker)
 		worker1 := &cluster.MockWorker{}
@@ -1073,7 +1073,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
 		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
-		mockRunner.EXPECT().BatchRun(mock.Anything).Return(nil, fmt.Errorf("mock err"))
+		mockRunner.EXPECT().BatchRun(mock.Anything).Return(nil, errors.New("mock err"))
 		defer func() {
 			s.delegator.functionRunners = oldRunner
 		}()

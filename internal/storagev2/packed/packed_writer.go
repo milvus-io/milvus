@@ -26,11 +26,11 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 )
@@ -57,7 +57,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	for _, group := range columnGroups {
 		cGroup := C.malloc(C.size_t(len(group.Columns)) * C.size_t(unsafe.Sizeof(C.int(0))))
 		if cGroup == nil {
-			return nil, fmt.Errorf("failed to allocate memory for column groups")
+			return nil, errors.New("failed to allocate memory for column groups")
 		}
 		cGroupSlice := (*[1 << 30]C.int)(cGroup)[:len(group.Columns):len(group.Columns)]
 		for i, val := range group.Columns {

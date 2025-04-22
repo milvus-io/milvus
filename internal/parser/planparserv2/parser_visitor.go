@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/antlr4-go/antlr/v4"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
@@ -157,7 +158,7 @@ func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
 
 func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
 	if typeutil.IsArrayType(columnInfo.GetDataType()) && len(columnInfo.GetNestedPath()) == 0 {
-		return fmt.Errorf("can not comparisons array fields directly")
+		return errors.New("can not comparisons array fields directly")
 	}
 	return nil
 }
@@ -446,12 +447,12 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 
 	leftExpr := getExpr(left)
 	if leftExpr == nil {
-		return fmt.Errorf("the left operand of like is invalid")
+		return errors.New("the left operand of like is invalid")
 	}
 
 	column := toColumnInfo(leftExpr)
 	if column == nil {
-		return fmt.Errorf("like operation on complicated expr is unsupported")
+		return errors.New("like operation on complicated expr is unsupported")
 	}
 	if err := checkDirectComparisonBinaryField(column); err != nil {
 		return err
@@ -459,7 +460,7 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 
 	if !typeutil.IsStringType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType) &&
 		!(typeutil.IsArrayType(leftExpr.dataType) && typeutil.IsStringType(column.GetElementType())) {
-		return fmt.Errorf("like operation on non-string or no-json field is unsupported")
+		return errors.New("like operation on non-string or no-json field is unsupported")
 	}
 
 	pattern, err := convertEscapeSingle(ctx.StringLiteral().GetText())
@@ -496,10 +497,10 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 		return fmt.Errorf("field %v does not enable text match", columnInfo.FieldId)
 	}
 	if !typeutil.IsStringType(column.dataType) {
-		return fmt.Errorf("text match operation on non-string is unsupported")
+		return errors.New("text match operation on non-string is unsupported")
 	}
 	if column.dataType == schemapb.DataType_Text {
-		return fmt.Errorf("text match operation on text field is not supported yet")
+		return errors.New("text match operation on text field is not supported yet")
 	}
 
 	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
@@ -527,7 +528,7 @@ func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interfa
 		return err
 	}
 	if !typeutil.IsStringType(column.dataType) {
-		return fmt.Errorf("phrase match operation on non-string is unsupported")
+		return errors.New("phrase match operation on non-string is unsupported")
 	}
 	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
 	if err != nil {
@@ -770,11 +771,11 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
 		if !(lowerInclusive && upperInclusive) {
 			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-				return fmt.Errorf("invalid range: lowerbound is greater than upperbound")
+				return errors.New("invalid range: lowerbound is greater than upperbound")
 			}
 		} else {
 			if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-				return fmt.Errorf("invalid range: lowerbound is greater than upperbound")
+				return errors.New("invalid range: lowerbound is greater than upperbound")
 			}
 		}
 	}
@@ -852,11 +853,11 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	if !isTemplateExpr(lowerValueExpr) && !isTemplateExpr(upperValueExpr) {
 		if !(lowerInclusive && upperInclusive) {
 			if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
-				return fmt.Errorf("invalid range: lowerbound is greater than upperbound")
+				return errors.New("invalid range: lowerbound is greater than upperbound")
 			}
 		} else {
 			if getGenericValue(Greater(lowerValue, upperValue)).GetBoolVal() {
-				return fmt.Errorf("invalid range: lowerbound is greater than upperbound")
+				return errors.New("invalid range: lowerbound is greater than upperbound")
 			}
 		}
 	}
@@ -904,10 +905,10 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 
 	childExpr := getExpr(child)
 	if childExpr == nil {
-		return fmt.Errorf("failed to parse unary expressions")
+		return errors.New("failed to parse unary expressions")
 	}
 	if isRandomSampleExpr(childExpr) {
-		return fmt.Errorf("random sample expression cannot be used in unary expression")
+		return errors.New("random sample expression cannot be used in unary expression")
 	}
 
 	if err := checkDirectComparisonBinaryField(toColumnInfo(childExpr)); err != nil {
@@ -957,7 +958,7 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 	}
 
 	if leftValue != nil || rightValue != nil {
-		return fmt.Errorf("'or' can only be used between boolean expressions")
+		return errors.New("'or' can only be used between boolean expressions")
 	}
 
 	var leftExpr *ExprWithType
@@ -965,11 +966,11 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
 	if isRandomSampleExpr(leftExpr) || isRandomSampleExpr(rightExpr) {
-		return fmt.Errorf("random sample expression cannot be used in logical and expression")
+		return errors.New("random sample expression cannot be used in logical and expression")
 	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
-		return fmt.Errorf("'or' can only be used between boolean expressions")
+		return errors.New("'or' can only be used between boolean expressions")
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_BinaryExpr{
@@ -1009,7 +1010,7 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	}
 
 	if leftValue != nil || rightValue != nil {
-		return fmt.Errorf("'and' can only be used between boolean expressions")
+		return errors.New("'and' can only be used between boolean expressions")
 	}
 
 	var leftExpr *ExprWithType
@@ -1017,11 +1018,11 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	leftExpr = getExpr(left)
 	rightExpr = getExpr(right)
 	if isRandomSampleExpr(leftExpr) {
-		return fmt.Errorf("random sample expression can only be the last expression in the logical and expression")
+		return errors.New("random sample expression can only be the last expression in the logical and expression")
 	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
-		return fmt.Errorf("'and' can only be used between boolean expressions")
+		return errors.New("'and' can only be used between boolean expressions")
 	}
 
 	var expr *planpb.Expr
@@ -1151,7 +1152,7 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 				return nil, fmt.Errorf("invalid identifier: %s", identifier)
 			}
 			if typeutil.IsArrayType(field.DataType) {
-				return nil, fmt.Errorf("can only access array field with integer index")
+				return nil, errors.New("can only access array field with integer index")
 			}
 		} else if _, err := strconv.ParseInt(path, 10, 64); err != nil {
 			return nil, fmt.Errorf("json key must be enclosed in double quotes or single quotes: \"%s\"", path)

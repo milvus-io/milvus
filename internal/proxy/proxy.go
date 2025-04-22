@@ -550,7 +550,7 @@ func (node *Proxy) SetQueryNodeCreator(f func(ctx context.Context, addr string, 
 // GetRateLimiter returns the rateLimiter in Proxy.
 func (node *Proxy) GetRateLimiter() (types.Limiter, error) {
 	if node.simpleLimiter == nil {
-		return nil, fmt.Errorf("nil rate limiter in Proxy")
+		return nil, errors.New("nil rate limiter in Proxy")
 	}
 	return node.simpleLimiter, nil
 }

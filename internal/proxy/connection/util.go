@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -33,11 +34,11 @@ func ZapClientInfo(info *commonpb.ClientInfo) []zap.Field {
 func GetIdentifierFromContext(ctx context.Context) (int64, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return 0, fmt.Errorf("fail to get metadata from the context")
+		return 0, errors.New("fail to get metadata from the context")
 	}
 	identifierContent, ok := md[util.IdentifierKey]
 	if !ok || len(identifierContent) < 1 {
-		return 0, fmt.Errorf("no identifier found in metadata")
+		return 0, errors.New("no identifier found in metadata")
 	}
 	identifier, err := strconv.ParseInt(identifierContent[0], 10, 64)
 	if err != nil {

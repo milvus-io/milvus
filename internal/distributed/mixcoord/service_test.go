@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -115,7 +116,7 @@ func (m *mockMix) Start() error {
 }
 
 func (m *mockMix) Stop() error {
-	return fmt.Errorf("stop error")
+	return errors.New("stop error")
 }
 
 func (m *mockMix) GracefulStop() {

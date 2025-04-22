@@ -18,7 +18,6 @@ package grpcmixcoordclient
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -70,7 +69,7 @@ type Client struct {
 func NewClient(ctx context.Context) (types.MixCoordClient, error) {
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("New MixCoord Client failed", zap.Error(err))
 		return nil, err
 	}
@@ -118,7 +117,7 @@ func (c *Client) getMixCoordAddr() (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Warn("MixCoordClient mess key not exist", zap.Any("key", key))
-		return "", fmt.Errorf("find no available mixcoord, check mixcoord state")
+		return "", errors.New("find no available mixcoord, check mixcoord state")
 	}
 	log.Debug("MixCoordClient GetSessions success",
 		zap.String("address", ms.Address),

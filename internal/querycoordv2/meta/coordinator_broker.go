@@ -18,7 +18,6 @@ package meta
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"time"
 
@@ -275,7 +274,7 @@ func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...Uniq
 
 		if len(resp.Infos) == 0 {
 			log.Warn("No such segment in DataCoord")
-			return nil, fmt.Errorf("no such segment in DataCoord")
+			return nil, errors.New("no such segment in DataCoord")
 		}
 
 		err = binlog.DecompressMultiBinLogs(resp.GetInfos())

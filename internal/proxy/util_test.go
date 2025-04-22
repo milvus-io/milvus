@@ -931,7 +931,7 @@ func TestPasswordVerify(t *testing.T) {
 	mockedRootCoord := NewMixCoordMock()
 	mockedRootCoord.GetGetCredentialFunc = func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
 		invokedCount++
-		return nil, fmt.Errorf("get cred not found credential")
+		return nil, errors.New("get cred not found credential")
 	}
 
 	metaCache := &MetaCache{

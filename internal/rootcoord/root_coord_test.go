@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"os"
 	"testing"
@@ -742,7 +741,7 @@ func TestRootCoord_ShowCollectionIDs(t *testing.T) {
 		ctx := context.Background()
 
 		// specify db names
-		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(nil, fmt.Errorf("mock err"))
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, typeutil.MaxTimestamp).Return(nil, errors.New("mock err"))
 		resp, err := c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
 			DbNames:          []string{"db1"},
 			AllowUnavailable: true,
@@ -751,7 +750,7 @@ func TestRootCoord_ShowCollectionIDs(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 		// not specify db names
-		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock err"))
+		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
 		resp, err = c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -760,7 +759,7 @@ func TestRootCoord_ShowCollectionIDs(t *testing.T) {
 		meta.ExpectedCalls = nil
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(
 			[]*model.Database{model.NewDatabase(rand.Int63(), "db1", etcdpb.DatabaseState_DatabaseCreated, nil)}, nil)
-		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, typeutil.MaxTimestamp, false).Return(nil, fmt.Errorf("mock err"))
+		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, typeutil.MaxTimestamp, false).Return(nil, errors.New("mock err"))
 		resp, err = c.ShowCollectionIDs(ctx, &rootcoordpb.ShowCollectionIDsRequest{
 			AllowUnavailable: true,
 		})
