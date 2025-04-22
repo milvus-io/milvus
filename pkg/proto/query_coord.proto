@@ -337,6 +337,7 @@ message WatchDmChannelsRequest {
     int64 version = 12;
     repeated index.IndexInfo index_info_list = 13;
     int64 target_version = 14;
+    map<int64, int64> sealed_segment_row_count = 15; // segmentID -> row count, same as unflushedSegmentIds in vchannelInfo
 }
 
 message UnsubDmChannelRequest {

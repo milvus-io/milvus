@@ -241,7 +241,7 @@ func (_c *MockShardDelegator_GetPartitionStatsVersions_Call) RunAndReturn(run fu
 	return _c
 }
 
-// GetQueryView provides a mock function with given fields:
+// GetQueryView provides a mock function with no fields
 func (_m *MockShardDelegator) GetQueryView() *channelQueryView {
 	ret := _m.Called()
 
@@ -452,54 +452,6 @@ func (_c *MockShardDelegator_GetTSafe_Call) RunAndReturn(run func() uint64) *Moc
 	return _c
 }
 
-<<<<<<< HEAD
-// GetTargetVersion provides a mock function with no fields
-func (_m *MockShardDelegator) GetTargetVersion() int64 {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetTargetVersion")
-	}
-
-	var r0 int64
-	if rf, ok := ret.Get(0).(func() int64); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(int64)
-	}
-
-	return r0
-}
-
-// MockShardDelegator_GetTargetVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTargetVersion'
-type MockShardDelegator_GetTargetVersion_Call struct {
-	*mock.Call
-}
-
-// GetTargetVersion is a helper method to define mock.On call
-func (_e *MockShardDelegator_Expecter) GetTargetVersion() *MockShardDelegator_GetTargetVersion_Call {
-	return &MockShardDelegator_GetTargetVersion_Call{Call: _e.mock.On("GetTargetVersion")}
-}
-
-func (_c *MockShardDelegator_GetTargetVersion_Call) Run(run func()) *MockShardDelegator_GetTargetVersion_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockShardDelegator_GetTargetVersion_Call) Return(_a0 int64) *MockShardDelegator_GetTargetVersion_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockShardDelegator_GetTargetVersion_Call) RunAndReturn(run func() int64) *MockShardDelegator_GetTargetVersion_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-=======
->>>>>>> fed60da8ee (enhance: Optimize shard serviceable mechanism)
 // LoadGrowing provides a mock function with given fields: ctx, infos, version
 func (_m *MockShardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error {
 	ret := _m.Called(ctx, infos, version)
@@ -1126,13 +1078,8 @@ func (_c *MockShardDelegator_SyncReadableTarget_Call) Return() *MockShardDelegat
 	return _c
 }
 
-<<<<<<< HEAD
-func (_c *MockShardDelegator_SyncTargetVersion_Call) RunAndReturn(run func(int64, []int64, []int64, []int64, []int64, *msgpb.MsgPosition, *msgpb.MsgPosition)) *MockShardDelegator_SyncTargetVersion_Call {
-	_c.Run(run)
-=======
 func (_c *MockShardDelegator_SyncReadableTarget_Call) RunAndReturn(run func(*querypb.SyncAction, []int64)) *MockShardDelegator_SyncReadableTarget_Call {
-	_c.Call.Return(run)
->>>>>>> d4ef0b8558 (enable partial result on delegator before all segment is loaded)
+	_c.Run(run)
 	return _c
 }
 

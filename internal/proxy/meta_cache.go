@@ -1003,15 +1003,17 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 	}
 
 	// convert shards map to string for logging
-	shardStr := make([]string, 0, len(shards))
-	for channel, nodes := range shards {
-		nodeStrs := make([]string, 0, len(nodes))
-		for _, node := range nodes {
-			nodeStrs = append(nodeStrs, node.String())
+	if log.Logger.Level() == zap.DebugLevel {
+		shardStr := make([]string, 0, len(shards))
+		for channel, nodes := range shards {
+			nodeStrs := make([]string, 0, len(nodes))
+			for _, node := range nodes {
+				nodeStrs = append(nodeStrs, node.String())
+			}
+			shardStr = append(shardStr, fmt.Sprintf("%s:[%s]", channel, strings.Join(nodeStrs, ", ")))
 		}
-		shardStr = append(shardStr, fmt.Sprintf("%s:[%s]", channel, strings.Join(nodeStrs, ", ")))
+		log.Debug("update shard leader cache", zap.String("newShardLeaders", strings.Join(shardStr, ", ")))
 	}
-	log.Info("update shard leader cache", zap.String("newShardLeaders", strings.Join(shardStr, ", ")))
 
 	m.leaderMut.Lock()
 	if _, ok := m.collLeader[database]; !ok {

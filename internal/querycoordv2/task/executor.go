@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -401,6 +402,12 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 			zap.Error(err))
 		return err
 	}
+
+	sealedSegments := ex.targetMgr.GetSealedSegmentsByChannel(ctx, dmChannel.CollectionID, dmChannel.ChannelName, meta.NextTarget)
+	sealedSegmentRowCount := lo.MapValues(sealedSegments, func(segment *datapb.SegmentInfo, _ int64) int64 {
+		return segment.GetNumOfRows()
+	})
+	req.SealedSegmentRowCount = sealedSegmentRowCount
 
 	ts := dmChannel.GetSeekPosition().GetTimestamp()
 	log.Info("subscribe channel...",

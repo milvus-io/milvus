@@ -122,7 +122,7 @@ func (lb *LBPolicyImpl) GetShardLeaders(ctx context.Context, dbName string, coll
 }
 
 // try to select the best node from the available nodes
-func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes typeutil.UniqueSet) (nodeInfo, error) {
+func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload *ChannelWorkload, excludeNodes typeutil.UniqueSet) (nodeInfo, error) {
 	// Select node using specified nodes
 	trySelectNode := func(nodes []nodeInfo) (nodeInfo, error) {
 		availableNodes := make(map[int64]nodeInfo)
@@ -157,7 +157,16 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 		}
 
 		if _, ok := candidateNodes[targetNodeID]; !ok {
-			return nodeInfo{}, merr.WrapErrChannelNotAvailable(workload.channel)
+			nodeStr := lo.Map(lo.Values(candidateNodes), func(node nodeInfo, _ int) string {
+				return node.String()
+			})
+			log.Warn("target node not found",
+				zap.Int64("targetNodeID", targetNodeID),
+				zap.String("channel", workload.channel),
+				zap.String("candidateNodes", strings.Join(nodeStr, ", ")),
+				zap.Int64s("excluded", excludeNodes.Collect()),
+			)
+			return nodeInfo{}, merr.WrapErrNodeNotAvailable(targetNodeID, "")
 		}
 
 		return candidateNodes[targetNodeID], nil
@@ -168,12 +177,12 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 	targetNode, err := trySelectNode(workload.shardLeaders)
 	// If failed, refresh cache and retry
 	if err != nil {
-		candidatesInStr := lo.Map(workload.shardLeaders, func(node nodeInfo, _ int) string {
-			return node.String()
-		})
 		globalMetaCache.DeprecateShardCache(workload.db, workload.collectionName)
 		shardLeaders, err := lb.GetShardLeaders(ctx, workload.db, workload.collectionName, workload.collectionID, false)
 		if err != nil {
+			candidatesInStr := lo.Map(workload.shardLeaders, func(node nodeInfo, _ int) string {
+				return node.String()
+			})
 			log.Warn("failed to get shard delegator",
 				zap.Int64("collectionID", workload.collectionID),
 				zap.String("channelName", workload.channel),
@@ -207,20 +216,26 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error {
 	var lastErr error
 	excludeNodes := typeutil.NewUniqueSet()
-	tryExecute := func() error {
+	tryExecute := func() (bool, error) {
+		// if keeping retry after all nodes are excluded, try to clean excludeNodes
+		if excludeNodes.Len() == len(workload.shardLeaders) {
+			excludeNodes.Clear()
+		}
+
 		balancer := lb.getBalancer()
-		targetNode, err := lb.selectNode(ctx, balancer, workload, excludeNodes)
+		targetNode, err := lb.selectNode(ctx, balancer, &workload, excludeNodes)
 		if err != nil {
 			log.Warn("failed to select node for shard",
 				zap.Int64("collectionID", workload.collectionID),
 				zap.String("channelName", workload.channel),
 				zap.Int64("nodeID", targetNode.nodeID),
+				zap.Int64s("excluded", excludeNodes.Collect()),
 				zap.Error(err),
 			)
 			if lastErr != nil {
-				return lastErr
+				return true, lastErr
 			}
-			return err
+			return true, err
 		}
 		// cancel work load which assign to the target node
 		defer balancer.CancelWorkload(targetNode.nodeID, workload.nq)
@@ -235,7 +250,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			excludeNodes.Insert(targetNode.nodeID)
 
 			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode.nodeID, workload.channel)
-			return lastErr
+			return true, lastErr
 		}
 
 		err = workload.exec(ctx, targetNode.nodeID, client, workload.channel, workload.partialResultRequiredDataRatio)
@@ -247,10 +262,10 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				zap.Error(err))
 			excludeNodes.Insert(targetNode.nodeID)
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.nodeID, workload.channel)
-			return lastErr
+			return true, lastErr
 		}
 
-		return nil
+		return true, nil
 	}
 
 	var err error
@@ -260,7 +275,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		// for multi replicas, try to skip partial result, this may cause some extra rpc to delegator,
 		// for example, send request to delegator which loadedDataRatio=0.8, then failed and retry another delegator which loadedDataRatio=0.2
 		workload.partialResultRequiredDataRatio = 1
-		err = retry.Do(ctx, tryExecute, retry.Attempts(workload.retryTimes))
+		err = retry.Handle(ctx, tryExecute, retry.Attempts(workload.retryTimes))
 		if err != nil {
 			log.Ctx(ctx).Warn("failed to execute with full result",
 				zap.String("channel", workload.channel),
@@ -269,8 +284,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	}
 
 	// if failed, try to execute with partial result
+	excludeNodes.Clear()
 	workload.partialResultRequiredDataRatio = partialResultRequiredDataRatio
-	err = retry.Do(ctx, tryExecute, retry.Attempts(workload.retryTimes))
+	err = retry.Handle(ctx, tryExecute, retry.Attempts(workload.retryTimes))
 	if err != nil {
 		log.Ctx(ctx).Warn("failed to execute with partial result",
 			zap.String("channel", workload.channel),

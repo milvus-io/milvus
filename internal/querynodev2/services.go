@@ -251,18 +251,9 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		}
 	}()
 
-	segmentInfos := req.GetSegmentInfos()
-	sealedSegmentRowCount := lo.SliceToMap(channel.GetFlushedSegmentIds(), func(id int64) (int64, int64) {
-		if info, ok := segmentInfos[id]; ok {
-			return id, info.GetNumOfRows()
-		}
-		log.Warn("failed to get sealed segment row count", zap.Int64("segmentID", id), zap.String("channel", channel.GetChannelName()))
-		return id, 0
-	})
-
 	queryView := delegator.NewChannelQueryView(
 		channel.GetUnflushedSegmentIds(),
-		sealedSegmentRowCount,
+		req.GetSealedSegmentRowCount(),
 		req.GetPartitionIDs(),
 		req.GetTargetVersion(),
 	)

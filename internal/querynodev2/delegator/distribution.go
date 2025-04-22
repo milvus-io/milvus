@@ -275,6 +275,7 @@ func (d *distribution) updateServiceable(triggerAction string) {
 			zap.Int64("loadedSealedRowCount", loadedSealedSegments),
 			zap.Int64("totalSealedRowCount", totalSealedRowCount),
 			zap.Int("unloadedSealedSegmentNum", len(unloadedSealedSegments)),
+			zap.Int("totalSealedSegmentNum", len(d.queryView.sealedSegmentRowCount)),
 			zap.String("action", triggerAction))
 	}
 

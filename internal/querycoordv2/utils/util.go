@@ -159,15 +159,13 @@ func GetShardLeaders(ctx context.Context,
 	collectionID int64,
 	withUnserviceableShards bool,
 ) ([]*querypb.ShardLeadersList, error) {
-	if !withUnserviceableShards {
-		// skip check load status if withUnserviceableShards is true
-		if err := checkLoadStatus(ctx, m, collectionID); err != nil {
-			return nil, err
-		}
+	// skip check load status if withUnserviceableShards is true
+	if err := checkLoadStatus(ctx, m, collectionID); err != nil {
+		return nil, err
 	}
 
-	channels := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTargetFirst)
-	if !withUnserviceableShards && len(channels) == 0 {
+	channels := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
+	if len(channels) == 0 {
 		msg := "loaded collection do not found any channel in target, may be in recovery"
 		err := merr.WrapErrCollectionOnRecovering(collectionID, msg)
 		log.Ctx(ctx).Warn("failed to get channels", zap.Error(err))

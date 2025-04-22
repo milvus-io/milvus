@@ -140,7 +140,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 	// compare inner dists to find repeated loaded segments
 	redundancies = c.findRepeatedSealedSegments(ctx, replica.GetID())
-	redundancies = c.filterExistedOnLeader(replica, redundancies)
+	redundancies = c.filterInUsedByDelegator(replica, redundancies)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("redundancies of segment", tasks...)
 	// set deduplicate task priority to low, to avoid deduplicate task cancel balance task
@@ -294,10 +294,20 @@ func (c *SegmentChecker) findRepeatedSealedSegments(ctx context.Context, replica
 	return segments
 }
 
-func (c *SegmentChecker) filterExistedOnLeader(replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
+func (c *SegmentChecker) filterInUsedByDelegator(replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
 	filtered := make([]*meta.Segment, 0, len(segments))
+	delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
+	ch2DelegatorList := lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
+		return d.View.Channel
+	})
+
 	for _, s := range segments {
-		delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica), meta.WithChannelName2Channel(s.GetInsertChannel()))
+		delegatorList := ch2DelegatorList[s.GetInsertChannel()]
+		if len(delegatorList) == 0 {
+			// skip deduplication if delegator is not found
+			continue
+		}
+
 		usedByDelegator := false
 		for _, delegator := range delegatorList {
 			seg, ok := delegator.View.Segments[s.GetID()]
