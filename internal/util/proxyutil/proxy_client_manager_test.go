@@ -18,7 +18,6 @@ package proxyutil
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 

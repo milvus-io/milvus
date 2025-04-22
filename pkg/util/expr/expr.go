@@ -20,10 +20,10 @@ package expr
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"unsafe"
 
+	"github.com/cockroachdb/errors"
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
 	"go.uber.org/zap"

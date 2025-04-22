@@ -1805,7 +1805,8 @@ func getTemplateType(value interface{}) schemapb.DataType {
 	case []interface{}:
 		return schemapb.DataType_Array
 	default:
-		panic(fmt.Sprintf("Unexpected data(%v) when getTemplateType, please check it!", value))
+		log.Panic(fmt.Sprintf("Unexpected data(%v) when getTemplateType, please check it!", value))
+		return schemapb.DataType_None
 	}
 }
 

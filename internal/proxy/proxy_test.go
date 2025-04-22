@@ -475,6 +475,7 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	log.Info("Register proxy done")
 	defer func() {
+		time.Sleep(5 * time.Second)
 		a := []any{rc, dc, qc, qn, in, dn, proxy}
 		fmt.Println(len(a))
 		// HINT: the order of stopping service refers to the `roles.go` file

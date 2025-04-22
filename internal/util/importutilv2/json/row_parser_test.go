@@ -221,7 +221,7 @@ func TestRowParser_Parse_Invalid(t *testing.T) {
 	}
 
 	cases = []testCase{
-		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3], "name": "\xc3\x28"}`, expectErr: "invalid character 'x' in string escape code"}, // test invalid uft-8
+		{name: `{"id": 1, "vector": [], "arrayField": [1, 2, 3], "name": "\xc3\x28"}`, expectErr: "Syntax error at index"}, // test invalid uft-8
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

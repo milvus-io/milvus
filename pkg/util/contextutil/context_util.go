@@ -18,11 +18,11 @@ package contextutil
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/pkg/v2/util"

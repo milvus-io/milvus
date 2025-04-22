@@ -24,11 +24,10 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -650,7 +649,7 @@ func (dsw *MultiFieldDeltalogStreamWriter) GetRecordWriter() (RecordWriter, erro
 		return dsw.rw, nil
 	}
 
-	fieldIds := []FieldID{common.RowIDField, common.TimeStampField} // Not used.
+	fieldIDs := []FieldID{common.RowIDField, common.TimeStampField} // Not used.
 	fields := []arrow.Field{
 		{
 			Name:     "pk",
@@ -664,7 +663,7 @@ func (dsw *MultiFieldDeltalogStreamWriter) GetRecordWriter() (RecordWriter, erro
 		},
 	}
 
-	rw, err := newMultiFieldRecordWriter(fieldIds, fields, &dsw.buf)
+	rw, err := newMultiFieldRecordWriter(fieldIDs, fields, &dsw.buf)
 	if err != nil {
 		return nil, err
 	}

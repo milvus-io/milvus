@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/sbinet/npyio"
 	"github.com/stretchr/testify/assert"

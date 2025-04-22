@@ -18,10 +18,10 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
