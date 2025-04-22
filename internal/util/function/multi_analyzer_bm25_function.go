@@ -181,9 +181,13 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error)
 		return nil, fmt.Errorf("BM25 function with multi analyzer text input must be string list")
 	}
 
-	option, ok := inputs[1].([]string)
+	analyzer, ok := inputs[1].([]string)
 	if !ok {
-		return nil, fmt.Errorf("BM25 function with multi analyzer option input must be string list")
+		return nil, fmt.Errorf("BM25 function with multi analyzer input analyzer name must be string list")
+	}
+
+	if len(text) != len(analyzer) {
+		return nil, fmt.Errorf("BM25 function with multi analyzer input text and analyzer name must have same length")
 	}
 
 	rowNum := len(text)
@@ -200,7 +204,7 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := v.run(text[start:end], option[start:end], embedData[start:end])
+			err := v.run(text[start:end], analyzer[start:end], embedData[start:end])
 			if err != nil {
 				errCh <- err
 				return

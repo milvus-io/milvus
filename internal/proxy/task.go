@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -39,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -388,41 +386,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	for _, field := range t.schema.Fields {
-		// validate field name
-		if err := validateFieldName(field.Name); err != nil {
-			return err
-		}
-		// validate dense vector field type parameters
-		isVectorType := typeutil.IsVectorType(field.DataType)
-		if isVectorType {
-			err = validateDimension(field)
-			if err != nil {
-				return err
-			}
-		}
-		// valid max length per row parameters
-		// if max_length not specified, return error
-		if field.DataType == schemapb.DataType_VarChar ||
-			(field.GetDataType() == schemapb.DataType_Array && field.GetElementType() == schemapb.DataType_VarChar) {
-			err = validateMaxLengthPerRow(t.schema.Name, field)
-			if err != nil {
-				return err
-			}
-		}
-		// valid max capacity for array per row parameters
-		// if max_capacity not specified, return error
-		if field.DataType == schemapb.DataType_Array {
-			if err = validateMaxCapacityPerRow(t.schema.Name, field); err != nil {
-				return err
-			}
-		}
-		// TODO should remove the index params in the field schema
-		indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
-		if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
-			return err
-		}
-
-		if err := ctokenizer.ValidateTextSchema(field, wasBm25FunctionInputField(t.schema, field)); err != nil {
+		if err := ValidateField(field, t.schema); err != nil {
 			return err
 		}
 	}

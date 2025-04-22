@@ -54,7 +54,7 @@ create_token_stream(CTokenizer tokenizer, const char* text, uint32_t text_len) {
 }
 
 CStatus
-validate_tokenizer(const char* params){
+validate_tokenizer(const char* params) {
     try {
         auto impl = std::make_unique<milvus::tantivy::Tokenizer>(params);
         return milvus::SuccessCStatus();
