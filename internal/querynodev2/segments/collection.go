@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -47,6 +48,8 @@ type CollectionManager interface {
 	// returns true if the collection ref count goes 0, or the collection not exists,
 	// return false otherwise
 	Unref(collectionID int64, count uint32) bool
+	// UpdateSchema update the underlying collection schema of the provided collection.
+	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema) error
 }
 
 type collectionManager struct {
@@ -103,6 +106,22 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	collection.Ref(1)
 	m.collections[collectionID] = collection
 	m.updateMetric()
+	return nil
+}
+
+func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema) error {
+	m.mut.Lock()
+	defer m.mut.Unlock()
+
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
+	}
+
+	if err := collection.ccollection.UpdateSchema(schema); err != nil {
+		return err
+	}
+	collection.schema.Store(schema)
 	return nil
 }
 

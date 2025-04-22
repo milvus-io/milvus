@@ -2334,6 +2334,44 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 }
 
+func (suite *ServiceSuite) TestUpdateSchema() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := &querypb.UpdateSchemaRequest{
+		CollectionID: suite.collectionID,
+		Schema:       suite.schema,
+	}
+	manager := suite.node.manager.Collection
+	// reset manager to align default teardown logic
+	defer func() {
+		suite.node.manager.Collection = manager
+	}()
+	mockManager := segments.NewMockCollectionManager(suite.T())
+	suite.node.manager.Collection = mockManager
+
+	suite.Run("normal", func() {
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, suite.schema).Return(nil).Once()
+
+		status, err := suite.node.UpdateSchema(ctx, req)
+		suite.NoError(merr.CheckRPCCall(status, err))
+	})
+
+	suite.Run("manager_returns_error", func() {
+		mockManager.EXPECT().UpdateSchema(suite.collectionID, suite.schema).Return(merr.WrapErrServiceInternal("mocked")).Once()
+
+		status, err := suite.node.UpdateSchema(ctx, req)
+		suite.Error(merr.CheckRPCCall(status, err))
+	})
+
+	suite.Run("abonormal_node", func() {
+		suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
+		status, err := suite.node.UpdateSchema(ctx, req)
+		suite.Error(merr.CheckRPCCall(status, err))
+	})
+}
+
 func TestQueryNodeService(t *testing.T) {
 	suite.Run(t, new(ServiceSuite))
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -84,7 +85,21 @@ func (impl *msgHandlerImpl) HandleManualFlush(vchannel string, flushMsg message.
 	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.Header().GetFlushTs()); err != nil {
 		return errors.Wrap(err, "failed to flush channel")
 	}
-	return nil
+	broadcastID := flushMsg.BroadcastHeader().BroadcastID
+	if broadcastID == 0 {
+		return nil
+	}
+	return streaming.WAL().Broadcast().Ack(context.Background(), types.BroadcastAckRequest{
+		BroadcastID: flushMsg.BroadcastHeader().BroadcastID,
+		VChannel:    vchannel,
+	})
+}
+
+func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, vchannel string, msg *adaptor.SchemaChangeMessageBody) error {
+	return streaming.WAL().Broadcast().Ack(ctx, types.BroadcastAckRequest{
+		BroadcastID: msg.BroadcastID,
+		VChannel:    vchannel,
+	})
 }
 
 func (impl *msgHandlerImpl) HandleImport(ctx context.Context, vchannel string, importMsg *msgpb.ImportMsg) error {

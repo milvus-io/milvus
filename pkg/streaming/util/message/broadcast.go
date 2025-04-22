@@ -9,13 +9,13 @@ import (
 
 // newBroadcastHeaderFromProto creates a BroadcastHeader from proto.
 func newBroadcastHeaderFromProto(proto *messagespb.BroadcastHeader) *BroadcastHeader {
-	rks := make(typeutil.Set[ResourceKey], len(proto.ResourceKeys))
-	for _, key := range proto.ResourceKeys {
+	rks := make(typeutil.Set[ResourceKey], len(proto.GetResourceKeys()))
+	for _, key := range proto.GetResourceKeys() {
 		rks.Insert(NewResourceKeyFromProto(key))
 	}
 	return &BroadcastHeader{
-		BroadcastID:  proto.BroadcastId,
-		VChannels:    proto.Vchannels,
+		BroadcastID:  proto.GetBroadcastId(),
+		VChannels:    proto.GetVchannels(),
 		ResourceKeys: rks,
 	}
 }

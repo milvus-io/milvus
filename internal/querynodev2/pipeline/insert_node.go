@@ -118,6 +118,7 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 	return &deleteNodeMsg{
 		deleteMsgs: nodeMsg.deleteMsgs,
 		timeRange:  nodeMsg.timeRange,
+		schema:     nodeMsg.schema,
 	}
 }
 

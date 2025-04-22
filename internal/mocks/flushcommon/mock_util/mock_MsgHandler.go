@@ -5,6 +5,8 @@ package mock_util
 import (
 	context "context"
 
+	adaptor "github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
+
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 
 	mock "github.com/stretchr/testify/mock"
@@ -211,6 +213,54 @@ func (_c *MockMsgHandler_HandleManualFlush_Call) Return(_a0 error) *MockMsgHandl
 }
 
 func (_c *MockMsgHandler_HandleManualFlush_Call) RunAndReturn(run func(string, message.ImmutableManualFlushMessageV2) error) *MockMsgHandler_HandleManualFlush_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// HandleSchemaChange provides a mock function with given fields: ctx, vchannel, msg
+func (_m *MockMsgHandler) HandleSchemaChange(ctx context.Context, vchannel string, msg *adaptor.SchemaChangeMessageBody) error {
+	ret := _m.Called(ctx, vchannel, msg)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HandleSchemaChange")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *adaptor.SchemaChangeMessageBody) error); ok {
+		r0 = rf(ctx, vchannel, msg)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockMsgHandler_HandleSchemaChange_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleSchemaChange'
+type MockMsgHandler_HandleSchemaChange_Call struct {
+	*mock.Call
+}
+
+// HandleSchemaChange is a helper method to define mock.On call
+//   - ctx context.Context
+//   - vchannel string
+//   - msg *adaptor.SchemaChangeMessageBody
+func (_e *MockMsgHandler_Expecter) HandleSchemaChange(ctx interface{}, vchannel interface{}, msg interface{}) *MockMsgHandler_HandleSchemaChange_Call {
+	return &MockMsgHandler_HandleSchemaChange_Call{Call: _e.mock.On("HandleSchemaChange", ctx, vchannel, msg)}
+}
+
+func (_c *MockMsgHandler_HandleSchemaChange_Call) Run(run func(ctx context.Context, vchannel string, msg *adaptor.SchemaChangeMessageBody)) *MockMsgHandler_HandleSchemaChange_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(*adaptor.SchemaChangeMessageBody))
+	})
+	return _c
+}
+
+func (_c *MockMsgHandler_HandleSchemaChange_Call) Return(_a0 error) *MockMsgHandler_HandleSchemaChange_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMsgHandler_HandleSchemaChange_Call) RunAndReturn(run func(context.Context, string, *adaptor.SchemaChangeMessageBody) error) *MockMsgHandler_HandleSchemaChange_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -26,11 +26,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 )
@@ -512,6 +514,77 @@ func (a *AddCollectionFieldStep) Execute(ctx context.Context) ([]nestedStep, err
 
 func (a *AddCollectionFieldStep) Desc() string {
 	return fmt.Sprintf("add field, collectionID: %d, fieldID: %d, ts: %d", a.oldColl.CollectionID, a.newField.FieldID, a.ts)
+}
+
+type WriteSchemaChangeWALStep struct {
+	baseStep
+	collection *model.Collection
+	ts         Timestamp
+}
+
+func (s *WriteSchemaChangeWALStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	vchannels := s.collection.VirtualChannelNames
+	schema := &schemapb.CollectionSchema{
+		Name:               s.collection.Name,
+		Description:        s.collection.Description,
+		AutoID:             s.collection.AutoID,
+		Fields:             model.MarshalFieldModels(s.collection.Fields),
+		Functions:          model.MarshalFunctionModels(s.collection.Functions),
+		EnableDynamicField: s.collection.EnableDynamicField,
+		Properties:         s.collection.Properties,
+	}
+
+	schemaMsg, err := message.NewSchemaChangeMessageBuilderV2().
+		WithBroadcast(vchannels).
+		WithHeader(&message.SchemaChangeMessageHeader{
+			CollectionId: s.collection.CollectionID,
+		}).
+		WithBody(&message.SchemaChangeMessageBody{
+			Schema:   schema,
+			ModifyTs: s.ts,
+		}).BuildBroadcast()
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := streaming.WAL().Broadcast().Append(ctx, schemaMsg)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Ctx(ctx).Info(
+		"broadcast schema change success",
+		zap.Uint64("broadcastID", resp.BroadcastID),
+		zap.Any("appendResults", resp.AppendResults),
+	)
+
+	flushMsg, err := message.NewManualFlushMessageBuilderV2().
+		WithBroadcast(vchannels).
+		WithHeader(&messagespb.ManualFlushMessageHeader{
+			CollectionId: s.collection.CollectionID,
+			FlushTs:      s.ts,
+		}).
+		WithBody(&message.ManualFlushMessageBody{}).BuildBroadcast()
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err = streaming.WAL().Broadcast().Append(ctx, flushMsg)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Ctx(ctx).Info(
+		"broadcast schema change success",
+		zap.Uint64("broadcastID", resp.BroadcastID),
+		zap.Any("appendResults", resp.AppendResults),
+	)
+
+	return nil, nil
+}
+
+func (s *WriteSchemaChangeWALStep) Desc() string {
+	return fmt.Sprintf("write schema change WALcollectionID: %d, ts: %d", s.collection.CollectionID, s.ts)
 }
 
 type AlterDatabaseStep struct {

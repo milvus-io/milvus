@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
@@ -76,6 +77,7 @@ type ShardDelegator interface {
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
+	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema) error
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -854,6 +856,51 @@ func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 
 func (sd *shardDelegator) GetTSafe() uint64 {
 	return sd.latestTsafe.Load()
+}
+
+func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema) error {
+	log := sd.getLogger(ctx)
+	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
+		return err
+	}
+	defer sd.lifetime.Done()
+
+	log.Info("delegator received update schema event")
+
+	sealed, growing, version, err := sd.distribution.PinReadableSegments()
+	if err != nil {
+		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
+		return err
+	}
+	defer sd.distribution.Unpin(version)
+
+	tasks, err := organizeSubTask(ctx, &querypb.UpdateSchemaRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		CollectionID: sd.collectionID,
+		Schema:       schema,
+	}, sealed, growing, sd, func(req *querypb.UpdateSchemaRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.UpdateSchemaRequest {
+		nodeReq := typeutil.Clone(req)
+		nodeReq.GetBase().TargetID = targetID
+		return nodeReq
+	})
+	if err != nil {
+		return err
+	}
+
+	_, err = executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.UpdateSchemaRequest, worker cluster.Worker) (*StatusWrapper, error) {
+		status, err := worker.UpdateSchema(ctx, req)
+		return (*StatusWrapper)(status), err
+	}, "UpdateSchema", log)
+
+	return err
+}
+
+type StatusWrapper commonpb.Status
+
+func (w *StatusWrapper) GetStatus() *commonpb.Status {
+	return (*commonpb.Status)(w)
 }
 
 // Close closes the delegator.

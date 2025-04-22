@@ -45,7 +45,6 @@
 #include "storage/Util.h"
 #include "milvus-storage/common/constants.h"
 
-
 using boost::algorithm::starts_with;
 
 namespace milvus::segcore {
