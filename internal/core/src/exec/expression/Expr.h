@@ -692,8 +692,9 @@ class SegmentExpr : public Expr {
 
             // if segment is chunked, type won't be growing
             int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
-
             size = std::min(size, batch_size_ - processed_size);
+            if (size == 0)
+                continue;  //do not go empty-loop at the bound of the chunk
 
             auto& skip_index = segment_->GetSkipIndex();
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
@@ -1024,7 +1025,8 @@ class SegmentExpr : public Expr {
             }
 
             size = std::min(size, batch_size_ - processed_size);
-
+            if (size == 0)
+                continue;  //do not go empty-loop at the bound of the chunk
             bool access_sealed_variable_column = false;
             if constexpr (std::is_same_v<T, std::string_view> ||
                           std::is_same_v<T, Json> ||
