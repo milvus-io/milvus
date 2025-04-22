@@ -249,6 +249,14 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 		}
 	}
+
+	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
+	// this make query view updated happens before new read request happens
+	// see also schema change design
+	if collectionInfo.updateTimestamp > guaranteeTs {
+		guaranteeTs = collectionInfo.updateTimestamp
+	}
+
 	t.SearchRequest.GuaranteeTimestamp = guaranteeTs
 	t.SearchRequest.ConsistencyLevel = consistencyLevel
 	if t.isIterator && t.request.GetGuaranteeTimestamp() > 0 {

@@ -599,6 +599,7 @@ func (coord *MixCoordMock) DescribeCollection(ctx context.Context, req *milvuspb
 		CreatedTimestamp:     meta.createdUtcTimestamp,
 		CreatedUtcTimestamp:  meta.createdUtcTimestamp,
 		Properties:           meta.properties,
+		UpdateTimestamp:      meta.createdTimestamp,
 	}, nil
 }
 

@@ -491,6 +491,23 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		st.SetTs(enqueueTs)
 		assert.Error(t, st.PreExecute(ctx))
 	})
+
+	t.Run("search_with_schema_updated", func(t *testing.T) {
+		collName := "collection_updated" + funcutil.GenRandomStr()
+		createColl(t, collName, qc)
+
+		st := getSearchTask(t, collName)
+		st.request.SearchParams = getValidSearchParams()
+		st.request.DslType = commonpb.DslType_BoolExprV1
+		st.request.UseDefaultConsistency = false
+		st.request.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
+
+		collInfo, err := globalMetaCache.GetCollectionInfo(ctx, "", collName, 0)
+		assert.NoError(t, err)
+
+		assert.NoError(t, st.PreExecute(ctx))
+		assert.Equal(t, collInfo.updateTimestamp, st.SearchRequest.GuaranteeTimestamp)
+	})
 }
 
 func TestSearchTask_WithFunctions(t *testing.T) {
