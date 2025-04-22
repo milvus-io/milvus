@@ -305,19 +305,17 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     size_t processed_cursor = 0;
-    auto execute_sub_batch = [lower_inclusive,
-                              upper_inclusive,
-                              &processed_cursor,
-                              &bitmap_input]<FilterType filter_type =
-                                                 FilterType::sequential>(
-                                 const T* data,
-                                 const bool* valid_data,
-                                 const int32_t* offsets,
-                                 const int size,
-                                 TargetBitmapView res,
-                                 TargetBitmapView valid_res,
-                                 HighPrecisionType val1,
-                                 HighPrecisionType val2) {
+    auto execute_sub_batch =
+        [ lower_inclusive, upper_inclusive, &processed_cursor, &
+          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+            const T* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res,
+            HighPrecisionType val1,
+            HighPrecisionType val2) {
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFunc<T, true, true, filter_type> func;
             func(val1,
@@ -449,20 +447,22 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     size_t processed_cursor = 0;
-    auto execute_sub_batch = [lower_inclusive,
-                              upper_inclusive,
-                              pointer,
-                              &bitmap_input,
-                              &processed_cursor]<FilterType filter_type =
-                                                     FilterType::sequential>(
-                                 const milvus::Json* data,
-                                 const bool* valid_data,
-                                 const int32_t* offsets,
-                                 const int size,
-                                 TargetBitmapView res,
-                                 TargetBitmapView valid_res,
-                                 ValueType val1,
-                                 ValueType val2) {
+    auto execute_sub_batch =
+        [
+            lower_inclusive,
+            upper_inclusive,
+            pointer,
+            &bitmap_input,
+            &processed_cursor
+        ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::Json* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res,
+            ValueType val1,
+            ValueType val2) {
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForJson<ValueType, true, true, filter_type>
                 func;
@@ -776,10 +776,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
                                       .clone();
         cached_index_chunk_id_ = 0;
     }
-    int total_data_chunk_pos_ =  GetProcessedRows();
+    int total_data_chunk_pos = GetProcessedGlobalPos();
     TargetBitmap result;
     result.append(
-        cached_index_chunk_res_, total_data_chunk_pos_, real_batch_size);
+        cached_index_chunk_res_, total_data_chunk_pos, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
@@ -821,20 +821,18 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
     }
 
     size_t processed_cursor = 0;
-    auto execute_sub_batch = [lower_inclusive,
-                              upper_inclusive,
-                              &processed_cursor,
-                              &bitmap_input]<FilterType filter_type =
-                                                 FilterType::sequential>(
-                                 const milvus::ArrayView* data,
-                                 const bool* valid_data,
-                                 const int32_t* offsets,
-                                 const int size,
-                                 TargetBitmapView res,
-                                 TargetBitmapView valid_res,
-                                 ValueType val1,
-                                 ValueType val2,
-                                 int index) {
+    auto execute_sub_batch =
+        [ lower_inclusive, upper_inclusive, &processed_cursor, &
+          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+            const milvus::ArrayView* data,
+            const bool* valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res,
+            ValueType val1,
+            ValueType val2,
+            int index) {
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, true, true, filter_type>
                 func;

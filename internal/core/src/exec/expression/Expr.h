@@ -204,7 +204,7 @@ class SegmentExpr : public Expr {
     }
 
     int64_t
-     GetProcessedRows() {
+    GetProcessedGlobalPos() {
         int64_t total_pos = 0;
 
         for (size_t i = 0; i < current_data_chunk_; i++) {
@@ -214,7 +214,7 @@ class SegmentExpr : public Expr {
         total_pos += current_data_chunk_pos_;
 
         LOG_DEBUG(
-            " GetProcessedRows - total_pos: {}, current_chunk: {}, "
+            " GetProcessedGlobalPos - total_pos: {}, current_chunk: {}, "
             "current_pos: {}",
             total_pos,
             current_data_chunk_,
