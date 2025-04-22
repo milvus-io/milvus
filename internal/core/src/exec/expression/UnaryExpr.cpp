@@ -959,9 +959,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
                            ExprValueType>;
-    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
-                               ? active_count_ - current_data_chunk_pos_
-                               : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
     auto pointerpath = milvus::Json::pointer(expr_->column_.nested_path_);
     auto pointerpair = SplitAtFirstSlashDigit(pointerpath);
     std::string pointer = pointerpair.first;
@@ -1125,6 +1126,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
     auto op_type = expr_->op_type_;
 
     if (cached_index_chunk_id_ != 0) {
+        cached_index_chunk_id_ = 0;
         const segcore::SegmentInternalInterface* segment = nullptr;
         if (segment_->type() == SegmentType::Growing) {
             segment =
@@ -1222,8 +1224,6 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                         } else {
                             UnaryJSONTypeCompareWithValue(x != val);
                         }
-                    case proto::plan::PrefixMatch:
-                    case proto::plan::Match:
                     default:
                         return false;
                 }
@@ -1466,12 +1466,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                                                      is_strong_consistency,
                                                      filter_func)
                                       .clone();
-        cached_index_chunk_id_ = 0;
     }
+    int total_data_chunk_pos= GetProcessedGlobalPos();
     TargetBitmap result;
     result.append(
-        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
-    current_data_chunk_pos_ += real_batch_size;
+        cached_index_chunk_res_, total_data_chunk_pos, real_batch_size);
+    MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
 }

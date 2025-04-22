@@ -202,9 +202,30 @@ class SegmentExpr : public Expr {
         return true;
     }
 
+    int64_t
+    GetProcessedGlobalPos() {
+        int64_t total_pos = 0;
+
+        for (size_t i = 0; i < current_data_chunk_; i++) {
+            total_pos += segment_->chunk_size(field_id_, i);
+        }
+
+        total_pos += current_data_chunk_pos_;
+
+        LOG_DEBUG(
+            "GetProcessedGlobalPos - total_pos: {}, current_chunk: {}, "
+            "current_pos: {}",
+            total_pos,
+            current_data_chunk_,
+            current_data_chunk_pos_);
+
+        return total_pos;
+    }
+
     void
     MoveCursorForDataMultipleChunk() {
         int64_t processed_size = 0;
+
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
