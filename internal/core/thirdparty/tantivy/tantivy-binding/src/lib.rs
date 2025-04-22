@@ -1,6 +1,5 @@
 use error::TantivyBindingError;
 
-mod analyzer;
 mod array;
 mod bitset_wrapper;
 mod data_type;
@@ -29,8 +28,9 @@ mod util;
 mod util_c;
 mod vec_collector;
 
-use error::Result;
+pub mod analyzer;
 
+use error::Result;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TantivyIndexVersion {
     V5, // Version for compatibility (for 2.4.x)

@@ -3,7 +3,7 @@ use serde_json as json;
 use tantivy::tokenizer::*;
 use tantivy::tokenizer::{TextAnalyzer, TextAnalyzerBuilder};
 
-use crate::analyzer::tokenizers::{JiebaTokenizer, LinderaTokenizer};
+use super::{IcuTokenizer, JiebaTokenizer, LangIdentTokenizer, LinderaTokenizer};
 use crate::error::{Result, TantivyBindingError};
 
 pub fn standard_builder() -> TextAnalyzerBuilder {
@@ -14,8 +14,27 @@ pub fn whitespace_builder() -> TextAnalyzerBuilder {
     TextAnalyzer::builder(WhitespaceTokenizer::default()).dynamic()
 }
 
-pub fn jieba_builder(params: Option<&json::Map<String, json::Value>>) -> Result<TextAnalyzerBuilder> {
-    if params.is_none(){
+pub fn icu_builder() -> TextAnalyzerBuilder {
+    TextAnalyzer::builder(IcuTokenizer::new()).dynamic()
+}
+
+pub fn lang_ident_builder(
+    params: Option<&json::Map<String, json::Value>>,
+    fc: fn(&json::Map<String, json::Value>) -> Result<TextAnalyzer>,
+) -> Result<TextAnalyzerBuilder> {
+    if params.is_none() {
+        return Err(TantivyBindingError::InvalidArgument(format!(
+            "lang ident tokenizer must be costum"
+        )));
+    }
+    let tokenizer = LangIdentTokenizer::from_json(params.unwrap(), fc)?;
+    Ok(TextAnalyzer::builder(tokenizer).dynamic())
+}
+
+pub fn jieba_builder(
+    params: Option<&json::Map<String, json::Value>>,
+) -> Result<TextAnalyzerBuilder> {
+    if params.is_none() {
         return Ok(TextAnalyzer::builder(JiebaTokenizer::new()).dynamic());
     }
     let tokenizer = JiebaTokenizer::from_json(params.unwrap())?;
@@ -34,7 +53,10 @@ pub fn lindera_builder(
     Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
-pub fn get_builder_with_tokenizer(params: &json::Value) -> Result<TextAnalyzerBuilder> {
+pub fn get_builder_with_tokenizer(
+    params: &json::Value,
+    fc: fn(&json::Map<String, json::Value>) -> Result<TextAnalyzer>,
+) -> Result<TextAnalyzerBuilder> {
     let name;
     let params_map;
     if params.is_string() {
@@ -65,6 +87,8 @@ pub fn get_builder_with_tokenizer(params: &json::Value) -> Result<TextAnalyzerBu
         "whitespace" => Ok(whitespace_builder()),
         "jieba" => jieba_builder(params_map),
         "lindera" => lindera_builder(params_map),
+        "icu" => Ok(icu_builder()),
+        "language_identifier" => lang_ident_builder(params_map, fc),
         other => {
             warn!("unsupported tokenizer: {}", other);
             Err(TantivyBindingError::InvalidArgument(format!(
