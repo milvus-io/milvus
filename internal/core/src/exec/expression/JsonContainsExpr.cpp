@@ -431,7 +431,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
                                       .clone();
         cached_index_chunk_id_ = 0;
     }
-    int total_data_chunk_pos_ = ProcessJsonStatsChunkPos();
+    int total_data_chunk_pos_ =  GetProcessedRows();
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, total_data_chunk_pos_, real_batch_size);
@@ -618,7 +618,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
                                       .clone();
         cached_index_chunk_id_ = 0;
     }
-    int total_data_chunk_pos_ = ProcessJsonStatsChunkPos();
+    int total_data_chunk_pos_ =  GetProcessedRows();
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, total_data_chunk_pos_, real_batch_size);
@@ -898,7 +898,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
                                       .clone();
         cached_index_chunk_id_ = 0;
     }
-    int total_data_chunk_pos_ = ProcessJsonStatsChunkPos();
+    int total_data_chunk_pos_ =  GetProcessedRows();
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, total_data_chunk_pos_, real_batch_size);
@@ -1208,7 +1208,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                                       .clone();
         cached_index_chunk_id_ = 0;
     }
-    int total_data_chunk_pos_ = ProcessJsonStatsChunkPos();
+    int total_data_chunk_pos_ =  GetProcessedRows();
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, total_data_chunk_pos_, real_batch_size);
@@ -1405,7 +1405,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
                                       .clone();
         cached_index_chunk_id_ = 0;
     }
-    int total_data_chunk_pos_ = ProcessJsonStatsChunkPos();
+    int total_data_chunk_pos_ =  GetProcessedRows();
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, total_data_chunk_pos_, real_batch_size);
@@ -1690,7 +1690,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
                                       .clone();
         cached_index_chunk_id_ = 0;
     }
-    int total_data_chunk_pos_ = ProcessJsonStatsChunkPos();
+    int total_data_chunk_pos_ =  GetProcessedRows();
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, total_data_chunk_pos_, real_batch_size);

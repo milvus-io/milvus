@@ -1405,7 +1405,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                                                      filter_func)
                                       .clone();
     }
-    int total_data_chunk_pos_ = ProcessJsonStatsChunkPos();
+    int total_data_chunk_pos_ =  GetProcessedRows();
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, total_data_chunk_pos_, real_batch_size);
