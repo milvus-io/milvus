@@ -234,7 +234,7 @@ func (impl *segmentInterceptor) Close() {
 }
 
 // recoverPChannelManager recovers PChannel Assignment Manager.
-func (impl *segmentInterceptor) recoverPChannelManager(param interceptors.InterceptorBuildParam) {
+func (impl *segmentInterceptor) recoverPChannelManager(param *interceptors.InterceptorBuildParam) {
 	timer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
 		Default: time.Second,
 		Backoff: typeutil.BackoffConfig{
@@ -245,7 +245,7 @@ func (impl *segmentInterceptor) recoverPChannelManager(param interceptors.Interc
 	})
 	timer.EnableBackoff()
 	for counter := 0; ; counter++ {
-		pm, err := manager.RecoverPChannelSegmentAllocManager(impl.ctx, param.WALImpls.Channel(), param.WAL)
+		pm, err := manager.RecoverPChannelSegmentAllocManager(impl.ctx, param.ChannelInfo, param.WAL)
 		if err != nil {
 			ch, d := timer.NextTimer()
 			impl.logger.Warn("recover PChannel Assignment Manager failed, wait a backoff", zap.Int("retry", counter), zap.Duration("nextRetryInterval", d), zap.Error(err))

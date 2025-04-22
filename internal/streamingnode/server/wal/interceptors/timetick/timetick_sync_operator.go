@@ -2,7 +2,6 @@ package timetick
 
 import (
 	"context"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -19,88 +18,63 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // timeTickSyncOperator is a time tick sync operator.
 var _ inspector.TimeTickSyncOperator = &timeTickSyncOperator{}
 
 // NewTimeTickSyncOperator creates a new time tick sync operator.
-func newTimeTickSyncOperator(param interceptors.InterceptorBuildParam) *timeTickSyncOperator {
+func newTimeTickSyncOperator(param *interceptors.InterceptorBuildParam) *timeTickSyncOperator {
+	metrics := metricsutil.NewTimeTickMetrics(param.ChannelInfo.Name)
 	return &timeTickSyncOperator{
-		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		logger: resource.Resource().Logger().With(
 			log.FieldComponent("timetick-sync"),
-			zap.Any("pchannel", param.WALImpls.Channel()),
+			zap.Any("pchannel", param.ChannelInfo),
 		),
-		pchannel:              param.WALImpls.Channel(),
-		ready:                 make(chan struct{}),
 		interceptorBuildParam: param,
-		ackManager:            nil,
+		ackManager:            ack.NewAckManager(param.InitializedTimeTick, param.InitializedMessageID, metrics),
 		ackDetails:            ack.NewAckDetails(),
 		sourceID:              paramtable.GetNodeID(),
-		metrics:               metricsutil.NewTimeTickMetrics(param.WALImpls.Channel().Name),
+		metrics:               metrics,
 	}
 }
 
 // timeTickSyncOperator is a time tick sync operator.
 type timeTickSyncOperator struct {
-	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
-
 	logger                *log.MLogger
-	pchannel              types.PChannelInfo                 // pchannel info belong to.
-	ready                 chan struct{}                      // hint the time tick operator is ready to use.
-	interceptorBuildParam interceptors.InterceptorBuildParam // interceptor build param.
-	ackManager            *ack.AckManager                    // ack manager.
-	ackDetails            *ack.AckDetails                    // all acknowledged details, all acked messages but not sent to wal will be kept here.
-	sourceID              int64                              // the current node id.
-	writeAheadBuffer      *wab.WriteAheadBuffer              // write ahead buffer.
-	mvccManager           *mvcc.MVCCManager                  // cursor manager is used to record the maximum presisted timetick of vchannel.
+	interceptorBuildParam *interceptors.InterceptorBuildParam // interceptor build param.
+	ackManager            *ack.AckManager                     // ack manager.
+	ackDetails            *ack.AckDetails                     // all acknowledged details, all acked messages but not sent to wal will be kept here.
+	sourceID              int64                               // source id of the time tick sync operator.
 	metrics               *metricsutil.TimeTickMetrics
-}
-
-// WriteAheadBuffer returns the write ahead buffer.
-func (impl *timeTickSyncOperator) WriteAheadBuffer(ctx context.Context) (wab.ROWriteAheadBuffer, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-impl.ready:
-	}
-	if impl.writeAheadBuffer == nil {
-		panic("unreachable: write ahead buffer is not ready")
-	}
-	return impl.writeAheadBuffer, nil
-}
-
-// MVCCManager returns the mvcc manager.
-func (impl *timeTickSyncOperator) MVCCManager(ctx context.Context) (*mvcc.MVCCManager, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-impl.ready:
-	}
-	if impl.mvccManager == nil {
-		panic("unreachable: mvcc manager is not ready")
-	}
-	return impl.mvccManager, nil
 }
 
 // Channel returns the pchannel info.
 func (impl *timeTickSyncOperator) Channel() types.PChannelInfo {
-	return impl.pchannel
+	return impl.interceptorBuildParam.ChannelInfo
+}
+
+// WriteAheadBuffer returns the write ahead buffer.
+func (impl *timeTickSyncOperator) WriteAheadBuffer() wab.ROWriteAheadBuffer {
+	return impl.interceptorBuildParam.WriteAheadBuffer
+}
+
+// MVCCManager returns the mvcc manager.
+func (impl *timeTickSyncOperator) MVCCManager() *mvcc.MVCCManager {
+	return impl.interceptorBuildParam.MVCCManager
 }
 
 // Sync trigger a sync operation.
 // Sync operation is not thread safe, so call it in a single goroutine.
 func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
 	// Sync operation cannot trigger until isReady.
-	if !impl.isReady() {
+	wal, err := impl.interceptorBuildParam.WAL.GetWithContext(ctx)
+	if err != nil {
+		impl.logger.Warn("unreachable: get wal failed", zap.Error(err))
 		return
 	}
 
-	wal := impl.interceptorBuildParam.WAL.Get()
-	err := impl.sendTsMsg(ctx, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+	err = impl.sendTsMsg(ctx, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		appendResult, err := wal.Append(ctx, msg)
 		if err != nil {
 			return nil, err
@@ -112,110 +86,6 @@ func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
 	}
 }
 
-// initialize initializes the time tick sync operator.
-// !!! This method should always be called after the operator is created.
-// Otherwise, the Close operation will be blocked forever.
-func (impl *timeTickSyncOperator) initialize() {
-	impl.blockUntilSyncTimeTickReady()
-}
-
-// blockUntilSyncTimeTickReady blocks until the first time tick message is sent.
-func (impl *timeTickSyncOperator) blockUntilSyncTimeTickReady() error {
-	defer impl.backgroundTaskNotifier.Finish(struct{}{})
-
-	underlyingWALImpls := impl.interceptorBuildParam.WALImpls
-
-	impl.logger.Info("start to sync first time tick")
-	defer impl.logger.Info("sync first time tick done")
-
-	backoffTimer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
-		Default: 5 * time.Second,
-		Backoff: typeutil.BackoffConfig{
-			InitialInterval: 20 * time.Millisecond,
-			Multiplier:      2.0,
-			MaxInterval:     5 * time.Second,
-		},
-	})
-	backoffTimer.EnableBackoff()
-
-	var lastErr error
-	// Send first timetick message to wal before interceptor is ready.
-	for count := 0; ; count++ {
-		if count > 0 {
-			nextTimer, nextBalanceInterval := backoffTimer.NextTimer()
-			impl.logger.Warn(
-				"send first time tick failed",
-				zap.Duration("nextBalanceInterval", nextBalanceInterval),
-				zap.Int("retryCount", count),
-				zap.Error(lastErr),
-			)
-			select {
-			case <-impl.backgroundTaskNotifier.Context().Done():
-				return impl.backgroundTaskNotifier.Context().Err()
-			case <-nextTimer:
-			}
-		}
-
-		// Sent first timetick message to wal before ready.
-		// New TT is always greater than all tt on previous streamingnode.
-		// A fencing operation of underlying WAL is needed to make exclusive produce of topic.
-		// Otherwise, the TT principle may be violated.
-		// And sendTsMsg must be done, to help ackManager to get first LastConfirmedMessageID
-		// !!! Send a timetick message into walimpls directly is safe.
-		resource.Resource().TSOAllocator().Sync()
-		ts, err := resource.Resource().TSOAllocator().Allocate(impl.backgroundTaskNotifier.Context())
-		if err != nil {
-			lastErr = errors.Wrap(err, "allocate timestamp failed")
-			continue
-		}
-		msg, err := NewTimeTickMsg(ts, nil, impl.sourceID)
-		if err != nil {
-			lastErr = errors.Wrap(err, "at build time tick msg")
-			continue
-		}
-		msgID, err := underlyingWALImpls.Append(impl.backgroundTaskNotifier.Context(), msg)
-		if err != nil {
-			lastErr = errors.Wrap(err, "send first timestamp message failed")
-			continue
-		}
-		// initialize ack manager.
-		impl.ackManager = ack.NewAckManager(ts, msgID, impl.metrics)
-		impl.logger.Info(
-			"send first time tick success",
-			zap.Uint64("timestamp", ts),
-			zap.Stringer("messageID", msgID))
-		capacity := int(paramtable.Get().StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
-		keepalive := paramtable.Get().StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse()
-		impl.writeAheadBuffer = wab.NewWirteAheadBuffer(
-			impl.Channel().Name,
-			impl.logger,
-			capacity,
-			keepalive,
-			msg.IntoImmutableMessage(msgID),
-		)
-		impl.mvccManager = mvcc.NewMVCCManager(ts)
-		break
-	}
-	// interceptor is ready now.
-	close(impl.ready)
-	return nil
-}
-
-// Ready implements AppendInterceptor.
-func (impl *timeTickSyncOperator) Ready() <-chan struct{} {
-	return impl.ready
-}
-
-// isReady returns true if the operator is ready.
-func (impl *timeTickSyncOperator) isReady() bool {
-	select {
-	case <-impl.ready:
-		return true
-	default:
-		return false
-	}
-}
-
 // AckManager returns the ack manager.
 func (impl *timeTickSyncOperator) AckManager() *ack.AckManager {
 	return impl.ackManager
@@ -223,14 +93,7 @@ func (impl *timeTickSyncOperator) AckManager() *ack.AckManager {
 
 // Close close the time tick sync operator.
 func (impl *timeTickSyncOperator) Close() {
-	// the initialization works at background, so it should be canceled, and wait until it's done.
-	impl.backgroundTaskNotifier.Cancel()
-	impl.backgroundTaskNotifier.BlockUntilFinish()
-
 	impl.metrics.Close()
-	if impl.writeAheadBuffer != nil {
-		impl.writeAheadBuffer.Close()
-	}
 }
 
 // sendTsMsg sends first timestamp message to wal.
@@ -298,7 +161,7 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 	impl.ackDetails.Clear()
 	tsMsg := msg.IntoImmutableMessage(msgID)
 	// Add it into write ahead buffer.
-	impl.writeAheadBuffer.Append(msgs, tsMsg)
+	impl.interceptorBuildParam.WriteAheadBuffer.Append(msgs, tsMsg)
 	return nil
 }
 

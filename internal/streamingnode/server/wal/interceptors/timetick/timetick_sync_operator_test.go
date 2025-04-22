@@ -12,8 +12,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
@@ -24,32 +25,9 @@ import (
 func TestTimeTickSyncOperator(t *testing.T) {
 	paramtable.Init()
 	resource.InitForTest(t)
+	ctx := context.Background()
 
 	walFuture := syncutil.NewFuture[wal.WAL]()
-	msgID := walimplstest.NewTestMessageID(1)
-	wimpls := mock_walimpls.NewMockWALImpls(t)
-	wimpls.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (message.MessageID, error) {
-		return msgID, nil
-	})
-	wimpls.EXPECT().Channel().Return(types.PChannelInfo{
-		Name: "test",
-		Term: 1,
-	})
-	param := interceptors.InterceptorBuildParam{
-		WALImpls: wimpls,
-		WAL:      walFuture,
-	}
-	operator := newTimeTickSyncOperator(param)
-
-	assert.Equal(t, "test", operator.Channel().Name)
-
-	defer operator.Close()
-
-	// Test the initialize.
-	shouldBlock(operator.Ready())
-	// after initialize, the operator should be ready, and setup the walFuture.
-	operator.initialize()
-	<-operator.Ready()
 	l := mock_wal.NewMockWAL(t)
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
 		hint := utility.GetNotPersisted(ctx)
@@ -60,22 +38,40 @@ func TestTimeTickSyncOperator(t *testing.T) {
 		}, nil
 	})
 	walFuture.Set(l)
+	msgID := walimplstest.NewTestMessageID(1)
+	channel := types.PChannelInfo{Name: "test", Term: 1}
+	ts, _ := resource.Resource().TSOAllocator().Allocate(ctx)
+	lastMsg, _ := NewTimeTickMsg(ts, nil, 0)
 
-	// Test the sync operation, but there is no message to sync.
-	ctx := context.Background()
-	ts, err := resource.Resource().TSOAllocator().Allocate(ctx)
-	assert.NoError(t, err)
-	wb, err := operator.WriteAheadBuffer(ctx)
-	assert.NoError(t, err)
+	param := &interceptors.InterceptorBuildParam{
+		ChannelInfo:          channel,
+		WAL:                  walFuture,
+		InitializedTimeTick:  ts,
+		InitializedMessageID: msgID,
+		WriteAheadBuffer: wab.NewWirteAheadBuffer(
+			channel.Name,
+			resource.Resource().Logger().With(),
+			1024,
+			30*time.Second,
+			lastMsg.IntoImmutableMessage(msgID),
+		),
+		MVCCManager: mvcc.NewMVCCManager(ts),
+	}
+	operator := newTimeTickSyncOperator(param)
+	assert.Equal(t, "test", operator.Channel().Name)
+	defer operator.Close()
+	wb := operator.WriteAheadBuffer()
 
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
 	defer cancel()
-	r, err := wb.ReadFromExclusiveTimeTick(ctx, ts)
+
+	newTs, _ := resource.Resource().TSOAllocator().Allocate(ctx)
+	r, err := wb.ReadFromExclusiveTimeTick(ctx, newTs)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Nil(t, r)
 	// should not trigger any wal operation, but only update the timetick.
-	operator.Sync(ctx, false)
-	r, err = wb.ReadFromExclusiveTimeTick(context.Background(), ts)
+	operator.Sync(context.Background(), false)
+	r, err = wb.ReadFromExclusiveTimeTick(context.Background(), newTs)
 	assert.NoError(t, err)
 	// should not block because timetick updates.
 	msg, err := r.Next(context.Background())
@@ -91,13 +87,5 @@ func TestTimeTickSyncOperator(t *testing.T) {
 			TimeTick:  mm.TimeTick(),
 		}, nil
 	})
-	operator.Sync(ctx, true)
-}
-
-func shouldBlock(ch <-chan struct{}) {
-	select {
-	case <-ch:
-		panic("should block")
-	case <-time.After(10 * time.Millisecond):
-	}
+	operator.Sync(context.Background(), true)
 }
