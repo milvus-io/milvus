@@ -29,7 +29,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestCohereTextEmbeddingProvider(t *testing.T) {
@@ -43,6 +45,12 @@ type CohereTextEmbeddingProviderSuite struct {
 }
 
 func (s *CohereTextEmbeddingProviderSuite) SetupTest() {
+	paramtable.Init()
+	paramtable.Get().CredentialCfg.Credential.GetFunc = func() map[string]string {
+		return map[string]string{
+			"mock.apikey": "mock",
+		}
+	}
 	s.schema = &schemapb.CollectionSchema{
 		Name: "test",
 		Fields: []*schemapb.FieldSchema{
@@ -69,13 +77,12 @@ func createCohereProvider(url string, schema *schemapb.FieldSchema, providerName
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: modelNameParamKey, Value: TestModel},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: url},
+			{Key: credentialParamKey, Value: "mock"},
 		},
 	}
 	switch providerName {
 	case cohereProvider:
-		return NewCohereEmbeddingProvider(schema, functionSchema, map[string]string{})
+		return NewCohereEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -259,22 +266,22 @@ func (s *CohereTextEmbeddingProviderSuite) TestNewCohereProvider() {
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: modelNameParamKey, Value: TestModel},
-			{Key: apiKeyParamKey, Value: "mock"},
+			{Key: credentialParamKey, Value: "mock"},
 		},
 	}
 
-	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
+	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 	s.NoError(err)
 	s.Equal(provider.truncate, "END")
 
 	functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: truncateParamKey, Value: "START"})
-	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
+	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 	s.NoError(err)
 	s.Equal(provider.truncate, "START")
 
 	// Invalid truncateParam
 	functionSchema.Params[2].Value = "Unknow"
-	_, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
+	_, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 	s.Error(err)
 }
 
@@ -288,17 +295,17 @@ func (s *CohereTextEmbeddingProviderSuite) TestGetInputType() {
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: modelNameParamKey, Value: "model-v2.0"},
-			{Key: apiKeyParamKey, Value: "mock"},
+			{Key: credentialParamKey, Value: "mock"},
 		},
 	}
 
-	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
+	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 	s.NoError(err)
 	s.Equal(provider.getInputType(InsertMode), "")
 	s.Equal(provider.getInputType(SearchMode), "")
 
 	functionSchema.Params[0].Value = "model-v3.0"
-	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
+	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 	s.NoError(err)
 	s.Equal(provider.getInputType(InsertMode), "search_document")
 	s.Equal(provider.getInputType(SearchMode), "search_query")

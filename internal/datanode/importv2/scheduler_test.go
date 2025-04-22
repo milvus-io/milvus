@@ -437,6 +437,13 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 }
 
 func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
+	paramtable.Init()
+	paramtable.Get().CredentialCfg.Credential.GetFunc = func() map[string]string {
+		return map[string]string{
+			"mock.apikey": "mock",
+		}
+	}
+
 	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 		future := conc.Go(func() (struct{}, error) {
 			return struct{}{}, nil
@@ -445,6 +452,11 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 	})
 	ts := function.CreateOpenAIEmbeddingServer()
 	defer ts.Close()
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		return map[string]string{
+			"openai.url": ts.URL,
+		}
+	}
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -484,8 +496,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 				Params: []*commonpb.KeyValuePair{
 					{Key: "provider", Value: "openai"},
 					{Key: "model_name", Value: "text-embedding-ada-002"},
-					{Key: "api_key", Value: "mock"},
-					{Key: "url", Value: ts.URL},
+					{Key: "credential", Value: "mock"},
 					{Key: "dim", Value: "4"},
 				},
 			},

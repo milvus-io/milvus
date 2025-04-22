@@ -19,6 +19,7 @@
 package function
 
 import (
+	"os"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/credentials"
 )
 
 func TestBedrockTextEmbeddingProvider(t *testing.T) {
@@ -65,13 +67,12 @@ func createBedrockProvider(schema *schemapb.FieldSchema, providerName string, di
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: modelNameParamKey, Value: TestModel},
-			{Key: apiKeyParamKey, Value: "mock"},
 			{Key: dimParamKey, Value: "4"},
 		},
 	}
 	switch providerName {
 	case bedrockProvider:
-		return NewBedrockEmbeddingProvider(schema, functionSchema, &MockBedrockClient{dim: dim}, map[string]string{})
+		return NewBedrockEmbeddingProvider(schema, functionSchema, &MockBedrockClient{dim: dim}, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.access_key_id": "mock", "mock.secret_access_key": "mock"}))
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -110,6 +111,38 @@ func (s *BedrockTextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 	}
 }
 
+func (s *BedrockTextEmbeddingProviderSuite) TestParseCredentail() {
+	{
+		cred := credentials.NewCredentialsManager(map[string]string{})
+		ak, sk, err := parseAKSKInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{})
+		s.Equal(ak, "")
+		s.Equal(sk, "")
+		s.NoError(err)
+	}
+	{
+		cred := credentials.NewCredentialsManager(map[string]string{})
+		_, _, err := parseAKSKInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "NotExist"})
+		s.ErrorContains(err, "is not a aksk crediential, can not find key")
+	}
+	{
+		cred := credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"})
+		_, _, err := parseAKSKInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "mock"})
+		s.ErrorContains(err, "is not a aksk crediential, can not find key")
+	}
+	{
+		cred := credentials.NewCredentialsManager(map[string]string{"mock.access_key_id": "mock", "mock.secret_access_key": "mock"})
+		_, _, err := parseAKSKInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "mock"})
+		s.NoError(err)
+	}
+	{
+		os.Setenv(bedrockAccessKeyId, "mock")
+		os.Setenv(bedrockSAKEnvStr, "mock")
+		cred := credentials.NewCredentialsManager(map[string]string{})
+		_, _, err := parseAKSKInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{})
+		s.NoError(err)
+	}
+}
+
 func (s *BedrockTextEmbeddingProviderSuite) TestCreateBedrockClient() {
 	_, err := createBedRockEmbeddingClient("", "", "")
 	s.Error(err)
@@ -144,32 +177,31 @@ func (s *BedrockTextEmbeddingProviderSuite) TestNewBedrockEmbeddingProvider() {
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: modelNameParamKey, Value: TestModel},
-			{Key: awsAKIdParamKey, Value: "mock"},
-			{Key: awsSAKParamKey, Value: "mock"},
+			{Key: credentialParamKey, Value: "mock"},
 			{Key: regionParamKey, Value: "mock"},
 			{Key: dimParamKey, Value: "4"},
 			{Key: normalizeParamKey, Value: "false"},
 		},
 	}
-	provider, err := NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{})
+	provider, err := NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.access_key_id": "mock", "mock.secret_access_key": "mock"}))
 	s.NoError(err)
 	s.True(provider.MaxBatch() > 0)
 	s.Equal(provider.FieldDim(), int64(4))
 
-	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{awsAKIdParamKey: "mock", awsSAKParamKey: "mock"})
+	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{credentialParamKey: "mock"}, credentials.NewCredentialsManager(map[string]string{"mock.access_key_id": "mock", "mock.secret_access_key": "mock"}))
 	s.NoError(err)
 
-	functionSchema.Params[5] = &commonpb.KeyValuePair{Key: normalizeParamKey, Value: "true"}
-	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{})
+	functionSchema.Params[4] = &commonpb.KeyValuePair{Key: normalizeParamKey, Value: "true"}
+	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.access_key_id": "mock", "mock.secret_access_key": "mock"}))
 	s.NoError(err)
 
-	functionSchema.Params[5] = &commonpb.KeyValuePair{Key: normalizeParamKey, Value: "invalid"}
-	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{})
+	functionSchema.Params[4] = &commonpb.KeyValuePair{Key: normalizeParamKey, Value: "invalid"}
+	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.access_key_id": "mock", "mock.secret_access_key": "mock"}))
 	s.Error(err)
 
 	// invalid dim
 	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: modelNameParamKey, Value: TestModel}
 	functionSchema.Params[0] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalid"}
-	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{})
+	_, err = NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.access_key_id": "mock", "mock.secret_access_key": "mock"}))
 	s.Error(err)
 }

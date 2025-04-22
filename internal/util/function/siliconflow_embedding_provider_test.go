@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models/siliconflow"
 )
 
@@ -69,13 +70,12 @@ func createSiliconflowProvider(url string, schema *schemapb.FieldSchema, provide
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: modelNameParamKey, Value: TestModel},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: url},
+			{Key: credentialParamKey, Value: "mock"},
 		},
 	}
 	switch providerName {
 	case siliconflowProvider:
-		return NewSiliconflowEmbeddingProvider(schema, functionSchema, map[string]string{})
+		return NewSiliconflowEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -182,11 +182,10 @@ func (s *SiliconflowTextEmbeddingProviderSuite) TestNewSiliconflowEmbeddingProvi
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: modelNameParamKey, Value: TestModel},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: "mock"},
+			{Key: credentialParamKey, Value: "mock"},
 		},
 	}
-	provider, err := NewSiliconflowEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
+	provider, err := NewSiliconflowEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{embeddingURLParamKey: "mock"}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
 	s.True(provider.MaxBatch() > 0)

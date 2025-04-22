@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 )
 
@@ -367,8 +368,20 @@ func TestUpsertTaskForReplicate(t *testing.T) {
 }
 
 func TestUpsertTask_Function(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().CredentialCfg.Credential.GetFunc = func() map[string]string {
+		return map[string]string{
+			"mock.apikey": "mock",
+		}
+	}
 	ts := function.CreateOpenAIEmbeddingServer()
 	defer ts.Close()
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		return map[string]string{
+			"openai.url": ts.URL,
+		}
+	}
+
 	data := []*schemapb.FieldData{}
 	f1 := schemapb.FieldData{
 		Type:      schemapb.DataType_Int64,
@@ -434,8 +447,7 @@ func TestUpsertTask_Function(t *testing.T) {
 				Params: []*commonpb.KeyValuePair{
 					{Key: "provider", Value: "openai"},
 					{Key: "model_name", Value: "text-embedding-ada-002"},
-					{Key: "api_key", Value: "mock"},
-					{Key: "url", Value: ts.URL},
+					{Key: "credential", Value: "mock"},
 					{Key: "dim", Value: "4"},
 				},
 			},

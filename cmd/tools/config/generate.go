@@ -361,6 +361,20 @@ func WriteYaml(w io.Writer) {
 # Any configuration related to the knowhere vector search engine`,
 		},
 		{
+			name: "credential",
+			header: `
+# credential configs, support apikey, AKSK, gcp credential
+# examples:
+# credential:
+#  your_apikey_crendential_name:
+#    apikey:  # Your apikey credential
+#  your_aksk_crendential_name:
+#    access_key_id:
+#    secret_access_key:
+#  your_gcp_credential_name:
+#    credential_json:`,
+		},
+		{
 			name: "function",
 			header: `
 # Any configuration related to functions`,

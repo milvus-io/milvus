@@ -86,6 +86,7 @@ type ComponentParam struct {
 	RbacConfig     rbacConfig
 	StreamingCfg   streamingConfig
 	FunctionCfg    functionConfig
+	CredentialCfg  credentialConfig
 
 	InternalTLSCfg InternalTLSConfig
 
@@ -142,6 +143,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.GpuConfig.init(bt)
 	p.KnowhereConfig.init(bt)
 	p.FunctionCfg.init(bt)
+	p.CredentialCfg.init(bt)
 
 	p.InternalTLSCfg.Init(bt)
 
