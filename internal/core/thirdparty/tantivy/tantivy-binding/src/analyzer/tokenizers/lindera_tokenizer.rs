@@ -327,12 +327,12 @@ fn fetch_lindera_token_filters(
 
 #[cfg(test)]
 mod tests {
+    use super::LinderaTokenizer;
     use serde_json as json;
     use tantivy::tokenizer::Tokenizer;
 
-    use crate::analyzer::tokenizers::lindera_tokenizer::LinderaTokenizer;
-
     #[test]
+    #[cfg(feature = "lindera-ipadic")]
     fn test_lindera_tokenizer() {
         let params = r#"{
             "type": "lindera",

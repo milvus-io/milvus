@@ -1,3 +1,5 @@
+use error::TantivyBindingError;
+
 mod array;
 mod data_type;
 mod demo_c;
@@ -21,8 +23,13 @@ mod util;
 mod util_c;
 mod vec_collector;
 
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+pub mod analyzer;
+
+use error::Result;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TantivyIndexVersion {
+    V5, // Version for compatibility (for 2.4.x)
+    V7, // Latest version
 }
 
 #[cfg(test)]
