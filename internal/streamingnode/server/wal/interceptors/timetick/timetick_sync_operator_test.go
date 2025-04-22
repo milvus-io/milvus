@@ -70,7 +70,7 @@ func TestTimeTickSyncOperator(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Nil(t, r)
 	// should not trigger any wal operation, but only update the timetick.
-	operator.Sync(ctx, false)
+	operator.Sync(context.Background(), false)
 	r, err = wb.ReadFromExclusiveTimeTick(context.Background(), newTs)
 	assert.NoError(t, err)
 	// should not block because timetick updates.
@@ -87,5 +87,5 @@ func TestTimeTickSyncOperator(t *testing.T) {
 			TimeTick:  mm.TimeTick(),
 		}, nil
 	})
-	operator.Sync(ctx, true)
+	operator.Sync(context.Background(), true)
 }
