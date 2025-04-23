@@ -25,7 +25,7 @@ checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
 dependencies = [
  "cfg-if",
  "const-random",
- "getrandom 0.2.15",
+ "getrandom 0.2.16",
  "once_cell",
  "version_check",
  "zerocopy",
@@ -447,7 +447,7 @@ version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9d839f2a20b0aee515dc581a6172f2321f96cab76c1a38a4c584a194955390e"
 dependencies = [
- "getrandom 0.2.15",
+ "getrandom 0.2.16",
  "once_cell",
  "tiny-keccak",
 ]
@@ -1039,9 +1039,9 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
-version = "0.2.15"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4567c8db10ae91089c99af84c68c38da3ec2f087c3f82960bcdbf3656b6f4d7"
+checksum = "335ff9f135e4384c8150d6f27c6daed433577f86b4750418338c01a1a2528592"
 dependencies = [
  "cfg-if",
  "libc",
@@ -1704,9 +1704,9 @@ checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
 
 [[package]]
 name = "libm"
-version = "0.2.12"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6d154aedcb0b7a1e91a3fddbe2a8350d3da76ac9d0220ae20da5c7aa8269612"
+checksum = "c9627da5196e5d8ed0b0495e61e518847578da83483c37288316d9b2e03a7f72"
 
 [[package]]
 name = "libredox"
@@ -1721,9 +1721,9 @@ dependencies = [
 
 [[package]]
 name = "lindera"
-version = "0.40.1"
+version = "0.40.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e4788d40d68746f81d50faba969dca5d9226ab527a9da90a7708dcbd1203f69"
+checksum = "5fc96440caa8bb9e832f1fc737ca807d603117e598ebb7d00c96d9558e8d7a30"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1751,9 +1751,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-cc-cedict"
-version = "0.40.1"
+version = "0.40.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9d2239d15eb62732f2912fee43585598e61dfe62600df13a8c54ae1c4b1ac71"
+checksum = "97718bf9918752bd31d9de979a1a900768b54ab741f6b0e52c22ac22205a72ec"
 dependencies = [
  "bincode",
  "byteorder",
@@ -1764,9 +1764,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-dictionary"
-version = "0.40.1"
+version = "0.40.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc5a12c962d4acf12d4bca442fd6420ca7be5e78163167443dd95503ab8b3ee0"
+checksum = "396b5be33424f4843e6dd8f2c98baebb1697cac3c0807846a07d9c65968fb849"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1789,9 +1789,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-ipadic"
-version = "0.40.1"
+version = "0.40.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c64227c9bd30152825df8693300b11fc370e93dd3b8f833d202b7a1709625104"
+checksum = "495e16ea16f066739b4d4920dac11e9a46dfd12fdfb6062b41c06d8d41776059"
 dependencies = [
  "bincode",
  "byteorder",
@@ -1802,9 +1802,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-ipadic-neologd"
-version = "0.40.1"
+version = "0.40.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c36f3516601e9b4bee37cc85126928fb19b70c0bc15210775d93019d07ebecda"
+checksum = "e4eea658adf10e0ee13059599c708b5ffac3058fc78984f792e1a703a1fbb1a8"
 dependencies = [
  "bincode",
  "byteorder",
@@ -1815,9 +1815,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-ko-dic"
-version = "0.40.1"
+version = "0.40.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "479bb34668a96bee04d9d39107c8e7b52a09f1b115c255aa4ccd5962b1fa5a86"
+checksum = "c1cb7bbef870ea429532b05c37f246e2a7c47e349309ccc526e1323af3c78490"
 dependencies = [
  "bincode",
  "byteorder",
@@ -1828,9 +1828,9 @@ dependencies = [
 
 [[package]]
 name = "lindera-unidic"
-version = "0.40.1"
+version = "0.40.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32f95b856c9a016df9f713ffc34fdf5d5e8e4353779fe1f114e95cfa2e04fb22"
+checksum = "b074127b5117e24bf2023c4ec569e1055254113a6c243bac92261e043a94eb11"
 dependencies = [
  "bincode",
  "byteorder",
@@ -3274,7 +3274,7 @@ checksum = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
 dependencies = [
  "cc",
  "cfg-if",
- "getrandom 0.2.15",
+ "getrandom 0.2.16",
  "libc",
  "untrusted",
  "windows-sys 0.52.0",

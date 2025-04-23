@@ -17,28 +17,9 @@ mod index_writer_text_c;
 mod log;
 mod string_c;
 mod token_stream_c;
-mod analyzer;
 mod tokenizer_c;
 mod util;
 mod util_c;
 mod vec_collector;
 
 pub mod analyzer;
-
-use error::Result;
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TantivyIndexVersion {
-    V5, // Version for compatibility (for 2.4.x)
-    V7, // Latest version
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
