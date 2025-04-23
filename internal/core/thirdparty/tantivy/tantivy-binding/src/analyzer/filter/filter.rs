@@ -1,8 +1,9 @@
 use serde_json as json;
 use tantivy::tokenizer::*;
 
-use crate::error::{Result,TantivyBindingError};
-use crate::analyzer::util::*;
+use super::util::*;
+use super::{RegexFilter, RemovePunctFilter};
+use crate::error::{Result, TantivyBindingError};
 
 pub(crate) enum SystemFilter {
     Invalid,
@@ -12,9 +13,11 @@ pub(crate) enum SystemFilter {
     CnCharOnly(CnCharOnlyFilter),
     CnAlphaNumOnly(CnAlphaNumOnlyFilter),
     Length(RemoveLongFilter),
+    RemovePunct(RemovePunctFilter),
     Stop(StopWordFilter),
     Decompounder(SplitCompoundWords),
     Stemmer(Stemmer),
+    Regex(RegexFilter),
 }
 
 impl SystemFilter {
@@ -29,6 +32,8 @@ impl SystemFilter {
             Self::Stop(filter) => builder.filter(filter).dynamic(),
             Self::Decompounder(filter) => builder.filter(filter).dynamic(),
             Self::Stemmer(filter) => builder.filter(filter).dynamic(),
+            Self::RemovePunct(filter) => builder.filter(filter).dynamic(),
+            Self::Regex(filter) => builder.filter(filter).dynamic(),
             Self::Invalid => builder,
         }
     }
@@ -152,6 +157,7 @@ impl From<&str> for SystemFilter {
             "alphanumonly" => Self::AlphaNumOnly(AlphaNumOnlyFilter),
             "cncharonly" => Self::CnCharOnly(CnCharOnlyFilter),
             "cnalphanumonly" => Self::CnAlphaNumOnly(CnAlphaNumOnlyFilter),
+            "removepunct" => Self::RemovePunct(RemovePunctFilter),
             _ => Self::Invalid,
         }
     }
@@ -174,6 +180,7 @@ impl TryFrom<&json::Map<String, json::Value>> for SystemFilter {
                     "stop" => get_stop_words_filter(params),
                     "decompounder" => get_decompounder_filter(params),
                     "stemmer" => get_stemmer_filter(params),
+                    "regex" => RegexFilter::from_json(params).map(|f| SystemFilter::Regex(f)),
                     other => Err(TantivyBindingError::InternalError(format!(
                         "unsupport filter type: {}",
                         other
