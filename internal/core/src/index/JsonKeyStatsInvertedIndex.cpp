@@ -30,10 +30,7 @@ JsonKeyStatsInvertedIndex::AddJSONEncodeValue(
     uint16_t length,
     int32_t value,
     std::map<std::string, std::vector<int64_t>>& mp) {
-    std::string key = "";
-    if (!paths.empty()) {
-        key = std::string("/") + Join(paths, "/");
-    }
+    std::string key = milvus::Json::pointer(paths);
     LOG_DEBUG(
         "insert inverted key: {}, flag: {}, type: {}, row_id: {}, offset: "
         "{}, length:{}, value:{}",
