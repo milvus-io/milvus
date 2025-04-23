@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -21,6 +22,7 @@ var ErrSealWorkerClosed = errors.New("seal worker is closed")
 func newSealQueue(
 	logger *log.MLogger,
 	wal *syncutil.Future[wal.WAL],
+	txnManager *txn.TxnManager,
 	metrics *metricsutil.SegmentAssignMetrics,
 ) *sealQueue {
 	w := &sealQueue{
@@ -29,6 +31,7 @@ func newSealQueue(
 		reqCh:          make(chan *asyncSealRequest),
 		logger:         logger,
 		wal:            wal,
+		txnManager:     txnManager,
 		metrics:        metrics,
 	}
 	go w.background()
@@ -43,6 +46,7 @@ type sealQueue struct {
 	reqCh          chan *asyncSealRequest
 	logger         *log.MLogger
 	wal            *syncutil.Future[wal.WAL]
+	txnManager     *txn.TxnManager
 	metrics        *metricsutil.SegmentAssignMetrics
 }
 
@@ -94,6 +98,15 @@ func (q *sealQueue) background() {
 		}
 		q.backgroundTask.Finish(struct{}{})
 	}()
+
+	// The segment assignment manager lost the txnSem for the recovered txn message,
+	// So the seal worker should wait for all the recovered txn to be done.
+	// Otherwise, the flush message may be sent into wal before the txn is done.
+	// Break the wal consistency: All insert message is writen into wal before the flush message.
+	if err := q.txnManager.WaitForRecoveredTranscationDone(q.backgroundTask.Context()); err != nil {
+		q.logger.Warn("seal worker is exit before recovered transaction done", zap.Error(err))
+		return
+	}
 
 	backoff := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
 		Default: time.Second,

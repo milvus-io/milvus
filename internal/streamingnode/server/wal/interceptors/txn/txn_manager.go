@@ -20,12 +20,33 @@ import (
 
 // NewTxnManager creates a new transaction manager.
 func NewTxnManager(pchannel types.PChannelInfo, buffer *utility.TxnBuffer) *TxnManager {
+	m := metricsutil.NewTxnMetrics(pchannel.Name)
+	builders := buffer.GetUncommittedMessageBuilder()
+	sessions := make(map[message.TxnID]*TxnSession, len(builders))
+	recoveredSessions := make(map[message.TxnID]struct{}, 0)
+	for _, builder := range builders {
+		beginMessages, body := builder.Messages()
+		session := newTxnSession(
+			beginMessages.VChannel(),
+			*beginMessages.TxnContext(),
+			beginMessages.TimeTick(),
+			m.BeginTxn(),
+		)
+		for _, msg := range body {
+			session.AddNewMessage(context.Background(), msg.TimeTick())
+			session.AddNewMessageDoneAndKeepalive(msg.TimeTick())
+		}
+		sessions[session.TxnContext().TxnID] = session
+		recoveredSessions[session.TxnContext().TxnID] = struct{}{}
+	}
 	return &TxnManager{
-		mu:       sync.Mutex{},
-		sessions: make(map[message.TxnID]*TxnSession),
-		closed:   nil,
-		metrics:  metricsutil.NewTxnMetrics(pchannel.Name),
-		logger:   resource.Resource().Logger().With(log.FieldComponent("txn-manager")),
+		mu:                    sync.Mutex{},
+		recoveredSessions:     recoveredSessions,
+		recoveredSessionsDone: make(chan struct{}),
+		sessions:              sessions,
+		closed:                nil,
+		metrics:               m,
+		logger:                resource.Resource().Logger().With(log.FieldComponent("txn-manager")),
 	}
 }
 
@@ -33,11 +54,23 @@ func NewTxnManager(pchannel types.PChannelInfo, buffer *utility.TxnBuffer) *TxnM
 // We don't support cross wal transaction by now and
 // We don't support the transaction lives after the wal transferred to another streaming node.
 type TxnManager struct {
-	mu       sync.Mutex
-	sessions map[message.TxnID]*TxnSession
-	closed   lifetime.SafeChan
-	metrics  *metricsutil.TxnMetrics
-	logger   *log.MLogger
+	mu                    sync.Mutex
+	recoveredSessions     map[message.TxnID]struct{}
+	recoveredSessionsDone chan struct{}
+	sessions              map[message.TxnID]*TxnSession
+	closed                lifetime.SafeChan
+	metrics               *metricsutil.TxnMetrics
+	logger                *log.MLogger
+}
+
+// WaitForAllTransactionDone waits for all transactions to be done.
+func (m *TxnManager) WaitForRecoveredTranscationDone(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-m.recoveredSessionsDone:
+		return nil
+	}
 }
 
 // BeginNewTxn starts a new transaction with a session.
@@ -67,21 +100,16 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, msg message.MutableBeginTx
 	if m.closed != nil {
 		return nil, status.NewTransactionExpired("manager closed")
 	}
-	metricsGuard := m.metrics.BeginTxn()
-	session := &TxnSession{
-		mu:           sync.Mutex{},
-		vchannel:     vchannel,
-		lastTimetick: timetick,
-		txnContext: message.TxnContext{
-			TxnID:     message.TxnID(id),
-			Keepalive: keepalive,
-		},
-		inFlightCount: 0,
-		state:         message.TxnStateBegin,
-		doneWait:      nil,
-		rollback:      false,
-		metricsGuard:  metricsGuard,
+	txnCtx := message.TxnContext{
+		TxnID:     message.TxnID(id),
+		Keepalive: keepalive,
 	}
+	session := newTxnSession(
+		vchannel,
+		txnCtx,
+		timetick,
+		m.metrics.BeginTxn(),
+	)
 	m.sessions[session.TxnContext().TxnID] = session
 	return session, nil
 }
@@ -96,11 +124,16 @@ func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 		if session.VChannel() == vchannel {
 			session.Cleanup()
 			delete(m.sessions, id)
+			delete(m.recoveredSessions, id)
 			ids = append(ids, int64(id))
 		}
 	}
 	if len(ids) > 0 {
 		m.logger.Info("transaction at vchannel is failed because of incoming exclusive required message", zap.String("vchannel", vchannel), zap.Int64s("txnIDs", ids))
+	}
+
+	if len(m.recoveredSessions) == 0 && m.recoveredSessionsDone != nil {
+		close(m.recoveredSessionsDone)
 	}
 }
 
@@ -113,12 +146,18 @@ func (m *TxnManager) CleanupTxnUntil(ts uint64) {
 		if session.IsExpiredOrDone(ts) {
 			session.Cleanup()
 			delete(m.sessions, id)
+			delete(m.recoveredSessions, id)
 		}
 	}
 
 	// If the manager is on graceful shutdown and all transactions are cleaned up.
 	if len(m.sessions) == 0 && m.closed != nil {
 		m.closed.Close()
+	}
+
+	if len(m.recoveredSessions) == 0 && m.recoveredSessionsDone != nil {
+		close(m.recoveredSessionsDone)
+		m.recoveredSessionsDone = nil
 	}
 }
 

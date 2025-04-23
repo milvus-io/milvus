@@ -14,10 +14,29 @@ type txnSessionKeyType int
 
 var txnSessionKeyValue txnSessionKeyType = 1
 
+// newTxnSession creates a new transaction session.
+func newTxnSession(
+	vchannel string,
+	txnContext message.TxnContext,
+	timetick uint64,
+	metricsGuard *metricsutil.TxnMetricsGuard,
+) *TxnSession {
+	return &TxnSession{
+		mu:            sync.Mutex{},
+		vchannel:      vchannel,
+		lastTimetick:  timetick,
+		txnContext:    txnContext,
+		inFlightCount: 0,
+		state:         message.TxnStateBegin,
+		doneWait:      nil,
+		rollback:      false,
+		metricsGuard:  metricsGuard,
+	}
+}
+
 // TxnSession is a session for a transaction.
 type TxnSession struct {
-	mu sync.Mutex
-
+	mu               sync.Mutex
 	vchannel         string                       // The vchannel of the session.
 	lastTimetick     uint64                       // session last timetick.
 	expired          bool                         // The flag indicates the transaction has trigger expired once.

@@ -315,6 +315,11 @@ func (b *ImmutableTxnMessageBuilder) EstimateSize() int {
 	return size
 }
 
+// Messages returns the begin message and body messages.
+func (b *ImmutableTxnMessageBuilder) Messages() (ImmutableBeginTxnMessageV2, []ImmutableMessage) {
+	return b.begin, b.messages
+}
+
 // Build builds a txn message.
 func (b *ImmutableTxnMessageBuilder) Build(commit ImmutableCommitTxnMessageV2) (ImmutableTxnMessage, error) {
 	msg, err := newImmutableTxnMesasgeFromWAL(b.begin, b.messages, commit)

@@ -8,13 +8,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -27,21 +25,19 @@ const gracefulCloseTimeout = 3 * time.Second
 // only use the wal and meta of streamingnode to recover the segment assignment manager.
 func RecoverPChannelSegmentAllocManager(
 	ctx context.Context,
-	recoverInfos *recovery.RecoverSnapshot,
-	pchannel types.PChannelInfo,
-	wal *syncutil.Future[wal.WAL],
+	param *interceptors.InterceptorBuildParam,
 ) (*PChannelSegmentAllocManager, error) {
-	metrics := metricsutil.NewSegmentAssignMetrics(pchannel.Name)
-	managers, growingBelongs, growingStats, waitForSealed := buildNewPartitionManagers(wal, pchannel, recoverInfos, metrics)
+	metrics := metricsutil.NewSegmentAssignMetrics(param.ChannelInfo.Name)
+	managers, growingBelongs, growingStats, waitForSealed := buildNewPartitionManagers(param.WAL, param.ChannelInfo, param.InitialRecoverSnapshot, metrics)
 
 	// PChannelSegmentAllocManager is the segment assign manager of determined pchannel.
-	logger := log.With(zap.Stringer("pchannel", pchannel))
+	logger := log.With(zap.Stringer("pchannel", param.ChannelInfo))
 	m := &PChannelSegmentAllocManager{
 		lifetime:   typeutil.NewLifetime(),
 		logger:     logger,
-		pchannel:   pchannel,
+		pchannel:   param.ChannelInfo,
 		managers:   managers,
-		sealWorker: newSealQueue(logger, wal, metrics),
+		sealWorker: newSealQueue(logger, param.WAL, param.TxnManager, metrics),
 		metrics:    metrics,
 	}
 	// seal the sealed segments from recovery asynchronously.

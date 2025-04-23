@@ -245,7 +245,7 @@ func (impl *segmentInterceptor) recoverPChannelManager(param *interceptors.Inter
 	})
 	timer.EnableBackoff()
 	for counter := 0; ; counter++ {
-		pm, err := manager.RecoverPChannelSegmentAllocManager(impl.notifier.Context(), param.InitialRecoverSnapshot, param.ChannelInfo, param.WAL)
+		pm, err := manager.RecoverPChannelSegmentAllocManager(impl.notifier.Context(), param)
 		if err != nil {
 			ch, d := timer.NextTimer()
 			impl.logger.Warn("recover PChannel Assignment Manager failed, wait a backoff", zap.Int("retry", counter), zap.Duration("nextRetryInterval", d), zap.Error(err))
