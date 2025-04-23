@@ -1,8 +1,8 @@
 use tantivy::tokenizer::*;
 
-use crate::analyzer::tokenizers::*;
-use crate::analyzer::filter::*;
-use crate::analyzer::stop_words;
+use super::tokenizers::*;
+use super::filter::*;
+use super::filter::stop_words;
 
 // default build-in analyzer
 pub(crate) fn standard_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
