@@ -567,6 +567,7 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 		UseDefaultConsistency: req.GetUseDefaultConsistency(),
 		SearchByPrimaryKeys:   false,
 		SubReqs:               nil,
+		FunctionScore:         req.FunctionScore,
 	}
 
 	for _, sub := range req.GetRequests() {
