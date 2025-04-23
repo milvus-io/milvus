@@ -39,6 +39,7 @@ type BM25FunctionRunner struct {
 	tokenizer   tokenizerapi.Tokenizer
 	schema      *schemapb.FunctionSchema
 	outputField *schemapb.FieldSchema
+	inputField  *schemapb.FieldSchema
 	concurrency int
 }
 
@@ -51,36 +52,44 @@ func getAnalyzerParams(field *schemapb.FieldSchema) string {
 	return "{}"
 }
 
-func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*BM25FunctionRunner, error) {
+func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (FunctionRunner, error) {
 	if len(schema.GetOutputFieldIds()) != 1 {
 		return nil, fmt.Errorf("bm25 function should only have one output field, but now %d", len(schema.GetOutputFieldIds()))
 	}
 
-	runner := &BM25FunctionRunner{
-		schema:      schema,
-		concurrency: 8,
-	}
+	var inputField, outputField *schemapb.FieldSchema
 	var params string
 	for _, field := range coll.GetFields() {
 		if field.GetFieldID() == schema.GetOutputFieldIds()[0] {
-			runner.outputField = field
+			outputField = field
 		}
 
 		if field.GetFieldID() == schema.GetInputFieldIds()[0] {
-			params = getAnalyzerParams(field)
+			inputField = field
 		}
 	}
 
-	if runner.outputField == nil {
+	if outputField == nil {
 		return nil, fmt.Errorf("no output field")
 	}
+
+	if params, ok := getMultiAnalyzerParams(inputField); ok {
+		return NewMultiAnalyzerBM25FunctionRunner(coll, schema, inputField, outputField, params)
+	}
+
+	params = getAnalyzerParams(inputField)
 	tokenizer, err := ctokenizer.NewTokenizer(params)
 	if err != nil {
 		return nil, err
 	}
 
-	runner.tokenizer = tokenizer
-	return runner, nil
+	return &BM25FunctionRunner{
+		schema:      schema,
+		inputField:  inputField,
+		outputField: outputField,
+		tokenizer:   tokenizer,
+		concurrency: 8,
+	}, nil
 }
 
 func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error {
@@ -155,6 +164,10 @@ func (v *BM25FunctionRunner) GetSchema() *schemapb.FunctionSchema {
 
 func (v *BM25FunctionRunner) GetOutputFields() []*schemapb.FieldSchema {
 	return []*schemapb.FieldSchema{v.outputField}
+}
+
+func (v *BM25FunctionRunner) GetInputFields() []*schemapb.FieldSchema {
+	return []*schemapb.FieldSchema{v.inputField}
 }
 
 func buildSparseFloatArray(mapdata []map[uint32]float32) *schemapb.SparseFloatArray {

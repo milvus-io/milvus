@@ -253,8 +253,8 @@ func (suite *EmbeddingNodeSuite) TestBM25Embedding() {
 
 		runner := function.NewMockFunctionRunner(suite.T())
 		runner.EXPECT().BatchRun(mock.Anything).Return(nil, fmt.Errorf("mock error"))
-		runner.EXPECT().GetSchema().Return(suite.collectionSchema.GetFunctions()[0])
-		runner.EXPECT().GetOutputFields().Return([]*schemapb.FieldSchema{nil})
+		runner.EXPECT().GetOutputFields().Return([]*schemapb.FieldSchema{suite.collectionSchema.Fields[3]})
+		runner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{suite.collectionSchema.Fields[2]})
 
 		err = node.bm25Embedding(runner, suite.msgs[0], nil)
 		suite.Error(err)
@@ -268,8 +268,8 @@ func (suite *EmbeddingNodeSuite) TestBM25Embedding() {
 
 		runner := function.NewMockFunctionRunner(suite.T())
 		runner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{1}, nil)
-		runner.EXPECT().GetSchema().Return(suite.collectionSchema.GetFunctions()[0])
-		runner.EXPECT().GetOutputFields().Return([]*schemapb.FieldSchema{nil})
+		runner.EXPECT().GetOutputFields().Return([]*schemapb.FieldSchema{suite.collectionSchema.Fields[3]})
+		runner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{suite.collectionSchema.Fields[2]})
 
 		err = node.bm25Embedding(runner, suite.msgs[0], nil)
 		suite.Error(err)

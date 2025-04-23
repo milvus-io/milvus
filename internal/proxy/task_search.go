@@ -508,6 +508,14 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.SearchRequest.DslType = commonpb.DslType_BoolExprV1
 	t.SearchRequest.GroupByFieldId = queryInfo.GroupByFieldId
 	t.SearchRequest.GroupSize = queryInfo.GroupSize
+
+	if t.SearchRequest.MetricType == metric.BM25 {
+		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV("analyzer_name", t.request.GetSearchParams())
+		if err == nil {
+			t.SearchRequest.AnalyzerName = analyzer
+		}
+	}
+
 	log.Debug("proxy init search request",
 		zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 		zap.Stringer("plan", plan)) // may be very large if large term passed.

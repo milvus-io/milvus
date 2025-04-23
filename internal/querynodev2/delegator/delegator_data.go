@@ -1017,14 +1017,29 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 		return 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar for BM25 Function based search, got %s", holder.Type.String()))
 	}
 
-	str := funcutil.GetVarCharFromPlaceholder(holder)
+	texts := funcutil.GetVarCharFromPlaceholder(holder)
+	datas := []any{texts}
 	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
 	if !ok {
 		return 0, fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
 	}
 
+	if len(functionRunner.GetInputFields()) == 2 {
+		analyzerName := "default"
+		if name := req.GetAnalyzerName(); name != "" {
+			// use user provided analyzer name
+			analyzerName = name
+		}
+
+		analyzers := make([]string, len(texts))
+		for i := range texts {
+			analyzers[i] = analyzerName
+		}
+		datas = append(datas, analyzers)
+	}
+
 	// get search text term frequency
-	output, err := functionRunner.BatchRun(str)
+	output, err := functionRunner.BatchRun(datas...)
 	if err != nil {
 		return 0, err
 	}
