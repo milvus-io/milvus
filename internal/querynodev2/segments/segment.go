@@ -1096,7 +1096,7 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 
 			metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, indexInfo.IndexParams)
 			if err != nil {
-				return fmt.Errorf("metric type not exist in index params")
+				return errors.New("metric type not exist in index params")
 			}
 
 			if metricType == metric.BM25 {

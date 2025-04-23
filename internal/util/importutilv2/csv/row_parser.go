@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -99,7 +100,7 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 
 func (r *rowParser) Parse(strArr []string) (Row, error) {
 	if len(strArr) != len(r.header) {
-		return nil, fmt.Errorf("the number of fields in the row is not equal to the header")
+		return nil, errors.New("the number of fields in the row is not equal to the header")
 	}
 
 	row := make(Row)
@@ -143,7 +144,7 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]string, row Row) 
 		var mp map[string]interface{}
 		err := json.Unmarshal([]byte(str), &mp)
 		if err != nil {
-			return fmt.Errorf("illegal value for dynamic field, not a JSON format string")
+			return errors.New("illegal value for dynamic field, not a JSON format string")
 		}
 		// put the all dynamic fields into newDynamicValues
 		for k, v := range mp {
@@ -164,7 +165,7 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]string, row Row) 
 	// check if stasify the json format
 	dynamicBytes, err := json.Marshal(newDynamicValues)
 	if err != nil {
-		return fmt.Errorf("illegal value for dynamic field, not a JSON object")
+		return errors.New("illegal value for dynamic field, not a JSON object")
 	}
 	row[dynamicFieldID] = dynamicBytes
 

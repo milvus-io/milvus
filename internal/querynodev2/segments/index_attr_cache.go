@@ -27,6 +27,8 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -59,7 +61,7 @@ func NewIndexAttrCache() *IndexAttrCache {
 func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo, memoryIndexLoadPredictMemoryUsageFactor float64, fieldBinlog *datapb.FieldBinlog) (memory uint64, disk uint64, err error) {
 	indexType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, indexInfo.IndexParams)
 	if err != nil {
-		return 0, 0, fmt.Errorf("index type not exist in index params")
+		return 0, 0, errors.New("index type not exist in index params")
 	}
 	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 		neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatio

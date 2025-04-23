@@ -20,11 +20,11 @@ package function
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -78,7 +78,7 @@ func createAliProvider(url string, schema *schemapb.FieldSchema, providerName st
 	case aliDashScopeProvider:
 		return NewAliDashScopeEmbeddingProvider(schema, functionSchema, map[string]string{})
 	default:
-		return nil, fmt.Errorf("Unknow provider")
+		return nil, errors.New("Unknow provider")
 	}
 }
 

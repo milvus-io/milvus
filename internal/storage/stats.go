@@ -19,10 +19,10 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"maps"
 	"math"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -100,7 +100,7 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 		stats.MaxPk = &VarCharPrimaryKey{}
 		stats.MinPk = &VarCharPrimaryKey{}
 	default:
-		return fmt.Errorf("Invalid PK Data Type")
+		return errors.New("Invalid PK Data Type")
 	}
 
 	if maxPkMessage, ok := messageMap["maxPk"]; ok && maxPkMessage != nil {

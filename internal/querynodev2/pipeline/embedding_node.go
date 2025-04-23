@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -104,7 +105,7 @@ func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.In
 
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
 	if err != nil {
-		err = fmt.Errorf("failed to get primary keys, err = %d", err)
+		err = fmt.Errorf("failed to get primary keys, err = %v", err)
 		log.Error(err.Error(), zap.String("channel", eNode.channel))
 		return err
 	}
@@ -156,7 +157,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, msg *m
 
 	sparseArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return fmt.Errorf("BM25 runner return unknown type output")
+		return errors.New("BM25 runner return unknown type output")
 	}
 
 	if _, ok := stats[outputFieldID]; !ok {
@@ -178,7 +179,7 @@ func (eNode *embeddingNode) embedding(msg *msgstream.InsertMsg, stats map[int64]
 			}
 		default:
 			log.Warn("pipeline embedding with unknown function type", zap.Any("type", functionSchema.GetType()))
-			return fmt.Errorf("unknown function type")
+			return errors.New("unknown function type")
 		}
 	}
 

@@ -19,6 +19,7 @@ package pipeline
 import (
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -86,7 +87,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, inputF
 
 	embeddingData, ok := data.Data[inputFieldId].GetDataRows().([]string)
 	if !ok {
-		return fmt.Errorf("BM25 embedding failed: input field data not varchar/text")
+		return errors.New("BM25 embedding failed: input field data not varchar/text")
 	}
 
 	output, err := runner.BatchRun(embeddingData)
@@ -96,7 +97,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, inputF
 
 	sparseArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return fmt.Errorf("BM25 embedding failed: BM25 runner output not sparse map")
+		return errors.New("BM25 embedding failed: BM25 runner output not sparse map")
 	}
 
 	meta[outputFieldId].AppendBytes(sparseArray.GetContents()...)

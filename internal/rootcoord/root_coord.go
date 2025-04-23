@@ -282,7 +282,7 @@ func (c *Core) SetTiKVClient(client *txnkv.Client) {
 func (c *Core) SetSession(session sessionutil.SessionInterface) error {
 	c.session = session
 	if c.session == nil {
-		return fmt.Errorf("session is nil, the etcd client connection may have failed")
+		return errors.New("session is nil, the etcd client connection may have failed")
 	}
 	return nil
 }

@@ -120,14 +120,14 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 	} else {
 		// Validate existing token is a valid UUID
 		if _, err := uuid.Parse(token); err != nil {
-			return nil, fmt.Errorf("invalid token format")
+			return nil, errors.New("invalid token format")
 		}
 	}
 
 	// parse batch size, required non-zero value
 	batchSizeStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterBatchSizeKey, searchParamsPair)
 	if batchSizeStr == "" {
-		return nil, fmt.Errorf("batch size is required")
+		return nil, errors.New("batch size is required")
 	}
 	batchSize, err := strconv.ParseInt(batchSizeStr, 0, 64)
 	if err != nil {

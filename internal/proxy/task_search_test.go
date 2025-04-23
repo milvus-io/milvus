@@ -3208,12 +3208,12 @@ func TestSearchTask_Requery(t *testing.T) {
 		schema := newSchemaInfo(collSchema)
 		qn := mocks.NewMockQueryNodeClient(t)
 		qn.EXPECT().Query(mock.Anything, mock.Anything).
-			Return(nil, fmt.Errorf("mock err 1"))
+			Return(nil, errors.New("mock err 1"))
 
 		lb := NewMockLBPolicy(t)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
 			_ = workload.exec(ctx, 0, qn, "")
-		}).Return(fmt.Errorf("mock err 1"))
+		}).Return(errors.New("mock err 1"))
 		node.lbPolicy = lb
 
 		qt := &searchTask{
@@ -3242,12 +3242,12 @@ func TestSearchTask_Requery(t *testing.T) {
 		schema := newSchemaInfo(collSchema)
 		qn := mocks.NewMockQueryNodeClient(t)
 		qn.EXPECT().Query(mock.Anything, mock.Anything).
-			Return(nil, fmt.Errorf("mock err 1"))
+			Return(nil, errors.New("mock err 1"))
 
 		lb := NewMockLBPolicy(t)
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
 			_ = workload.exec(ctx, 0, qn, "")
-		}).Return(fmt.Errorf("mock err 1"))
+		}).Return(errors.New("mock err 1"))
 		node.lbPolicy = lb
 
 		resultIDs := &schemapb.IDs{
@@ -3481,7 +3481,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		mockMetaCache.ExpectedCalls = nil
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			nil, fmt.Errorf("mock error")).Once()
+			nil, errors.New("mock error")).Once()
 
 		st := &searchTask{
 			request: &milvuspb.SearchRequest{
@@ -3497,7 +3497,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.False(t, skip)
 
 		mockMetaCache.ExpectedCalls = nil
-		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, fmt.Errorf("mock error"))
+		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, errors.New("mock error"))
 		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
 			&collectionInfo{
 				collID:           collID,

@@ -17,9 +17,9 @@
 package pipeline
 
 import (
-	"fmt"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
@@ -252,7 +252,7 @@ func (suite *EmbeddingNodeSuite) TestBM25Embedding() {
 		suite.NoError(err)
 
 		runner := function.NewMockFunctionRunner(suite.T())
-		runner.EXPECT().BatchRun(mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		runner.EXPECT().BatchRun(mock.Anything).Return(nil, errors.New("mock error"))
 		runner.EXPECT().GetSchema().Return(suite.collectionSchema.GetFunctions()[0])
 		runner.EXPECT().GetOutputFields().Return([]*schemapb.FieldSchema{nil})
 

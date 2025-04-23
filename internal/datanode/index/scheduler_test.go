@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -65,7 +66,7 @@ func (s *stagectx) Done() <-chan struct{} {
 func (s *stagectx) Err() error {
 	select {
 	case <-s.ch:
-		return fmt.Errorf("canceled")
+		return errors.New("canceled")
 	default:
 		return nil
 	}
@@ -189,7 +190,7 @@ func TestIndexTaskScheduler(t *testing.T) {
 		newTask(fakeTaskPrepared, nil, indexpb.JobState_JobStateRetry),
 		newTask(fakeTaskBuiltIndex, nil, indexpb.JobState_JobStateRetry),
 		newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished),
-		newTask(fakeTaskSavedIndexes, map[fakeTaskState]error{fakeTaskSavedIndexes: fmt.Errorf("auth failed")}, indexpb.JobState_JobStateRetry))
+		newTask(fakeTaskSavedIndexes, map[fakeTaskState]error{fakeTaskSavedIndexes: errors.New("auth failed")}, indexpb.JobState_JobStateRetry))
 
 	for _, task := range tasks {
 		assert.Nil(t, scheduler.TaskQueue.Enqueue(task))

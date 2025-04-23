@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"go.uber.org/zap"
 
@@ -104,7 +105,7 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 
 func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 	if mgr.workerPool.IsClosed() {
-		return nil, fmt.Errorf("sync manager is closed")
+		return nil, errors.New("sync manager is closed")
 	}
 
 	switch t := task.(type) {

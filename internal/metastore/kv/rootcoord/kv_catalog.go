@@ -631,7 +631,7 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 
 func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp) error {
 	if oldColl.TenantID != newColl.TenantID || oldColl.CollectionID != newColl.CollectionID {
-		return fmt.Errorf("altering tenant id or collection id is forbidden")
+		return errors.New("altering tenant id or collection id is forbidden")
 	}
 	oldCollClone := oldColl.Clone()
 	oldCollClone.DBID = newColl.DBID
@@ -683,7 +683,7 @@ func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collectio
 
 func (kc *Catalog) alterModifyPartition(ctx context.Context, oldPart *model.Partition, newPart *model.Partition, ts typeutil.Timestamp) error {
 	if oldPart.CollectionID != newPart.CollectionID || oldPart.PartitionID != newPart.PartitionID {
-		return fmt.Errorf("altering collection id or partition id is forbidden")
+		return errors.New("altering collection id or partition id is forbidden")
 	}
 	oldPartClone := oldPart.Clone()
 	newPartClone := newPart.Clone()
@@ -1102,7 +1102,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		}
 	} else {
 		if funcutil.IsEmptyString(entity.Name) {
-			return results, fmt.Errorf("role name in the role entity is empty")
+			return results, errors.New("role name in the role entity is empty")
 		}
 		roleKey := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, entity.Name)
 		_, err := kc.Txn.Load(ctx, roleKey)
@@ -1177,7 +1177,7 @@ func (kc *Catalog) ListUser(ctx context.Context, tenant string, entity *milvuspb
 		}
 	} else {
 		if funcutil.IsEmptyString(entity.Name) {
-			return results, fmt.Errorf("username in the user entity is empty")
+			return results, errors.New("username in the user entity is empty")
 		}
 		_, err = kc.GetCredential(ctx, entity.Name)
 		if err != nil {

@@ -691,7 +691,7 @@ func getPrimaryKeysFromUnaryRangeExpr(schema *schemapb.CollectionSchema, unaryRa
 			},
 		}
 	default:
-		return pks, fmt.Errorf("invalid field data type specifyed in simple delete expr")
+		return pks, errors.New("invalid field data type specifyed in simple delete expr")
 	}
 
 	return pks, nil
@@ -722,7 +722,7 @@ func getPrimaryKeysFromTermExpr(schema *schemapb.CollectionSchema, termExpr *pla
 			},
 		}
 	default:
-		return pks, 0, fmt.Errorf("invalid field data type specifyed in simple delete expr")
+		return pks, 0, errors.New("invalid field data type specifyed in simple delete expr")
 	}
 
 	return pks, pkCount, nil

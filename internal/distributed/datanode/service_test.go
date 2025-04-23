@@ -18,9 +18,9 @@ package grpcdatanode
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -212,7 +212,7 @@ func Test_Run(t *testing.T) {
 	datanode.EXPECT().SetAddress(mock.Anything).Return()
 	datanode.EXPECT().SetMixCoordClient(mock.Anything).Return(nil)
 	datanode.EXPECT().UpdateStateCode(mock.Anything).Return()
-	datanode.EXPECT().Init().Return(fmt.Errorf("mock err"))
+	datanode.EXPECT().Init().Return(errors.New("mock err"))
 	server.datanode = datanode
 
 	err = server.Prepare()

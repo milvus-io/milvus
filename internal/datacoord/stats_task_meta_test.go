@@ -18,9 +18,9 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -76,7 +76,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 
 		s.Run("failed case", func() {
 			catalog := mocks.NewDataCoordCatalog(s.T())
-			catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, fmt.Errorf("mock error"))
+			catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, errors.New("mock error"))
 
 			m, err := newStatsTaskMeta(context.Background(), catalog)
 			s.Error(err)
@@ -105,7 +105,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 
 	s.Run("AddStatsTask", func() {
 		s.Run("failed case", func() {
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
+			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 			s.Error(m.AddStatsTask(t))
 			_, ok := m.tasks.Get(1)
@@ -145,7 +145,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 		})
 
 		s.Run("failed case", func() {
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
+			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 			s.Error(m.UpdateVersion(1, 1180))
 			task, ok := m.tasks.Get(1)
@@ -157,7 +157,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 
 	s.Run("UpdateBuildingTask", func() {
 		s.Run("failed case", func() {
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
+			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 			s.Error(m.UpdateBuildingTask(1))
 			task, ok := m.tasks.Get(1)
@@ -214,7 +214,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			NumRows: 2048,
 		}
 		s.Run("failed case", func() {
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
+			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 			s.Error(m.FinishTask(1, result))
 			task, ok := m.tasks.Get(1)
@@ -265,7 +265,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 
 	s.Run("DropStatsTask", func() {
 		s.Run("failed case", func() {
-			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
+			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 			s.Error(m.DropStatsTask(1))
 			_, ok := m.tasks.Get(1)

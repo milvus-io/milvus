@@ -24,6 +24,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -48,7 +50,7 @@ func getVertexAIJsonKey(credentialsFilePath string) ([]byte, error) {
 		jsonKeyPath = credentialsFilePath
 	}
 	if jsonKeyPath == "" {
-		return nil, fmt.Errorf("VetexAI credentials file path is empty")
+		return nil, errors.New("VetexAI credentials file path is empty")
 	}
 
 	if vtxKey.filePath == jsonKeyPath {

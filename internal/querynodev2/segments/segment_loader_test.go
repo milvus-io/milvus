@@ -582,7 +582,8 @@ func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
 			loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
 		},
 	}
-	paramtable.Get().QueryNodeCfg.DiskCapacityLimit.SwapTempValue("100000")
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key, "100000")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key)
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
 	suite.Error(err)
 }

@@ -19,6 +19,7 @@ package common
 import (
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -99,14 +100,14 @@ func GetMsgTypeFromRaw(payload []byte, properties map[string]string) (commonpb.M
 	if msgType == commonpb.MsgType_Undefined {
 		header := commonpb.MsgHeader{}
 		if payload == nil {
-			return msgType, fmt.Errorf("failed to unmarshal message header, payload is empty")
+			return msgType, errors.New("failed to unmarshal message header, payload is empty")
 		}
 		err := proto.Unmarshal(payload, &header)
 		if err != nil {
 			return msgType, fmt.Errorf("failed to unmarshal message header, err %s", err.Error())
 		}
 		if header.Base == nil {
-			return msgType, fmt.Errorf("failed to unmarshal message, header is uncomplete")
+			return msgType, errors.New("failed to unmarshal message, header is uncomplete")
 		}
 		msgType = header.Base.MsgType
 	}

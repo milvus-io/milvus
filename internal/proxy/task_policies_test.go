@@ -2,12 +2,12 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/types"
@@ -34,7 +34,7 @@ func TestRoundRobinPolicy(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, querier.records(), map[UniqueID][]string{0: {"c0", "c2"}, 1: {"c1", "c3"}})
 
-	mockerr := fmt.Errorf("mock query node error")
+	mockerr := errors.New("mock query node error")
 	querier.init()
 	querier.failset[0] = mockerr
 

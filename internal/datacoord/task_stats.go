@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/types"
@@ -151,7 +152,7 @@ func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta
 		// reset compacting
 		meta.SetSegmentsCompacting(ctx, []UniqueID{st.segmentID}, false)
 		st.SetStartTime(time.Now())
-		return fmt.Errorf("segment is contains by l0 compaction")
+		return errors.New("segment is contains by l0 compaction")
 	}
 
 	if err := meta.statsTaskMeta.UpdateVersion(st.taskID, nodeID); err != nil {

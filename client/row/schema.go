@@ -39,7 +39,7 @@ func ParseSchema(r interface{}) (*entity.Schema, error) {
 	// MapRow is not supported for schema definition
 	// TODO add PrimaryKey() interface later
 	if t.Kind() == reflect.Map {
-		return nil, fmt.Errorf("map row is not supported for schema definition")
+		return nil, errors.New("map row is not supported for schema definition")
 	}
 
 	if t.Kind() != reflect.Struct {

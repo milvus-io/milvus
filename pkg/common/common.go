@@ -459,7 +459,7 @@ func ValidateAutoIndexMmapConfig(autoIndexConfigEnable, isVectorField bool, inde
 
 	_, ok := indexParams[MmapEnabledKey]
 	if ok && isVectorField {
-		return fmt.Errorf("mmap index is not supported to config for the collection in auto index mode")
+		return errors.New("mmap index is not supported to config for the collection in auto index mode")
 	}
 	return nil
 }

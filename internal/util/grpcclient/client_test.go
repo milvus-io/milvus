@@ -124,7 +124,7 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 	base.grpcClientMtx.Unlock()
 	_, err = base.Call(ctx, func(client *mockClient) (any, error) {
-		return struct{}{}, status.Errorf(codes.Unknown, merr.ErrNodeNotMatch.Error())
+		return struct{}{}, status.Error(codes.Unknown, merr.ErrNodeNotMatch.Error())
 	})
 	assert.True(t, IsServerIDMismatchErr(err))
 
@@ -133,7 +133,7 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 	base.grpcClientMtx.Unlock()
 	_, err = base.Call(ctx, func(client *mockClient) (any, error) {
-		return struct{}{}, status.Errorf(codes.Unavailable, "fake error")
+		return struct{}{}, status.Error(codes.Unavailable, "fake error")
 	})
 	assert.True(t, errors.Is(err, merr.ErrNodeNotFound))
 }
@@ -370,35 +370,35 @@ func TestClientBase_CheckGrpcError(t *testing.T) {
 	base.MaxAttempts = 1
 
 	ctx := context.Background()
-	retry, reset, forceReset, _ := base.checkGrpcErr(ctx, status.Errorf(codes.Canceled, "fake context canceled"))
+	retry, reset, forceReset, _ := base.checkGrpcErr(ctx, status.Error(codes.Canceled, "fake context canceled"))
 	assert.True(t, retry)
 	assert.True(t, reset)
 	assert.False(t, forceReset)
 
-	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unimplemented, "fake context canceled"))
+	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Error(codes.Unimplemented, "fake context canceled"))
 	assert.False(t, retry)
 	assert.True(t, reset)
 	assert.True(t, forceReset)
 
-	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unavailable, "fake context canceled"))
+	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Error(codes.Unavailable, "fake context canceled"))
 	assert.True(t, retry)
 	assert.True(t, reset)
 	assert.True(t, forceReset)
 
 	// test serverId mismatch
-	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrNodeNotMatch.Error()))
+	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Error(codes.Unknown, merr.ErrNodeNotMatch.Error()))
 	assert.True(t, retry)
 	assert.True(t, reset)
 	assert.True(t, forceReset)
 
 	// test cross cluster
-	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrServiceCrossClusterRouting.Error()))
+	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Error(codes.Unknown, merr.ErrServiceCrossClusterRouting.Error()))
 	assert.True(t, retry)
 	assert.True(t, reset)
 	assert.True(t, forceReset)
 
 	// test default
-	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Errorf(codes.Unknown, merr.ErrNodeNotFound.Error()))
+	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Error(codes.Unknown, merr.ErrNodeNotFound.Error()))
 	assert.True(t, retry)
 	assert.True(t, reset)
 	assert.False(t, forceReset)
@@ -417,7 +417,7 @@ func (s *server) SayHello(ctx context.Context, in *helloworld.HelloRequest) (*he
 		log.Printf("success %d", s.reqCounter)
 		return &helloworld.HelloReply{Message: strings.ToUpper(in.Name)}, nil
 	}
-	return nil, status.Errorf(codes.Unavailable, "server: fail it")
+	return nil, status.Error(codes.Unavailable, "server: fail it")
 }
 
 func TestClientBase_RetryPolicy(t *testing.T) {

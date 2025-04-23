@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -116,7 +117,7 @@ func (executor *FunctionExecutor) processSingleFunction(ctx context.Context, run
 		}
 	}
 	if len(inputs) != len(runner.GetSchema().InputFieldIds) {
-		return nil, fmt.Errorf("Input field not found")
+		return nil, errors.New("Input field not found")
 	}
 
 	tr := timerecord.NewTimeRecorder("function ProcessInsert")

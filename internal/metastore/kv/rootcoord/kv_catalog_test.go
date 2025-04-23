@@ -1644,7 +1644,7 @@ func TestRBAC_Role(t *testing.T) {
 
 			notExistKey = "not-exist"
 			errorKey    = "error"
-			otherError  = fmt.Errorf("mock load error")
+			otherError  = errors.New("mock load error")
 		)
 
 		kvmock.EXPECT().Load(mock.Anything, notExistKey).Return("", merr.WrapErrIoKeyNotFound(notExistKey)).Once()
@@ -1688,7 +1688,7 @@ func TestRBAC_Role(t *testing.T) {
 
 			notExistKey = "not-exist"
 			errorKey    = "error"
-			otherError  = fmt.Errorf("mock load error")
+			otherError  = errors.New("mock load error")
 		)
 
 		kvmock.EXPECT().Load(mock.Anything, notExistKey).Return("", merr.WrapErrIoKeyNotFound(notExistKey)).Once()
@@ -1735,7 +1735,7 @@ func TestRBAC_Role(t *testing.T) {
 			notExistPath = funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, notExistName)
 			errorName    = "error"
 			errorPath    = funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, errorName)
-			otherError   = fmt.Errorf("mock load error")
+			otherError   = errors.New("mock load error")
 		)
 
 		kvmock.EXPECT().Load(mock.Anything, notExistPath).Return("", merr.WrapErrIoKeyNotFound(notExistName)).Once()
@@ -3075,7 +3075,7 @@ func TestCatalog_AlterDatabase(t *testing.T) {
 func TestCatalog_listFunctionError(t *testing.T) {
 	mockSnapshot := newMockSnapshot(t)
 	kc := NewCatalog(nil, mockSnapshot).(*Catalog)
-	mockSnapshot.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, fmt.Errorf("mock error"))
+	mockSnapshot.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, errors.New("mock error"))
 	_, err := kc.listFunctions(context.TODO(), 1, 1)
 	assert.Error(t, err)
 

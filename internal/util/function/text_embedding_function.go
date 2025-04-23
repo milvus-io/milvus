@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -57,7 +59,7 @@ func hasEmptyString(texts []string) bool {
 
 func TextEmbeddingOutputsCheck(fields []*schemapb.FieldSchema) error {
 	if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_FloatVector && fields[0].DataType != schemapb.DataType_Int8Vector) {
-		return fmt.Errorf("TextEmbedding function output field must be a FloatVector or Int8Vector field")
+		return errors.New("TextEmbedding function output field must be a FloatVector or Int8Vector field")
 	}
 	return nil
 }
@@ -222,12 +224,12 @@ func (runner *TextEmbeddingFunction) ProcessInsert(ctx context.Context, inputs [
 
 	texts := inputs[0].GetScalars().GetStringData().GetData()
 	if texts == nil {
-		return nil, fmt.Errorf("Input texts is empty")
+		return nil, errors.New("Input texts is empty")
 	}
 
 	// make sure all texts are not empty
 	if hasEmptyString(texts) {
-		return nil, fmt.Errorf("There is an empty string in the input data, TextEmbedding function does not support empty text")
+		return nil, errors.New("There is an empty string in the input data, TextEmbedding function does not support empty text")
 	}
 	numRows := len(texts)
 	if numRows > runner.MaxBatch() {
@@ -250,7 +252,7 @@ func (runner *TextEmbeddingFunction) ProcessSearch(ctx context.Context, placehol
 	}
 	// make sure all texts are not empty
 	if hasEmptyString(texts) {
-		return nil, fmt.Errorf("There is an empty string in the queries, TextEmbedding function does not support empty text")
+		return nil, errors.New("There is an empty string in the queries, TextEmbedding function does not support empty text")
 	}
 	embds, err := runner.embProvider.CallEmbedding(texts, SearchMode)
 	if err != nil {
@@ -275,13 +277,13 @@ func (runner *TextEmbeddingFunction) ProcessBulkInsert(inputs []storage.FieldDat
 
 	texts, ok := inputs[0].GetDataRows().([]string)
 	if !ok {
-		return nil, fmt.Errorf("Input texts is empty")
+		return nil, errors.New("Input texts is empty")
 	}
 
 	// make sure all texts are not empty
 	// In storage.FieldData, null is also stored as an empty string
 	if hasEmptyString(texts) {
-		return nil, fmt.Errorf("There is an empty string in the input data, TextEmbedding function does not support empty text")
+		return nil, errors.New("There is an empty string in the input data, TextEmbedding function does not support empty text")
 	}
 	embds, err := runner.embProvider.CallEmbedding(texts, InsertMode)
 	if err != nil {
@@ -316,5 +318,5 @@ func (runner *TextEmbeddingFunction) ProcessBulkInsert(inputs []storage.FieldDat
 			runner.outputFields[0].FieldID: field,
 		}, nil
 	}
-	return nil, fmt.Errorf("Unknow embedding type")
+	return nil, errors.New("Unknow embedding type")
 }

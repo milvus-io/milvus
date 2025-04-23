@@ -1,7 +1,7 @@
 package indexparamcheck
 
 import (
-	"fmt"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -18,7 +18,7 @@ func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, params map[strin
 
 func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	if !typeutil.IsArithmetic(field.GetDataType()) {
-		return fmt.Errorf("STL_SORT are only supported on numeric field")
+		return errors.New("STL_SORT are only supported on numeric field")
 	}
 	return nil
 }

@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -46,7 +48,7 @@ type TeiEmbeddingProvider struct {
 func createTEIEmbeddingClient(apiKey string, endpoint string) (*tei.TEIEmbedding, error) {
 	enable := os.Getenv(enableTeiEnvStr)
 	if strings.ToLower(enable) == "false" {
-		return nil, fmt.Errorf("TEI model serving is not enabled")
+		return nil, errors.New("TEI model serving is not enabled")
 	}
 
 	return tei.NewTEIEmbeddingClient(apiKey, endpoint)
