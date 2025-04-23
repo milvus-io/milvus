@@ -1116,9 +1116,8 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
     auto& request_fields = plan->extra_info_opt_.value().involved_fields_;
     auto field_ready_bitset =
         field_data_ready_bitset_ | index_ready_bitset_ | binlog_index_bitset_;
-    AssertInfo(request_fields.size() == field_ready_bitset.size(),
-               "Request fields size not equal to field ready bitset size when "
-               "check search");
+    
+    // allow absent fields after supporting add fields
     auto absent_fields = request_fields - field_ready_bitset;
 
     if (absent_fields.any()) {

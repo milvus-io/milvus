@@ -135,8 +135,9 @@ func newSchemaInfoWithLoadFields(schema *schemapb.CollectionSchema, loadFields [
 			pkField = field
 		}
 	}
-	// schema shall be verified before
-	schemaHelper, _ := typeutil.CreateSchemaHelperWithLoadFields(schema, loadFields)
+	// skip load fields logic for now
+	// partial load shall be processed as hint after tiered storage feature
+	schemaHelper, _ := typeutil.CreateSchemaHelperWithLoadFields(schema, nil)
 	return &schemaInfo{
 		CollectionSchema:     schema,
 		fieldMap:             fieldMap,

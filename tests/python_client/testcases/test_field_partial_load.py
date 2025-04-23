@@ -5,7 +5,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
 
-
+@pytest.mark.skip(reason="field partial load behavior changing @congqixia")
 class TestFieldPartialLoad(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_field_partial_load_default(self):
@@ -261,6 +261,7 @@ class TestFieldPartialLoad(TestcaseBase):
         assert len(res[0][0].fields.keys()) == 2
 
 
+@pytest.mark.skip(reason="field partial load behavior changing @congqixia")
 class TestFieldPartialLoadInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_skip_load_on_pk_field_or_vector_field(self):

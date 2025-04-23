@@ -114,7 +114,63 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 		assert.Error(t, err, "error shall be return when get collection failed")
 	})
 
+	t.Run("write_wal_fail", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetCollectionByName(
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(testCollection, nil)
+		meta.EXPECT().ListAliasesByID(mock.Anything, mock.Anything).Return([]string{})
+
+		broker := newMockBroker()
+		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+			return errors.New("mock")
+		}
+		alloc := newMockIDAllocator()
+		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker), withIDAllocator(alloc))
+		task := &addCollectionFieldTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req: &milvuspb.AddCollectionFieldRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
+				CollectionName: "coll",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				Name:     "fid",
+				DataType: schemapb.DataType_Bool,
+				Nullable: true,
+			},
+		}
+
+		t.Run("write_schema_change_fail", func(t *testing.T) {
+			b.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+			err := task.Execute(context.Background())
+			assert.Error(t, err)
+		})
+
+		t.Run("write_flush_failed", func(t *testing.T) {
+			b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{
+				AppendResults: map[string]*types.AppendResult{
+					"dml_ch_01": {TimeTick: 100},
+					"dml_ch_02": {TimeTick: 101},
+				},
+			}, nil).Once()
+			b.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+			err := task.Execute(context.Background())
+			assert.Error(t, err)
+		})
+	})
+
 	t.Run("add field step failed", func(t *testing.T) {
+		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{
+			AppendResults: map[string]*types.AppendResult{
+				"dml_ch_01": {TimeTick: 100},
+				"dml_ch_02": {TimeTick: 101},
+			},
+		}, nil).Times(2)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByName(
 			mock.Anything,
@@ -147,59 +203,13 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("write_wal_fail", func(t *testing.T) {
-		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().GetCollectionByName(
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(testCollection, nil)
-		meta.EXPECT().AlterCollection(
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(nil)
-		meta.EXPECT().ListAliasesByID(mock.Anything, mock.Anything).Return([]string{})
-
-		broker := newMockBroker()
-		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
-			return errors.New("mock")
-		}
-		alloc := newMockIDAllocator()
-		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker), withIDAllocator(alloc))
-		task := &addCollectionFieldTask{
-			baseTask: newBaseTask(context.Background(), core),
-			Req: &milvuspb.AddCollectionFieldRequest{
-				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
-				CollectionName: "coll",
-			},
-			fieldSchema: &schemapb.FieldSchema{
-				Name:     "fid",
-				DataType: schemapb.DataType_Bool,
-				Nullable: true,
-			},
-		}
-
-		t.Run("write_schema_change_fail", func(t *testing.T) {
-			b.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
-
-			err := task.Execute(context.Background())
-			assert.Error(t, err)
-		})
-
-		t.Run("write_flush_failed", func(t *testing.T) {
-			b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Once()
-			b.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
-
-			err := task.Execute(context.Background())
-			assert.Error(t, err)
-		})
-	})
-
 	t.Run("broadcast add field step failed", func(t *testing.T) {
-		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Times(2)
+		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{
+			AppendResults: map[string]*types.AppendResult{
+				"dml_ch_01": {TimeTick: 100},
+				"dml_ch_02": {TimeTick: 101},
+			},
+		}, nil).Times(2)
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByName(
@@ -239,7 +249,12 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 	})
 
 	t.Run("expire cache failed", func(t *testing.T) {
-		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Times(2)
+		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{
+			AppendResults: map[string]*types.AppendResult{
+				"dml_ch_01": {TimeTick: 100},
+				"dml_ch_02": {TimeTick: 101},
+			},
+		}, nil).Times(2)
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByName(
@@ -280,7 +295,12 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Times(2)
+		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{
+			AppendResults: map[string]*types.AppendResult{
+				"dml_ch_01": {TimeTick: 100},
+				"dml_ch_02": {TimeTick: 101},
+			},
+		}, nil).Times(2)
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByName(
