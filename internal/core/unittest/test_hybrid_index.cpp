@@ -158,7 +158,7 @@ class HybridIndexTestV1 : public testing::Test {
 
         Config config;
         config["index_type"] = milvus::index::HYBRID_INDEX_TYPE;
-        config["insert_files"] = std::vector<std::string>{log_path};
+        config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config["bitmap_cardinality_limit"] = "1000";
         if (has_lack_binlog_row_) {
             config["lack_binlog_rows"] = lack_binlog_row_;

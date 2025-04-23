@@ -165,11 +165,7 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
 template <typename T>
 void
 InvertedIndexTantivy<T>::Build(const Config& config) {
-    auto insert_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
-    AssertInfo(insert_files.has_value(), "insert_files were empty");
-    auto field_datas =
-        mem_file_manager_->CacheRawDataToMemory(insert_files.value());
+    auto field_datas = mem_file_manager_->CacheRawDataToMemory(config);
     auto lack_binlog_rows =
         GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
     if (lack_binlog_rows.has_value()) {

@@ -12,6 +12,7 @@
 #include <glog/logging.h>
 #include <memory>
 #include <string>
+#include "common/Consts.h"
 #include "fmt/core.h"
 #include "indexbuilder/type_c.h"
 #include "log/Log.h"
@@ -35,6 +36,7 @@
 #include "storage/Util.h"
 #include "index/Meta.h"
 #include "index/JsonKeyStatsInvertedIndex.h"
+#include "milvus-storage/filesystem/fs.h"
 
 using namespace milvus;
 CStatus
@@ -129,6 +131,22 @@ get_opt_field(const ::google::protobuf::RepeatedPtrField<
     return opt_fields_map;
 }
 
+milvus::SegmentInsertFiles
+get_segment_insert_files(
+    const milvus::proto::indexcgo::SegmentInsertFiles& segment_insert_files) {
+    milvus::SegmentInsertFiles files;
+    for (const auto& column_group_files :
+         segment_insert_files.field_insert_files()) {
+        std::vector<std::string> paths;
+        paths.reserve(column_group_files.file_paths().size());
+        for (const auto& path : column_group_files.file_paths()) {
+            paths.push_back(path);
+        }
+        files.emplace_back(std::move(paths));
+    }
+    return files;
+}
+
 milvus::Config
 get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     milvus::Config config;
@@ -142,14 +160,21 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
         config[param.key()] = param.value();
     }
 
-    config["insert_files"] = info->insert_files();
+    config[INSERT_FILES_KEY] = info->insert_files();
     if (info->opt_fields().size()) {
-        config["opt_fields"] = get_opt_field(info->opt_fields());
+        config[VEC_OPT_FIELDS] = get_opt_field(info->opt_fields());
     }
     config["lack_binlog_rows"] = info->lack_binlog_rows();
     if (info->partition_key_isolation()) {
-        config["partition_key_isolation"] = info->partition_key_isolation();
+        config[PARTITION_KEY_ISOLATION_KEY] = info->partition_key_isolation();
     }
+    config[STORAGE_VERSION_KEY] = info->storage_version();
+    if (info->storage_version() == STORAGE_V2) {
+        config[SEGMENT_INSERT_FILES_KEY] =
+            get_segment_insert_files(info->segment_insert_files());
+    }
+    config[DIM_KEY] = info->dim();
+    config[DATA_TYPE_KEY] = info->field_schema().data_type();
 
     return config;
 }
@@ -213,6 +238,8 @@ CreateIndex(CIndex* res_index,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager);
+
+        auto fs = milvus::storage::InitArrowFileSystem(storage_config);
 
         auto index =
             milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -285,6 +312,7 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
 
         auto chunk_manager =
             milvus::storage::CreateChunkManager(storage_config);
+        auto fs = milvus::storage::InitArrowFileSystem(storage_config);
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager);
@@ -355,6 +383,7 @@ BuildTextIndex(ProtoLayoutInterface result,
         };
         auto chunk_manager =
             milvus::storage::CreateChunkManager(storage_config);
+        auto fs = milvus::storage::InitArrowFileSystem(storage_config);
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager);

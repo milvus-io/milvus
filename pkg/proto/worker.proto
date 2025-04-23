@@ -58,6 +58,7 @@ message CreateJobRequest {
   int64 storage_version = 28;
   int64 lack_binlog_rows = 29;
   int64 task_slot = 30;
+  repeated data.FieldBinlog insert_logs = 31;
 }
 
 message QueryJobsRequest {

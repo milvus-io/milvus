@@ -137,12 +137,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     build_config.update(config);
 
     auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
-    auto insert_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
-    AssertInfo(insert_files.has_value(),
-               "insert file paths is empty when build disk ann index");
-    auto local_data_path =
-        file_manager_->CacheRawDataToDisk<T>(insert_files.value());
+    auto local_data_path = file_manager_->CacheRawDataToDisk<T>(config);
     build_config[DISK_ANN_RAW_DATA_PATH] = local_data_path;
 
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
@@ -170,7 +165,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
         // into the index Build call directly
     }
 
-    build_config.erase("insert_files");
+    build_config.erase(INSERT_FILES_KEY);
     build_config.erase(VEC_OPT_FIELDS);
     auto stat = index_.Build({}, build_config);
     if (stat != knowhere::Status::success)
