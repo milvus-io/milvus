@@ -41,6 +41,9 @@ GetMinimalIndexVersion();
 int32_t
 GetCurrentIndexVersion();
 
+int32_t
+GetMaximumIndexVersion();
+
 void
 KnowhereInitGPUMemoryPool(const uint32_t init_size, const uint32_t max_size);
 
