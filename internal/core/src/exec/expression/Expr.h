@@ -203,30 +203,9 @@ class SegmentExpr : public Expr {
         return true;
     }
 
-    int64_t
-    GetProcessedGlobalPos() {
-        int64_t total_pos = 0;
-
-        for (size_t i = 0; i < current_data_chunk_; i++) {
-            total_pos += segment_->chunk_size(field_id_, i);
-        }
-
-        total_pos += current_data_chunk_pos_;
-
-        LOG_DEBUG(
-            " GetProcessedGlobalPos - total_pos: {}, current_chunk: {}, "
-            "current_pos: {}",
-            total_pos,
-            current_data_chunk_,
-            current_data_chunk_pos_);
-
-        return total_pos;
-    }
-
     void
     MoveCursorForDataMultipleChunk() {
         int64_t processed_size = 0;
-
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
@@ -239,6 +218,8 @@ class SegmentExpr : public Expr {
             if (processed_size >= batch_size_) {
                 current_data_chunk_ = i;
                 current_data_chunk_pos_ = data_pos + size;
+                current_data_global_pos_ =
+                    current_data_global_pos_ + processed_size;
                 break;
             }
             // }
@@ -250,6 +231,7 @@ class SegmentExpr : public Expr {
             auto size =
                 std::min(active_count_ - current_data_chunk_pos_, batch_size_);
             current_data_chunk_pos_ += size;
+            current_data_global_pos_ += size;
         } else {
             int64_t processed_size = 0;
             for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
@@ -266,6 +248,8 @@ class SegmentExpr : public Expr {
                 if (processed_size >= batch_size_) {
                     current_data_chunk_ = i;
                     current_data_chunk_pos_ = data_pos + size;
+                    current_data_global_pos_ =
+                        current_data_global_pos_ + processed_size;
                     break;
                 }
             }
@@ -1287,6 +1271,7 @@ class SegmentExpr : public Expr {
     // because expr maybe called for every batch.
     int64_t current_data_chunk_{0};
     int64_t current_data_chunk_pos_{0};
+    int64_t current_data_global_pos_{0};
     int64_t current_index_chunk_{0};
     int64_t current_index_chunk_pos_{0};
     int64_t size_per_chunk_{0};
