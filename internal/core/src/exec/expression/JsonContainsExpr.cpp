@@ -433,8 +433,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
     }
     TargetBitmap result;
     result.append(
-        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
-    current_data_chunk_pos_ += real_batch_size;
+        cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
 }
@@ -619,8 +619,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
     }
     TargetBitmap result;
     result.append(
-        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
-    current_data_chunk_pos_ += real_batch_size;
+        cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
 }
@@ -898,8 +898,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
     }
     TargetBitmap result;
     result.append(
-        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
-    current_data_chunk_pos_ += real_batch_size;
+        cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
 }
@@ -1207,8 +1207,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
     }
     TargetBitmap result;
     result.append(
-        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
-    current_data_chunk_pos_ += real_batch_size;
+        cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
 }
@@ -1403,8 +1403,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
     }
     TargetBitmap result;
     result.append(
-        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
-    current_data_chunk_pos_ += real_batch_size;
+        cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
 }
@@ -1687,8 +1687,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
     }
     TargetBitmap result;
     result.append(
-        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
-    current_data_chunk_pos_ += real_batch_size;
+        cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
 }
