@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -41,7 +42,9 @@ func RecoverPChannelSegmentAllocManager(
 		metrics:    metrics,
 	}
 	// seal the sealed segments from recovery asynchronously.
-	_ = m.sealWorker.AsyncSeal(ctx, waitForSealed)
+	if err := m.sealWorker.AsyncSeal(waitForSealed); err != nil {
+		panic(fmt.Sprintf("unreachable: failed to seal segments when recovery, %s", err.Error()))
+	}
 	// register the segment assignment manager to the global manager.
 	resource.Resource().SegmentAssignStatsManager().RegisterSealOperator(m, growingBelongs, growingStats)
 	return m, nil
@@ -154,6 +157,9 @@ func (m *PChannelSegmentAllocManager) AsyncMustSealSegments(signal utils.SealSeg
 	if pm, err := m.managers.Get(signal.SegmentBelongs.CollectionID, signal.SegmentBelongs.PartitionID); err == nil {
 		if segment := pm.GetAndRemoveSegment(signal.SegmentBelongs.SegmentID); segment != nil {
 			segment.WithSealPolicy(signal.SealPolicy)
+			if err := m.sealWorker.AsyncSeal([]*segmentAllocManager{segment}); err != nil {
+				m.logger.Warn("failed to add segment into seal worker, may be recovered later", zap.Error(err))
+			}
 		} else {
 			m.logger.Info(
 				"segment not found when trigger must seal, may be already sealed",

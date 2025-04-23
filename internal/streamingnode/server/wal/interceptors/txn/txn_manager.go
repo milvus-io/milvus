@@ -39,38 +39,35 @@ func NewTxnManager(pchannel types.PChannelInfo, buffer *utility.TxnBuffer) *TxnM
 		sessions[session.TxnContext().TxnID] = session
 		recoveredSessions[session.TxnContext().TxnID] = struct{}{}
 	}
-	return &TxnManager{
-		mu:                    sync.Mutex{},
-		recoveredSessions:     recoveredSessions,
-		recoveredSessionsDone: make(chan struct{}),
-		sessions:              sessions,
-		closed:                nil,
-		metrics:               m,
-		logger:                resource.Resource().Logger().With(log.FieldComponent("txn-manager")),
+	txnManager := &TxnManager{
+		mu:                        sync.Mutex{},
+		recoveredSessions:         recoveredSessions,
+		recoveredSessionsDoneChan: make(chan struct{}),
+		sessions:                  sessions,
+		closed:                    nil,
+		metrics:                   m,
+		logger:                    resource.Resource().Logger().With(log.FieldComponent("txn-manager")),
 	}
+	txnManager.notifyRecoverDone()
+	return txnManager
 }
 
 // TxnManager is the manager of transactions.
 // We don't support cross wal transaction by now and
 // We don't support the transaction lives after the wal transferred to another streaming node.
 type TxnManager struct {
-	mu                    sync.Mutex
-	recoveredSessions     map[message.TxnID]struct{}
-	recoveredSessionsDone chan struct{}
-	sessions              map[message.TxnID]*TxnSession
-	closed                lifetime.SafeChan
-	metrics               *metricsutil.TxnMetrics
-	logger                *log.MLogger
+	mu                        sync.Mutex
+	recoveredSessions         map[message.TxnID]struct{}
+	recoveredSessionsDoneChan chan struct{}
+	sessions                  map[message.TxnID]*TxnSession
+	closed                    lifetime.SafeChan
+	metrics                   *metricsutil.TxnMetrics
+	logger                    *log.MLogger
 }
 
-// WaitForAllTransactionDone waits for all transactions to be done.
-func (m *TxnManager) WaitForRecoveredTranscationDone(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-m.recoveredSessionsDone:
-		return nil
-	}
+// RecoverDone returns a channel that is closed when all transactions are cleaned up.
+func (m *TxnManager) RecoverDone() <-chan struct{} {
+	return m.recoveredSessionsDoneChan
 }
 
 // BeginNewTxn starts a new transaction with a session.
@@ -131,10 +128,7 @@ func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 	if len(ids) > 0 {
 		m.logger.Info("transaction at vchannel is failed because of incoming exclusive required message", zap.String("vchannel", vchannel), zap.Int64s("txnIDs", ids))
 	}
-
-	if len(m.recoveredSessions) == 0 && m.recoveredSessionsDone != nil {
-		close(m.recoveredSessionsDone)
-	}
+	m.notifyRecoverDone()
 }
 
 // CleanupTxnUntil cleans up the transactions until the specified timestamp.
@@ -155,9 +149,13 @@ func (m *TxnManager) CleanupTxnUntil(ts uint64) {
 		m.closed.Close()
 	}
 
-	if len(m.recoveredSessions) == 0 && m.recoveredSessionsDone != nil {
-		close(m.recoveredSessionsDone)
-		m.recoveredSessionsDone = nil
+	m.notifyRecoverDone()
+}
+
+func (m *TxnManager) notifyRecoverDone() {
+	if len(m.recoveredSessions) == 0 && m.recoveredSessions != nil {
+		close(m.recoveredSessionsDoneChan)
+		m.recoveredSessions = nil
 	}
 }
 

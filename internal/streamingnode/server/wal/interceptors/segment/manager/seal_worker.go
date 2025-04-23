@@ -53,11 +53,14 @@ type sealQueue struct {
 // asyncSealRequest is a request to seal segments asynchronously.
 type asyncSealRequest struct {
 	segments []*segmentAllocManager
-	result   *syncutil.Future[error]
 }
 
 // AsyncSeal adds a segment into the queue, and will be sealed at next time.
-func (q *sealQueue) AsyncSeal(ctx context.Context, managers []*segmentAllocManager) *syncutil.Future[error] {
+// The seal operation does not block the caller, and it may not success if node crash or graceful shutdown happens.
+func (q *sealQueue) AsyncSeal(managers []*segmentAllocManager) error {
+	if len(managers) == 0 {
+		return nil
+	}
 	if q.logger.Level().Enabled(zap.DebugLevel) {
 		for _, m := range managers {
 			policy := m.SealPolicy()
@@ -70,43 +73,69 @@ func (q *sealQueue) AsyncSeal(ctx context.Context, managers []*segmentAllocManag
 			)
 		}
 	}
-	result := syncutil.NewFuture[error]()
 	r := &asyncSealRequest{
 		segments: managers,
-		result:   result,
 	}
 	select {
 	case <-q.backgroundTask.Context().Done():
-		result.Set(ErrSealWorkerClosed)
-	case <-ctx.Done():
-		result.Set(ctx.Err())
+		return ErrSealWorkerClosed
 	case q.reqCh <- r:
+		return nil
 	}
-	return result
 }
 
 // background is a background working that will run in a separate goroutine.
 func (q *sealQueue) background() {
+	defer q.backgroundTask.Finish(struct{}{})
+	if err := q.prepare(); err != nil {
+		return
+	}
+	q.execute()
+}
+
+// prepare prepares the seal worker.
+func (q *sealQueue) prepare() (err error) {
 	defer func() {
-		q.flushAllPendings()
-		if len(q.pendings) > 0 {
+		if err != nil {
 			segmentIDs := q.getPendingSegmentIDs()
-			q.logger.Warn("there're some segments in pending queue after graceful closing", zap.Int("segmentCount", len(segmentIDs)), zap.Int64s("segmentIDs", segmentIDs))
-			for _, req := range q.pendings {
-				req.result.Set(ErrSealWorkerClosed)
-			}
+			q.logger.Error("seal worker prepare failed", zap.Int64s("pendingSegmentIDs", segmentIDs), zap.Error(err))
+			return
 		}
-		q.backgroundTask.Finish(struct{}{})
+		q.logger.Info("seal worker prepare done")
 	}()
 
 	// The segment assignment manager lost the txnSem for the recovered txn message,
 	// So the seal worker should wait for all the recovered txn to be done.
 	// Otherwise, the flush message may be sent into wal before the txn is done.
 	// Break the wal consistency: All insert message is writen into wal before the flush message.
-	if err := q.txnManager.WaitForRecoveredTranscationDone(q.backgroundTask.Context()); err != nil {
-		q.logger.Warn("seal worker is exit before recovered transaction done", zap.Error(err))
-		return
+	//
+	for {
+		select {
+		case <-q.backgroundTask.Context().Done():
+			return ErrSealWorkerClosed
+		case <-q.gracefulClose:
+			return ErrSealWorkerClosed
+		case req := <-q.reqCh:
+			// before the txn manager recover is done,
+			// we only collect the pending segments that need to be sealed.
+			q.pendings = append(q.pendings, req)
+		case <-q.txnManager.RecoverDone():
+			// the txn manager is recovered, so we can start seal worker and seal all pending segments.
+			q.flushAllPendings()
+			return nil
+		}
 	}
+}
+
+// background is a background working that will run in a separate goroutine.
+func (q *sealQueue) execute() {
+	defer func() {
+		q.flushAllPendings()
+		if len(q.pendings) > 0 {
+			segmentIDs := q.getPendingSegmentIDs()
+			q.logger.Warn("there're some segments in pending queue after graceful closing", zap.Int("segmentCount", len(segmentIDs)), zap.Int64s("segmentIDs", segmentIDs))
+		}
+	}()
 
 	backoff := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
 		Default: time.Second,
@@ -126,11 +155,8 @@ func (q *sealQueue) background() {
 			q.logger.Info("seal worker is on graceful closing")
 			return
 		case req := <-q.reqCh:
-			q.handleSealRequest(q.backgroundTask.Context(), req)
-			if len(req.segments) > 0 {
-				// if there's still any segments need to be sealed, add it into pending queue and wait backoff.
-				q.pendings = append(q.pendings, req)
-			}
+			q.pendings = append(q.pendings, req)
+			q.flushAllPendings()
 		case <-backoffTimer:
 			q.flushAllPendings()
 		}
@@ -197,9 +223,6 @@ func (q *sealQueue) getPendingSegmentIDs() []int64 {
 func (q *sealQueue) handleSealRequest(ctx context.Context, req *asyncSealRequest) {
 	// try to seal segments, return the undone segments.
 	req.segments = q.tryToSealSegments(ctx, req.segments...)
-	if len(req.segments) == 0 {
-		req.result.Set(nil)
-	}
 }
 
 // tryToSealSegments tries to seal segments, return the undone segments.
