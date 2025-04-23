@@ -124,7 +124,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
     def random_primary_key(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.fixture(scope="function", params=ct.all_dense_vector_types)
     def vector_data_type(self, request):
         yield request.param
 
@@ -280,7 +280,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                                     default_value_fields={
                                                         ct.default_float_field_name: np.float32(10.0)})[0]
         # 2. generate search data
-        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim, "FLOAT_VECTOR")
+        vectors = cf.gen_vectors(default_nq, default_dim, vector_data_type=DataType.FLOAT_VECTOR)
         # 3. search after insert
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
@@ -479,7 +479,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         collection_w.load()
         # 2. search iterator
         search_params = {"metric_type": "L2"}
-        vectors = cf.gen_vectors_based_on_vector_type(1, dim, "FLOAT_VECTOR")
+        vectors = cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)
         collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
                                      check_items={"batch_size": batch_size})

@@ -2354,7 +2354,7 @@ class TestQueryOperation(TestcaseBase):
         expected: return the latest entity; verify the result is same as dedup entities
         """
         collection_w = self.init_collection_general(prefix, dim=16, is_flush=False, insert_data=False, is_index=False,
-                                                    vector_data_type=ct.float_type, with_json=False)[0]
+                                                    vector_data_type=DataType.FLOAT_VECTOR, with_json=False)[0]
         nb = 50
         rounds = 10
         for i in range(rounds):
@@ -2468,7 +2468,7 @@ class TestQueryOperation(TestcaseBase):
         assert res[0].keys() == set(fields)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("vector_data_type", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.mark.parametrize("vector_data_type", ct.all_dense_vector_types)
     def test_query_output_all_vector_type(self, vector_data_type):
         """
         target: test query output different vector type

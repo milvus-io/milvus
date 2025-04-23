@@ -676,7 +676,7 @@ class TestCollectionSearch(TestcaseBase):
     def random_primary_key(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.fixture(scope="function", params=ct.all_dense_vector_types)
     def vector_data_type(self, request):
         yield request.param
 
@@ -1613,7 +1613,7 @@ class TestCollectionSearch(TestcaseBase):
         enable_dynamic_field = False
         collection_w, _, _, insert_ids, time_stamp = \
             self.init_collection_general(prefix, True, 5000, partition_num=1, auto_id=auto_id,
-                                         dim=dim, is_index=False,
+                                         dim=dim, is_index=False, vector_data_type=DataType.SPARSE_FLOAT_VECTOR,
                                          enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. create index and load
         params = cf.get_index_params_params(index)
@@ -1624,7 +1624,7 @@ class TestCollectionSearch(TestcaseBase):
             if (dim % params["PQM"]) != 0:
                 params["PQM"] = dim // 4
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
+        collection_w.create_index("sparse_vector", default_index)
         collection_w.load()
         # 3. search
         search_params = cf.gen_search_param(index)
@@ -1714,6 +1714,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
+                                                                                  vector_data_type=DataType.SPARSE_FLOAT_VECTOR,
                                                                                   dim=min_dim, is_index=False)[0:5]
         # 2. create index and load
         params = cf.get_index_params_params(index)
@@ -1722,7 +1723,7 @@ class TestCollectionSearch(TestcaseBase):
         if params.get("PQM"):
             params["PQM"] = min_dim
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
+        collection_w.create_index("sparse_vector", default_index)
         collection_w.load()
         # 3. search
         search_params = cf.gen_search_param(index)
@@ -1885,6 +1886,7 @@ class TestCollectionSearch(TestcaseBase):
         enable_dynamic_field = False
         collection_w, _, _, insert_ids, time_stamp = \
             self.init_collection_general(prefix, True, 5000, partition_num=1, auto_id=auto_id,
+                                         vector_data_type=DataType.SPARSE_FLOAT_VECTOR,
                                          dim=dim, is_index=False, enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. create different index
         params = cf.get_index_params_params(index)
@@ -2924,10 +2926,10 @@ class TestCollectionSearch(TestcaseBase):
             limit = 0
             insert_ids = []
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
-        for search_field in vector_name_list:
-            vector_data_type = search_field.lstrip("multiple_vector_")
-            vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
-            res = collection_w.search(vectors[:nq], search_field,
+        for vector_field_name in vector_name_list:
+            vector_data_type = cf.get_field_dtype_by_field_name(collection_w, vector_field_name)
+            vectors = cf.gen_vectors(nq, dim, vector_data_type)
+            res = collection_w.search(vectors[:nq], vector_field_name,
                                       default_search_params, default_limit,
                                       search_exp, _async=_async,
                                       output_fields=[default_int64_field_name,
@@ -3213,7 +3215,7 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index", ct.all_index_types[:7])
-    @pytest.mark.parametrize("metrics", ct.float_metrics)
+    @pytest.mark.parametrize("metrics", ct.dense_metrics)
     @pytest.mark.parametrize("limit", [20, 1200])
     def test_search_output_field_vector_after_different_index_metrics(self, index, metrics, limit):
         """

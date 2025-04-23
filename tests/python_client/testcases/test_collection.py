@@ -50,7 +50,7 @@ vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 max_vector_field_num = ct.max_vector_field_num
-SPARSE_FLOAT_VECTOR_data_type = "SPARSE_FLOAT_VECTOR"
+SPARSE_FLOAT_VECTOR_data_type = DataType.SPARSE_FLOAT_VECTOR
 
 
 class TestCollectionParams(TestcaseBase):
@@ -1061,7 +1061,7 @@ class TestCollectionParams(TestcaseBase):
         # 2. create collection with multiple vectors
         c_name = cf.gen_unique_str(prefix)
         fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
-                  cf.gen_float_vec_field(vector_data_type=ct.sparse_vector), cf.gen_float_vec_field(name="vec_sparse", vector_data_type=ct.sparse_vector)]
+                  cf.gen_float_vec_field(vector_data_type=DataType.FLOAT_VECTOR), cf.gen_float_vec_field(name="vec_sparse", vector_data_type=DataType.SPARSE_FLOAT_VECTOR)]
         schema = cf.gen_collection_schema(fields=fields)
         self.collection_wrap.init_collection(c_name, schema=schema,
                                              check_task=CheckTasks.check_collection_property,
@@ -3260,7 +3260,7 @@ class TestLoadPartition(TestcaseBase):
     )
     def get_binary_index(self, request):
         log.info(request.param)
-        if request.param["index_type"] in ct.binary_support:
+        if request.param["index_type"] in ct.binary_supported_index_types:
             return request.param
         else:
             pytest.skip("Skip index Temporary")
@@ -4560,7 +4560,7 @@ class TestCollectionNullInvalid(TestcaseBase):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("vector_type", ct.all_vector_data_types)
+    @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes[0])
     def test_create_collection_set_nullable_on_pk_field(self, vector_type):
         """
         target: test create collection with set nullable=True on pk field
@@ -4578,7 +4578,7 @@ class TestCollectionNullInvalid(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("vector_type", ct.all_vector_data_types)
+    @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes)
     def test_create_collection_set_nullable_on_vector_field(self, vector_type):
         """
         target: test create collection with set nullable=True on vector field
@@ -4623,7 +4623,7 @@ class TestCollectionDefaultValueInvalid(TestcaseBase):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("vector_type", ct.all_vector_data_types)
+    @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes[0])
     def test_create_collection_default_value_on_pk_field(self, vector_type):
         """
         target: test create collection with set default value on pk field
@@ -4641,7 +4641,7 @@ class TestCollectionDefaultValueInvalid(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("vector_type", ct.all_vector_data_types)
+    @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes)
     def test_create_collection_default_value_on_vector_field(self, vector_type):
         """
         target: test create collection with set default value on vector field

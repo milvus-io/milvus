@@ -3273,9 +3273,9 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
         nq = 2
         limit = 100
         if invalid_search_data == "sparse_vector":
-            search_data = cf.gen_vectors(nb=nq, dim=1000, vector_data_type="SPARSE_FLOAT_VECTOR")
+            search_data = cf.gen_vectors(nb=nq, dim=1000, vector_data_type=DataType.SPARSE_FLOAT_VECTOR)
         else:
-            search_data = cf.gen_vectors(nb=nq, dim=1000, vector_data_type="FLOAT_VECTOR")
+            search_data = cf.gen_vectors(nb=nq, dim=1000, vector_data_type=DataType.FLOAT_VECTOR)
         log.info(f"search data: {search_data}")
         error = {ct.err_code: 65535,
                  ct.err_msg: "please provide varchar/text for BM25 Function based search"}
@@ -3377,7 +3377,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
                 "paragraph": fake.paragraph().lower() if random.random() >= empty_percent else "",
                 "text": fake.text().lower() if random.random() >= empty_percent else "",
                 "dense_emb": [random.random() for _ in range(dim)],
-                "neural_sparse_emb": cf.gen_vectors(nb=1, dim=1000, vector_data_type="SPARSE_FLOAT_VECTOR")[0],
+                "neural_sparse_emb": cf.gen_vectors(nb=1, dim=1000, vector_data_type=DataType.SPARSE_FLOAT_VECTOR)[0],
             }
             for i in range(data_size)
         ]
@@ -3428,7 +3428,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
             limit=limit,
         )
         sparse_search = AnnSearchRequest(
-            data=cf.gen_vectors(nb=nq, dim=dim, vector_data_type="SPARSE_FLOAT_VECTOR"),
+            data=cf.gen_vectors(nb=nq, dim=dim, vector_data_type=DataType.SPARSE_FLOAT_VECTOR),
             anns_field="neural_sparse_emb",
             param={},
             limit=limit,
