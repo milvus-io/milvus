@@ -32,6 +32,9 @@ clone_tokenizer(CTokenizer* tokenizer, CTokenizer* rst);
 void
 free_tokenizer(CTokenizer tokenizer);
 
+CStatus
+validate_tokenizer(const char* params);
+
 CTokenStream
 create_token_stream(CTokenizer tokenizer, const char* text, uint32_t text_len);
 

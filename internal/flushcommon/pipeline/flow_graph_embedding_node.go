@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -80,17 +81,26 @@ func (eNode *embeddingNode) Name() string {
 	return fmt.Sprintf("embeddingNode-%s", eNode.channelName)
 }
 
-func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, inputFieldId, outputFieldId int64, data *storage.InsertData, meta map[int64]*storage.BM25Stats) error {
+func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, data *storage.InsertData, meta map[int64]*storage.BM25Stats) error {
+	inputFieldIds := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
+	outputFieldId := runner.GetOutputFields()[0].GetFieldID()
+
 	if _, ok := meta[outputFieldId]; !ok {
 		meta[outputFieldId] = storage.NewBM25Stats()
 	}
 
-	embeddingData, ok := data.Data[inputFieldId].GetDataRows().([]string)
-	if !ok {
-		return errors.New("BM25 embedding failed: input field data not varchar/text")
+	datas := []any{}
+
+	for _, inputFieldId := range inputFieldIds {
+		data, ok := data.Data[inputFieldId]
+		if !ok {
+			return errors.New("BM25 embedding failed: input field data not varchar/text")
+		}
+
+		datas = append(datas, data.GetDataRows())
 	}
 
-	output, err := runner.BatchRun(embeddingData)
+	output, err := runner.BatchRun(datas...)
 	if err != nil {
 		return err
 	}
@@ -112,7 +122,7 @@ func (eNode *embeddingNode) embedding(datas []*storage.InsertData) (map[int64]*s
 			functionSchema := functionRunner.GetSchema()
 			switch functionSchema.GetType() {
 			case schemapb.FunctionType_BM25:
-				err := eNode.bm25Embedding(functionRunner, functionSchema.GetInputFieldIds()[0], functionSchema.GetOutputFieldIds()[0], data, meta)
+				err := eNode.bm25Embedding(functionRunner, data, meta)
 				if err != nil {
 					return nil, err
 				}

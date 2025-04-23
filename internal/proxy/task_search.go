@@ -536,6 +536,13 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.SearchRequest.GroupByFieldId = queryInfo.GroupByFieldId
 	t.SearchRequest.GroupSize = queryInfo.GroupSize
 
+	if t.SearchRequest.MetricType == metric.BM25 {
+		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV("analyzer_name", t.request.GetSearchParams())
+		if err == nil {
+			t.SearchRequest.AnalyzerName = analyzer
+		}
+	}
+
 	if function.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
 		defer sp.End()

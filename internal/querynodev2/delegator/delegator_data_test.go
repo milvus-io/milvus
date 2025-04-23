@@ -1073,6 +1073,13 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
 		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
+		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+			},
+		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return(nil, errors.New("mock err"))
 		defer func() {
 			s.delegator.functionRunners = oldRunner
@@ -1093,6 +1100,13 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
 		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
+		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+			},
+		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{1}, nil)
 		defer func() {
 			s.delegator.functionRunners = oldRunner
@@ -1113,6 +1127,13 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
 		s.delegator.functionRunners = map[int64]function.FunctionRunner{103: mockRunner}
+		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+			},
+		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{&schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1})}}}, nil)
 		defer func() {
 			s.delegator.functionRunners = oldRunner
