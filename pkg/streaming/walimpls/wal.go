@@ -30,4 +30,7 @@ type WALImpls interface {
 	// Append writes a record to the log.
 	// Can be only called when the wal is in read-write mode.
 	Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)
+
+	// Truncate truncates the wal to the given id (inclusive).
+	Truncate(ctx context.Context, id message.MessageID) error
 }

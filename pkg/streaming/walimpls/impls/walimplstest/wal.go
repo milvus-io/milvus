@@ -56,5 +56,9 @@ func (w *walImpls) Read(ctx context.Context, opts walimpls.ReadOption) (walimpls
 	), nil
 }
 
+func (w *walImpls) Truncate(ctx context.Context, id message.MessageID) error {
+	return nil
+}
+
 func (w *walImpls) Close() {
 }
