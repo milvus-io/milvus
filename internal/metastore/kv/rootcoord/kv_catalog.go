@@ -647,6 +647,7 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 	oldCollClone.State = newColl.State
 	oldCollClone.Properties = newColl.Properties
 	oldCollClone.Fields = newColl.Fields
+	oldCollClone.UpdateTimestamp = newColl.UpdateTimestamp
 
 	oldKey := BuildCollectionKey(oldColl.DBID, oldColl.CollectionID)
 	newKey := BuildCollectionKey(newColl.DBID, oldColl.CollectionID)

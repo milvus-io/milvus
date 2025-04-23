@@ -3,6 +3,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strings"
 	"sync"
 	"testing"
@@ -1046,7 +1047,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		ctx := context.Background()
 		var collectionID int64 = 1
 		oldC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreating}
-		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
+		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, UpdateTimestamp: rand.Uint64()}
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0)
 		assert.NoError(t, err)
 		key := BuildCollectionKey(0, collectionID)
@@ -1057,6 +1058,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		assert.NoError(t, err)
 		got := model.UnmarshalCollectionModel(&collPb)
 		assert.Equal(t, pb.CollectionState_CollectionCreated, got.State)
+		assert.Equal(t, newC.UpdateTimestamp, got.UpdateTimestamp)
 	})
 
 	t.Run("modify, tenant id changed", func(t *testing.T) {
