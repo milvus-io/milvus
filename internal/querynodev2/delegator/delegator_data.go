@@ -954,11 +954,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 			pkoracle.WithSegmentType(commonpb.SegmentState_Sealed),
 			pkoracle.WithWorkerID(targetNodeID),
 		)
-		if sd.idfOracle != nil {
-			for _, segment := range sealed {
-				sd.idfOracle.Remove(segment.SegmentID, commonpb.SegmentState_Sealed)
-			}
-		}
 	}
 	if len(growing) > 0 {
 		sd.pkOracle.Remove(
@@ -967,7 +962,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		)
 		if sd.idfOracle != nil {
 			for _, segment := range growing {
-				sd.idfOracle.Remove(segment.SegmentID, commonpb.SegmentState_Growing)
+				sd.idfOracle.RemoveGrowing(segment.SegmentID)
 			}
 		}
 	}
