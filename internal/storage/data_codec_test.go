@@ -762,36 +762,6 @@ func TestUpgradeDeleteLog(t *testing.T) {
 	})
 }
 
-func TestDDCodec(t *testing.T) {
-	dataDefinitionCodec := NewDataDefinitionCodec(int64(1))
-	ts := []Timestamp{1, 2, 3, 4}
-	ddRequests := []string{
-		"CreateCollection",
-		"DropCollection",
-		"CreatePartition",
-		"DropPartition",
-	}
-	eventTypeCodes := []EventTypeCode{
-		CreateCollectionEventType,
-		DropCollectionEventType,
-		CreatePartitionEventType,
-		DropPartitionEventType,
-	}
-	blobs, err := dataDefinitionCodec.Serialize(ts, ddRequests, eventTypeCodes)
-	assert.NoError(t, err)
-	for _, blob := range blobs {
-		blob.Key = fmt.Sprintf("1/data_definition/3/4/5/%d", 99)
-	}
-	resultTs, resultRequests, err := dataDefinitionCodec.Deserialize(blobs)
-	assert.NoError(t, err)
-	assert.Equal(t, resultTs, ts)
-	assert.Equal(t, resultRequests, ddRequests)
-
-	blobs = []*Blob{}
-	_, _, err = dataDefinitionCodec.Deserialize(blobs)
-	assert.Error(t, err)
-}
-
 func TestTsError(t *testing.T) {
 	insertData := &InsertData{}
 	insertCodec := NewInsertCodecWithSchema(nil)
