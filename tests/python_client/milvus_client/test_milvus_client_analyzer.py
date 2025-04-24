@@ -2,7 +2,7 @@ import pytest
 
 from base.client_v2_base import TestMilvusClientV2Base
 from common.common_type import CaseLabel
-from common.phrase_match_generator import generate_text_by_analyzer
+from common.text_generator import generate_text_by_analyzer
 
 
 class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
@@ -19,6 +19,9 @@ class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
         {
             "tokenizer": "jieba",
         },
+        {
+            "tokenizer": "icu"
+        }
         # {
         #     "tokenizer": {"type": "lindera", "dict_kind": "ipadic"},
         #     "filter": [
@@ -41,8 +44,8 @@ class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
         """
         client = self._client()
         text = generate_text_by_analyzer(analyzer_params)
-        res, result = self.run_analyzer(client, text, analyzer_params, with_detail=True, with_hash=True)
-        res_2, result_2 = self.run_analyzer(client, text, analyzer_params, with_detail=True, with_hash=True)
+        res, _ = self.run_analyzer(client, text, analyzer_params, with_detail=True, with_hash=True)
+        res_2, _ = self.run_analyzer(client, text, analyzer_params, with_detail=True, with_hash=True)
         # verify the result are the same when run analyzer twice
         for i in range(len(res.tokens)):
             assert res.tokens[i]["token"] == res_2.tokens[i]["token"]
