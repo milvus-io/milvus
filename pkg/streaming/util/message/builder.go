@@ -114,6 +114,16 @@ func (b *mutableMesasgeBuilder[H, B]) WithHeader(h H) *mutableMesasgeBuilder[H, 
 	return b
 }
 
+// WithNotPersist creates a new builder with not persisted property.
+func (b *mutableMesasgeBuilder[H, B]) WithNotPersisted() *mutableMesasgeBuilder[H, B] {
+	messageType := mustGetMessageTypeFromHeader(b.header)
+	if messageType != MessageTypeTimeTick {
+		panic("only time tick message can be not persisted")
+	}
+	b.WithProperty(messageNotPersisteted, "")
+	return b
+}
+
 // WithBody creates a new builder with message body.
 func (b *mutableMesasgeBuilder[H, B]) WithBody(body B) *mutableMesasgeBuilder[H, B] {
 	b.body = body
@@ -313,6 +323,11 @@ func (b *ImmutableTxnMessageBuilder) EstimateSize() int {
 		size += m.EstimateSize()
 	}
 	return size
+}
+
+// Messages returns the begin message and body messages.
+func (b *ImmutableTxnMessageBuilder) Messages() (ImmutableBeginTxnMessageV2, []ImmutableMessage) {
+	return b.begin, b.messages
 }
 
 // Build builds a txn message.

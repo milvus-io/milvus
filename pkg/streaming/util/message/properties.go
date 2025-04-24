@@ -14,6 +14,7 @@ const (
 	messageHeader                           = "_h"   // specialized message header.
 	messageTxnContext                       = "_tx"  // transaction context.
 	messageCipherHeader                     = "_ch"  // message cipher header.
+	messageNotPersisteted                   = "_np"  // check if the message is unpersisted.
 )
 
 var (
