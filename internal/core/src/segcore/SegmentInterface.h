@@ -15,6 +15,7 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 #include <index/ScalarIndex.h>
@@ -33,6 +34,8 @@
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
 #include "mmap/ChunkedColumnInterface.h"
+#include "index/Index.h"
+#include "index/JsonFlatIndex.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "pb/schema.pb.h"
@@ -245,6 +248,17 @@ class SegmentInternalInterface : public SegmentInterface {
         auto ptr = dynamic_cast<const IndexType*>(pw.get());
         AssertInfo(ptr, "entry mismatch");
         return PinWrapper<const index::ScalarIndex<T>*>(pw, ptr);
+    }
+
+    // We should not expose this interface directly, but access the index through chunk_scalar_index.
+    // However, chunk_scalar_index requires specifying a template parameter, which makes it impossible to return JsonFlatIndex.
+    // A better approach would be to have chunk_scalar_index return a pointer to a base class,
+    // and then use dynamic_cast to convert it. But this would cause a lot of code changes, so for now, we will do it this way.
+    PinWrapper<const index::IndexBase*>
+    chunk_json_index(FieldId field_id,
+                     std::string& json_path,
+                     int64_t chunk_id) const {
+        return chunk_index_impl(field_id, json_path, chunk_id);
     }
 
     // union(segment_id, field_id) as unique id
