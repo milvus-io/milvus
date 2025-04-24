@@ -23,7 +23,7 @@ import (
 func buildNewPartitionManagers(
 	wal *syncutil.Future[wal.WAL],
 	pchannel types.PChannelInfo,
-	recoverInfos *recovery.RecoverSnapshot,
+	recoverInfos *recovery.RecoverySnapshot,
 	metrics *metricsutil.SegmentAssignMetrics,
 ) (partitionManager *partitionSegmentManagers,
 	growingBelongs []stats.SegmentBelongs,

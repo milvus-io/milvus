@@ -7,8 +7,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
-// RecoverSnapshot is the snapshot of the recovery info.
-type RecoverSnapshot struct {
+// RecoverySnapshot is the snapshot of the recovery info.
+type RecoverySnapshot struct {
 	VChannels          map[string]*streamingpb.VChannelMeta
 	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
 	Checkpoint         *WALCheckpoint

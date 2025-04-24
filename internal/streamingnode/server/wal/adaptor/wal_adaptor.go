@@ -71,9 +71,10 @@ func adaptImplsToWAL(
 
 	// start the flusher to flush and generate recovery info.
 	flusher := flusherimpl.RecoverWALFlusher(&flusherimpl.RecoverWALFlusherParam{
-		WAL:             param.WAL,
-		RecoveryStorage: rs,
-		ChannelInfo:     basicWAL.Channel(),
+		WAL:              param.WAL,
+		RecoveryStorage:  rs,
+		ChannelInfo:      basicWAL.Channel(),
+		RecoverySnapshot: snapshot,
 	})
 
 	// build append interceptor for a wal.

@@ -53,7 +53,7 @@ func (rs *RecoveryStorage) persistDritySnapshotWhenClosing() {
 }
 
 // persistDirtySnapshot persists the dirty snapshot to the catalog.
-func (rs *RecoveryStorage) persistDirtySnapshot(ctx context.Context, snapshot *RecoverSnapshot, lvl zapcore.Level) (err error) {
+func (rs *RecoveryStorage) persistDirtySnapshot(ctx context.Context, snapshot *RecoverySnapshot, lvl zapcore.Level) (err error) {
 	logger := rs.Logger().With(
 		zap.String("writeAheadCheckpoint", snapshot.Checkpoint.WriteAheadCheckpoint.String()),
 		zap.Uint64("writeAheadTimeTick", snapshot.Checkpoint.WriteAheadCheckpointTimeTick),

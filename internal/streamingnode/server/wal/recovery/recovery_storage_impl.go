@@ -21,7 +21,7 @@ func RecoverRecoveryStorage(
 	ctx context.Context,
 	recoveryStreamBuilder RecoveryStreamBuilder,
 	lastTimeTickMessage message.ImmutableMessage,
-) (*RecoveryStorage, *RecoverSnapshot, error) {
+) (*RecoveryStorage, *RecoverySnapshot, error) {
 	cfg := newConfig()
 	info, err := recoverRecoveryInfoFromMeta(ctx, recoveryStreamBuilder.WALName(), recoveryStreamBuilder.Channel(), lastTimeTickMessage)
 	if err != nil {
@@ -39,7 +39,10 @@ func RecoverRecoveryStorage(
 		dirtyCounter:              0,
 		persistNotifier:           make(chan struct{}, 1),
 	}
-	rs.SetLogger(resource.Resource().Logger().With(zap.String("channel", recoveryStreamBuilder.Channel().String())))
+	rs.SetLogger(resource.Resource().Logger().With(
+		zap.String("channel", recoveryStreamBuilder.Channel().String()),
+		log.FieldComponent("recovery_storage"),
+	))
 
 	// recover the state from wal and start the background task to persist the state.
 	snapshot, err := rs.recoverFromStream(ctx, recoveryStreamBuilder, lastTimeTickMessage)
@@ -75,7 +78,7 @@ func (r *RecoveryStorage) recoverFromStream(
 	ctx context.Context,
 	recoveryStreamBuilder RecoveryStreamBuilder,
 	lastTimeTickMessage message.ImmutableMessage,
-) (*RecoverSnapshot, error) {
+) (*RecoverySnapshot, error) {
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
 		StartCheckpoint: r.checkpoint.WriteAheadCheckpoint,
 		EndTimeTick:     lastTimeTickMessage.TimeTick(),
@@ -118,7 +121,7 @@ func (r *RecoveryStorage) FlushCheckpoint() message.MessageID {
 // getSnapshot returns the snapshot of the recovery storage.
 // Use this function to get the snapshot after recovery is finished,
 // and use the snapshot to recover all write ahead components.
-func (r *RecoveryStorage) getSnapshot() *RecoverSnapshot {
+func (r *RecoveryStorage) getSnapshot() *RecoverySnapshot {
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(r.segments))
 	vchannels := make(map[string]*streamingpb.VChannelMeta, len(r.vchannels))
 	for segmentID, segment := range r.segments {
@@ -127,7 +130,7 @@ func (r *RecoveryStorage) getSnapshot() *RecoverSnapshot {
 	for channelName, vchannel := range r.vchannels {
 		vchannels[channelName] = proto.Clone(vchannel.meta).(*streamingpb.VChannelMeta)
 	}
-	return &RecoverSnapshot{
+	return &RecoverySnapshot{
 		VChannels:          vchannels,
 		SegmentAssignments: segments,
 		Checkpoint:         r.checkpoint.Clone(),
@@ -214,7 +217,7 @@ func (r *RecoveryStorage) notifyPersist() {
 }
 
 // consumeDirtySnapshot consumes the dirty state and returns a snapshot to persist.
-func (r *RecoveryStorage) consumeDirtySnapshot() *RecoverSnapshot {
+func (r *RecoveryStorage) consumeDirtySnapshot() *RecoverySnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -240,7 +243,7 @@ func (r *RecoveryStorage) consumeDirtySnapshot() *RecoverSnapshot {
 	}
 	// clear the dirty counter.
 	r.dirtyCounter = 0
-	return &RecoverSnapshot{
+	return &RecoverySnapshot{
 		VChannels:          vchannels,
 		SegmentAssignments: segments,
 		Checkpoint:         r.checkpoint.Clone(),
@@ -328,6 +331,12 @@ func (r *RecoveryStorage) handleCreateSegment(msg message.ImmutableCreateSegment
 	segments := newSegmentRecoveryInfoFromCreateSegmentMessage(msg)
 	for _, segment := range segments {
 		r.segments[segment.meta.SegmentId] = segment
+		r.Logger().Debug(
+			"create segment",
+			zap.String("vchannel", segment.meta.Vchannel),
+			zap.Int64("collectionID", segment.meta.CollectionId),
+			zap.Int64("partitionID", segment.meta.PartitionId),
+			zap.Int64("segmentID", segment.meta.SegmentId))
 	}
 }
 
@@ -335,8 +344,14 @@ func (r *RecoveryStorage) handleCreateSegment(msg message.ImmutableCreateSegment
 func (r *RecoveryStorage) handleFlush(msg message.ImmutableFlushMessageV2) {
 	body := msg.MustBody()
 	for _, segmentID := range body.SegmentId {
-		if segmentRecoveryInfo, ok := r.segments[segmentID]; ok {
-			segmentRecoveryInfo.ObserveFlush(msg.TimeTick())
+		if segment, ok := r.segments[segmentID]; ok {
+			segment.ObserveFlush(msg.TimeTick())
+			r.Logger().Info(
+				"flush segment",
+				zap.String("vchannel", segment.meta.Vchannel),
+				zap.Int64("collectionID", segment.meta.CollectionId),
+				zap.Int64("partitionID", segment.meta.PartitionId),
+				zap.Int64("segmentID", segment.meta.SegmentId))
 		}
 	}
 }
@@ -349,6 +364,12 @@ func (r *RecoveryStorage) handleManualFlush(msg message.ImmutableManualFlushMess
 func (r *RecoveryStorage) flushAllSegmentOfCollection(collectionID int64, timetick uint64) {
 	for _, segment := range r.segments {
 		if segment.meta.CollectionId == collectionID {
+			r.Logger().Info(
+				"flush all segments of collection",
+				zap.String("vchannel", segment.meta.Vchannel),
+				zap.Int64("collectionID", segment.meta.CollectionId),
+				zap.Int64("partitionID", segment.meta.PartitionId),
+				zap.Int64("segmentID", segment.meta.SegmentId))
 			segment.ObserveFlush(timetick)
 		}
 	}
@@ -357,6 +378,12 @@ func (r *RecoveryStorage) flushAllSegmentOfCollection(collectionID int64, timeti
 func (r *RecoveryStorage) flushAllSegmentOfPartition(partitionID int64, timetick uint64) {
 	for _, segment := range r.segments {
 		if segment.meta.PartitionId == partitionID {
+			r.Logger().Info(
+				"flush all segments of partition",
+				zap.String("vchannel", segment.meta.Vchannel),
+				zap.Int64("collectionID", segment.meta.CollectionId),
+				zap.Int64("partitionID", segment.meta.PartitionId),
+				zap.Int64("segmentID", segment.meta.SegmentId))
 			segment.ObserveFlush(timetick)
 		}
 	}
@@ -368,6 +395,11 @@ func (r *RecoveryStorage) handleCreateCollection(msg message.ImmutableCreateColl
 		return
 	}
 	r.vchannels[msg.VChannel()] = newVChannelRecoveryInfoFromCreateCollectionMessage(msg)
+	r.Logger().Info(
+		"create collection",
+		zap.String("vchannel", msg.VChannel()),
+		zap.Int64("collectionID", msg.Header().CollectionId),
+	)
 }
 
 // handleDropCollection handles the drop collection message.
@@ -378,6 +410,11 @@ func (r *RecoveryStorage) handleDropCollection(msg message.ImmutableDropCollecti
 	r.vchannels[msg.VChannel()].ObserveDropCollection(msg)
 	// flush all existing segments.
 	r.flushAllSegmentOfCollection(msg.Header().CollectionId, msg.TimeTick())
+	r.Logger().Info(
+		"drop collection",
+		zap.String("vchannel", msg.VChannel()),
+		zap.Int64("collectionID", msg.Header().CollectionId),
+	)
 }
 
 // handleCreatePartition handles the create partition message.
@@ -386,6 +423,11 @@ func (r *RecoveryStorage) handleCreatePartition(msg message.ImmutableCreateParti
 		return
 	}
 	r.vchannels[msg.VChannel()].ObserveCreatePartition(msg)
+	r.Logger().Info("create partition",
+		zap.String("vchannel", msg.VChannel()),
+		zap.Int64("collectionID", msg.Header().CollectionId),
+		zap.Int64("partitionID", msg.Header().PartitionId),
+	)
 }
 
 // handleDropPartition handles the drop partition message.
@@ -393,6 +435,11 @@ func (r *RecoveryStorage) handleDropPartition(msg message.ImmutableDropPartition
 	r.vchannels[msg.VChannel()].ObserveDropPartition(msg)
 	// flush all existing segments.
 	r.flushAllSegmentOfPartition(msg.Header().PartitionId, msg.TimeTick())
+	r.Logger().Info("drop partition",
+		zap.String("vchannel", msg.VChannel()),
+		zap.Int64("collectionID", msg.Header().CollectionId),
+		zap.Int64("partitionID", msg.Header().PartitionId),
+	)
 }
 
 // handleTxn handles the txn message.

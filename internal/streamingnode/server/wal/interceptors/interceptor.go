@@ -21,12 +21,12 @@ type (
 // InterceptorBuildParam is the parameter to build a interceptor.
 type InterceptorBuildParam struct {
 	ChannelInfo            types.PChannelInfo
-	WAL                    *syncutil.Future[wal.WAL] // The wal final object, can be used after interceptor is ready.
-	LastTimeTickMessage    message.ImmutableMessage  // The last time tick message in wal.
-	WriteAheadBuffer       *wab.WriteAheadBuffer     // The write ahead buffer for the wal, used to erase the subscription of underlying wal.
-	MVCCManager            *mvcc.MVCCManager         // The MVCC manager for the wal, can be used to get the latest mvcc timetick.
-	InitialRecoverSnapshot *recovery.RecoverSnapshot // The initial recover snapshot for the wal, used to recover the wal state.
-	TxnManager             *txn.TxnManager           // The transaction manager for the wal, used to manage the transactions.
+	WAL                    *syncutil.Future[wal.WAL]  // The wal final object, can be used after interceptor is ready.
+	LastTimeTickMessage    message.ImmutableMessage   // The last time tick message in wal.
+	WriteAheadBuffer       *wab.WriteAheadBuffer      // The write ahead buffer for the wal, used to erase the subscription of underlying wal.
+	MVCCManager            *mvcc.MVCCManager          // The MVCC manager for the wal, can be used to get the latest mvcc timetick.
+	InitialRecoverSnapshot *recovery.RecoverySnapshot // The initial recover snapshot for the wal, used to recover the wal state.
+	TxnManager             *txn.TxnManager            // The transaction manager for the wal, used to manage the transactions.
 }
 
 // InterceptorBuilder is the interface to build a interceptor.

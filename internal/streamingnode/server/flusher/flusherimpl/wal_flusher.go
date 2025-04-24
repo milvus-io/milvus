@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -25,9 +26,10 @@ var errChannelLifetimeUnrecoverable = errors.New("channel lifetime unrecoverable
 
 // RecoverWALFlusherParam is the parameter for building wal flusher.
 type RecoverWALFlusherParam struct {
-	ChannelInfo     types.PChannelInfo
-	WAL             *syncutil.Future[wal.WAL]
-	RecoveryStorage *recovery.RecoveryStorage
+	ChannelInfo      types.PChannelInfo
+	WAL              *syncutil.Future[wal.WAL]
+	RecoverySnapshot *recovery.RecoverySnapshot
+	RecoveryStorage  *recovery.RecoveryStorage
 }
 
 // RecoverWALFlusher recovers the wal flusher.
@@ -41,7 +43,7 @@ func RecoverWALFlusher(param *RecoverWALFlusherParam) *WALFlusherImpl {
 		metrics: newFlusherMetrics(param.ChannelInfo),
 		rs:      param.RecoveryStorage,
 	}
-	go flusher.Execute()
+	go flusher.Execute(param.RecoverySnapshot)
 	return flusher
 }
 
@@ -55,7 +57,7 @@ type WALFlusherImpl struct {
 }
 
 // Execute starts the wal flusher.
-func (impl *WALFlusherImpl) Execute() (err error) {
+func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) (err error) {
 	defer func() {
 		impl.notifier.Finish(struct{}{})
 		if err == nil {
@@ -76,7 +78,7 @@ func (impl *WALFlusherImpl) Execute() (err error) {
 	}
 	impl.logger.Info("wal ready for flusher recovery")
 
-	impl.flusherComponents, err = impl.buildFlusherComponents(impl.notifier.Context(), l)
+	impl.flusherComponents, err = impl.buildFlusherComponents(impl.notifier.Context(), l, recoverSnapshot)
 	if err != nil {
 		return errors.Wrap(err, "when build flusher components")
 	}
@@ -102,7 +104,6 @@ func (impl *WALFlusherImpl) Execute() (err error) {
 				return nil
 			}
 			impl.metrics.ObserveMetrics(msg.TimeTick())
-			impl.rs.ObserveMessage(msg)
 			if err := impl.dispatch(msg); err != nil {
 				// The error is always context canceled.
 				return nil
@@ -124,13 +125,9 @@ func (impl *WALFlusherImpl) Close() {
 }
 
 // buildFlusherComponents builds the components of the flusher.
-func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WAL) (*flusherComponents, error) {
+func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WAL, snapshot *recovery.RecoverySnapshot) (*flusherComponents, error) {
 	// Get all existed vchannels of the pchannel.
-	vchannels, err := impl.getVchannels(ctx, l.Channel().Name)
-	if err != nil {
-		impl.logger.Warn("get vchannels failed", zap.Error(err))
-		return nil, err
-	}
+	vchannels := lo.Keys(snapshot.VChannels)
 	impl.logger.Info("fetch vchannel done", zap.Int("vchannelNum", len(vchannels)))
 
 	// Get all the recovery info of the recoverable vchannels.
@@ -198,6 +195,10 @@ func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL) (wal
 
 // dispatch dispatches the message to the related handler for flusher components.
 func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) error {
+	// TODO: We will merge the flusher into recovery storage in future.
+	// Currently, flusher works as a separate component.
+	defer impl.rs.ObserveMessage(msg)
+
 	// Do the data sync service management here.
 	switch msg.MessageType() {
 	case message.MessageTypeCreateCollection:
