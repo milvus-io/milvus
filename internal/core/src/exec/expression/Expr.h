@@ -1244,6 +1244,26 @@ class SegmentExpr : public Expr {
         return false;
     }
 
+    bool
+    PlanUseJsonStats(EvalCtx& context) const {
+        return context.get_exec_context()
+            ->get_query_context()
+            ->get_plan_options()
+            .expr_use_json_stats;
+    }
+
+    bool
+    HasJsonStats(FieldId field_id) const {
+        return segment_->type() == SegmentType::Sealed &&
+               static_cast<const segcore::SegmentSealed*>(segment_)
+                       ->GetJsonStats(field_id) != nullptr;
+    }
+
+    bool
+    CanUseJsonStats(EvalCtx& context, FieldId field_id) const {
+        return PlanUseJsonStats(context) && HasJsonStats(field_id);
+    }
+
  protected:
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
