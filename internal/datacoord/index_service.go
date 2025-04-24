@@ -161,16 +161,24 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 
 	if isJson {
+		// check json_path and json_cast_type exist
 		jsonPath, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
 		if err != nil {
-			log.Error("get json path from index params failed", zap.Error(err))
+			log.Warn("get json path failed", zap.Error(err))
 			return merr.Status(err), nil
 		}
+		_, err = getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
+		if err != nil {
+			log.Warn("get json cast type failed", zap.Error(err))
+			return merr.Status(err), nil
+		}
+
 		nestedPath, err := s.parseAndVerifyNestedPath(jsonPath, schema, req.GetFieldID())
 		if err != nil {
 			log.Error("parse nested path failed", zap.Error(err))
 			return merr.Status(err), nil
 		}
+		// set nested path as json path
 		setIndexParam(req.GetIndexParams(), common.JSONPathKey, nestedPath)
 	}
 
@@ -183,19 +191,17 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 		defaultIndexName := fieldName
 		if isJson {
-			jsonPath, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
-			if err != nil {
-				return merr.Status(err), nil
-			}
-
+			// ignore error, because it's already checked in getIndexParam before
+			jsonPath, _ := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
+			// filter indexes by json path, the length of indexes should not be larger than 1
+			// this is guaranteed by CanCreateIndex
 			indexes = lo.Filter(indexes, func(index *model.Index, i int) bool {
-				path, err := getIndexParam(index.IndexParams, common.JSONPathKey)
-				return err == nil && path == jsonPath
+				path, _ := getIndexParam(index.IndexParams, common.JSONPathKey)
+				return path == jsonPath
 			})
 
 			defaultIndexName += jsonPath
 		}
-
 		if len(indexes) == 0 {
 			req.IndexName = defaultIndexName
 		} else if len(indexes) == 1 {
