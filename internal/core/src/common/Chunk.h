@@ -55,7 +55,7 @@ class Chunk {
         return size_;
     }
 
-    uint64_t
+    size_t
     CellByteSize() const {
         return size_;
     }

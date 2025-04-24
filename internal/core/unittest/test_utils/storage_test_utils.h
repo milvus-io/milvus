@@ -159,7 +159,7 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
         auto file =
             "./data/test" + std::to_string(field_id) + "/" + std::to_string(i);
         files.push_back(file);
-        row_counts.push_back(row_count);
+        row_counts.push_back(field_data->Length());
         auto payload_reader =
             std::make_shared<milvus::storage::PayloadReader>(field_data);
         auto insert_data = std::make_shared<InsertData>(payload_reader);
@@ -199,7 +199,8 @@ LoadGeneratedDataIntoSegment(const GeneratedData& dataset,
                                          excluded_field_ids);
     auto status = LoadFieldData(segment, &load_info);
     AssertInfo(status.error_code == milvus::Success,
-               "Failed to load field data");
+               "Failed to load field data, error: {}",
+               status.error_msg);
 }
 
 inline std::unique_ptr<milvus::segcore::SegmentSealed>

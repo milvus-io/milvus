@@ -348,7 +348,6 @@ LoadFieldData(CSegmentInterface c_segment,
         segment->LoadFieldData(*load_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        std::cout << "LoadFieldData error: " << e.what() << std::endl;
         return milvus::FailureCStatus(&e);
     }
 }

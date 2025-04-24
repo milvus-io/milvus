@@ -49,8 +49,9 @@ ListNode::NodePin::operator=(NodePin&& other) {
 }
 
 ListNode::ListNode(DList* dlist, ResourceUsage size)
-    : last_touch_(std::chrono::high_resolution_clock::now() -
-                  2 * dlist->touch_config().refresh_window),
+    : last_touch_(dlist ? (std::chrono::high_resolution_clock::now() -
+                           2 * dlist->touch_config().refresh_window)
+                        : std::chrono::high_resolution_clock::now()),
       dlist_(dlist),
       size_(size),
       state_(State::NOT_LOADED) {
@@ -194,8 +195,10 @@ void
 ListNode::clear_data() {
     // if the cell is evicted, loaded, pinned and unpinned within a single refresh window,
     // the cell should be inserted into the cache again.
-    last_touch_ = std::chrono::high_resolution_clock::now() -
-                  2 * dlist_->touch_config().refresh_window;
+    if (dlist_) {
+        last_touch_ = std::chrono::high_resolution_clock::now() -
+                      2 * dlist_->touch_config().refresh_window;
+    }
     unload();
     state_ = State::NOT_LOADED;
 }

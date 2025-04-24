@@ -44,6 +44,10 @@ using namespace milvus::cachinglayer;
 
 std::pair<size_t, size_t> inline GetChunkIDByOffset(
     int64_t offset, std::vector<int64_t>& num_rows_until_chunk) {
+    AssertInfo(offset >= 0 && offset < num_rows_until_chunk.back(),
+               "offset is out of range, offset: {}, num rows: {}",
+               offset,
+               num_rows_until_chunk.back());
     auto iter = std::lower_bound(
         num_rows_until_chunk.begin(), num_rows_until_chunk.end(), offset + 1);
     size_t chunk_idx = std::distance(num_rows_until_chunk.begin(), iter) - 1;

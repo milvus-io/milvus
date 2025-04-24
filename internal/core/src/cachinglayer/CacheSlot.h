@@ -59,17 +59,6 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             .Increment();
         internal::cache_cell_count(translator_->meta()->storage_type)
             .Increment(translator_->num_cells());
-        if (dlist_ == nullptr) {
-            std::vector<cid_t> cids;
-            cids.reserve(translator_->num_cells());
-            for (cid_t i = 0; i < translator_->num_cells(); ++i) {
-                cids.push_back(i);
-            }
-            auto fut = PinCells(std::move(cids));
-            // loaded cells are not added to dlist_, thus will not be evicted
-            // until this CacheSlot is destroyed.
-            SemiInlineGet(std::move(fut));
-        }
     }
 
     CacheSlot(const CacheSlot&) = delete;
@@ -158,7 +147,6 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
 
  private:
     friend class CellAccessor<CellT>;
-    friend class EvictionManager;
 
     cid_t
     cell_id_of(uid_t uid) const {
