@@ -24,7 +24,7 @@
 #include "exec/expression/Expr.h"
 #include "segcore/SegmentInterface.h"
 #include "query/Utils.h"
-
+#include "common/bson_view.h"
 namespace milvus {
 namespace exec {
 
@@ -125,6 +125,94 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
         }
         i++;
     }
+    return true;
+}
+
+template <>
+inline bool
+CompareTwoJsonArray<bsoncxx::array::view>(bsoncxx::array::view arr1,
+                                          const proto::plan::Array& arr2) {
+    size_t bson_array_length = std::distance(arr1.begin(), arr1.end());
+
+    if (arr2.array_size() != bson_array_length) {
+        return false;
+    }
+
+    auto bson_it = arr1.begin();
+    for (int i = 0; i < arr2.array_size(); ++i, ++bson_it) {
+        if (bson_it == arr1.end()) {
+            return false;
+        }
+
+        const auto& bson_elem = *bson_it;
+        const auto& proto_elem = arr2.array(i);
+
+        switch (proto_elem.val_case()) {
+            case proto::plan::GenericValue::kBoolVal: {
+                if (bson_elem.type() != bsoncxx::type::k_bool) {
+                    return false;
+                }
+                if (bson_elem.get_bool().value != proto_elem.bool_val()) {
+                    return false;
+                }
+                break;
+            }
+            case proto::plan::GenericValue::kInt64Val: {
+                if (bson_elem.type() == bsoncxx::type::k_int32) {
+                    const int32_t val = bson_elem.get_int32().value;
+                    if (val != proto_elem.int64_val()) {
+                        return false;
+                    }
+                } else if (bson_elem.type() == bsoncxx::type::k_int64) {
+                    const int64_t val = bson_elem.get_int64().value;
+                    if (val != proto_elem.int64_val()) {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+                break;
+            }
+            case proto::plan::GenericValue::kFloatVal: {
+                double bson_val;
+                switch (bson_elem.type()) {
+                    case bsoncxx::type::k_int32:
+                        bson_val = bson_elem.get_int32().value;
+                        break;
+                    case bsoncxx::type::k_int64:
+                        bson_val = bson_elem.get_int64().value;
+                        break;
+                    case bsoncxx::type::k_double:
+                        bson_val = bson_elem.get_double().value;
+                        break;
+                    default:
+                        return false;
+                }
+                if (bson_val != proto_elem.float_val()) {
+                    return false;
+                }
+                break;
+            }
+            case proto::plan::GenericValue::kStringVal: {
+                if (bson_elem.type() != bsoncxx::type::k_string) {
+                    return false;
+                }
+                auto bson_str_view = bson_elem.get_string().value;
+                if (std::string(bson_str_view.data(), bson_str_view.size()) !=
+                    proto_elem.string_val()) {
+                    return false;
+                }
+                break;
+            }
+            default:
+                return false;
+        }
+    }
+
+    if (bson_it != arr1.end()) {
+        return false;
+    }
+
     return true;
 }
 

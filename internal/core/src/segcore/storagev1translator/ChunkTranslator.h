@@ -22,6 +22,10 @@
 
 namespace milvus::segcore::storagev1translator {
 
+using ArrowReaderLoadFunc =
+    std::function<void(const std::vector<std::string>& remote_files,
+                       std::shared_ptr<ArrowReaderChannel> channel)>;
+
 struct CTMeta : public milvus::cachinglayer::Meta {
     std::vector<int64_t> num_rows_until_chunk_;
     // virtual chunk is used to speed up the offset->cid translation

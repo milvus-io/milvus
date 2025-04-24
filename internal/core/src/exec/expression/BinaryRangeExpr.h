@@ -312,7 +312,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
     template <typename ValueType>
     VectorPtr
-    ExecRangeVisitorImplForJsonForIndex();
+    ExecRangeVisitorImplForJsonStats();
 
     template <typename ValueType>
     VectorPtr

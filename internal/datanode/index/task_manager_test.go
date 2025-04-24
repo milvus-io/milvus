@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
@@ -102,7 +103,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 					Files:                  []string{"file1"},
 					LogSize:                1024,
 					MemorySize:             1024,
-					JsonKeyStatsDataFormat: 1,
+					JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
 				},
 			})
 	})

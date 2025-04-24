@@ -296,7 +296,7 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   echo "clang-format check passed!"
 else
   # compile and build
-  make -j ${jobs} install || exit 1
+  make -j ${JOBS} install || exit 1
 fi
 
 if command -v ccache &> /dev/null

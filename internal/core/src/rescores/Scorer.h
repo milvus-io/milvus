@@ -47,7 +47,7 @@ class WeightScorer : public Scorer {
     }
 
     float
-    weight() override{
+    weight() override {
         return weight_;
     }
 

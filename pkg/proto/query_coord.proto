@@ -395,6 +395,14 @@ message FieldIndexInfo {
     int64 index_store_version = 12;
 }
 
+message JsonStatsInfo {
+    int64 fieldID = 1;
+    int64 dataFormatVersion = 2;
+    int64 indexID = 3;
+    int64 buildID = 4;
+    int64 versionID = 5;
+}
+
 enum LoadScope {
     Full = 0;
     Delta = 1;
@@ -657,6 +665,7 @@ message SegmentVersionInfo {
     data.SegmentLevel level = 8;
     bool is_sorted = 9;
     repeated int64 field_json_index_stats = 10;
+    map<int64, JsonStatsInfo> json_stats_info = 11; 
 }
 
 message ChannelVersionInfo {
