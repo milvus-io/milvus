@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -171,6 +172,11 @@ func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 			return true
 		}
 		if segment.GetJsonKeyStats()[fieldID] == nil {
+			return true
+		}
+		// if the data format version is less than the current version, we need to do the stats task again
+		// because the data format is updated, the old data format need to be converted to the new data format
+		if segment.GetJsonKeyStats()[fieldID].GetJsonKeyStatsDataFormat() < common.JSONStatsDataFormatVersion {
 			return true
 		}
 	}
