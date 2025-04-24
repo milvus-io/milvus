@@ -2536,7 +2536,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         # verify search
         self.collection_wrap.search(
-            data=cf.gen_vectors(ct.default_nq, ct.default_dim, vector_data_type=DataType.FLOAT_VECTOR.name),
+            data=cf.gen_vectors(ct.default_nq, ct.default_dim, vector_data_type=DataType.FLOAT_VECTOR),
             anns_field=df.float_vec_field, param=DefaultVectorSearchParams.IVF_SQ8(),
             limit=ct.default_limit,
             check_task=CheckTasks.check_search_results,
