@@ -1898,7 +1898,7 @@ class TestCollectionSearch(TestcaseBase):
                 params["PQM"] = dim // 4
         log.info("test_search_after_index_different_metric_type: Creating index-%s" % index)
         default_index = {"index_type": index, "params": params, "metric_type": "IP"}
-        collection_w.create_index("float_vector", default_index)
+        collection_w.create_index("sparse_vector", default_index)
         log.info("test_search_after_index_different_metric_type: Created index-%s" % index)
         collection_w.load()
         # 3. search
