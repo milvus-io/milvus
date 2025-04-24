@@ -58,7 +58,7 @@ JsonKeyStatsInvertedIndex::AddInvertedRecord(
     std::vector<uintptr_t> json_offsets_lens;
     std::vector<const char*> keys;
     std::vector<const int64_t*> json_offsets;
-    if(mp.empty()) {
+    if (mp.empty()) {
         return;
     }
     for (auto& iter : mp) {
