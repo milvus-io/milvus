@@ -62,8 +62,8 @@ func adaptImplsToWAL(
 	wal := &walAdaptorImpl{
 		roWALAdaptorImpl: roWAL,
 		rwWALImpls:       basicWAL,
-		// TODO: make the pool size configurable.
-		appendExecutionPool:    conc.NewPool[struct{}](10),
+		// TODO: remove the pool, use a queue instead.
+		appendExecutionPool:    conc.NewPool[struct{}](0),
 		param:                  param,
 		interceptorBuildResult: buildInterceptor(builders, param),
 		writeMetrics:           metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
