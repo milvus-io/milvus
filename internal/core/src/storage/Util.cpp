@@ -644,50 +644,58 @@ GenTextIndexPathPrefix(ChunkManagerPtr cm,
 }
 
 std::string
-GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
-                          int64_t build_id,
-                          int64_t index_version,
-                          int64_t segment_id,
-                          int64_t field_id,
-                          bool is_temp) {
-    return GenIndexPathPrefixByType(cm,
-                                    build_id,
+GenJsonStatsPathPrefix(ChunkManagerPtr cm,
+                       int64_t build_id,
+                       int64_t index_version,
+                       int64_t segment_id,
+                       int64_t field_id,
+                       bool is_temp) {
+    boost::filesystem::path prefix = cm->GetRootPath();
+
+    if (is_temp) {
+        prefix = prefix / TEMP;
+    }
+
+    boost::filesystem::path path = std::string(JSON_STATS_ROOT_PATH);
+    boost::filesystem::path path1 =
+        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
+
+    return (prefix / path / path1).string();
+}
+
+std::string
+GenJsonStatsPathIdentifier(int64_t build_id,
+                           int64_t index_version,
+                           int64_t collection_id,
+                           int64_t partition_id,
+                           int64_t segment_id,
+                           int64_t field_id) {
+    boost::filesystem::path p =
+        boost::filesystem::path(std::to_string(build_id)) /
+        std::to_string(index_version) / std::to_string(collection_id) /
+        std::to_string(partition_id) / std::to_string(segment_id) /
+        std::to_string(field_id);
+    return p.string() + "/";
+}
+
+std::string
+GenRemoteJsonStatsPathPrefix(ChunkManagerPtr cm,
+                             int64_t build_id,
+                             int64_t index_version,
+                             int64_t collection_id,
+                             int64_t partition_id,
+                             int64_t segment_id,
+                             int64_t field_id) {
+    boost::filesystem::path p = cm->GetRootPath();
+    p /= std::string(JSON_STATS_ROOT_PATH);
+    p /= std::string(JSON_STATS_DATA_FORMAT_VERSION);
+    p /= GenJsonStatsPathIdentifier(build_id,
                                     index_version,
+                                    collection_id,
+                                    partition_id,
                                     segment_id,
-                                    field_id,
-                                    JSON_KEY_INDEX_LOG_ROOT_PATH,
-                                    is_temp);
-}
-
-std::string
-GenJsonKeyIndexPathIdentifier(int64_t build_id,
-                              int64_t index_version,
-                              int64_t collection_id,
-                              int64_t partition_id,
-                              int64_t segment_id,
-                              int64_t field_id) {
-    return std::to_string(build_id) + "/" + std::to_string(index_version) +
-           "/" + std::to_string(collection_id) + "/" +
-           std::to_string(partition_id) + "/" + std::to_string(segment_id) +
-           "/" + std::to_string(field_id) + "/";
-}
-
-std::string
-GenRemoteJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
-                                int64_t build_id,
-                                int64_t index_version,
-                                int64_t collection_id,
-                                int64_t partition_id,
-                                int64_t segment_id,
-                                int64_t field_id) {
-    return cm->GetRootPath() + "/" + std::string(JSON_KEY_INDEX_LOG_ROOT_PATH) +
-           "/" +
-           GenJsonKeyIndexPathIdentifier(build_id,
-                                         index_version,
-                                         collection_id,
-                                         partition_id,
-                                         segment_id,
-                                         field_id);
+                                    field_id);
+    return p.string();
 }
 
 std::string

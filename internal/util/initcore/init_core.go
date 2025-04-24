@@ -386,15 +386,6 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
-		paramtable.Get().QueryNodeCfg.JSONKeyStatsCommitInterval.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			interval, err := strconv.Atoi(newValue)
-			if err != nil {
-				return err
-			}
-			UpdateDefaultJSONKeyStatsCommitInterval(interval)
-			return nil
-		})
-
 		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {

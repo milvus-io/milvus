@@ -263,6 +263,7 @@ std::unique_ptr<milvus::GroupChunk>
 GroupChunkTranslator::load_group_chunk(
     const std::shared_ptr<arrow::Table>& table,
     const milvus::cachinglayer::cid_t cid) {
+    AssertInfo(table != nullptr, "arrow table is nullptr");
     // Create chunks for each field in this batch
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     // Iterate through field_id_list to get field_id and create chunk

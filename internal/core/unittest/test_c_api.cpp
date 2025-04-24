@@ -51,6 +51,7 @@
 #include "test_utils/DataGen.h"
 #include "segcore/vector_index_c.h"
 #include "common/jsmn.h"
+#include "exec/expression/Element.h"
 
 using namespace milvus;
 using namespace milvus::test;
@@ -1048,6 +1049,40 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 
     DeleteCollection(collection);
     DeleteSegment(segment);
+}
+
+TEST(CApiTest, TestMultiElement) {
+    std::vector<std::string> params;
+    for (int i = 0; i < 100; i++) {
+        params.push_back(std::to_string(i));
+    }
+    auto multi_element =
+        std::make_shared<milvus::exec::SortVectorElement<std::string>>(params);
+    std::string target = "50";
+    auto res = multi_element->In(target);
+    ASSERT_EQ(res, true);
+    target = "30";
+    res = multi_element->In(target);
+    ASSERT_EQ(res, true);
+    target = "40";
+    res = multi_element->In(target);
+    ASSERT_EQ(res, true);
+    target = "100";
+    res = multi_element->In(target);
+    ASSERT_EQ(res, false);
+    target = "1000";
+    res = multi_element->In(target);
+    ASSERT_EQ(res, false);
+
+    std::string_view target_view = "30";
+    res = multi_element->In(target_view);
+    ASSERT_EQ(res, true);
+    target_view = "40";
+    res = multi_element->In(target_view);
+    ASSERT_EQ(res, true);
+    target_view = "50";
+    res = multi_element->In(target_view);
+    ASSERT_EQ(res, true);
 }
 
 TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {

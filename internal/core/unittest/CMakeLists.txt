@@ -97,7 +97,6 @@ set(MILVUS_TEST_FILES
         test_cached_search_iterator.cpp
         test_random_sample.cpp
         test_json_index.cpp
-        test_json_key_stats_index.cpp
         test_types.cpp
         test_growing_storage_v2.cpp
         test_memory_planner.cpp
@@ -202,6 +201,7 @@ target_link_libraries(all_tests
 install(TARGETS all_tests DESTINATION unittest)
 
 add_subdirectory(bench)
+add_subdirectory(test_json_stats)
 
 # if (USE_DYNAMIC_SIMD)
 # add_executable(dynamic_simd_test

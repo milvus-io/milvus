@@ -73,6 +73,13 @@ type statsTask struct {
 	currentTime time.Time
 }
 
+type BuildIndexOptions struct {
+	TantivyMemory                int64
+	JsonStatsMaxShreddingColumns int64
+	JsonStatsShreddingRatio      float64
+	JsonStatsWriteBatchSize      int64
+}
+
 func NewStatsTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.CreateStatsRequest,
@@ -337,9 +344,11 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			st.req.GetTargetSegmentID(),
 			st.req.GetTaskVersion(),
 			st.req.GetTaskID(),
-			st.req.GetJsonKeyStatsTantivyMemory(),
 			st.req.GetJsonKeyStatsDataFormat(),
-			insertLogs)
+			insertLogs,
+			st.req.GetJsonStatsMaxShreddingColumns(),
+			st.req.GetJsonStatsShreddingRatioThreshold(),
+			st.req.GetJsonStatsWriteBatchSize())
 		if err != nil {
 			log.Warn("stats wrong, failed to create json index", zap.Error(err))
 			return err
@@ -467,7 +476,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 		req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
 		req.InsertLogs = insertBinlogs
-		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, 0)
+		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil)
 
 		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
 		if err != nil {
@@ -505,20 +514,27 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	segmentID int64,
 	version int64,
 	taskID int64,
-	tantivyMemory int64,
 	jsonKeyStatsDataFormat int64,
 	insertBinlogs []*datapb.FieldBinlog,
+	jsonStatsMaxShreddingColumns int64,
+	jsonStatsShreddingRatioThreshold float64,
+	jsonStatsWriteBatchSize int64,
 ) error {
 	log := log.Ctx(ctx).With(
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
+		zap.Int64("version", version),
 		zap.Int64("collectionID", st.req.GetCollectionID()),
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 		zap.Any("statsJobType", st.req.GetSubJobType()),
 		zap.Int64("jsonKeyStatsDataFormat", jsonKeyStatsDataFormat),
+		zap.Int64("jsonStatsMaxShreddingColumns", jsonStatsMaxShreddingColumns),
+		zap.Float64("jsonStatsShreddingRatioThreshold", jsonStatsShreddingRatioThreshold),
+		zap.Int64("jsonStatsWriteBatchSize", jsonStatsWriteBatchSize),
 	)
-	if jsonKeyStatsDataFormat != 1 {
+
+	if jsonKeyStatsDataFormat != common.JSONStatsDataFormatVersion {
 		log.Info("create json key index failed dataformat invalid")
 		return nil
 	}
@@ -562,18 +578,29 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 
 		req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
 		req.InsertLogs = insertBinlogs
-		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, tantivyMemory)
+		options := &BuildIndexOptions{
+			JsonStatsMaxShreddingColumns: jsonStatsMaxShreddingColumns,
+			JsonStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
+			JsonStatsWriteBatchSize:      jsonStatsWriteBatchSize,
+		}
+		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options)
 
 		uploaded, err := indexcgowrapper.CreateJSONKeyStats(ctx, buildIndexParams)
 		if err != nil {
 			return err
 		}
+		memorySize := int64(0)
+		for _, file := range uploaded {
+			memorySize += file
+		}
+
 		jsonKeyIndexStats[field.GetFieldID()] = &datapb.JsonKeyStats{
 			FieldID:                field.GetFieldID(),
 			Version:                version,
 			BuildID:                taskID,
 			Files:                  lo.Keys(uploaded),
 			JsonKeyStatsDataFormat: jsonKeyStatsDataFormat,
+			MemorySize:             memorySize,
 		}
 		log.Info("field enable json key index, create json key index done",
 			zap.Int64("field id", field.GetFieldID()),
@@ -603,20 +630,26 @@ func buildIndexParams(
 	files []string,
 	field *schemapb.FieldSchema,
 	storageConfig *indexcgopb.StorageConfig,
-	tantivyMemory int64,
+	options *BuildIndexOptions,
 ) *indexcgopb.BuildIndexInfo {
+	if options == nil {
+		options = &BuildIndexOptions{}
+	}
+
 	params := &indexcgopb.BuildIndexInfo{
-		BuildID:                   req.GetTaskID(),
-		CollectionID:              req.GetCollectionID(),
-		PartitionID:               req.GetPartitionID(),
-		SegmentID:                 req.GetTargetSegmentID(),
-		IndexVersion:              req.GetTaskVersion(),
-		InsertFiles:               files,
-		FieldSchema:               field,
-		StorageConfig:             storageConfig,
-		CurrentScalarIndexVersion: req.GetCurrentScalarIndexVersion(),
-		StorageVersion:            req.GetStorageVersion(),
-		JsonKeyStatsTantivyMemory: tantivyMemory,
+		BuildID:                          req.GetTaskID(),
+		CollectionID:                     req.GetCollectionID(),
+		PartitionID:                      req.GetPartitionID(),
+		SegmentID:                        req.GetTargetSegmentID(),
+		IndexVersion:                     req.GetTaskVersion(),
+		InsertFiles:                      files,
+		FieldSchema:                      field,
+		StorageConfig:                    storageConfig,
+		CurrentScalarIndexVersion:        req.GetCurrentScalarIndexVersion(),
+		StorageVersion:                   req.GetStorageVersion(),
+		JsonStatsMaxShreddingColumns:     options.JsonStatsMaxShreddingColumns,
+		JsonStatsShreddingRatioThreshold: options.JsonStatsShreddingRatio,
+		JsonStatsWriteBatchSize:          options.JsonStatsWriteBatchSize,
 	}
 
 	if req.GetStorageVersion() == storage.StorageV2 {
