@@ -62,7 +62,7 @@ const (
 )
 
 // AnyToColumns converts input rows into column-based data.
-// when schemas are provded, this method will use 0-th element
+// when schemas are provided, this method will use 0-th element
 // otherwise, it shall try to parse schema from row[0]
 func AnyToColumns(rows []interface{}, schemas ...*entity.Schema) ([]column.Column, error) {
 	rowsLen := len(rows)
@@ -74,6 +74,7 @@ func AnyToColumns(rows []interface{}, schemas ...*entity.Schema) ([]column.Colum
 	var err error
 	// if schema not provided, try to parse from row
 	if len(schemas) == 0 {
+		//nolint rows number checked before
 		sch, err = ParseSchema(rows[0])
 		if err != nil {
 			return []column.Column{}, err
