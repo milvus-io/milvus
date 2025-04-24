@@ -76,7 +76,7 @@ func createAliProvider(url string, schema *schemapb.FieldSchema, providerName st
 	}
 	switch providerName {
 	case aliDashScopeProvider:
-		return NewAliDashScopeEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
+		return NewAliDashScopeEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -186,6 +186,6 @@ func (s *AliTextEmbeddingProviderSuite) TestNewAliDashScopeEmbeddingProvider() {
 	}
 	// invalid dim
 	functionSchema.Params[1] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalid"}
-	_, err := NewAliDashScopeEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
+	_, err := NewAliDashScopeEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 	s.Error(err)
 }

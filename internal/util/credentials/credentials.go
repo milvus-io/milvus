@@ -32,7 +32,7 @@ const (
 )
 
 // The current version only supports plain text, and cipher text will be supported later.
-type CredentialsManager struct {
+type Credentials struct {
 	// key formats:
 	// {credentialName}.api_key
 	// {credentialName}.access_key_id
@@ -41,11 +41,11 @@ type CredentialsManager struct {
 	confMap map[string]string
 }
 
-func NewCredentialsManager(conf map[string]string) *CredentialsManager {
-	return &CredentialsManager{conf}
+func NewCredentials(conf map[string]string) *Credentials {
+	return &Credentials{conf}
 }
 
-func (c *CredentialsManager) GetAPIKeyCredential(name string) (string, error) {
+func (c *Credentials) GetAPIKeyCredential(name string) (string, error) {
 	k := name + "." + APIKey
 	apikey, exist := c.confMap[k]
 	if !exist {
@@ -54,7 +54,7 @@ func (c *CredentialsManager) GetAPIKeyCredential(name string) (string, error) {
 	return apikey, nil
 }
 
-func (c *CredentialsManager) GetAKSKCredential(name string) (string, string, error) {
+func (c *Credentials) GetAKSKCredential(name string) (string, string, error) {
 	IdKey := name + "." + AccessKeyId
 	accessKeyId, exist := c.confMap[IdKey]
 	if !exist {
@@ -69,7 +69,7 @@ func (c *CredentialsManager) GetAKSKCredential(name string) (string, string, err
 	return accessKeyId, secretAccessKey, nil
 }
 
-func (c *CredentialsManager) GetGcpCredential(name string) ([]byte, error) {
+func (c *Credentials) GetGcpCredential(name string) ([]byte, error) {
 	k := name + "." + CredentialJSON
 	jsonByte, exist := c.confMap[k]
 	if !exist {

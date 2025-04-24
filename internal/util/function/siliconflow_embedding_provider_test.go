@@ -75,7 +75,7 @@ func createSiliconflowProvider(url string, schema *schemapb.FieldSchema, provide
 	}
 	switch providerName {
 	case siliconflowProvider:
-		return NewSiliconflowEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
+		return NewSiliconflowEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -185,7 +185,7 @@ func (s *SiliconflowTextEmbeddingProviderSuite) TestNewSiliconflowEmbeddingProvi
 			{Key: credentialParamKey, Value: "mock"},
 		},
 	}
-	provider, err := NewSiliconflowEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{embeddingURLParamKey: "mock"}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
+	provider, err := NewSiliconflowEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{embeddingURLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
 	s.True(provider.MaxBatch() > 0)

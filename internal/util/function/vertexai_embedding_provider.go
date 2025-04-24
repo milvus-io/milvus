@@ -87,7 +87,7 @@ func createVertexAIEmbeddingClient(url string, credentialsJSON []byte) (*vertexa
 	return c, nil
 }
 
-func parseGcpCredentialInfo(credentials *credentials.CredentialsManager, params []*commonpb.KeyValuePair, confParams map[string]string) ([]byte, error) {
+func parseGcpCredentialInfo(credentials *credentials.Credentials, params []*commonpb.KeyValuePair, confParams map[string]string) ([]byte, error) {
 	// function param > yaml > env
 	var credentialsJSON []byte
 	var err error
@@ -122,7 +122,7 @@ func parseGcpCredentialInfo(credentials *credentials.CredentialsManager, params 
 	return credentialsJSON, nil
 }
 
-func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c *vertexai.VertexAIEmbedding, params map[string]string, credentials *credentials.CredentialsManager) (*VertexAIEmbeddingProvider, error) {
+func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c *vertexai.VertexAIEmbedding, params map[string]string, credentials *credentials.Credentials) (*VertexAIEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
