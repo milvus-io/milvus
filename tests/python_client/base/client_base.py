@@ -1,4 +1,3 @@
-import pytest
 import sys
 from typing import Dict, List
 from pymilvus import DefaultConfig
@@ -18,7 +17,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_params import IndexPrams
 
-from pymilvus import ResourceGroupInfo, DataType, utility
+from pymilvus import ResourceGroupInfo, DataType, utility, MilvusClient
 import pymilvus
 
 
@@ -169,6 +168,22 @@ class TestcaseBase(Base):
         server_version = utility.get_server_version()
         log.info(f"server version: {server_version}")
         return res
+
+
+    def get_tokens_by_analyzer(self, text, analyzer_params):
+        if cf.param_info.param_uri:
+            uri = cf.param_info.param_uri
+        else:
+            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+
+        client = MilvusClient(
+            uri = uri,
+            token = cf.param_info.param_token
+        )
+        res = client.run_analyzer(text, analyzer_params, with_detail=True, with_hash=True)
+        tokens = [r['token'] for r in res.tokens]
+        return tokens
+        
 
     # def init_async_milvus_client(self):
     #     uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
