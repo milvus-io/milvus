@@ -2700,6 +2700,7 @@ type queryNodeConfig struct {
 	DiskCacheCapacityLimit ParamItem `refreshable:"true"`
 
 	// cache limit
+	// Deprecated: Never used
 	CacheMemoryLimit ParamItem `refreshable:"false"`
 	MmapDirPath      ParamItem `refreshable:"false"`
 	// Deprecated: Since 2.4.7, use `MmapVectorField`/`MmapVectorIndex`/`MmapScalarField`/`MmapScalarIndex` instead
@@ -2958,7 +2959,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Version:      "2.0.0",
 		DefaultValue: "2147483648",
 		PanicIfEmpty: true,
-		Doc:          "2 GB, 2 * 1024 *1024 *1024",
+		Doc:          "Deprecated: 2 GB, 2 * 1024 *1024 *1024",
 		Export:       true,
 	}
 	p.CacheMemoryLimit.Init(base.mgr)
