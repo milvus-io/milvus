@@ -13,12 +13,7 @@ const (
 
 // newWALCheckpointFromProto creates a new WALCheckpoint from a protobuf message.
 func newWALCheckpointFromProto(walName string, cp *streamingpb.WALCheckpoint) *WALCheckpoint {
-	var flushCheckpoint message.MessageID
-	if cp.FlushCheckpoint != nil {
-		flushCheckpoint = message.MustUnmarshalMessageID(walName, cp.FlushCheckpoint.Id)
-	}
 	return &WALCheckpoint{
-		FlushCheckpoint:              flushCheckpoint,
 		WriteAheadCheckpoint:         message.MustUnmarshalMessageID(walName, cp.WriteAheadCheckpoint.Id),
 		WriteAheadCheckpointTimeTick: cp.WriteAheadCheckpointTimeTick,
 		Magic:                        cp.RecoveryMagic,
@@ -26,7 +21,6 @@ func newWALCheckpointFromProto(walName string, cp *streamingpb.WALCheckpoint) *W
 }
 
 type WALCheckpoint struct {
-	FlushCheckpoint              message.MessageID
 	WriteAheadCheckpoint         message.MessageID
 	WriteAheadCheckpointTimeTick uint64
 	Magic                        int64
@@ -41,18 +35,12 @@ func (c *WALCheckpoint) IntoProto() *streamingpb.WALCheckpoint {
 		WriteAheadCheckpointTimeTick: c.WriteAheadCheckpointTimeTick,
 		RecoveryMagic:                c.Magic,
 	}
-	if c.FlushCheckpoint != nil {
-		cp.FlushCheckpoint = &messagespb.MessageID{
-			Id: c.FlushCheckpoint.Marshal(),
-		}
-	}
 	return cp
 }
 
 // Clone creates a new WALCheckpoint with the same values as the original.
 func (c *WALCheckpoint) Clone() *WALCheckpoint {
 	return &WALCheckpoint{
-		FlushCheckpoint:              c.FlushCheckpoint,
 		WriteAheadCheckpoint:         c.WriteAheadCheckpoint,
 		WriteAheadCheckpointTimeTick: c.WriteAheadCheckpointTimeTick,
 		Magic:                        c.Magic,
