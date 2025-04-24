@@ -98,6 +98,9 @@ PhyFilterBitsNode::GetOutput() {
     Assert(bitset.size() == need_process_rows_);
     Assert(valid_bitset.size() == need_process_rows_);
     // num_processed_rows_ = need_process_rows_;
+    auto filter_ratio =
+        bitset.size() != 0 ? 1 - float(bitset.count()) / bitset.size() : 0;
+    monitor::internal_core_expr_filter_ratio.Observe(filter_ratio);
     std::vector<VectorPtr> col_res;
     col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset),
                                                      std::move(valid_bitset)));
