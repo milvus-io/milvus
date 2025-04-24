@@ -49,6 +49,7 @@ type bm25Stats struct {
 	stats         map[int64]*storage.BM25Stats
 	activate      bool
 	targetVersion int64
+	snapVersion   int64
 }
 
 func (s *bm25Stats) Merge(stats map[int64]*storage.BM25Stats) {
@@ -133,7 +134,7 @@ func (o *idfOracle) Register(segmentID int64, stats map[int64]*storage.BM25Stats
 		o.sealed[segmentID] = &bm25Stats{
 			stats:         stats,
 			activate:      false,
-			targetVersion: initialTargetVersion,
+			targetVersion: unreadableTargetVersion,
 		}
 	default:
 		log.Warn("register segment with unknown state", zap.String("stats", state.String()))
@@ -195,7 +196,10 @@ func (o *idfOracle) SyncDistribution(snapshot *snapshot) {
 			}
 
 			if stats, ok := o.sealed[segment.SegmentID]; ok {
-				stats.targetVersion = segment.TargetVersion
+				if stats.targetVersion < segment.TargetVersion {
+					stats.targetVersion = segment.TargetVersion
+				}
+				stats.snapVersion = snapshot.version
 			} else {
 				log.Warn("idf oracle lack some sealed segment", zap.Int64("segmentID", segment.SegmentID))
 			}
@@ -215,7 +219,7 @@ func (o *idfOracle) SyncDistribution(snapshot *snapshot) {
 	for segmentID, stats := range o.sealed {
 		if !stats.activate && stats.targetVersion == o.targetVersion {
 			o.activate(stats)
-		} else if stats.targetVersion != o.targetVersion {
+		} else if (stats.targetVersion < o.targetVersion && stats.targetVersion != unreadableTargetVersion) || stats.snapVersion != snapshot.version {
 			if stats.activate {
 				o.current.Minus(stats.stats)
 			}
