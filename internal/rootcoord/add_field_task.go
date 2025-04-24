@@ -65,8 +65,8 @@ func (t *addCollectionFieldTask) Execute(ctx context.Context) error {
 
 	newField := model.UnmarshalFieldModel(t.fieldSchema)
 
-	ts := t.GetTs()
-	return executeAddCollectionFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req, ts)
+	// ts := t.GetTs()
+	return executeAddCollectionFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req)
 }
 
 func (t *addCollectionFieldTask) nextFieldID(coll *model.Collection) int64 {
@@ -93,24 +93,23 @@ func executeAddCollectionFieldTaskSteps(ctx context.Context,
 	col *model.Collection,
 	newField *model.Field,
 	req *milvuspb.AddCollectionFieldRequest,
-	ts Timestamp,
+	// ts Timestamp,
 ) error {
 	redoTask := newBaseRedoTask(core.stepExecutor)
-
-	oldColl := col.Clone()
-	redoTask.AddSyncStep(&AddCollectionFieldStep{
-		baseStep: baseStep{core: core},
-		oldColl:  oldColl,
-		newField: newField,
-		ts:       ts,
-	})
 
 	updatedCollection := col.Clone()
 	updatedCollection.Fields = append(updatedCollection.Fields, newField)
 	redoTask.AddSyncStep(&WriteSchemaChangeWALStep{
 		baseStep:   baseStep{core: core},
 		collection: updatedCollection,
-		ts:         ts,
+	})
+
+	oldColl := col.Clone()
+	redoTask.AddSyncStep(&AddCollectionFieldStep{
+		baseStep:          baseStep{core: core},
+		oldColl:           oldColl,
+		updatedCollection: updatedCollection,
+		newField:          newField,
 	})
 
 	req.CollectionID = oldColl.CollectionID
