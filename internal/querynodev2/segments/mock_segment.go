@@ -409,19 +409,19 @@ func (_c *MockSegment_GetBM25Stats_Call) RunAndReturn(run func() map[int64]*stor
 }
 
 // GetFieldJSONIndexStats provides a mock function with no fields
-func (_m *MockSegment) GetFieldJSONIndexStats() []int64 {
+func (_m *MockSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetFieldJSONIndexStats")
 	}
 
-	var r0 []int64
-	if rf, ok := ret.Get(0).(func() []int64); ok {
+	var r0 map[int64]*querypb.JsonStatsInfo
+	if rf, ok := ret.Get(0).(func() map[int64]*querypb.JsonStatsInfo); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]int64)
+			r0 = ret.Get(0).(map[int64]*querypb.JsonStatsInfo)
 		}
 	}
 

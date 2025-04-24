@@ -197,6 +197,6 @@ func (s *L0Segment) RemoveUnusedFieldFiles() error {
 	panic("not implemented")
 }
 
-func (s *L0Segment) GetFieldJSONIndexStats() []int64 {
+func (s *L0Segment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
 	return nil
 }

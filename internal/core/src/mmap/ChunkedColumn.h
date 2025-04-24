@@ -370,6 +370,42 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
             }
         }
     }
+
+    void
+    BulkRawBsonAt(std::function<void(BsonView, uint32_t, uint32_t)> fn,
+                  const uint32_t* row_offsets,
+                  const uint32_t* value_offsets,
+                  int64_t count) const override {
+        if (count == 0) {
+            return;
+        }
+        AssertInfo(row_offsets != nullptr && value_offsets != nullptr,
+                   "row_offsets and value_offsets must be provided");
+
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(row_offsets, count);
+        auto ca = SemiInlineGet(slot_->PinCells(cids));
+        for (int64_t i = 0; i < count; i++) {
+            auto chunk = ca->get_cell_of(cids[i]);
+            auto str_view = static_cast<StringChunk*>(chunk)->operator[](
+                offsets_in_chunk[i]);
+            fn(BsonView(reinterpret_cast<const uint8_t*>(str_view.data()),
+                        str_view.size()),
+               row_offsets[i],
+               value_offsets[i]);
+        }
+    }
+
+    BsonView
+    RawBsonAt(size_t i) const override {
+        auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
+        auto ca =
+            SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        std::string_view str_view =
+            static_cast<StringChunk*>(chunk)->operator[](offset_in_chunk);
+        return BsonView(reinterpret_cast<const uint8_t*>(str_view.data()),
+                        str_view.size());
+    }
 };
 
 class ChunkedArrayColumn : public ChunkedColumnBase {

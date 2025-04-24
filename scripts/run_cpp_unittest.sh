@@ -78,6 +78,13 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
       exit 1
   fi
 
+  echo "Running json_stats unittest"
+  ${UNITTEST_DIR}/json_stats_test
+  if [ $? -ne 0 ]; then
+      echo ${UNITTEST_DIR}/json_stats_test "run failed"
+      exit 1
+  fi
+
 done
 
 # run cwrapper unittest
