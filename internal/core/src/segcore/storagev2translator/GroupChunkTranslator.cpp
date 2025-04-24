@@ -41,7 +41,8 @@ GroupChunkTranslator::GroupChunkTranslator(
     FieldDataInfo column_group_info,
     std::vector<std::string> insert_files,
     bool use_mmap,
-    std::vector<milvus_storage::RowGroupMetadataVector>& row_group_meta_list,
+    const std::vector<milvus_storage::RowGroupMetadataVector>&
+        row_group_meta_list,
     milvus_storage::FieldIDList field_id_list,
     milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
@@ -190,6 +191,7 @@ std::unique_ptr<milvus::GroupChunk>
 GroupChunkTranslator::load_group_chunk(
     const std::shared_ptr<arrow::Table>& table,
     const milvus::cachinglayer::cid_t cid) {
+    AssertInfo(table != nullptr, "arrow table is nullptr");
     // Create chunks for each field in this batch
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     // Iterate through field_id_list to get field_id and create chunk

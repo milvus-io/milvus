@@ -191,7 +191,7 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 			StorageConfig:             &indexpb.StorageConfig{RootPath: "/test/path"},
 		}
 
-		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, 0)
+		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, 0, 256, 0.3, 81920)
 
 		s.Equal(storage.StorageV2, params.StorageVersion)
 		s.NotNil(params.SegmentInsertFiles)
