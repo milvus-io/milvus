@@ -205,6 +205,51 @@ func (_c *MockMutableMessage_IntoImmutableMessage_Call) RunAndReturn(run func(me
 	return _c
 }
 
+// IsPersisted provides a mock function with no fields
+func (_m *MockMutableMessage) IsPersisted() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsPersisted")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockMutableMessage_IsPersisted_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsPersisted'
+type MockMutableMessage_IsPersisted_Call struct {
+	*mock.Call
+}
+
+// IsPersisted is a helper method to define mock.On call
+func (_e *MockMutableMessage_Expecter) IsPersisted() *MockMutableMessage_IsPersisted_Call {
+	return &MockMutableMessage_IsPersisted_Call{Call: _e.mock.On("IsPersisted")}
+}
+
+func (_c *MockMutableMessage_IsPersisted_Call) Run(run func()) *MockMutableMessage_IsPersisted_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_IsPersisted_Call) Return(_a0 bool) *MockMutableMessage_IsPersisted_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_IsPersisted_Call) RunAndReturn(run func() bool) *MockMutableMessage_IsPersisted_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MessageType provides a mock function with no fields
 func (_m *MockMutableMessage) MessageType() message.MessageType {
 	ret := _m.Called()

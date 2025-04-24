@@ -95,11 +95,7 @@ func sendFirstTimeTick(ctx context.Context, underlyingWALImpls walimpls.WALImpls
 			lastErr = errors.Wrap(err, "allocate timestamp failed")
 			continue
 		}
-		msg, err := timetick.NewTimeTickMsg(ts, nil, sourceID)
-		if err != nil {
-			lastErr = errors.Wrap(err, "at build time tick msg")
-			continue
-		}
+		msg := timetick.NewTimeTickMsg(ts, nil, sourceID, true)
 		msgID, err := underlyingWALImpls.Append(ctx, msg)
 		if err != nil {
 			lastErr = errors.Wrap(err, "send first timestamp message failed")
