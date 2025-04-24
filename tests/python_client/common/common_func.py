@@ -676,9 +676,15 @@ def gen_double_field(name=ct.default_double_field_name, is_primary=False, descri
 def gen_float_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
                         description=ct.default_desc, vector_data_type=DataType.FLOAT_VECTOR, **kwargs):
 
-    float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=vector_data_type,
+    if vector_data_type != DataType.SPARSE_FLOAT_VECTOR:
+        float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=vector_data_type,
                                                                    description=description, dim=dim,
                                                                    is_primary=is_primary, **kwargs)
+    else:
+        float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.SPARSE_FLOAT_VECTOR,
+                                                                    description=description,
+                                                                    is_primary=is_primary, **kwargs)
+
     return float_vec_field
 
 

@@ -4560,7 +4560,7 @@ class TestCollectionNullInvalid(TestcaseBase):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes[0])
+    @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes[:1])
     def test_create_collection_set_nullable_on_pk_field(self, vector_type):
         """
         target: test create collection with set nullable=True on pk field
@@ -4623,7 +4623,7 @@ class TestCollectionDefaultValueInvalid(TestcaseBase):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes[0])
+    @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes[:1])
     def test_create_collection_default_value_on_pk_field(self, vector_type):
         """
         target: test create collection with set default value on pk field
