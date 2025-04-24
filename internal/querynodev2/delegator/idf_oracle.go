@@ -40,7 +40,7 @@ type IDFOracle interface {
 	UpdateGrowing(segmentID int64, stats map[int64]*storage.BM25Stats)
 
 	Register(segmentID int64, stats map[int64]*storage.BM25Stats, state commonpb.SegmentState)
-	Remove(segmentID int64, state commonpb.SegmentState)
+	RemoveGrowing(segmentID int64)
 
 	BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
 }
@@ -160,27 +160,15 @@ func (o *idfOracle) UpdateGrowing(segmentID int64, stats map[int64]*storage.BM25
 	}
 }
 
-func (o *idfOracle) Remove(segmentID int64, state commonpb.SegmentState) {
+func (o *idfOracle) RemoveGrowing(segmentID int64) {
 	o.Lock()
 	defer o.Unlock()
 
-	switch state {
-	case segments.SegmentTypeGrowing:
-		if stats, ok := o.growing[segmentID]; ok {
-			if stats.activate {
-				o.current.Minus(stats.stats)
-			}
-			delete(o.growing, segmentID)
+	if stats, ok := o.growing[segmentID]; ok {
+		if stats.activate {
+			o.current.Minus(stats.stats)
 		}
-	case segments.SegmentTypeSealed:
-		if stats, ok := o.sealed[segmentID]; ok {
-			if stats.activate {
-				o.current.Minus(stats.stats)
-			}
-			delete(o.sealed, segmentID)
-		}
-	default:
-		return
+		delete(o.growing, segmentID)
 	}
 }
 
@@ -224,11 +212,14 @@ func (o *idfOracle) SyncDistribution(snapshot *snapshot) {
 
 	o.targetVersion = snapshot.targetVersion
 
-	for _, stats := range o.sealed {
+	for segmentID, stats := range o.sealed {
 		if !stats.activate && stats.targetVersion == o.targetVersion {
 			o.activate(stats)
-		} else if stats.activate && stats.targetVersion != o.targetVersion {
-			o.deactivate(stats)
+		} else if stats.targetVersion != o.targetVersion {
+			if stats.activate {
+				o.current.Minus(stats.stats)
+			}
+			delete(o.sealed, segmentID)
 		}
 	}
 
