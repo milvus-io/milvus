@@ -1,6 +1,14 @@
 use index_writer_v5::TantivyDocumentV5;
 use index_writer_v7::TantivyDocumentV7;
 use libc::c_char;
+use log::info;
+use tantivy::schema::{
+    Field, IndexRecordOption, OwnedValue, Schema, SchemaBuilder, TextFieldIndexing, TextOptions,
+    FAST, INDEXED, STRING,
+};
+use tantivy::{
+    doc, tokenizer, Document, Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument,
+};
 
 use crate::data_type::TantivyDataType;
 
@@ -100,6 +108,20 @@ impl IndexWriterWrapper {
         match self {
             IndexWriterWrapper::V5(writer) => writer.add_array(data, offset),
             IndexWriterWrapper::V7(writer) => writer.add_array(data, offset.unwrap() as u32),
+        }
+    }
+
+    pub fn add_json(&mut self, data: &str, offset: Option<i64>) -> Result<()> {
+        match self {
+            IndexWriterWrapper::V5(writer) => writer.add_json(data, offset),
+            IndexWriterWrapper::V7(writer) => writer.add_json(data, offset.unwrap() as u32),
+        }
+    }
+
+    pub fn add_array_json(&mut self, datas: &[*const c_char], offset: Option<i64>) -> Result<()> {
+        match self {
+            IndexWriterWrapper::V5(writer) => writer.add_array_json(datas, offset),
+            IndexWriterWrapper::V7(writer) => writer.add_array_json(datas, offset.unwrap() as u32),
         }
     }
 
