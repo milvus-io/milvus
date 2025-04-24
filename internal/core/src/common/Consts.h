@@ -23,6 +23,7 @@
 
 const int64_t INVALID_FIELD_ID = -1;
 const int64_t INVALID_SEG_OFFSET = -1;
+const int64_t INVALID_ARRAY_INDEX = -1;
 const milvus::PkType INVALID_PK;  // of std::monostate if not set.
 // TODO: default field start id, could get from config.yaml
 const int64_t START_USER_FIELDID = 100;
@@ -49,8 +50,19 @@ const char PAGE_RETAIN_ORDER[] = "page_retain_order";
 const char TEXT_LOG_ROOT_PATH[] = "text_log";
 const char ITERATIVE_FILTER[] = "iterative_filter";
 const char HINTS[] = "hints";
+// json stats related
 const char JSON_KEY_INDEX_LOG_ROOT_PATH[] = "json_key_index_log";
 const char NGRAM_LOG_ROOT_PATH[] = "ngram_log";
+constexpr const char* JSON_STATS_ROOT_PATH = "json_stats";
+constexpr const char* JSON_STATS_DATA_FORMAT_VERSION = "2";
+constexpr const char* JSON_STATS_SHARED_INDEX_PATH = "shared_key_index";
+constexpr const char* JSON_STATS_SHREDDING_DATA_PATH = "shredding_data";
+constexpr const char* JSON_KEY_STATS_SHARED_FIELD_NAME = "__shared";
+// store key map and key type in parquet file metadata
+constexpr const char* JSON_STATS_META_KEY_MAP = "key_map";
+constexpr const char* JSON_STATS_META_KEY_LAYOUT_TYPE = "key_layout_type";
+// start json stats field id for mock column
+const int64_t START_JSON_STATS_FIELD_ID = 1000;
 
 const char DEFAULT_PLANNODE_ID[] = "0";
 const char DEAFULT_QUERY_ID[] = "0";

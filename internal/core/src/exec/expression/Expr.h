@@ -1310,10 +1310,6 @@ class SegmentExpr : public Expr {
             if (sealed_seg->GetJsonKeyIndex(field_id) != nullptr) {
                 return true;
             }
-        } else if (segment_->type() == SegmentType ::Growing) {
-            if (segment_->GetJsonKeyIndex(field_id) != nullptr) {
-                return true;
-            }
         }
         return false;
     }
@@ -1325,6 +1321,26 @@ class SegmentExpr : public Expr {
         }
         auto cast_ptr = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         return (cast_ptr != nullptr && cast_ptr->HasNgramIndex(field_id));
+    }
+
+    bool
+    PlanUseJsonStats(EvalCtx& context) const {
+        return context.get_exec_context()
+            ->get_query_context()
+            ->get_plan_options()
+            .expr_use_json_stats;
+    }
+
+    bool
+    HasJsonStats(FieldId field_id) const {
+        return segment_->type() == SegmentType::Sealed &&
+               static_cast<const segcore::SegmentSealed*>(segment_)
+                       ->GetJsonStats(field_id) != nullptr;
+    }
+
+    bool
+    CanUseJsonStats(EvalCtx& context, FieldId field_id) const {
+        return PlanUseJsonStats(context) && HasJsonStats(field_id);
     }
 
  protected:

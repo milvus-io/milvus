@@ -150,7 +150,7 @@ class PhyTermFilterExpr : public SegmentExpr {
     TargetBitmap cached_bits_;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
-    std::shared_ptr<MultiElement> arg_set_float_;
+    std::shared_ptr<MultiElement> arg_set_double_;
     SingleElement arg_val_;
     int32_t consistency_level_ = 0;
 };

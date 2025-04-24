@@ -104,8 +104,30 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         FieldId field_id,
         std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) override {
         std::unique_lock lck(mutex_);
-        const auto& field_meta = schema_->operator[](field_id);
         json_key_indexes_[field_id] = std::move(index);
+    }
+
+    void
+    RemoveJsonStats(FieldId field_id) override {
+        std::unique_lock lck(mutex_);
+        json_stats_.erase(field_id);
+    }
+
+    void
+    LoadJsonStats(FieldId field_id,
+                  std::shared_ptr<index::JsonKeyStats> stats) override {
+        std::unique_lock lck(mutex_);
+        json_stats_[field_id] = stats;
+    }
+
+    index::JsonKeyStats*
+    GetJsonStats(FieldId field_id) const override {
+        std::shared_lock lck(mutex_);
+        auto iter = json_stats_.find(field_id);
+        if (iter == json_stats_.end()) {
+            return nullptr;
+        }
+        return iter->second.get();
     }
 
     index::JsonKeyStatsInvertedIndex*
