@@ -45,7 +45,8 @@ class MilvusConan(ConanFile):
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
         "grpc/1.50.1@milvus/dev#75103960d1cac300cf425ccfccceac08",
         "rapidjson/cci.20230929#624c0094d741e6a3749d2e44d834b96c",
-        "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972"
+        "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
+        "mongo-cxx-driver/3.11.0#ae206de0e90fb8cb2fb95465fb8b2f01"
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {

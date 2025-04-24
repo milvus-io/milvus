@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
@@ -376,7 +377,7 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		BinlogMaxSize:             Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		EnableJsonKeyStats:        Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
 		JsonKeyStatsTantivyMemory: Params.DataCoordCfg.JSONKeyStatsMemoryBudgetInTantivy.GetAsInt64(),
-		JsonKeyStatsDataFormat:    1,
+		JsonKeyStatsDataFormat:    common.JSONStatsDataFormatVersion,
 		EnableJsonKeyStatsInSort:  Params.DataCoordCfg.EnabledJSONKeyStatsInSort.GetAsBool(),
 		TaskSlot:                  st.taskSlot,
 		StorageVersion:            segment.StorageVersion,

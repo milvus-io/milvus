@@ -243,6 +243,7 @@ class SetElement : public MultiElement {
         if (std::holds_alternative<T>(value)) {
             return values_.count(std::get<T>(value)) > 0;
         }
+        return false;
     }
 
     void

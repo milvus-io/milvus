@@ -1243,6 +1243,13 @@ class SegmentExpr : public Expr {
         return false;
     }
 
+    bool
+    CanUseJsonStats(FieldId field_id) const {
+        return segment_->type() == SegmentType::Sealed &&
+               static_cast<const segcore::SegmentSealed*>(segment_)
+                       ->GetJsonStats(field_id) != nullptr;
+    }
+
  protected:
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;

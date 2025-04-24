@@ -121,6 +121,13 @@ const (
 
 	// JSONIndexPath storage path const for json index
 	JSONIndexPath = "json_key_index_log"
+
+	// JSONStatsPath storage path const for json stats
+	JSONStatsPath = "json_stats"
+)
+
+const (
+	JSONStatsDataFormatVersion = 2
 )
 
 // Search, Index parameter keys

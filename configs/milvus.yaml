@@ -479,6 +479,7 @@ queryNode:
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
+    jsonStats: true # Enable mmap for loading json stats
     # Enable memory mapping (mmap) to optimize the handling of growing raw data.
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
@@ -819,7 +820,7 @@ msgChannel:
 log:
   # Milvus log level. Option: debug, info, warn, error, panic, and fatal.
   # It is recommended to use debug level under test and development environments, and info level in production environment.
-  level: info
+  level: debug
   file:
     # Root path to the log files.
     # The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
@@ -953,7 +954,7 @@ common:
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
-  enabledJSONKeyStats: false # Indicates sealedsegment whether to enable JSON key stats
+  enabledJSONKeyStats: true # Indicates sealedsegment whether to enable JSON key stats
   enabledGrowingSegmentJSONKeyStats: false # Indicates growingsegment whether to enable JSON key stats
   enableConfigParamTypeCheck: true # Indicates whether to enable config param type check
 
