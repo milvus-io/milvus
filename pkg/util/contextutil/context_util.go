@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/pkg/v2/util"
@@ -72,7 +73,7 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 func GetAuthInfoFromContext(ctx context.Context) (string, string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", "", fmt.Errorf("fail to get md from the context")
+		return "", "", errors.New("fail to get md from the context")
 	}
 	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
 	if !ok || len(authorization) < 1 {

@@ -323,7 +323,7 @@ func (c *Core) SetTiKVClient(client *txnkv.Client) {
 func (c *Core) initSession() error {
 	c.session = sessionutil.NewSession(c.ctx)
 	if c.session == nil {
-		return fmt.Errorf("session is nil, the etcd client connection may have failed")
+		return errors.New("session is nil, the etcd client connection may have failed")
 	}
 	c.session.Init(typeutil.RootCoordRole, c.address, true, true)
 	c.session.SetEnableActiveStandBy(c.enableActiveStandBy)

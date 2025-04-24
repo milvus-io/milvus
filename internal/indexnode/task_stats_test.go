@@ -18,10 +18,10 @@ package indexnode
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -94,7 +94,7 @@ func (s *TaskStatsSuite) Testbm25SerializeWriteError() {
 
 	s.Run("upload failed", func() {
 		s.schema = genCollectionSchemaWithBM25()
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
+		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 		s.GenSegmentWriterWithBM25(0)
 		_, _, err := bm25SerializeWrite(context.Background(), "root_path", s.mockBinlogIO, 0, s.segWriter, 1)
 		s.Error(err)
@@ -158,7 +158,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			}
 			return result, nil
 		})
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
+		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 		s.mockBinlogIO.EXPECT().AsyncUpload(mock.Anything, mock.Anything).Return(nil)
 
 		ctx, cancel := context.WithCancel(context.Background())

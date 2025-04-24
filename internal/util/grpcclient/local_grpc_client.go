@@ -2,7 +2,6 @@ package grpcclient
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"strings"
 
@@ -33,7 +32,7 @@ type localConn struct {
 func (c *localConn) Invoke(ctx context.Context, method string, args, reply interface{}, opts ...grpc.CallOption) error {
 	methodDesc := c.findMethod(method)
 	if methodDesc == nil {
-		return status.Errorf(codes.Unimplemented, fmt.Sprintf("method %s not implemented", method))
+		return status.Errorf(codes.Unimplemented, "method %s not implemented", method)
 	}
 	resp, err := methodDesc.Handler(c.server, ctx, func(in any) error {
 		reflect.ValueOf(in).Elem().Set(reflect.ValueOf(args).Elem())

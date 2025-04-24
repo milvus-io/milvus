@@ -630,7 +630,7 @@ func fnWithTimeout(fn func() error, d time.Duration) error {
 		case <-resultChan:
 			log.Ctx(context.TODO()).Debug("retry func success")
 		case <-time.After(d):
-			return fmt.Errorf("func timed out")
+			return errors.New("func timed out")
 		}
 		return err1
 	}

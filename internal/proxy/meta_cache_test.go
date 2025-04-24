@@ -189,7 +189,7 @@ func (m *MockRootCoordClientInterface) GetCredential(ctx context.Context, req *r
 		}, nil
 	}
 
-	err := fmt.Errorf("can't find credential: " + req.Username)
+	err := fmt.Errorf("can't find credential: %s", req.Username)
 	return nil, err
 }
 
@@ -768,7 +768,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 
 	t.Run("InitMetaCache", func(t *testing.T) {
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
-			return nil, fmt.Errorf("mock error")
+			return nil, errors.New("mock error")
 		}
 		err := InitMetaCache(context.Background(), client, qc, mgr)
 		assert.Error(t, err)
@@ -1055,7 +1055,7 @@ func TestMetaCache_AllocID(t *testing.T) {
 		rootCoord := mocks.NewMockRootCoordClient(t)
 		rootCoord.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
 			Status: merr.Status(nil),
-		}, fmt.Errorf("mock error"))
+		}, errors.New("mock error"))
 		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 			Status:      merr.Success(),
 			PolicyInfos: []string{"policy1", "policy2", "policy3"},
@@ -1073,7 +1073,7 @@ func TestMetaCache_AllocID(t *testing.T) {
 	t.Run("failed", func(t *testing.T) {
 		rootCoord := mocks.NewMockRootCoordClient(t)
 		rootCoord.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
-			Status: merr.Status(fmt.Errorf("mock failed")),
+			Status: merr.Status(errors.New("mock failed")),
 		}, nil)
 		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 			Status:      merr.Success(),

@@ -45,6 +45,7 @@ type TimestampedRetrieveResult[T interface {
 	Timestamps []int64
 }
 
+// nolint
 func (r *TimestampedRetrieveResult[T]) GetIds() *schemapb.IDs {
 	return r.Result.GetIds()
 }

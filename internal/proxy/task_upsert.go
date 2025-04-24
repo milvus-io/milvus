@@ -64,8 +64,8 @@ type upsertTask struct {
 	partitionKeyMode bool
 	partitionKeys    *schemapb.FieldData
 	// automatic generate pk as new pk wehen autoID == true
-	// delete task need use the oldIds
-	oldIds          *schemapb.IDs
+	// delete task need use the oldIDs
+	oldIDs          *schemapb.IDs
 	schemaTimestamp uint64
 }
 
@@ -191,7 +191,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	// use the passed pk as new pk when autoID == false
 	// automatic generate pk as new pk wehen autoID == true
 	var err error
-	it.result.IDs, it.oldIds, err = checkUpsertPrimaryFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
 	if err != nil {
 		log.Warn("check primary field data and hash primary key failed when upsert",
@@ -488,7 +488,7 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 		it.result.Status = merr.Status(err)
 		return err
 	}
-	it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIds
+	it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIDs
 	it.upsertMsg.DeleteMsg.HashValues = typeutil.HashPK2Channels(it.upsertMsg.DeleteMsg.PrimaryKeys, channelNames)
 
 	// repack delete msg by dmChannel

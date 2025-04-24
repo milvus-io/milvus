@@ -21,7 +21,7 @@ func GetVersion(m interface{}) (string, error) {
 	log := log.Ctx(context.TODO())
 	pbMsg, ok := m.(proto.Message)
 	if !ok {
-		err := fmt.Errorf("MessageDescriptorProto result is nil")
+		err := errors.New("MessageDescriptorProto result is nil")
 		log.RatedInfo(60, "GetVersion failed", zap.Error(err))
 		return "", err
 	}
@@ -39,7 +39,7 @@ func GetVersion(m interface{}) (string, error) {
 func GetPrivilegeExtObj(m interface{}) (commonpb.PrivilegeExt, error) {
 	pbMsg, ok := m.(proto.Message)
 	if !ok {
-		err := fmt.Errorf("MessageDescriptorProto result is nil")
+		err := errors.New("MessageDescriptorProto result is nil")
 		log.RatedInfo(60, "GetPrivilegeExtObj failed", zap.Error(err))
 		return commonpb.PrivilegeExt{}, err
 	}
@@ -69,7 +69,7 @@ func GetObjectName(m interface{}, index int32) string {
 
 	pbMsg, ok := m.(proto.Message)
 	if !ok {
-		err := fmt.Errorf("MessageDescriptorProto result is nil")
+		err := errors.New("MessageDescriptorProto result is nil")
 		log.RatedInfo(60, "GetObjectName fail", zap.Error(err))
 		return util.AnyWord
 	}
@@ -95,7 +95,7 @@ func GetObjectNames(m interface{}, index int32) []string {
 
 	pbMsg, ok := m.(proto.Message)
 	if !ok {
-		err := fmt.Errorf("MessageDescriptorProto result is nil")
+		err := errors.New("MessageDescriptorProto result is nil")
 		log.RatedInfo(60, "GetObjectNames fail", zap.Error(err))
 		return []string{}
 	}

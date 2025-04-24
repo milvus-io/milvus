@@ -23,6 +23,7 @@ import (
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/exp/constraints"
 
@@ -945,7 +946,7 @@ func checkVectorAlignWithDim(offsets []int32, dim int32) error {
 
 func checkVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) error {
 	if len(offsets) < 1 {
-		return fmt.Errorf("empty offsets")
+		return errors.New("empty offsets")
 	}
 	switch dataType {
 	case schemapb.DataType_BinaryVector:

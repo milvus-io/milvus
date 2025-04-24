@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -179,8 +180,8 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	numRows := st.req.GetNumRows()
 
-	bm25FieldIds := compaction.GetBM25FieldIDs(st.req.GetSchema())
-	writer, err := compaction.NewSegmentWriter(st.req.GetSchema(), numRows, statsBatchSize, st.req.GetTargetSegmentID(), st.req.GetPartitionID(), st.req.GetCollectionID(), bm25FieldIds)
+	bm25FieldIDs := compaction.GetBM25FieldIDs(st.req.GetSchema())
+	writer, err := compaction.NewSegmentWriter(st.req.GetSchema(), numRows, statsBatchSize, st.req.GetTargetSegmentID(), st.req.GetPartitionID(), st.req.GetCollectionID(), bm25FieldIDs)
 	if err != nil {
 		log.Ctx(ctx).Warn("sort segment wrong, unable to init segment writer",
 			zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
@@ -199,7 +200,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 	)
 
 	downloadStart := time.Now()
-	values, err := st.downloadData(ctx, numRows, writer.GetPkID(), bm25FieldIds)
+	values, err := st.downloadData(ctx, numRows, writer.GetPkID(), bm25FieldIDs)
 	if err != nil {
 		log.Ctx(ctx).Warn("download data failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err
@@ -237,7 +238,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 				log.Ctx(ctx).Warn("binlog files too much, log is not enough", zap.Int64("taskID", st.req.GetTaskID()),
 					zap.Int64("binlog num", binlogNum), zap.Int64("startLogID", st.req.GetStartLogID()),
 					zap.Int64("endLogID", st.req.GetEndLogID()), zap.Int64("logIDOffset", st.logIDOffset))
-				return nil, fmt.Errorf("binlog files too much, log is not enough")
+				return nil, errors.New("binlog files too much, log is not enough")
 			}
 		}
 	}
@@ -275,7 +276,7 @@ func (st *statsTask) sortSegment(ctx context.Context) ([]*datapb.FieldBinlog, er
 	st.logIDOffset += binlogNums
 
 	var bm25StatsLogs []*datapb.FieldBinlog
-	if len(bm25FieldIds) > 0 {
+	if len(bm25FieldIDs) > 0 {
 		binlogNums, bm25StatsLogs, err = bm25SerializeWrite(ctx, st.req.GetStorageConfig().GetRootPath(), st.binlogIO, st.req.GetStartLogID()+st.logIDOffset, writer, numRows)
 		if err != nil {
 			log.Ctx(ctx).Warn("compact wrong, failed to serialize write segment bm25 stats", zap.Error(err))
@@ -400,14 +401,14 @@ func (st *statsTask) Reset() {
 	st.node = nil
 }
 
-func (st *statsTask) downloadData(ctx context.Context, numRows int64, PKFieldID int64, bm25FieldIds []int64) ([]*storage.Value, error) {
+func (st *statsTask) downloadData(ctx context.Context, numRows int64, PKFieldID int64, bm25FieldIDs []int64) ([]*storage.Value, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
 		zap.Int64("collectionID", st.req.GetCollectionID()),
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
-		zap.Int64s("bm25Fields", bm25FieldIds),
+		zap.Int64s("bm25Fields", bm25FieldIDs),
 	)
 
 	deletePKs, err := st.loadDeltalogs(ctx, st.deltaLogs)

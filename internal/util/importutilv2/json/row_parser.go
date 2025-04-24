@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -179,14 +180,14 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]any, row Row) err
 			// case 1, 3
 			err := json.Unmarshal([]byte(value), &mp)
 			if err != nil {
-				return fmt.Errorf("illegal value for dynamic field, not a JSON format string")
+				return errors.New("illegal value for dynamic field, not a JSON format string")
 			}
 		case map[string]interface{}:
 			// case 2, 4, 5
 			mp = value
 		default:
 			// invalid input
-			return fmt.Errorf("illegal value for dynamic field, not a JSON object")
+			return errors.New("illegal value for dynamic field, not a JSON object")
 		}
 		delete(dynamicValues, r.dynamicField.GetName())
 		for k, v := range mp {

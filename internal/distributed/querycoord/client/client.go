@@ -18,8 +18,8 @@ package grpcquerycoordclient
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -51,7 +51,7 @@ type Client struct {
 func NewClient(ctx context.Context) (types.QueryCoordClient, error) {
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("QueryCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (c *Client) getQueryCoordAddr() (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Ctx(c.ctx).Debug("QueryCoordClient msess key not existed", zap.Any("key", key))
-		return "", fmt.Errorf("find no available querycoord, check querycoord state")
+		return "", errors.New("find no available querycoord, check querycoord state")
 	}
 
 	log.Ctx(c.ctx).Debug("QueryCoordClient GetSessions success",

@@ -705,7 +705,7 @@ func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) er
 // Produce produces messages for topic and updates page infos for retention
 func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]UniqueID, error) {
 	if messages == nil {
-		return []UniqueID{}, fmt.Errorf("messages are empty")
+		return []UniqueID{}, errors.New("messages are empty")
 	}
 	if rmq.isClosed() {
 		return nil, errors.New(RmqNotServingErrMsg)

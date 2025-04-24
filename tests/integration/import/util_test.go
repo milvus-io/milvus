@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/sbinet/npyio"
 	"github.com/stretchr/testify/assert"
@@ -50,7 +51,7 @@ func CheckLogID(fieldBinlogs []*datapb.FieldBinlog) error {
 	for _, fieldBinlog := range fieldBinlogs {
 		for _, l := range fieldBinlog.GetBinlogs() {
 			if l.GetLogID() == 0 {
-				return fmt.Errorf("unexpected log id 0")
+				return errors.New("unexpected log id 0")
 			}
 		}
 	}

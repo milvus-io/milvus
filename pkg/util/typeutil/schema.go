@@ -216,12 +216,12 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 			res += 8
 		case schemapb.DataType_VarChar:
 			if rowOffset >= len(fs.GetScalars().GetStringData().GetData()) {
-				return 0, fmt.Errorf("offset out range of field datas")
+				return 0, errors.New("offset out range of field datas")
 			}
 			res += len(fs.GetScalars().GetStringData().Data[rowOffset])
 		case schemapb.DataType_Array:
 			if rowOffset >= len(fs.GetScalars().GetArrayData().GetData()) {
-				return 0, fmt.Errorf("offset out range of field datas")
+				return 0, errors.New("offset out range of field datas")
 			}
 			array := fs.GetScalars().GetArrayData().GetData()[rowOffset]
 			res += CalcColumnSize(&schemapb.FieldData{
@@ -230,7 +230,7 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 			})
 		case schemapb.DataType_JSON:
 			if rowOffset >= len(fs.GetScalars().GetJsonData().GetData()) {
-				return 0, fmt.Errorf("offset out range of field datas")
+				return 0, errors.New("offset out range of field datas")
 			}
 			res += len(fs.GetScalars().GetJsonData().GetData()[rowOffset])
 		case schemapb.DataType_BinaryVector:
@@ -327,7 +327,7 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 // GetPrimaryKeyField returns the schema of the primary key
 func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) {
 	if helper.primaryKeyOffset == -1 {
-		return nil, fmt.Errorf("failed to get primary key field: no primary in schema")
+		return nil, errors.New("failed to get primary key field: no primary in schema")
 	}
 	return helper.schema.Fields[helper.primaryKeyOffset], nil
 }
@@ -335,7 +335,7 @@ func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) 
 // GetPartitionKeyField returns the schema of the partition key
 func (helper *SchemaHelper) GetPartitionKeyField() (*schemapb.FieldSchema, error) {
 	if helper.partitionKeyOffset == -1 {
-		return nil, fmt.Errorf("failed to get partition key field: no partition key in schema")
+		return nil, errors.New("failed to get partition key field: no partition key in schema")
 	}
 	return helper.schema.Fields[helper.partitionKeyOffset], nil
 }
@@ -344,7 +344,7 @@ func (helper *SchemaHelper) GetPartitionKeyField() (*schemapb.FieldSchema, error
 // If not found, an error shall be returned.
 func (helper *SchemaHelper) GetClusteringKeyField() (*schemapb.FieldSchema, error) {
 	if helper.clusteringKeyOffset == -1 {
-		return nil, fmt.Errorf("failed to get clustering key field: not clustering key in schema")
+		return nil, errors.New("failed to get clustering key field: not clustering key in schema")
 	}
 	return helper.schema.Fields[helper.clusteringKeyOffset], nil
 }
@@ -353,7 +353,7 @@ func (helper *SchemaHelper) GetClusteringKeyField() (*schemapb.FieldSchema, erro
 // if there is no dynamic field defined in schema, error will be returned.
 func (helper *SchemaHelper) GetDynamicField() (*schemapb.FieldSchema, error) {
 	if helper.dynamicFieldOffset == -1 {
-		return nil, fmt.Errorf("failed to get dynamic field: no dynamic field in schema")
+		return nil, errors.New("failed to get dynamic field: no dynamic field in schema")
 	}
 	return helper.schema.Fields[helper.dynamicFieldOffset], nil
 }
@@ -400,7 +400,7 @@ func (helper *SchemaHelper) getDefaultJSONField(fieldName string) (*schemapb.Fie
 	}
 	errMsg := fmt.Sprintf("field %s not exist", fieldName)
 	log.Warn(errMsg)
-	return nil, fmt.Errorf(errMsg)
+	return nil, errors.New(errMsg)
 }
 
 // GetFieldFromID returns the schema of specified field
@@ -441,7 +441,7 @@ func (helper *SchemaHelper) GetFunctionByOutputField(field *schemapb.FieldSchema
 			}
 		}
 	}
-	return nil, fmt.Errorf("function not exist")
+	return nil, errors.New("function not exist")
 }
 
 // As of now, only BM25 function output field is not supported to retrieve raw field data
@@ -1890,11 +1890,11 @@ func CreateSparseFloatRowFromMap(input map[string]interface{}) ([]byte, error) {
 			values = append(values, val)
 		}
 	} else {
-		return nil, fmt.Errorf("invalid JSON input")
+		return nil, errors.New("invalid JSON input")
 	}
 
 	if len(indices) != len(values) {
-		return nil, fmt.Errorf("indices and values length mismatch")
+		return nil, errors.New("indices and values length mismatch")
 	}
 
 	sortedIndices, sortedValues := SortSparseFloatRow(indices, values)

@@ -609,7 +609,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 			s.loader.ExpectedCalls = nil
 		}()
 
-		s.loader.EXPECT().LoadBM25Stats(mock.Anything, s.collectionID, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		s.loader.EXPECT().LoadBM25Stats(mock.Anything, s.collectionID, mock.Anything).Return(nil, errors.New("mock error"))
 
 		workers := make(map[int64]*cluster.MockWorker)
 		worker1 := &cluster.MockWorker{}

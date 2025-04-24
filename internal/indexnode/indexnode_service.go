@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -544,7 +545,7 @@ func (i *IndexNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2Re
 	default:
 		log.Warn("IndexNode receive querying unknown type jobs")
 		return &workerpb.QueryJobsV2Response{
-			Status: merr.Status(fmt.Errorf("IndexNode receive querying unknown type jobs")),
+			Status: merr.Status(errors.New("IndexNode receive querying unknown type jobs")),
 		}, nil
 	}
 }
@@ -605,6 +606,6 @@ func (i *IndexNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Requ
 		return merr.Success(), nil
 	default:
 		log.Warn("IndexNode receive dropping unknown type jobs")
-		return merr.Status(fmt.Errorf("IndexNode receive dropping unknown type jobs")), nil
+		return merr.Status(errors.New("IndexNode receive dropping unknown type jobs")), nil
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc/metadata"
 
@@ -33,7 +34,7 @@ var ClusterPrefix atomic.String
 func getCurUserFromContext(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", fmt.Errorf("fail to get md from the context")
+		return "", errors.New("fail to get md from the context")
 	}
 	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
 	if !ok || len(authorization) < 1 {

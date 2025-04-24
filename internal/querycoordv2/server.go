@@ -184,7 +184,7 @@ func (s *Server) initSession() error {
 	// Init QueryCoord session
 	s.session = sessionutil.NewSession(s.ctx)
 	if s.session == nil {
-		return fmt.Errorf("failed to create session")
+		return errors.New("failed to create session")
 	}
 	s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
 	s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()

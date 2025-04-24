@@ -18,9 +18,9 @@ package delegator
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -76,7 +76,7 @@ func (s *bm25Stats) Minus(stats map[int64]*storage.BM25Stats) {
 func (s *bm25Stats) GetStats(fieldID int64) (*storage.BM25Stats, error) {
 	stats, ok := s.stats[fieldID]
 	if !ok {
-		return nil, fmt.Errorf("field not found in idf oracle BM25 stats")
+		return nil, errors.New("field not found in idf oracle BM25 stats")
 	}
 	return stats, nil
 }

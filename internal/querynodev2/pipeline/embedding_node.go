@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -153,7 +154,7 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, msg *m
 
 	sparseArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return fmt.Errorf("BM25 runner return unknown type output")
+		return errors.New("BM25 runner return unknown type output")
 	}
 
 	if _, ok := stats[outputFieldID]; !ok {
@@ -175,7 +176,7 @@ func (eNode *embeddingNode) embedding(msg *msgstream.InsertMsg, stats map[int64]
 			}
 		default:
 			log.Warn("pipeline embedding with unknown function type", zap.Any("type", functionSchema.GetType()))
-			return fmt.Errorf("unknown function type")
+			return errors.New("unknown function type")
 		}
 	}
 

@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -114,7 +113,7 @@ func TestServer_CreateIndex(t *testing.T) {
 	b := mocks.NewMockRootCoordClient(t)
 
 	t.Run("get field name failed", func(t *testing.T) {
-		b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 
 		s.broker = broker.NewCoordinatorBroker(b)
 		resp, err := s.CreateIndex(ctx, req)

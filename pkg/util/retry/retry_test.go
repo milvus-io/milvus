@@ -67,7 +67,7 @@ func TestMaxSleepTime(t *testing.T) {
 	ctx := context.Background()
 
 	testFn := func() error {
-		return fmt.Errorf("some error")
+		return errors.New("some error")
 	}
 
 	err := Do(ctx, testFn, Attempts(3), MaxSleepTime(200*time.Millisecond))
@@ -85,7 +85,7 @@ func TestSleep(t *testing.T) {
 	ctx := context.Background()
 
 	testFn := func() error {
-		return fmt.Errorf("some error")
+		return errors.New("some error")
 	}
 
 	err := Do(ctx, testFn, Attempts(3), Sleep(500*time.Millisecond))
@@ -126,7 +126,7 @@ func TestContextDeadline(t *testing.T) {
 	defer cancel()
 
 	testFn := func() error {
-		return fmt.Errorf("some error")
+		return errors.New("some error")
 	}
 
 	err := Do(ctx, testFn)

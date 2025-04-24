@@ -160,7 +160,7 @@ func TestQuotaCenter(t *testing.T) {
 
 		dc.ExpectedCalls = nil
 		dc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
-		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock err"))
+		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
 		quotaCenter = NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
 		err = quotaCenter.collectMetrics()
 		assert.Error(t, err)
@@ -469,7 +469,7 @@ func TestQuotaCenter(t *testing.T) {
 		assert.NoError(t, err)
 		alloc := newMockTsoAllocator()
 		alloc.GenerateTSOF = func(count uint32) (typeutil.Timestamp, error) {
-			return 0, fmt.Errorf("mock tso err")
+			return 0, errors.New("mock tso err")
 		}
 		quotaCenter.tsoAllocator = alloc
 		quotaCenter.clearMetrics()

@@ -18,7 +18,8 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -33,7 +34,7 @@ type dropDatabaseTask struct {
 
 func (t *dropDatabaseTask) Prepare(ctx context.Context) error {
 	if t.Req.GetDbName() == util.DefaultDBName {
-		return fmt.Errorf("can not drop default database")
+		return errors.New("can not drop default database")
 	}
 	return nil
 }

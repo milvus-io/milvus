@@ -337,7 +337,7 @@ func (c *DataNodeManagerImpl) GetCompactionPlanResult(nodeID int64, planID int64
 
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Info("GetCompactionState state is not", zap.Error(err))
-		return nil, fmt.Errorf("GetCopmactionState failed")
+		return nil, errors.New("GetCopmactionState failed")
 	}
 	var result *datapb.CompactionPlanResult
 	for _, rst := range resp.GetResults() {

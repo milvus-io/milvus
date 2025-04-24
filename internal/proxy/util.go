@@ -392,7 +392,7 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 			return fmt.Errorf("the value for %s of field %s must be an integer", common.MaxCapacityKey, field.GetName())
 		}
 		if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
-			return fmt.Errorf("the maximum capacity specified for a Array should be in (0, 4096]")
+			return errors.New("the maximum capacity specified for a Array should be in (0, 4096]")
 		}
 		exist = true
 	}
@@ -634,7 +634,7 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 			// If autoID is required, it is recommended to use int64 field as the primary key
 			//if field.DataType == schemapb.DataType_VarChar {
 			//	if field.AutoID {
-			//		return fmt.Errorf("autoID is not supported when the VarChar field is the primary key")
+			//		return errors.New("autoID is not supported when the VarChar field is the primary key")
 			//	}
 			//}
 
@@ -650,7 +650,7 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 func validateDynamicField(coll *schemapb.CollectionSchema) error {
 	for _, field := range coll.Fields {
 		if field.IsDynamic {
-			return fmt.Errorf("cannot explicitly set a field as a dynamic field")
+			return errors.New("cannot explicitly set a field as a dynamic field")
 		}
 	}
 	return nil
@@ -715,12 +715,12 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 		// primary key detector
 		if field.IsPrimaryKey {
 			if autoID {
-				return fmt.Errorf("autoId forbids primary key")
+				return errors.New("autoId forbids primary key")
 			} else if primaryIdx != -1 {
 				return fmt.Errorf("there are more than one primary key, field name = %s, %s", coll.Fields[primaryIdx].Name, field.Name)
 			}
 			if field.DataType != schemapb.DataType_Int64 {
-				return fmt.Errorf("type of primary key should be int64")
+				return errors.New("type of primary key should be int64")
 			}
 			primaryIdx = idx
 		}
@@ -781,7 +781,7 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 	}
 
 	if !autoID && primaryIdx == -1 {
-		return fmt.Errorf("primary key is required for non autoid mode")
+		return errors.New("primary key is required for non autoid mode")
 	}
 
 	return nil
@@ -865,7 +865,7 @@ func checkFunctionOutputField(function *schemapb.FunctionSchema, fields []*schem
 			return fmt.Errorf("BM25 function output field must be a SparseFloatVector field, but got %s", fields[0].DataType.String())
 		}
 	default:
-		return fmt.Errorf("check output field for unknown function type")
+		return errors.New("check output field for unknown function type")
 	}
 	return nil
 }
@@ -879,18 +879,18 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 		}
 		h := typeutil.CreateFieldSchemaHelper(fields[0])
 		if !h.EnableAnalyzer() {
-			return fmt.Errorf("BM25 function input field must set enable_analyzer to true")
+			return errors.New("BM25 function input field must set enable_analyzer to true")
 		}
 
 	default:
-		return fmt.Errorf("check input field with unknown function type")
+		return errors.New("check input field with unknown function type")
 	}
 	return nil
 }
 
 func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
 	if function.GetName() == "" {
-		return fmt.Errorf("function name cannot be empty")
+		return errors.New("function name cannot be empty")
 	}
 	if len(function.GetInputFieldNames()) == 0 {
 		return fmt.Errorf("function input field names cannot be empty, function: %s", function.GetName())
@@ -921,10 +921,10 @@ func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
 		if len(function.GetParams()) != 0 {
-			return fmt.Errorf("BM25 function accepts no params")
+			return errors.New("BM25 function accepts no params")
 		}
 	default:
-		return fmt.Errorf("check function params with unknown function type")
+		return errors.New("check function params with unknown function type")
 	}
 	return nil
 }
@@ -1404,9 +1404,9 @@ func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResul
 			results.Recalls = recalls
 			return nil
 		case *schemapb.IDs_StrId:
-			return fmt.Errorf("pk type is inconsistent between search results(int64) and ground truth(string)")
+			return errors.New("pk type is inconsistent between search results(int64) and ground truth(string)")
 		default:
-			return fmt.Errorf("unsupported pk type")
+			return errors.New("unsupported pk type")
 		}
 
 	case *schemapb.IDs_StrId:
@@ -1426,12 +1426,12 @@ func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResul
 			results.Recalls = recalls
 			return nil
 		case *schemapb.IDs_IntId:
-			return fmt.Errorf("pk type is inconsistent between search results(string) and ground truth(int64)")
+			return errors.New("pk type is inconsistent between search results(string) and ground truth(int64)")
 		default:
-			return fmt.Errorf("unsupported pk type")
+			return errors.New("unsupported pk type")
 		}
 	default:
-		return fmt.Errorf("unsupported pk type")
+		return errors.New("unsupported pk type")
 	}
 }
 
@@ -1509,7 +1509,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 								expr.GetColumnExpr().GetInfo().GetNestedPath()[0] == outputFieldName {
 								return nil
 							}
-							return fmt.Errorf("not support getting subkeys of json field yet")
+							return errors.New("not support getting subkeys of json field yet")
 						})
 						if err != nil {
 							log.Info("parse output field name failed", zap.String("field name", outputFieldName))
@@ -1831,12 +1831,12 @@ func checkUpsertPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *m
 	if !primaryFieldSchema.GetAutoID() {
 		return ids, ids, nil
 	}
-	newIds, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
+	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
 	if err != nil {
 		log.Warn("parse primary field data to IDs failed", zap.Error(err))
 		return nil, nil, err
 	}
-	return newIds, ids, nil
+	return newIDs, ids, nil
 }
 
 func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) (*schemapb.FieldData, error) {
@@ -2335,7 +2335,7 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLDB, 1, nil
 	default: // TODO: support more request
 		if req == nil {
-			return util.InvalidDBID, map[int64][]int64{}, 0, 0, fmt.Errorf("null request")
+			return util.InvalidDBID, map[int64][]int64{}, 0, 0, errors.New("null request")
 		}
 		log.RatedWarn(60, "not supported request type for rate limiter", zap.String("type", reflect.TypeOf(req).String()))
 		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil

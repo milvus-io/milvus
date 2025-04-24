@@ -154,7 +154,7 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrNodeNotMatch.code():
 		return commonpb.ErrorCode_NodeIDNotMatch
 
-	case ErrCollectionNotFound.code(), ErrPartitionNotFound.code(), ErrReplicaNotFound.code():
+	case ErrPartitionNotFound.code(), ErrReplicaNotFound.code():
 		return commonpb.ErrorCode_MetaFailed
 
 	case ErrReplicaNotAvailable.code(), ErrChannelNotAvailable.code(), ErrNodeNotAvailable.code():
