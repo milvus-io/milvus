@@ -245,24 +245,6 @@ func (writer *DDLBinlogWriter) NextDropPartitionEventWriter() (*dropPartitionEve
 	return event, nil
 }
 
-// IndexFileBinlogWriter is an object to write binlog file which saves index files
-type IndexFileBinlogWriter struct {
-	baseBinlogWriter
-}
-
-// NextIndexFileEventWriter return next available EventWriter
-func (writer *IndexFileBinlogWriter) NextIndexFileEventWriter() (*indexFileEventWriter, error) {
-	if writer.isClosed() {
-		return nil, errors.New("binlog has closed")
-	}
-	event, err := newIndexFileEventWriter(writer.PayloadDataType)
-	if err != nil {
-		return nil, err
-	}
-	writer.eventWriters = append(writer.eventWriters, event)
-	return event, nil
-}
-
 // NewInsertBinlogWriter creates InsertBinlogWriter to write binlog file.
 func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID, segmentID, FieldID int64, nullable bool) *InsertBinlogWriter {
 	descriptorEvent := newDescriptorEvent()

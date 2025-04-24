@@ -30,9 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
 )
 
 func TestPrintBinlogFilesInt64(t *testing.T) {
@@ -474,59 +472,6 @@ func TestPrintDDFiles(t *testing.T) {
 
 	PrintBinlogFiles(binlogFiles)
 
-	for _, file := range binlogFiles {
-		_ = os.RemoveAll(file)
-	}
-}
-
-func TestPrintIndexFile(t *testing.T) {
-	indexBuildID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-	version := int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-	collectionID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-	partitionID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-	segmentID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-	fieldID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-	indexName := funcutil.GenRandomStr()
-	indexID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-	indexParams := make(map[string]string)
-	indexParams[common.IndexTypeKey] = "IVF_FLAT"
-	datas := []*Blob{
-		{
-			Key:   "ivf1",
-			Value: []byte{1, 2, 3},
-		},
-		{
-			Key:   "ivf2",
-			Value: []byte{4, 5, 6},
-		},
-		{
-			Key:   "SLICE_META",
-			Value: []byte(`"{"meta":[{"name":"IVF","slice_num":5,"total_len":20047555},{"name":"RAW_DATA","slice_num":20,"total_len":80025824}]}"`),
-		},
-	}
-
-	codec := NewIndexFileBinlogCodec()
-
-	serializedBlobs, err := codec.Serialize(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexParams, indexName, indexID, datas)
-	assert.NoError(t, err)
-
-	var binlogFiles []string
-	for index, blob := range serializedBlobs {
-		fileName := fmt.Sprintf("/tmp/index_blob_%d.binlog", index)
-		binlogFiles = append(binlogFiles, fileName)
-		fd, err := os.Create(fileName)
-		assert.NoError(t, err)
-		num, err := fd.Write(blob.GetValue())
-		assert.NoError(t, err)
-		assert.Equal(t, num, len(blob.GetValue()))
-		err = fd.Close()
-		assert.NoError(t, err)
-	}
-
-	err = PrintBinlogFiles(binlogFiles)
-	assert.NoError(t, err)
-
-	// remove tmp files
 	for _, file := range binlogFiles {
 		_ = os.RemoveAll(file)
 	}

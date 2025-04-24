@@ -20,11 +20,11 @@ type ReadDataFromAllRowGroupsSuite struct {
 }
 
 func (s *ReadDataFromAllRowGroupsSuite) SetupSuite() {
-	w := NewIndexFileBinlogWriter(0, 0, 1, 2, 3, 100, "", 0, "test")
+	w := NewInsertBinlogWriter(schemapb.DataType_Int8, 1, 2, 3, 4, false)
 	defer w.Close()
 	// make sure it's still written int8 data
 	w.PayloadDataType = schemapb.DataType_Int8
-	ew, err := w.NextIndexFileEventWriter()
+	ew, err := w.NextInsertEventWriter()
 	s.Require().NoError(err)
 	defer ew.Close()
 
