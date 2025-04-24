@@ -58,10 +58,6 @@ func (rs *RecoveryStorage) persistDirtySnapshot(ctx context.Context, snapshot *R
 		zap.String("writeAheadCheckpoint", snapshot.Checkpoint.WriteAheadCheckpoint.String()),
 		zap.Uint64("writeAheadTimeTick", snapshot.Checkpoint.WriteAheadCheckpointTimeTick),
 	)
-	if snapshot.Checkpoint.FlushCheckpoint != nil {
-		logger.With(zap.String("flushCheckpoint", snapshot.Checkpoint.FlushCheckpoint.String()))
-	}
-
 	defer func() {
 		if err != nil {
 			logger.Warn("failed to persist dirty snapshot", zap.Error(err))

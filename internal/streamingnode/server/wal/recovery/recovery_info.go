@@ -92,7 +92,6 @@ func initializeRecoverInfo(ctx context.Context, channelInfo types.PChannelInfo, 
 
 	// Use the first timesync message as the initial checkpoint.
 	checkpoint := &streamingpb.WALCheckpoint{
-		FlushCheckpoint: nil,
 		WriteAheadCheckpoint: &messagespb.MessageID{
 			Id: untilMessage.LastConfirmedMessageID().Marshal(),
 		},

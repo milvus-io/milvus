@@ -28,16 +28,15 @@ func RecoverRecoveryStorage(
 		return nil, nil, err
 	}
 	rs := &RecoveryStorage{
-		backgroundTaskNotifier:    syncutil.NewAsyncTaskNotifier[struct{}](),
-		cfg:                       cfg,
-		mu:                        sync.Mutex{},
-		channel:                   recoveryStreamBuilder.Channel(),
-		segments:                  newSegmentRecoveryInfoFromSegmentAssignmentMeta(info.Segments),
-		vchannels:                 newVChannelRecoveryInfoFromVChannelMeta(info.VChannels),
-		checkpoint:                info.Checkpoint,
-		vchannelCheckpointManager: nil,
-		dirtyCounter:              0,
-		persistNotifier:           make(chan struct{}, 1),
+		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+		cfg:                    cfg,
+		mu:                     sync.Mutex{},
+		channel:                recoveryStreamBuilder.Channel(),
+		segments:               newSegmentRecoveryInfoFromSegmentAssignmentMeta(info.Segments),
+		vchannels:              newVChannelRecoveryInfoFromVChannelMeta(info.VChannels),
+		checkpoint:             info.Checkpoint,
+		dirtyCounter:           0,
+		persistNotifier:        make(chan struct{}, 1),
 	}
 	rs.SetLogger(resource.Resource().Logger().With(
 		zap.String("channel", recoveryStreamBuilder.Channel().String()),
@@ -57,18 +56,14 @@ func RecoverRecoveryStorage(
 // It will consume the message from the wal, consume the message in wal, and update the checkpoint for it.
 type RecoveryStorage struct {
 	log.Binder
-	backgroundTaskNotifier    *syncutil.AsyncTaskNotifier[struct{}]
-	cfg                       *config
-	mu                        sync.Mutex
-	channel                   types.PChannelInfo
-	segments                  map[int64]*segmentRecoveryInfo
-	vchannels                 map[string]*vchannelRecoveryInfo
-	checkpoint                *WALCheckpoint
-	vchannelCheckpointManager *vchannelCheckpointManager // Because current data path at datasyncservice doen's promise
-	// the checkpoint is closed enough, so we need to manage the checkpoint of every vchannel here.
-	// make the pchannel checkpoint and write ahead checkpoint different.
-	// TODO: remove this in future.
-	dirtyCounter int // records the message count since last persist snapshot.
+	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
+	cfg                    *config
+	mu                     sync.Mutex
+	channel                types.PChannelInfo
+	segments               map[int64]*segmentRecoveryInfo
+	vchannels              map[string]*vchannelRecoveryInfo
+	checkpoint             *WALCheckpoint
+	dirtyCounter           int // records the message count since last persist snapshot.
 	// used to trigger the recovery persist operation.
 	persistNotifier chan struct{}
 }
@@ -105,19 +100,6 @@ L:
 	return snapshot, nil
 }
 
-// FlushCheckpoint returns the checkpoint of the recovery storage.
-func (r *RecoveryStorage) FlushCheckpoint() message.MessageID {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.vchannelCheckpointManager == nil {
-		panic("FlushCheckpoint should always be called after InitVChannelCheckpoint")
-	}
-	if r.checkpoint.FlushCheckpoint == nil {
-		return r.vchannelCheckpointManager.MinimumCheckpoint()
-	}
-	return r.checkpoint.FlushCheckpoint
-}
-
 // getSnapshot returns the snapshot of the recovery storage.
 // Use this function to get the snapshot after recovery is finished,
 // and use the snapshot to recover all write ahead components.
@@ -134,63 +116,6 @@ func (r *RecoveryStorage) getSnapshot() *RecoverySnapshot {
 		VChannels:          vchannels,
 		SegmentAssignments: segments,
 		Checkpoint:         r.checkpoint.Clone(),
-	}
-}
-
-// InitVChannelCheckpoint initializes the vchannel checkpoint manager.
-func (r *RecoveryStorage) InitVChannelCheckpoint(exists map[string]message.MessageID) {
-	vchannelCheckpointManager := newVChannelCheckpointManager(exists)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.vchannelCheckpointManager = vchannelCheckpointManager
-}
-
-func (r *RecoveryStorage) AddVChannelCheckpoint(vchannel string, checkpoint message.MessageID) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.vchannelCheckpointManager == nil {
-		panic("AddVChannelCheckpoint should always be called after InitVChannelCheckpoint")
-	}
-
-	err := r.vchannelCheckpointManager.Add(vchannel, checkpoint)
-	if err != nil {
-		r.Logger().Warn("failed to add vchannel checkpoint", zap.String("vchannel", vchannel), zap.Error(err))
-		return
-	}
-	if newMinimum := r.vchannelCheckpointManager.MinimumCheckpoint(); r.checkpoint.FlushCheckpoint == nil || r.checkpoint.FlushCheckpoint.LT(newMinimum) {
-		r.checkpoint.FlushCheckpoint = newMinimum
-	}
-}
-
-// UpdateVChannelCheckpoint updates the checkpoint of a vchannel.
-func (r *RecoveryStorage) UpdateVChannelCheckpoint(vchannel string, checkpoint message.MessageID) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.vchannelCheckpointManager == nil {
-		panic("UpdateVChannelCheckpoint should always be called after InitVChannelCheckpoint")
-	}
-
-	oldMinimum := r.vchannelCheckpointManager.MinimumCheckpoint()
-	err := r.vchannelCheckpointManager.Update(vchannel, checkpoint)
-	if err != nil {
-		r.Logger().Warn("failed to update vchannel checkpoint", zap.String("vchannel", vchannel), zap.Error(err))
-		return
-	}
-	if newMinimum := r.vchannelCheckpointManager.MinimumCheckpoint(); oldMinimum == nil || oldMinimum.LT(newMinimum) {
-		r.checkpoint.FlushCheckpoint = newMinimum
-	}
-}
-
-func (r *RecoveryStorage) DropVChannelCheckpoint(vchannel string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.vchannelCheckpointManager == nil {
-		panic("AddVChannelCheckpoint should always be called after InitVChannelCheckpoint")
-	}
-
-	err := r.vchannelCheckpointManager.Drop(vchannel)
-	if err != nil {
-		r.Logger().Warn("failed to drop vchannel checkpoint", zap.String("vchannel", vchannel), zap.Error(err))
 	}
 }
 

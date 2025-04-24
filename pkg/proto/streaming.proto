@@ -557,10 +557,9 @@ message SegmentAssignmentStat {
 
 // The WALCheckpoint that is used to recovery the wal scanner.
 message WALCheckpoint {
-    messages.MessageID flush_checkpoint = 1; // From here to recover all unflushed(unsync) data info, e.g., binlog, L0 segment...
-    messages.MessageID write_ahead_checkpoint = 2; // From here to recover all uncommited write ahead info.
+    messages.MessageID write_ahead_checkpoint = 1; // From here to recover all uncommited write ahead info.
     // e.g., primary key index, segment assignment info, vchannel info...
     // because the data path flush is slow, so we add a new checkpoint here to promise fast recover the wal state from log.
-    uint64 write_ahead_checkpoint_time_tick = 3; // The timetick of write ahead checkpoint, keep consistecy with write_ahead_checkpoint.
-    int64 recovery_magic = 4; // The recovery version of the checkpoint, it's used to hint the future recovery info upgrading.
+    uint64 write_ahead_checkpoint_time_tick = 2; // The timetick of write ahead checkpoint, keep consistecy with write_ahead_checkpoint.
+    int64 recovery_magic = 3; // The recovery version of the checkpoint, it's used to hint the future recovery info upgrading.
 }

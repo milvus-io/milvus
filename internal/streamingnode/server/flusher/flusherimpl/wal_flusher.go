@@ -7,7 +7,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -78,13 +77,14 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 	}
 	impl.logger.Info("wal ready for flusher recovery")
 
-	impl.flusherComponents, err = impl.buildFlusherComponents(impl.notifier.Context(), l, recoverSnapshot)
+	var checkpoint message.MessageID
+	impl.flusherComponents, checkpoint, err = impl.buildFlusherComponents(impl.notifier.Context(), l, recoverSnapshot)
 	if err != nil {
 		return errors.Wrap(err, "when build flusher components")
 	}
 	defer impl.flusherComponents.Close()
 
-	scanner, err := impl.generateScanner(impl.notifier.Context(), impl.wal.Get())
+	scanner, err := impl.generateScanner(impl.notifier.Context(), impl.wal.Get(), checkpoint)
 	if err != nil {
 		return errors.Wrap(err, "when generate scanner")
 	}
@@ -125,24 +125,23 @@ func (impl *WALFlusherImpl) Close() {
 }
 
 // buildFlusherComponents builds the components of the flusher.
-func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WAL, snapshot *recovery.RecoverySnapshot) (*flusherComponents, error) {
+func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WAL, snapshot *recovery.RecoverySnapshot) (*flusherComponents, message.MessageID, error) {
 	// Get all existed vchannels of the pchannel.
 	vchannels := lo.Keys(snapshot.VChannels)
 	impl.logger.Info("fetch vchannel done", zap.Int("vchannelNum", len(vchannels)))
 
 	// Get all the recovery info of the recoverable vchannels.
-	recoverInfos, checkpoints, err := impl.getRecoveryInfos(ctx, vchannels)
+	recoverInfos, checkpoint, err := impl.getRecoveryInfos(ctx, vchannels)
 	if err != nil {
 		impl.logger.Warn("get recovery info failed", zap.Error(err))
-		return nil, err
+		return nil, nil, err
 	}
 	impl.logger.Info("fetch recovery info done", zap.Int("recoveryInfoNum", len(recoverInfos)))
-	impl.rs.InitVChannelCheckpoint(checkpoints)
 
 	mixc, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 	if err != nil {
 		impl.logger.Warn("flusher recovery is canceled before data coord client ready", zap.Error(err))
-		return nil, err
+		return nil, nil, err
 	}
 	impl.logger.Info("data coord client ready")
 
@@ -150,10 +149,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	broker := broker.NewCoordBroker(mixc, paramtable.GetNodeID())
 	chunkManager := resource.Resource().ChunkManager()
 
-	cpUpdater := util.NewChannelCheckpointUpdaterWithCallback(broker, func(mp *msgpb.MsgPosition) {
-		// After vchannel checkpoint updated, notify the pchannel checkpoint manager to work.
-		impl.rs.UpdateVChannelCheckpoint(mp.ChannelName, adaptor.MustGetMessageIDFromMQWrapperIDBytes(l.WALName(), mp.MsgID))
-	})
+	cpUpdater := util.NewChannelCheckpointUpdater(broker)
 	go cpUpdater.Start()
 
 	fc := &flusherComponents{
@@ -169,21 +165,21 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 		impl.logger.Warn("flusher recovery is canceled before recovery done, recycle the resource", zap.Error(err))
 		fc.Close()
 		impl.logger.Info("flusher recycle the resource done")
-		return nil, err
+		return nil, nil, err
 	}
 	impl.logger.Info("flusher recovery done")
-	return fc, nil
+	return fc, checkpoint, nil
 }
 
 // generateScanner create a new scanner for the wal.
-func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL) (wal.Scanner, error) {
+func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL, startMessageID message.MessageID) (wal.Scanner, error) {
 	handler := make(adaptor.ChanMessageHandler, 64)
 	readOpt := wal.ReadOption{
 		VChannel:       "", // We need consume all message from wal.
 		MesasgeHandler: handler,
 		DeliverPolicy:  options.DeliverPolicyAll(),
 	}
-	if startMessageID := impl.rs.FlushCheckpoint(); startMessageID != nil {
+	if startMessageID != nil {
 		impl.logger.Info("wal start to scan from minimum checkpoint", zap.Stringer("startMessageID", startMessageID))
 		// !!! we always set the deliver policy to start from the last confirmed message id.
 		// because the catchup scanner at the streamingnode server must see the last confirmed message id if it's the last timetick.
@@ -208,13 +204,11 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) error {
 			return nil
 		}
 		impl.flusherComponents.WhenCreateCollection(createCollectionMsg)
-		impl.rs.AddVChannelCheckpoint(createCollectionMsg.VChannel(), createCollectionMsg.LastConfirmedMessageID())
 	case message.MessageTypeDropCollection:
 		// defer to remove the data sync service from the components.
 		// TODO: Current drop collection message will be handled by the underlying data sync service.
 		defer func() {
 			impl.flusherComponents.WhenDropCollection(msg.VChannel())
-			impl.rs.DropVChannelCheckpoint(msg.VChannel())
 		}()
 	}
 	return impl.flusherComponents.HandleMessage(impl.notifier.Context(), msg)
