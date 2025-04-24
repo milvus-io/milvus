@@ -1189,6 +1189,99 @@ func (s *DelegatorSuite) TestGetStats() {
 	})
 }
 
+func (s *DelegatorSuite) TestUpdateSchema() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	s.initSegments()
+
+	s.Run("normal", func() {
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
+
+		workers[1] = worker1
+		workers[2] = worker2
+
+		worker1.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).RunAndReturn(func(ctx context.Context, usr *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
+			return merr.Success(), nil
+		}).Twice()
+
+		worker2.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).RunAndReturn(func(ctx context.Context, usr *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
+			return merr.Success(), nil
+		}).Once()
+
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil).Times(3) // currently node 1 will be called twice for growing & sealed
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{})
+		s.NoError(err)
+	})
+
+	s.Run("worker_return_error", func() {
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := cluster.NewMockWorker(s.T())
+		worker2 := cluster.NewMockWorker(s.T())
+
+		workers[1] = worker1
+		workers[2] = worker2
+
+		worker1.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).RunAndReturn(func(ctx context.Context, usr *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
+			return merr.Status(merr.WrapErrServiceInternal("mocked")), merr.WrapErrServiceInternal("mocked")
+		}).Maybe()
+
+		worker2.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).RunAndReturn(func(ctx context.Context, usr *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
+			return merr.Success(), nil
+		}).Maybe()
+
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil).Times(3)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{})
+		s.Error(err)
+	})
+
+	s.Run("worker_manager_error", func() {
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).RunAndReturn(func(ctx context.Context, i int64) (cluster.Worker, error) {
+			return nil, merr.WrapErrServiceInternal("mocked")
+		}).Once()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{})
+		s.Error(err)
+	})
+
+	s.Run("distribution_not_serviceable", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		sd, ok := s.delegator.(*shardDelegator)
+		s.Require().True(ok)
+		sd.distribution.AddOfflines(1001)
+
+		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{})
+		s.Error(err)
+	})
+
+	s.Run("cluster_not_serviceable", func() {
+		s.delegator.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{})
+		s.Error(err)
+	})
+}
+
 func TestDelegatorSuite(t *testing.T) {
 	suite.Run(t, new(DelegatorSuite))
 }

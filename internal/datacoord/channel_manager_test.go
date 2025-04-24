@@ -18,10 +18,10 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -673,7 +673,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).
-			Return(fmt.Errorf("mock error")).Twice()
+			Return(errors.New("mock error")).Twice()
 		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToWatch)
@@ -706,7 +706,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		}
 		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToRelease)
 		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).
-			Return(fmt.Errorf("mock error")).Twice()
+			Return(errors.New("mock error")).Twice()
 		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
 		s.Require().NoError(err)
 		s.checkAssignment(m, 1, "ch1", ToRelease)

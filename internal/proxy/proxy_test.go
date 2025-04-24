@@ -113,7 +113,7 @@ func runMixCoord(ctx context.Context, localMsg bool) *grpcmixcoord.Server {
 	}()
 	wg.Wait()
 
-	metrics.RegisterRootCoord(Registry)
+	metrics.RegisterMixCoord(Registry)
 	return rc
 }
 

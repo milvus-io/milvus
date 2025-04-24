@@ -954,12 +954,22 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 			pkoracle.WithSegmentType(commonpb.SegmentState_Sealed),
 			pkoracle.WithWorkerID(targetNodeID),
 		)
+		if sd.idfOracle != nil {
+			for _, segment := range sealed {
+				sd.idfOracle.Remove(segment.SegmentID, commonpb.SegmentState_Sealed)
+			}
+		}
 	}
 	if len(growing) > 0 {
 		sd.pkOracle.Remove(
 			pkoracle.WithSegmentIDs(lo.Map(growing, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
 			pkoracle.WithSegmentType(commonpb.SegmentState_Growing),
 		)
+		if sd.idfOracle != nil {
+			for _, segment := range growing {
+				sd.idfOracle.Remove(segment.SegmentID, commonpb.SegmentState_Growing)
+			}
+		}
 	}
 
 	var releaseErr error
@@ -1079,21 +1089,36 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 		return 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String()))
 	}
 
-	str := funcutil.GetVarCharFromPlaceholder(holder)
+	texts := funcutil.GetVarCharFromPlaceholder(holder)
+	datas := []any{texts}
 	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
 	if !ok {
 		return 0, fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
 	}
 
+	if len(functionRunner.GetInputFields()) == 2 {
+		analyzerName := "default"
+		if name := req.GetAnalyzerName(); name != "" {
+			// use user provided analyzer name
+			analyzerName = name
+		}
+
+		analyzers := make([]string, len(texts))
+		for i := range texts {
+			analyzers[i] = analyzerName
+		}
+		datas = append(datas, analyzers)
+	}
+
 	// get search text term frequency
-	output, err := functionRunner.BatchRun(str)
+	output, err := functionRunner.BatchRun(datas...)
 	if err != nil {
 		return 0, err
 	}
 
 	tfArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return 0, fmt.Errorf("functionRunner return unknown data")
+		return 0, errors.New("functionRunner return unknown data")
 	}
 
 	idfSparseVector, avgdl, err := sd.idfOracle.BuildIDF(req.GetFieldId(), tfArray)

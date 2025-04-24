@@ -321,7 +321,7 @@ func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]st
 		break
 	}
 	if file == nil {
-		return nil, nil, "", InvalidUniqueID, fmt.Errorf("can not find params blob")
+		return nil, nil, "", InvalidUniqueID, errors.New("can not find params blob")
 	}
 	info := struct {
 		Params    map[string]string

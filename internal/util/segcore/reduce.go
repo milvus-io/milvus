@@ -72,10 +72,10 @@ func NewStreamReducer(ctx context.Context,
 	sliceTopKs []int64,
 ) (StreamSearchReducer, error) {
 	if plan.cSearchPlan == nil {
-		return nil, fmt.Errorf("nil search plan")
+		return nil, errors.New("nil search plan")
 	}
 	if len(sliceNQs) == 0 {
-		return nil, fmt.Errorf("empty slice nqs is not allowed")
+		return nil, errors.New("empty slice nqs is not allowed")
 	}
 	if len(sliceNQs) != len(sliceTopKs) {
 		return nil, fmt.Errorf("unaligned sliceNQs(len=%d) and sliceTopKs(len=%d)", len(sliceNQs), len(sliceTopKs))
@@ -119,11 +119,11 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searc
 	numSegments int64, sliceNQs []int64, sliceTopKs []int64,
 ) (SearchResultDataBlobs, error) {
 	if plan.cSearchPlan == nil {
-		return nil, fmt.Errorf("nil search plan")
+		return nil, errors.New("nil search plan")
 	}
 
 	if len(sliceNQs) == 0 {
-		return nil, fmt.Errorf("empty slice nqs is not allowed")
+		return nil, errors.New("empty slice nqs is not allowed")
 	}
 
 	if len(sliceNQs) != len(sliceTopKs) {
@@ -133,7 +133,7 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searc
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
 		if res == nil {
-			return nil, fmt.Errorf("nil searchResult detected when reduceSearchResultsAndFillData")
+			return nil, errors.New("nil searchResult detected when reduceSearchResultsAndFillData")
 		}
 		cSearchResults = append(cSearchResults, res.cSearchResult)
 	}

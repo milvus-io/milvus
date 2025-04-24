@@ -231,7 +231,7 @@ func TestRowParser_Parse_Invalid(t *testing.T) {
 			desc.UseNumber()
 			err = desc.Decode(&mp)
 			assert.Error(t, err)
-			assert.True(t, strings.Contains(err.Error(), c.expectErr))
+			assert.True(t, strings.Contains(err.Error(), c.expectErr), "error: %s, expectErr: %s", err.Error(), c.expectErr)
 		})
 	}
 }

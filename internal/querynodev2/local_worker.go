@@ -19,6 +19,7 @@ package querynodev2
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -71,6 +72,10 @@ func (w *LocalWorker) QuerySegments(ctx context.Context, req *querypb.QueryReque
 
 func (w *LocalWorker) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
 	return w.node.GetStatistics(ctx, req)
+}
+
+func (w *LocalWorker) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
+	return w.node.UpdateSchema(ctx, req)
 }
 
 func (w *LocalWorker) IsHealthy() bool {

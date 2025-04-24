@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	logLevelRPCMetaKey = "log_level"
-	clientRequestIDKey = "client_request_id"
+	logLevelRPCMetaKeyLegacy = "log_level"
+	logLevelRPCMetaKey       = "log-level"
+	clientRequestIDKeyLegacy = "client-request-id"
+	clientRequestIDKey       = "client_request_id"
 )
 
 // UnaryTraceLoggerInterceptor adds a traced logger in unary rpc call ctx
@@ -37,7 +39,7 @@ func withLevelAndTrace(ctx context.Context) context.Context {
 	newctx := ctx
 	var traceID trace.TraceID
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		levels := md.Get(logLevelRPCMetaKey)
+		levels := GetMetadata(md, logLevelRPCMetaKey, logLevelRPCMetaKeyLegacy)
 		// get log level
 		if len(levels) >= 1 {
 			level := zapcore.DebugLevel
@@ -63,12 +65,12 @@ func withLevelAndTrace(ctx context.Context) context.Context {
 			newctx = metadata.AppendToOutgoingContext(newctx, logLevelRPCMetaKey, level.String())
 		}
 		// client request id
-		requestID := md.Get(clientRequestIDKey)
+		requestID := GetMetadata(md, clientRequestIDKey, clientRequestIDKeyLegacy)
 		if len(requestID) >= 1 {
 			// inject traceid in order to pass client request id
 			newctx = metadata.AppendToOutgoingContext(newctx, clientRequestIDKey, requestID[0])
 			var err error
-			// if client_request_id is a valid traceID, use traceID path
+			// if client-request-id is a valid traceID, use traceID path
 			traceID, err = trace.TraceIDFromHex(requestID[0])
 			if err != nil {
 				// set request id to custom field
@@ -84,4 +86,14 @@ func withLevelAndTrace(ctx context.Context) context.Context {
 		newctx = log.WithTraceID(newctx, traceID.String())
 	}
 	return newctx
+}
+
+func GetMetadata(md metadata.MD, keys ...string) []string {
+	var result []string
+	for _, key := range keys {
+		if values := md.Get(key); len(values) > 0 {
+			result = append(result, values...)
+		}
+	}
+	return result
 }

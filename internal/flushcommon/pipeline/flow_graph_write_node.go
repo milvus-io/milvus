@@ -115,6 +115,11 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 		wNode.updater.Update(wNode.channelName, end.GetTimestamp(), stats)
 	}
 
+	// update schema after all data processed
+	if fgMsg.updatedSchema != nil {
+		wNode.metacache.UpdateSchema(fgMsg.updatedSchema)
+	}
+
 	res := FlowGraphMsg{
 		TimeRange:      fgMsg.TimeRange,
 		StartPositions: fgMsg.StartPositions,

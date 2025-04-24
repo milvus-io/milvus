@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -52,11 +53,11 @@ type Client struct {
 // NewClient creates a new QueryNode client.
 func NewClient(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error) {
 	if addr == "" {
-		return nil, fmt.Errorf("addr is empty")
+		return nil, errors.New("addr is empty")
 	}
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("QueryNodeClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
@@ -358,5 +359,16 @@ func (c *Client) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchReques
 	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*querypb.DeleteBatchResponse, error) {
 		return client.DeleteBatch(ctx, req)
+	})
+}
+
+func (c *Client) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(c.nodeID),
+	)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*commonpb.Status, error) {
+		return client.UpdateSchema(ctx, req)
 	})
 }

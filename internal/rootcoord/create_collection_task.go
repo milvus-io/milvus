@@ -73,7 +73,12 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 
 	// 1. check shard number
 	shardsNum := t.Req.GetShardsNum()
-	cfgMaxShardNum := Params.RootCoordCfg.DmlChannelNum.GetAsInt32()
+	var cfgMaxShardNum int32
+	if Params.CommonCfg.PreCreatedTopicEnabled.GetAsBool() {
+		cfgMaxShardNum = int32(len(Params.CommonCfg.TopicNames.GetAsStrings()))
+	} else {
+		cfgMaxShardNum = Params.RootCoordCfg.DmlChannelNum.GetAsInt32()
+	}
 	if shardsNum > cfgMaxShardNum {
 		return fmt.Errorf("shard num (%d) exceeds max configuration (%d)", shardsNum, cfgMaxShardNum)
 	}
@@ -137,7 +142,7 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 		if err != nil {
 			log.Ctx(ctx).Warn("parse value of property fail", zap.String("key", common.DatabaseMaxCollectionsKey),
 				zap.String("value", maxColNumPerDBStr), zap.Error(err))
-			return fmt.Errorf(fmt.Sprintf("parse value of property fail, key:%s, value:%s", common.DatabaseMaxCollectionsKey, maxColNumPerDBStr))
+			return fmt.Errorf("parse value of property fail, key:%s, value:%s", common.DatabaseMaxCollectionsKey, maxColNumPerDBStr)
 		}
 		return check(maxColNumPerDB)
 	}

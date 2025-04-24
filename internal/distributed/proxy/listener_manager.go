@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
 	"net"
 
 	"github.com/cockroachdb/errors"
@@ -136,7 +135,7 @@ func newHTTPListner(ctx context.Context, l *listenerManager) error {
 		}
 		if !certPool.AppendCertsFromPEM(rootBuf) {
 			log.Warn("fail to append ca to cert")
-			return fmt.Errorf("fail to append ca to cert")
+			return errors.New("fail to append ca to cert")
 		}
 		tlsConf = &tls.Config{
 			ClientAuth:   tls.RequireAndVerifyClientCert,

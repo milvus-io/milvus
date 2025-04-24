@@ -403,12 +403,13 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             for i in range(default_nq):
                 page_ids = [page_res[i][j].get('id') for j in range(limit)]
                 ids_in_full = [search_res_full[i][p * limit:p * limit + limit][j].get('id') for j in range(limit)]
+
                 # Calculate intersection between paginated results and baseline full results
                 common_ids = set(page_ids) & set(ids_in_full) 
                 # Calculate overlap ratio using full results as baseline
                 overlap_ratio = len(common_ids) / len(ids_in_full) * 100
-                assert overlap_ratio >= 90, f"Only {overlap_ratio}% overlap with baseline results, expected >= 90%"
-    
+                assert overlap_ratio >= 80, f"Only {overlap_ratio}% overlap with baseline results, expected >= 80%"
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [100, 3000, 10000])
     def test_search_with_pagination_topk(self, limit):

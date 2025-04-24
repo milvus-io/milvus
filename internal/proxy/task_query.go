@@ -476,6 +476,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 			guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 		}
 	}
+
+	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
+	// this make query view updated happens before new read request happens
+	// see also schema change design
+	if collectionInfo.updateTimestamp > guaranteeTs {
+		guaranteeTs = collectionInfo.updateTimestamp
+	}
+
 	t.GuaranteeTimestamp = guaranteeTs
 	// need modify mvccTs and guaranteeTs for iterator specially
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() > 0 {

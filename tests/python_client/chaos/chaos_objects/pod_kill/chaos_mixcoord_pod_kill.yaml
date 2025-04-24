@@ -16,7 +16,7 @@ spec:
       labelSelectors:
         app.kubernetes.io/instance: milvus-chaos
         app.kubernetes.io/name: milvus
-        app.kubernetes.io/component: mixcoord
+        component: mixcoord
     mode: fixed
     value: "1"
     action: pod-kill

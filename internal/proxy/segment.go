@@ -367,7 +367,7 @@ func (sa *segIDAssigner) syncSegments() (bool, error) {
 		assign.lastInsertTime = now
 	}
 	if !success {
-		return false, fmt.Errorf(errMsg)
+		return false, errors.New(errMsg)
 	}
 	return success, nil
 }

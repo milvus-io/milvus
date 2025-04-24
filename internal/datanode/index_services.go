@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -491,7 +492,7 @@ func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2
 	default:
 		log.Warn("DataNode receive querying unknown type jobs")
 		return &workerpb.QueryJobsV2Response{
-			Status: merr.Status(fmt.Errorf("DataNode receive querying unknown type jobs")),
+			Status: merr.Status(errors.New("DataNode receive querying unknown type jobs")),
 		}, nil
 	}
 }
@@ -552,6 +553,6 @@ func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Re
 		return merr.Success(), nil
 	default:
 		log.Warn("DataNode receive dropping unknown type jobs")
-		return merr.Status(fmt.Errorf("DataNode receive dropping unknown type jobs")), nil
+		return merr.Status(errors.New("DataNode receive dropping unknown type jobs")), nil
 	}
 }

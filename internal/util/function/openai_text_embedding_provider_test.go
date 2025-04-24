@@ -20,12 +20,12 @@ package function
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -81,7 +81,7 @@ func createOpenAIProvider(url string, schema *schemapb.FieldSchema, providerName
 	case azureOpenAIProvider:
 		return NewAzureOpenAIEmbeddingProvider(schema, functionSchema, map[string]string{})
 	default:
-		return nil, fmt.Errorf("Unknow provider")
+		return nil, errors.New("Unknow provider")
 	}
 }
 

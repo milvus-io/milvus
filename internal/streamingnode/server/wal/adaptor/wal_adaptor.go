@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -27,10 +26,11 @@ type gracefulCloseFunc func()
 
 // adaptImplsToWAL creates a new wal from wal impls.
 func adaptImplsToWAL(
+	ctx context.Context,
 	basicWAL walimpls.WALImpls,
 	builders []interceptors.InterceptorBuilder,
 	cleanup func(),
-) wal.WAL {
+) (wal.WAL, error) {
 	logger := resource.Resource().Logger().With(
 		log.FieldComponent("wal"),
 		zap.String("channel", basicWAL.Channel().String()),
@@ -51,24 +51,25 @@ func adaptImplsToWAL(
 	roWAL.SetLogger(logger)
 	if basicWAL.Channel().AccessMode == types.AccessModeRO {
 		// if the wal is read-only, return it directly.
-		return roWAL
+		return roWAL, nil
+	}
+	param, err := buildInterceptorParams(ctx, basicWAL)
+	if err != nil {
+		return nil, err
 	}
 
 	// build append interceptor for a wal.
-	param := interceptors.InterceptorBuildParam{
-		WALImpls: basicWAL,
-		WAL:      syncutil.NewFuture[wal.WAL](),
-	}
 	wal := &walAdaptorImpl{
 		roWALAdaptorImpl: roWAL,
 		rwWALImpls:       basicWAL,
 		// TODO: make the pool size configurable.
 		appendExecutionPool:    conc.NewPool[struct{}](10),
+		param:                  param,
 		interceptorBuildResult: buildInterceptor(builders, param),
 		writeMetrics:           metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
 	}
 	param.WAL.Set(wal)
-	return wal
+	return wal, nil
 }
 
 // walAdaptorImpl is a wrapper of WALImpls to extend it into a WAL interface.
@@ -77,6 +78,7 @@ type walAdaptorImpl struct {
 
 	rwWALImpls             walimpls.WALImpls
 	appendExecutionPool    *conc.Pool[struct{}]
+	param                  *interceptors.InterceptorBuildParam
 	interceptorBuildResult interceptorBuildResult
 	writeMetrics           *metricsutil.WriteMetrics
 }
@@ -87,16 +89,10 @@ func (w *walAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel st
 		return 0, status.NewOnShutdownError("wal is on shutdown")
 	}
 	defer w.lifetime.Done()
-	operator := resource.Resource().TimeTickInspector().MustGetOperator(w.rwWALImpls.Channel())
-	mvccManager, err := operator.MVCCManager(ctx)
-	if err != nil {
-		// Unreachable code forever.
-		return 0, err
-	}
-	currentMVCC := mvccManager.GetMVCCOfVChannel(vchannel)
+	currentMVCC := w.param.MVCCManager.GetMVCCOfVChannel(vchannel)
 	if !currentMVCC.Confirmed {
 		// if the mvcc is not confirmed, trigger a sync operation to make it confirmed as soon as possible.
-		resource.Resource().TimeTickInspector().TriggerSync(w.rwWALImpls.Channel())
+		resource.Resource().TimeTickInspector().TriggerSync(w.rwWALImpls.Channel(), false)
 	}
 	return currentMVCC.Timetick, nil
 }
@@ -112,8 +108,11 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	case <-w.available:
+		return nil, status.NewOnShutdownError("wal is on shutdown")
 	case <-w.interceptorBuildResult.Interceptor.Ready():
 	}
+
 	// Setup the term of wal.
 	msg = msg.WithWALTerm(w.Channel().Term)
 
@@ -184,13 +183,12 @@ func (w *walAdaptorImpl) Close() {
 	w.Logger().Info("wal begin to close, start graceful close...")
 	// graceful close the interceptors before wal closing.
 	w.interceptorBuildResult.GracefulCloseFunc()
-
 	w.Logger().Info("wal graceful close done, wait for operation to be finished...")
 
 	// begin to close the wal.
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
-	w.lifetime.Wait()
 	close(w.available)
+	w.lifetime.Wait()
 
 	w.Logger().Info("wal begin to close scanners...")
 
@@ -207,6 +205,9 @@ func (w *walAdaptorImpl) Close() {
 	w.Logger().Info("wal close done, close interceptors...")
 	w.interceptorBuildResult.Close()
 	w.appendExecutionPool.Free()
+
+	w.Logger().Info("close the write ahead buffer...")
+	w.param.WriteAheadBuffer.Close()
 
 	w.Logger().Info("call wal cleanup function...")
 	w.cleanup()
@@ -227,7 +228,7 @@ func (r interceptorBuildResult) Close() {
 }
 
 // newWALWithInterceptors creates a new wal with interceptors.
-func buildInterceptor(builders []interceptors.InterceptorBuilder, param interceptors.InterceptorBuildParam) interceptorBuildResult {
+func buildInterceptor(builders []interceptors.InterceptorBuilder, param *interceptors.InterceptorBuildParam) interceptorBuildResult {
 	// Build all interceptors.
 	builtIterceptors := make([]interceptors.Interceptor, 0, len(builders))
 	for _, b := range builders {

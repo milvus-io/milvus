@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -39,6 +40,7 @@ type BM25FunctionRunner struct {
 	tokenizer   tokenizerapi.Tokenizer
 	schema      *schemapb.FunctionSchema
 	outputField *schemapb.FieldSchema
+	inputField  *schemapb.FieldSchema
 	concurrency int
 }
 
@@ -51,36 +53,44 @@ func getAnalyzerParams(field *schemapb.FieldSchema) string {
 	return "{}"
 }
 
-func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (*BM25FunctionRunner, error) {
+func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (FunctionRunner, error) {
 	if len(schema.GetOutputFieldIds()) != 1 {
 		return nil, fmt.Errorf("bm25 function should only have one output field, but now %d", len(schema.GetOutputFieldIds()))
 	}
 
-	runner := &BM25FunctionRunner{
-		schema:      schema,
-		concurrency: 8,
-	}
+	var inputField, outputField *schemapb.FieldSchema
 	var params string
 	for _, field := range coll.GetFields() {
 		if field.GetFieldID() == schema.GetOutputFieldIds()[0] {
-			runner.outputField = field
+			outputField = field
 		}
 
 		if field.GetFieldID() == schema.GetInputFieldIds()[0] {
-			params = getAnalyzerParams(field)
+			inputField = field
 		}
 	}
 
-	if runner.outputField == nil {
-		return nil, fmt.Errorf("no output field")
+	if outputField == nil {
+		return nil, errors.New("no output field")
 	}
+
+	if params, ok := getMultiAnalyzerParams(inputField); ok {
+		return NewMultiAnalyzerBM25FunctionRunner(coll, schema, inputField, outputField, params)
+	}
+
+	params = getAnalyzerParams(inputField)
 	tokenizer, err := ctokenizer.NewTokenizer(params)
 	if err != nil {
 		return nil, err
 	}
 
-	runner.tokenizer = tokenizer
-	return runner, nil
+	return &BM25FunctionRunner{
+		schema:      schema,
+		inputField:  inputField,
+		outputField: outputField,
+		tokenizer:   tokenizer,
+		concurrency: 8,
+	}, nil
 }
 
 func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error {
@@ -107,12 +117,12 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 
 func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 	if len(inputs) > 1 {
-		return nil, fmt.Errorf("BM25 function received more than one input column")
+		return nil, errors.New("BM25 function received more than one input column")
 	}
 
 	text, ok := inputs[0].([]string)
 	if !ok {
-		return nil, fmt.Errorf("BM25 function batch input not string list")
+		return nil, errors.New("BM25 function batch input not string list")
 	}
 
 	rowNum := len(text)
@@ -155,6 +165,10 @@ func (v *BM25FunctionRunner) GetSchema() *schemapb.FunctionSchema {
 
 func (v *BM25FunctionRunner) GetOutputFields() []*schemapb.FieldSchema {
 	return []*schemapb.FieldSchema{v.outputField}
+}
+
+func (v *BM25FunctionRunner) GetInputFields() []*schemapb.FieldSchema {
+	return []*schemapb.FieldSchema{v.inputField}
 }
 
 func buildSparseFloatArray(mapdata []map[uint32]float32) *schemapb.SparseFloatArray {

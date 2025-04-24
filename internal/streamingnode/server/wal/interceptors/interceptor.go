@@ -4,8 +4,10 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
@@ -15,8 +17,12 @@ type (
 )
 
 type InterceptorBuildParam struct {
-	WALImpls walimpls.WALImpls         // The underlying walimpls implementation, can be used anytime.
-	WAL      *syncutil.Future[wal.WAL] // The wal final object, can be used after interceptor is ready.
+	ChannelInfo          types.PChannelInfo
+	WAL                  *syncutil.Future[wal.WAL] // The wal final object, can be used after interceptor is ready.
+	InitializedTimeTick  uint64                    // The time tick is initialized, can be used to skip the time tick append.
+	InitializedMessageID message.MessageID         // The message id of the last message in the wal, can be used to skip the message id append.
+	WriteAheadBuffer     *wab.WriteAheadBuffer     // The write ahead buffer for the wal, used to erase the subscription of underlying wal.
+	MVCCManager          *mvcc.MVCCManager         // The MVCC manager for the wal, can be used to get the latest mvcc timetick.
 }
 
 // InterceptorBuilder is the interface to build a interceptor.
@@ -25,7 +31,7 @@ type InterceptorBuildParam struct {
 type InterceptorBuilder interface {
 	// Build build a interceptor with wal that interceptor will work on.
 	// the wal object will be sent to the interceptor builder when the wal is constructed with all interceptors.
-	Build(param InterceptorBuildParam) Interceptor
+	Build(param *InterceptorBuildParam) Interceptor
 }
 
 type Interceptor interface {

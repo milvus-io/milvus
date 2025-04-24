@@ -104,7 +104,7 @@ TEST(GroupBY, SealedIndex) {
     //2. load raw data
     auto raw_data = DataGen(schema, N, 42, 0, 8, 10, false, false);
     auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
+    for (const auto& field_data : raw_data.raw_->fields_data()) {
         int64_t field_id = field_data.field_id();
 
         auto info = FieldDataInfo(field_data.field_id(), N);
@@ -167,8 +167,8 @@ TEST(GroupBY, SealedIndex) {
         std::unordered_map<int8_t, int> i8_map;
         float lastDistance = 0.0;
         for (size_t i = 0; i < size; i++) {
-            if (std::holds_alternative<int8_t>(group_by_values[i])) {
-                int8_t g_val = std::get<int8_t>(group_by_values[i]);
+            if (std::holds_alternative<int8_t>(group_by_values[i].value())) {
+                int8_t g_val = std::get<int8_t>(group_by_values[i].value());
                 i8_map[g_val] += 1;
                 ASSERT_TRUE(i8_map[g_val] <= group_size);
                 //for every group, the number of hits should not exceed group_size
@@ -220,8 +220,8 @@ TEST(GroupBY, SealedIndex) {
         std::unordered_map<int16_t, int> i16_map;
         float lastDistance = 0.0;
         for (size_t i = 0; i < size; i++) {
-            if (std::holds_alternative<int16_t>(group_by_values[i])) {
-                int16_t g_val = std::get<int16_t>(group_by_values[i]);
+            if (std::holds_alternative<int16_t>(group_by_values[i].value())) {
+                int16_t g_val = std::get<int16_t>(group_by_values[i].value());
                 i16_map[g_val] += 1;
                 ASSERT_TRUE(i16_map[g_val] <= group_size);
                 auto distance = search_result->distances_.at(i);
@@ -270,8 +270,8 @@ TEST(GroupBY, SealedIndex) {
         std::unordered_map<int32_t, int> i32_map;
         float lastDistance = 0.0;
         for (size_t i = 0; i < size; i++) {
-            if (std::holds_alternative<int32_t>(group_by_values[i])) {
-                int16_t g_val = std::get<int32_t>(group_by_values[i]);
+            if (std::holds_alternative<int32_t>(group_by_values[i].value())) {
+                int16_t g_val = std::get<int32_t>(group_by_values[i].value());
                 i32_map[g_val] += 1;
                 ASSERT_TRUE(i32_map[g_val] <= group_size);
                 auto distance = search_result->distances_.at(i);
@@ -320,8 +320,8 @@ TEST(GroupBY, SealedIndex) {
         std::unordered_map<int64_t, int> i64_map;
         float lastDistance = 0.0;
         for (size_t i = 0; i < size; i++) {
-            if (std::holds_alternative<int64_t>(group_by_values[i])) {
-                int16_t g_val = std::get<int64_t>(group_by_values[i]);
+            if (std::holds_alternative<int64_t>(group_by_values[i].value())) {
+                int16_t g_val = std::get<int64_t>(group_by_values[i].value());
                 i64_map[g_val] += 1;
                 ASSERT_TRUE(i64_map[g_val] <= group_size);
                 auto distance = search_result->distances_.at(i);
@@ -368,9 +368,10 @@ TEST(GroupBY, SealedIndex) {
         std::unordered_map<std::string, int> strs_map;
         float lastDistance = 0.0;
         for (size_t i = 0; i < size; i++) {
-            if (std::holds_alternative<std::string>(group_by_values[i])) {
-                std::string g_val =
-                    std::move(std::get<std::string>(group_by_values[i]));
+            if (std::holds_alternative<std::string>(
+                    group_by_values[i].value())) {
+                std::string g_val = std::move(
+                    std::get<std::string>(group_by_values[i].value()));
                 strs_map[g_val] += 1;
                 ASSERT_TRUE(strs_map[g_val] <= group_size);
                 auto distance = search_result->distances_.at(i);
@@ -420,8 +421,8 @@ TEST(GroupBY, SealedIndex) {
         std::unordered_map<bool, int> bools_map;
         float lastDistance = 0.0;
         for (size_t i = 0; i < size; i++) {
-            if (std::holds_alternative<bool>(group_by_values[i])) {
-                bool g_val = std::get<bool>(group_by_values[i]);
+            if (std::holds_alternative<bool>(group_by_values[i].value())) {
+                bool g_val = std::get<bool>(group_by_values[i].value());
                 bools_map[g_val] += 1;
                 ASSERT_TRUE(bools_map[g_val] <= group_size);
                 auto distance = search_result->distances_.at(i);
@@ -445,7 +446,7 @@ TEST(GroupBY, SealedData) {
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
-    auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
+    auto int8_fid = schema->AddDebugField("int8", DataType::INT8, true);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
@@ -456,9 +457,9 @@ TEST(GroupBY, SealedData) {
     size_t N = 100;
 
     //2. load raw data
-    auto raw_data = DataGen(schema, N, 42, 0, 8, 10, false, false);
+    auto raw_data = DataGen(schema, N, 42, 0, 20, 10, false, false);
     auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
+    for (auto&& field_data : raw_data.raw_->fields_data()) {
         int64_t field_id = field_data.field_id();
 
         auto info = FieldDataInfo(field_data.field_id(), N);
@@ -503,26 +504,29 @@ TEST(GroupBY, SealedData) {
 
         auto& group_by_values = search_result->group_by_values_.value();
         int size = group_by_values.size();
-        //as the repeated is 8, so there will be 13 groups and enough 10 * 5 = 50 results
-        ASSERT_EQ(50, size);
+        // groups are: (0, 1, 2, 3, 4, null), counts are: (10, 10, 10, 10 ,10, 50)
+        ASSERT_EQ(30, size);
 
         std::unordered_map<int8_t, int> i8_map;
         float lastDistance = 0.0;
         for (size_t i = 0; i < size; i++) {
-            if (std::holds_alternative<int8_t>(group_by_values[i])) {
-                int8_t g_val = std::get<int8_t>(group_by_values[i]);
+            if (group_by_values[i].has_value()) {
+                int8_t g_val = std::get<int8_t>(group_by_values[i].value());
                 i8_map[g_val] += 1;
-                ASSERT_TRUE(i8_map[g_val] <= group_size);
-                auto distance = search_result->distances_.at(i);
-                ASSERT_TRUE(
-                    lastDistance <=
-                    distance);  //distance should be decreased as metrics_type is L2
-                lastDistance = distance;
+            } else {
+                i8_map[-1] += 1;
             }
+            auto distance = search_result->distances_.at(i);
+            ASSERT_TRUE(
+                lastDistance <=
+                distance);  //distance should be decreased as metrics_type is L2
+            lastDistance = distance;
         }
-        ASSERT_TRUE(i8_map.size() == topK);
+
+        ASSERT_EQ(i8_map.size(), 6);
         for (const auto& it : i8_map) {
-            ASSERT_TRUE(it.second == group_size);
+            ASSERT_TRUE(it.second == group_size)
+                << "unexpected count on group " << it.first;
         }
     }
 }
@@ -537,7 +541,7 @@ TEST(GroupBY, Reduce) {
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64, true);
     auto fp16_fid = schema->AddDebugField(
         "fakevec_fp16", DataType::VECTOR_FLOAT16, dim, knowhere::metric::L2);
     auto bf16_fid = schema->AddDebugField(
@@ -572,7 +576,7 @@ TEST(GroupBY, Reduce) {
     prepareSegmentSystemFieldData(segment1, N, raw_data1);
 
     //load segment2 raw data
-    for (auto field_data : raw_data2.raw_->fields_data()) {
+    for (auto&& field_data : raw_data2.raw_->fields_data()) {
         int64_t field_id = field_data.field_id();
         auto info = FieldDataInfo(field_data.field_id(), N);
         auto field_meta = fields.at(FieldId(field_id));
@@ -735,8 +739,8 @@ TEST(GroupBY, GrowingRawData) {
         std::unordered_set<int32_t> i32_set;
         float lastDistance = 0.0;
         for (int j = 0; j < expected_group_count; j++) {
-            if (std::holds_alternative<int32_t>(group_by_values[idx])) {
-                int32_t g_val = std::get<int32_t>(group_by_values[idx]);
+            if (std::holds_alternative<int32_t>(group_by_values[idx].value())) {
+                int32_t g_val = std::get<int32_t>(group_by_values[idx].value());
                 ASSERT_FALSE(
                     i32_set.count(g_val) >
                     0);  //as the group_size is 1, there should not be any duplication for group_by value
@@ -833,8 +837,8 @@ TEST(GroupBY, GrowingIndex) {
         std::unordered_map<int32_t, int> i32_map;
         float lastDistance = 0.0;
         for (int j = 0; j < expected_group_count * group_size; j++) {
-            if (std::holds_alternative<int32_t>(group_by_values[idx])) {
-                int32_t g_val = std::get<int32_t>(group_by_values[idx]);
+            if (std::holds_alternative<int32_t>(group_by_values[idx].value())) {
+                int32_t g_val = std::get<int32_t>(group_by_values[idx].value());
                 i32_map[g_val] += 1;
                 ASSERT_TRUE(i32_map[g_val] <= group_size);
                 auto distance = search_result->distances_.at(idx);

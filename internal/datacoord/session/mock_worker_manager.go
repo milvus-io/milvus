@@ -67,51 +67,6 @@ func (_c *MockWorkerManager_AddNode_Call) RunAndReturn(run func(int64, string) e
 	return _c
 }
 
-// ClientSupportDisk provides a mock function with given fields:
-func (_m *MockWorkerManager) ClientSupportDisk() bool {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for ClientSupportDisk")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func() bool); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// MockWorkerManager_ClientSupportDisk_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClientSupportDisk'
-type MockWorkerManager_ClientSupportDisk_Call struct {
-	*mock.Call
-}
-
-// ClientSupportDisk is a helper method to define mock.On call
-func (_e *MockWorkerManager_Expecter) ClientSupportDisk() *MockWorkerManager_ClientSupportDisk_Call {
-	return &MockWorkerManager_ClientSupportDisk_Call{Call: _e.mock.On("ClientSupportDisk")}
-}
-
-func (_c *MockWorkerManager_ClientSupportDisk_Call) Run(run func()) *MockWorkerManager_ClientSupportDisk_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockWorkerManager_ClientSupportDisk_Call) Return(_a0 bool) *MockWorkerManager_ClientSupportDisk_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockWorkerManager_ClientSupportDisk_Call) RunAndReturn(run func() bool) *MockWorkerManager_ClientSupportDisk_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetAllClients provides a mock function with given fields:
 func (_m *MockWorkerManager) GetAllClients() map[int64]types.DataNodeClient {
 	ret := _m.Called()

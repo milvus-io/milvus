@@ -18,8 +18,8 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -42,7 +42,7 @@ func (t *dropPartitionTask) Prepare(ctx context.Context) error {
 		return err
 	}
 	if t.Req.GetPartitionName() == Params.CommonCfg.DefaultPartitionName.GetValue() {
-		return fmt.Errorf("default partition cannot be deleted")
+		return errors.New("default partition cannot be deleted")
 	}
 	collMeta, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), t.GetTs())
 	if err != nil {

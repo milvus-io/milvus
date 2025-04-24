@@ -29,6 +29,7 @@ type (
 	RollbackTxnMessageHeader      = messagespb.RollbackTxnMessageHeader
 	TxnMessageHeader              = messagespb.TxnMessageHeader
 	ImportMessageHeader           = messagespb.ImportMessageHeader
+	SchemaChangeMessageHeader     = messagespb.SchemaChangeMessageHeader
 )
 
 type (
@@ -39,6 +40,7 @@ type (
 	CommitTxnMessageBody     = messagespb.CommitTxnMessageBody
 	RollbackTxnMessageBody   = messagespb.RollbackTxnMessageBody
 	TxnMessageBody           = messagespb.TxnMessageBody
+	SchemaChangeMessageBody  = messagespb.SchemaChangeMessageBody
 )
 
 type (
@@ -62,6 +64,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&RollbackTxnMessageHeader{}):      MessageTypeRollbackTxn,
 	reflect.TypeOf(&TxnMessageHeader{}):              MessageTypeTxn,
 	reflect.TypeOf(&ImportMessageHeader{}):           MessageTypeImport,
+	reflect.TypeOf(&SchemaChangeMessageHeader{}):     MessageTypeSchemaChange,
 }
 
 // A system preserved message, should not allowed to provide outside of the streaming system.
@@ -93,6 +96,7 @@ type (
 	MutableBeginTxnMessageV2         = specializedMutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
 	MutableCommitTxnMessageV2        = specializedMutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 	MutableRollbackTxnMessageV2      = specializedMutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
+	MutableSchemaChangeMessageV2     = specializedMutableMessage[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
 
 	ImmutableTimeTickMessageV1         = specializedImmutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
 	ImmutableInsertMessageV1           = specializedImmutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
@@ -108,6 +112,7 @@ type (
 	ImmutableBeginTxnMessageV2         = specializedImmutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
 	ImmutableCommitTxnMessageV2        = specializedImmutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 	ImmutableRollbackTxnMessageV2      = specializedImmutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
+	ImmutableSchemaChangeMessageV2     = specializedImmutableMessage[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
 )
 
 // List all as functions for specialized messages.
@@ -141,6 +146,7 @@ var (
 	AsImmutableBeginTxnMessageV2         = asSpecializedImmutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
 	AsImmutableCommitTxnMessageV2        = asSpecializedImmutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 	AsImmutableRollbackTxnMessageV2      = asSpecializedImmutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
+	AsImmutableCollectionSchemaChangeV2  = asSpecializedImmutableMessage[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
 	AsImmutableTxnMessage                = func(msg ImmutableMessage) ImmutableTxnMessage {
 		underlying, ok := msg.(*immutableTxnMessageImpl)
 		if !ok {

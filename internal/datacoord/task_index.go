@@ -207,11 +207,15 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		}
 	}
 
-	dim, err := storage.GetDimFromParams(field.GetTypeParams())
-	if err != nil {
-		log.Ctx(ctx).Warn("failed to get dim from field type params",
-			zap.String("field type", field.GetDataType().String()), zap.Error(err))
-		// don't return, maybe field is scalar field or sparseFloatVector
+	// Extract dim only for vector types to avoid unnecessary warnings
+	dim := -1
+	if typeutil.IsFixDimVectorType(field.GetDataType()) {
+		if dimVal, err := storage.GetDimFromParams(field.GetTypeParams()); err != nil {
+			log.Ctx(ctx).Warn("failed to get dim from field type params",
+				zap.String("field type", field.GetDataType().String()), zap.Error(err))
+		} else {
+			dim = dimVal
+		}
 	}
 
 	// vector index build needs information of optional scalar fields data
@@ -241,7 +245,14 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 			}
 		}
 	}
-
+	indexNonEncoding := "false"
+	if dependency.indexEngineVersionManager.GetIndexNonEncoding() {
+		indexNonEncoding = "true"
+	}
+	indexParams = append(indexParams, &commonpb.KeyValuePair{
+		Key:   common.IndexNonEncoding,
+		Value: indexNonEncoding,
+	})
 	it.req = &workerpb.CreateJobRequest{
 		ClusterID:                 Params.CommonCfg.ClusterPrefix.GetValue(),
 		IndexFilePrefix:           path.Join(dependency.chunkManager.RootPath(), common.SegmentIndexPath),
@@ -274,6 +285,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		zap.Int64("segID", segment.GetID()),
 		zap.Int32("CurrentIndexVersion", it.req.GetCurrentIndexVersion()),
 		zap.Int32("CurrentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
+		zap.String("IndexNonEncoding", indexNonEncoding),
 		zap.Int64("segID", segment.GetID()))
 	return true
 }

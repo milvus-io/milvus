@@ -399,7 +399,7 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 			return fmt.Errorf("the value for %s of field %s must be an integer", common.MaxCapacityKey, field.GetName())
 		}
 		if maxCapacityPerRow > defaultMaxArrayCapacity || maxCapacityPerRow <= 0 {
-			return fmt.Errorf("the maximum capacity specified for a Array should be in (0, 4096]")
+			return errors.New("the maximum capacity specified for a Array should be in (0, 4096]")
 		}
 		exist = true
 	}
@@ -517,9 +517,110 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 		return err
 	}
 
-	if err := ctokenizer.ValidateTextSchema(field, wasBm25FunctionInputField(schema, field)); err != nil {
+	if err := validateAnalyzer(schema, field); err != nil {
 		return err
 	}
+	return nil
+}
+
+func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema) error {
+	var m map[string]json.RawMessage
+	var analyzerMap map[string]json.RawMessage
+	var mFileName string
+
+	err := json.Unmarshal([]byte(params), &m)
+	if err != nil {
+		return err
+	}
+
+	mfield, ok := m["by_field"]
+	if !ok {
+		return fmt.Errorf("multi analyzer params now must set by_field to specify with field decide analyzer")
+	}
+
+	err = json.Unmarshal(mfield, &mFileName)
+	if err != nil {
+		return fmt.Errorf("multi analyzer params by_field must be string but now: %s", mfield)
+	}
+
+	// check field exist
+	fieldExist := false
+	for _, field := range coll.GetFields() {
+		if field.GetName() == mFileName {
+			// only support string field now
+			if field.GetDataType() != schemapb.DataType_VarChar {
+				return fmt.Errorf("multi analyzer params now only support by string field, but field %s is not string", field.GetName())
+			}
+			fieldExist = true
+			break
+		}
+	}
+
+	if !fieldExist {
+		return fmt.Errorf("multi analyzer dependent field %s not exist in collection %s", string(mfield), coll.GetName())
+	}
+
+	if value, ok := m["alias"]; ok {
+		mapping := map[string]string{}
+		err = json.Unmarshal(value, &mapping)
+		if err != nil {
+			return fmt.Errorf("multi analyzer alias must be string map but now: %s", value)
+		}
+	}
+
+	analyzers, ok := m["analyzers"]
+	if !ok {
+		return fmt.Errorf("multi analyzer params must set analyzers ")
+	}
+
+	err = json.Unmarshal(analyzers, &analyzerMap)
+	if err != nil {
+		return fmt.Errorf("unmarshal analyzers failed: %s", err)
+	}
+
+	hasDefault := false
+	for name, params := range analyzerMap {
+		if err := ctokenizer.ValidateTokenizer(string(params)); err != nil {
+			return fmt.Errorf("analyzer %s params invalid: %s", name, err)
+		}
+		if name == "default" {
+			hasDefault = true
+		}
+	}
+
+	if !hasDefault {
+		return fmt.Errorf("multi analyzer must set default analyzer for all unknown value")
+	}
+	return nil
+}
+
+func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema) error {
+	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
+	if !h.EnableMatch() && !wasBm25FunctionInputField(collSchema, fieldSchema) {
+		return nil
+	}
+
+	if !h.EnableAnalyzer() {
+		return fmt.Errorf("field %s is set to enable match or bm25 function but not enable analyzer", fieldSchema.Name)
+	}
+
+	if params, ok := h.GetMultiAnalyzerParams(); ok {
+		if h.EnableMatch() {
+			return fmt.Errorf("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
+		}
+		if h.HasAnalyzerParams() {
+			return fmt.Errorf("field %s analyzer params should be none if has multi analyzer params", fieldSchema.Name)
+		}
+
+		return validateMultiAnalyzerParams(params, collSchema)
+	}
+
+	for _, kv := range fieldSchema.GetTypeParams() {
+		if kv.GetKey() == "analyzer_params" {
+			return ctokenizer.ValidateTokenizer(kv.Value)
+		}
+	}
+	// return nil when use default analyzer
 	return nil
 }
 
@@ -540,7 +641,7 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 			// If autoID is required, it is recommended to use int64 field as the primary key
 			//if field.DataType == schemapb.DataType_VarChar {
 			//	if field.AutoID {
-			//		return fmt.Errorf("autoID is not supported when the VarChar field is the primary key")
+			//		return errors.New("autoID is not supported when the VarChar field is the primary key")
 			//	}
 			//}
 
@@ -556,7 +657,7 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 func validateDynamicField(coll *schemapb.CollectionSchema) error {
 	for _, field := range coll.Fields {
 		if field.IsDynamic {
-			return fmt.Errorf("cannot explicitly set a field as a dynamic field")
+			return errors.New("cannot explicitly set a field as a dynamic field")
 		}
 	}
 	return nil
@@ -621,12 +722,12 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 		// primary key detector
 		if field.IsPrimaryKey {
 			if autoID {
-				return fmt.Errorf("autoId forbids primary key")
+				return errors.New("autoId forbids primary key")
 			} else if primaryIdx != -1 {
 				return fmt.Errorf("there are more than one primary key, field name = %s, %s", coll.Fields[primaryIdx].Name, field.Name)
 			}
 			if field.DataType != schemapb.DataType_Int64 {
-				return fmt.Errorf("type of primary key should be int64")
+				return errors.New("type of primary key should be int64")
 			}
 			primaryIdx = idx
 		}
@@ -687,7 +788,7 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 	}
 
 	if !autoID && primaryIdx == -1 {
-		return fmt.Errorf("primary key is required for non autoid mode")
+		return errors.New("primary key is required for non autoid mode")
 	}
 
 	return nil
@@ -779,18 +880,9 @@ func checkFunctionOutputField(fSchema *schemapb.FunctionSchema, fields []*schema
 			return err
 		}
 	default:
-		return fmt.Errorf("check output field for unknown function type")
+		return errors.New("check output field for unknown function type")
 	}
 	return nil
-}
-
-func wasBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
-	for _, fun := range coll.GetFunctions() {
-		if fun.GetType() == schemapb.FunctionType_BM25 && field.GetName() == fun.GetInputFieldNames()[0] {
-			return true
-		}
-	}
-	return false
 }
 
 func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
@@ -802,21 +894,21 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 		}
 		h := typeutil.CreateFieldSchemaHelper(fields[0])
 		if !h.EnableAnalyzer() {
-			return fmt.Errorf("BM25 function input field must set enable_analyzer to true")
+			return errors.New("BM25 function input field must set enable_analyzer to true")
 		}
 	case schemapb.FunctionType_TextEmbedding:
 		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
-			return fmt.Errorf("TextEmbedding function input field must be a VARCHAR/TEXT field")
+			return errors.New("TextEmbedding function input field must be a VARCHAR/TEXT field")
 		}
 	default:
-		return fmt.Errorf("check input field with unknown function type")
+		return errors.New("check input field with unknown function type")
 	}
 	return nil
 }
 
 func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
 	if function.GetName() == "" {
-		return fmt.Errorf("function name cannot be empty")
+		return errors.New("function name cannot be empty")
 	}
 	if len(function.GetInputFieldNames()) == 0 {
 		return fmt.Errorf("function input field names cannot be empty, function: %s", function.GetName())
@@ -847,14 +939,14 @@ func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
 		if len(function.GetParams()) != 0 {
-			return fmt.Errorf("BM25 function accepts no params")
+			return errors.New("BM25 function accepts no params")
 		}
 	case schemapb.FunctionType_TextEmbedding:
 		if len(function.GetParams()) == 0 {
-			return fmt.Errorf("TextEmbedding function accepts no params")
+			return errors.New("TextEmbedding function accepts no params")
 		}
 	default:
-		return fmt.Errorf("check function params with unknown function type")
+		return errors.New("check function params with unknown function type")
 	}
 	return nil
 }
@@ -1334,9 +1426,9 @@ func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResul
 			results.Recalls = recalls
 			return nil
 		case *schemapb.IDs_StrId:
-			return fmt.Errorf("pk type is inconsistent between search results(int64) and ground truth(string)")
+			return errors.New("pk type is inconsistent between search results(int64) and ground truth(string)")
 		default:
-			return fmt.Errorf("unsupported pk type")
+			return errors.New("unsupported pk type")
 		}
 
 	case *schemapb.IDs_StrId:
@@ -1356,12 +1448,12 @@ func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResul
 			results.Recalls = recalls
 			return nil
 		case *schemapb.IDs_IntId:
-			return fmt.Errorf("pk type is inconsistent between search results(string) and ground truth(int64)")
+			return errors.New("pk type is inconsistent between search results(string) and ground truth(int64)")
 		default:
-			return fmt.Errorf("unsupported pk type")
+			return errors.New("unsupported pk type")
 		}
 	default:
-		return fmt.Errorf("unsupported pk type")
+		return errors.New("unsupported pk type")
 	}
 }
 
@@ -1439,7 +1531,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 								expr.GetColumnExpr().GetInfo().GetNestedPath()[0] == outputFieldName {
 								return nil
 							}
-							return fmt.Errorf("not support getting subkeys of json field yet")
+							return errors.New("not support getting subkeys of json field yet")
 						})
 						if err != nil {
 							log.Info("parse output field name failed", zap.String("field name", outputFieldName))
@@ -2273,7 +2365,7 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLDB, 1, nil
 	default: // TODO: support more request
 		if req == nil {
-			return util.InvalidDBID, map[int64][]int64{}, 0, 0, fmt.Errorf("null request")
+			return util.InvalidDBID, map[int64][]int64{}, 0, 0, errors.New("null request")
 		}
 		log.RatedWarn(60, "not supported request type for rate limiter", zap.String("type", reflect.TypeOf(req).String()))
 		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil

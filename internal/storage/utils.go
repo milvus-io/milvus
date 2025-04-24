@@ -441,7 +441,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 				Dim:  dim,
 			}
 		case schemapb.DataType_SparseFloatVector:
-			return nil, fmt.Errorf("Sparse Float Vector is not supported in row based data")
+			return nil, errors.New("Sparse Float Vector is not supported in row based data")
 
 		case schemapb.DataType_Int8Vector:
 			dim, err := GetDimFromParams(field.TypeParams)
@@ -1326,7 +1326,7 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 				},
 			}
 		default:
-			return insertRecord, fmt.Errorf("unsupported data type when transter storage.InsertData to internalpb.InsertRecord")
+			return insertRecord, errors.New("unsupported data type when transter storage.InsertData to internalpb.InsertRecord")
 		}
 
 		insertRecord.FieldsData = append(insertRecord.FieldsData, fieldData)

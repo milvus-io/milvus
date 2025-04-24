@@ -18,9 +18,9 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -76,7 +76,7 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 		mockMeta := mockrootcoord.NewIMetaTable(t)
 		mockMeta.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(111)
 		mockMeta.EXPECT().RenameCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			Return(fmt.Errorf("failed to alter alias"))
+			Return(errors.New("failed to alter alias"))
 		core := newTestCore(withValidProxyManager(), withMeta(mockMeta))
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),

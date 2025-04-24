@@ -29,6 +29,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -59,7 +60,7 @@ func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey stri
 		return nil, fmt.Errorf("Missing credentials. Please pass `aws_secret_access_key`, or configure the %s environment variable in the Milvus service.", bedrockSAKEnvStr)
 	}
 	if region == "" {
-		return nil, fmt.Errorf("Missing AWS Service region. Please pass `region` param.")
+		return nil, errors.New("Missing AWS Service region. Please pass `region` param.")
 	}
 
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region),

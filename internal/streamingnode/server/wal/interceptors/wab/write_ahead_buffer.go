@@ -24,7 +24,7 @@ type ROWriteAheadBuffer interface {
 }
 
 // NewWriteAheadBuffer creates a new WriteAheadBuffer.
-func NewWirteAheadBuffer(
+func NewWriteAheadBuffer(
 	pchannel string,
 	logger *log.MLogger,
 	capacity int,

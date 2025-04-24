@@ -747,7 +747,7 @@ func (kv *txnTiKV) removeTiKVMeta(ctx context.Context, key string) error {
 }
 
 func (kv *txnTiKV) CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error) {
-	err := fmt.Errorf("Unimplemented! CompareVersionAndSwap is under deprecation")
+	err := errors.New("Unimplemented! CompareVersionAndSwap is under deprecation")
 	logWarnOnFailure(&err, "Unimplemented")
 	return false, err
 }

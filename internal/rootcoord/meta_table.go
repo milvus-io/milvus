@@ -331,7 +331,7 @@ func (mt *MetaTable) AlterDatabase(ctx context.Context, oldDB *model.Database, n
 	defer mt.ddLock.Unlock()
 
 	if oldDB.Name != newDB.Name || oldDB.ID != newDB.ID || oldDB.State != newDB.State {
-		return fmt.Errorf("alter database name/id is not supported!")
+		return errors.New("alter database name/id is not supported!")
 	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
@@ -348,7 +348,7 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 	defer mt.ddLock.Unlock()
 
 	if dbName == util.DefaultDBName {
-		return fmt.Errorf("can not drop default database")
+		return errors.New("can not drop default database")
 	}
 
 	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
@@ -895,7 +895,7 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	// unsupported rename collection while the collection has aliases
 	aliases := mt.listAliasesByID(oldColl.CollectionID)
 	if len(aliases) > 0 && oldColl.DBID != targetDB.ID {
-		return fmt.Errorf("fail to rename db name, must drop all aliases of this collection before rename")
+		return errors.New("fail to rename db name, must drop all aliases of this collection before rename")
 	}
 
 	newColl := oldColl.Clone()
@@ -1063,7 +1063,7 @@ func (mt *MetaTable) CreateAlias(ctx context.Context, dbName string, alias strin
 	if collID, ok := mt.names.get(dbName, alias); ok {
 		coll, ok := mt.collID2Meta[collID]
 		if !ok {
-			return fmt.Errorf("meta error, name mapped non-exist collection id")
+			return errors.New("meta error, name mapped non-exist collection id")
 		}
 		// allow alias with dropping&dropped
 		if coll.State != pb.CollectionState_CollectionDropping && coll.State != pb.CollectionState_CollectionDropped {
@@ -1318,7 +1318,7 @@ func (mt *MetaTable) GetGeneralCount(ctx context.Context) int {
 // AddCredential add credential
 func (mt *MetaTable) AddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
 	if credInfo.Username == "" {
-		return fmt.Errorf("username is empty")
+		return errors.New("username is empty")
 	}
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
@@ -1347,7 +1347,7 @@ func (mt *MetaTable) AddCredential(ctx context.Context, credInfo *internalpb.Cre
 // AlterCredential update credential
 func (mt *MetaTable) AlterCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
 	if credInfo.Username == "" {
-		return fmt.Errorf("username is empty")
+		return errors.New("username is empty")
 	}
 
 	mt.permissionLock.Lock()
@@ -1392,7 +1392,7 @@ func (mt *MetaTable) ListCredentialUsernames(ctx context.Context) (*milvuspb.Lis
 // CreateRole create role
 func (mt *MetaTable) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
 	if funcutil.IsEmptyString(entity.Name) {
-		return fmt.Errorf("the role name in the role info is empty")
+		return errors.New("the role name in the role info is empty")
 	}
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
@@ -1428,10 +1428,10 @@ func (mt *MetaTable) DropRole(ctx context.Context, tenant string, roleName strin
 // OperateUserRole operate the relationship between a user and a role, including adding a user to a role and removing a user from a role
 func (mt *MetaTable) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
 	if funcutil.IsEmptyString(userEntity.Name) {
-		return fmt.Errorf("username in the user entity is empty")
+		return errors.New("username in the user entity is empty")
 	}
 	if funcutil.IsEmptyString(roleEntity.Name) {
-		return fmt.Errorf("role name in the role entity is empty")
+		return errors.New("role name in the role entity is empty")
 	}
 
 	mt.permissionLock.Lock()
@@ -1463,25 +1463,25 @@ func (mt *MetaTable) SelectUser(ctx context.Context, tenant string, entity *milv
 // OperatePrivilege grant or revoke privilege by setting the operateType param
 func (mt *MetaTable) OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 	if funcutil.IsEmptyString(entity.ObjectName) {
-		return fmt.Errorf("the object name in the grant entity is empty")
+		return errors.New("the object name in the grant entity is empty")
 	}
 	if entity.Object == nil || funcutil.IsEmptyString(entity.Object.Name) {
-		return fmt.Errorf("the object entity in the grant entity is invalid")
+		return errors.New("the object entity in the grant entity is invalid")
 	}
 	if entity.Role == nil || funcutil.IsEmptyString(entity.Role.Name) {
-		return fmt.Errorf("the role entity in the grant entity is invalid")
+		return errors.New("the role entity in the grant entity is invalid")
 	}
 	if entity.Grantor == nil {
-		return fmt.Errorf("the grantor in the grant entity is empty")
+		return errors.New("the grantor in the grant entity is empty")
 	}
 	if entity.Grantor.Privilege == nil || funcutil.IsEmptyString(entity.Grantor.Privilege.Name) {
-		return fmt.Errorf("the privilege name in the grant entity is empty")
+		return errors.New("the privilege name in the grant entity is empty")
 	}
 	if entity.Grantor.User == nil || funcutil.IsEmptyString(entity.Grantor.User.Name) {
-		return fmt.Errorf("the grantor name in the grant entity is empty")
+		return errors.New("the grantor name in the grant entity is empty")
 	}
 	if !funcutil.IsRevoke(operateType) && !funcutil.IsGrant(operateType) {
-		return fmt.Errorf("the operate type in the grant entity is invalid")
+		return errors.New("the operate type in the grant entity is invalid")
 	}
 	if entity.DbName == "" {
 		entity.DbName = util.DefaultDBName
@@ -1499,11 +1499,11 @@ func (mt *MetaTable) OperatePrivilege(ctx context.Context, tenant string, entity
 func (mt *MetaTable) SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
 	var entities []*milvuspb.GrantEntity
 	if entity == nil {
-		return entities, fmt.Errorf("the grant entity is nil")
+		return entities, errors.New("the grant entity is nil")
 	}
 
 	if entity.Role == nil || funcutil.IsEmptyString(entity.Role.Name) {
-		return entities, fmt.Errorf("the role entity in the grant entity is invalid")
+		return entities, errors.New("the role entity in the grant entity is invalid")
 	}
 	if entity.DbName == "" {
 		entity.DbName = util.DefaultDBName
@@ -1517,7 +1517,7 @@ func (mt *MetaTable) SelectGrant(ctx context.Context, tenant string, entity *mil
 
 func (mt *MetaTable) DropGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
 	if role == nil || funcutil.IsEmptyString(role.Name) {
-		return fmt.Errorf("the role entity is invalid when dropping the grant")
+		return errors.New("the role entity is invalid when dropping the grant")
 	}
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
@@ -1569,7 +1569,7 @@ func (mt *MetaTable) IsCustomPrivilegeGroup(ctx context.Context, groupName strin
 
 func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string) error {
 	if funcutil.IsEmptyString(groupName) {
-		return fmt.Errorf("the privilege group name is empty")
+		return errors.New("the privilege group name is empty")
 	}
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
@@ -1593,7 +1593,7 @@ func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string)
 
 func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) error {
 	if funcutil.IsEmptyString(groupName) {
-		return fmt.Errorf("the privilege group name is empty")
+		return errors.New("the privilege group name is empty")
 	}
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
@@ -1639,7 +1639,7 @@ func (mt *MetaTable) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privi
 
 func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
 	if funcutil.IsEmptyString(groupName) {
-		return fmt.Errorf("the privilege group name is empty")
+		return errors.New("the privilege group name is empty")
 	}
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
@@ -1709,7 +1709,7 @@ func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string
 
 func (mt *MetaTable) GetPrivilegeGroupRoles(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error) {
 	if funcutil.IsEmptyString(groupName) {
-		return nil, fmt.Errorf("the privilege group name is empty")
+		return nil, errors.New("the privilege group name is empty")
 	}
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()

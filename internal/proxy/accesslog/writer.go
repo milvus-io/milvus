@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -78,7 +79,7 @@ func (l *CacheWriter) Write(p []byte) (n int, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.closed {
-		return 0, fmt.Errorf("write to closed writer")
+		return 0, errors.New("write to closed writer")
 	}
 
 	return l.writer.Write(p)
@@ -197,7 +198,7 @@ func (l *RotateWriter) Write(p []byte) (n int, err error) {
 	defer l.mu.Unlock()
 
 	if l.closed {
-		return 0, fmt.Errorf("write to closed writer")
+		return 0, errors.New("write to closed writer")
 	}
 
 	writeLen := int64(len(p))

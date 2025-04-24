@@ -18,9 +18,11 @@ package pipeline
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 )
@@ -30,11 +32,13 @@ type insertNodeMsg struct {
 	deleteMsgs  []*DeleteMsg
 	insertDatas map[int64]*delegator.InsertData
 	timeRange   TimeRange
+	schema      *schemapb.CollectionSchema
 }
 
 type deleteNodeMsg struct {
 	deleteMsgs []*DeleteMsg
 	timeRange  TimeRange
+	schema     *schemapb.CollectionSchema
 }
 
 func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
@@ -47,6 +51,13 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 		deleteMsg := taskMsg.(*DeleteMsg)
 		msg.deleteMsgs = append(msg.deleteMsgs, deleteMsg)
 		collector.Rate.Add(metricsinfo.DeleteConsumeThroughput, float64(deleteMsg.Size()))
+	case commonpb.MsgType_AddCollectionField:
+		schemaMsg := taskMsg.(*adaptor.SchemaChangeMessageBody)
+		body, err := schemaMsg.SchemaChangeMessage.Body()
+		if err != nil {
+			return err
+		}
+		msg.schema = body.GetSchema()
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}

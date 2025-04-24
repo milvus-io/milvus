@@ -24,13 +24,13 @@ func TestInsepctor(t *testing.T) {
 		Term: 1,
 	}
 	operator.EXPECT().Channel().Return(pchannel)
-	operator.EXPECT().Sync(mock.Anything).Run(func(ctx context.Context) {})
+	operator.EXPECT().Sync(mock.Anything, mock.Anything).Run(func(ctx context.Context, forcePersisted bool) {})
 
 	i.RegisterSyncOperator(operator)
 	assert.Panics(t, func() {
 		i.RegisterSyncOperator(operator)
 	})
-	i.TriggerSync(pchannel)
+	i.TriggerSync(pchannel, false)
 	o := i.MustGetOperator(pchannel)
 	assert.NotNil(t, o)
 	time.Sleep(250 * time.Millisecond)

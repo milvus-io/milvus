@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -69,7 +71,7 @@ func (ta *timestampAllocator) alloc(ctx context.Context, count uint32) ([]Timest
 		return nil, fmt.Errorf("syncTimeStamp Failed:%s", resp.GetStatus().GetReason())
 	}
 	if resp == nil {
-		return nil, fmt.Errorf("empty AllocTimestampResponse")
+		return nil, errors.New("empty AllocTimestampResponse")
 	}
 	start, cnt := resp.GetTimestamp(), resp.GetCount()
 	ret := make([]Timestamp, cnt)

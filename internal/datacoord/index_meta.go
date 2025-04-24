@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
@@ -398,7 +399,7 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 			// creating multiple indexes on same field is not supported
 			errMsg := "CreateIndex failed: creating multiple indexes on same field is not supported"
 			log.Warn(errMsg)
-			return 0, fmt.Errorf(errMsg)
+			return 0, errors.New(errMsg)
 		}
 	}
 	return 0, nil
@@ -1192,18 +1193,20 @@ func (m *indexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID Uni
 	for _, index := range fieldIndexes {
 		if si, ok := segIndexInfos.Get(index.IndexID); !index.IsDeleted {
 			buildID := int64(-1)
-			if !ok {
+			serializedSize := int64(0)
+			if !ok || si == nil {
 				// the segment should be unindexed status if the segment index is not found within field indexes
 				isIndexed = false
 			} else {
 				buildID = si.BuildID
+				serializedSize = int64(si.IndexSerializedSize)
 			}
 
 			segmentIndexes = append(segmentIndexes, &metricsinfo.IndexedField{
-				IndexFieldID: index.IndexID,
+				IndexFieldID: index.FieldID,
 				IndexID:      index.IndexID,
 				BuildID:      buildID,
-				IndexSize:    int64(si.IndexSerializedSize),
+				IndexSize:    serializedSize,
 			})
 		}
 	}

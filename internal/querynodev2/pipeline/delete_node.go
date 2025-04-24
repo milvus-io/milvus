@@ -17,6 +17,7 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/samber/lo"
@@ -74,6 +75,10 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 		}
 		// do Delete, use ts range max as ts
 		dNode.delegator.ProcessDelete(lo.Values(deleteDatas), nodeMsg.timeRange.timestampMax)
+	}
+
+	if nodeMsg.schema != nil {
+		dNode.delegator.UpdateSchema(context.Background(), nodeMsg.schema)
 	}
 
 	// update tSafe
