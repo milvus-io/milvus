@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 type MockRecordWriter struct {
@@ -136,25 +135,6 @@ func BenchmarkDeserializeReader(b *testing.B) {
 		}
 		_, err = reader.NextValue()
 		assert.Equal(b, io.EOF, err)
-	}
-}
-
-func BenchmarkBinlogIterator(b *testing.B) {
-	len := 1000000
-	blobs, err := generateTestData(len)
-	assert.NoError(b, err)
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		itr, err := NewInsertBinlogIterator(blobs, common.RowIDField, schemapb.DataType_Int64)
-		assert.NoError(b, err)
-		defer itr.Dispose()
-		for i := 0; i < len; i++ {
-			assert.True(b, itr.HasNext())
-			_, err = itr.Next()
-			assert.NoError(b, err)
-		}
-		assert.False(b, itr.HasNext())
 	}
 }
 
