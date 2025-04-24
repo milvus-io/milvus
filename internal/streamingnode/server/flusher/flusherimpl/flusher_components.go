@@ -141,7 +141,7 @@ func (impl *flusherComponents) addNewDataSyncService(
 	ds *pipeline.DataSyncService,
 ) {
 	impl.checkpointManager.AddVChannel(createCollectionMsg.VChannel(), createCollectionMsg.LastConfirmedMessageID())
-	newDS := newDataSyncServiceWrapper(input, ds)
+	newDS := newDataSyncServiceWrapper(createCollectionMsg.VChannel(), input, ds)
 	newDS.Start()
 	impl.dataServices[createCollectionMsg.VChannel()] = newDS
 	impl.logger.Info("create data sync service done", zap.String("vchannel", createCollectionMsg.VChannel()))
@@ -268,5 +268,5 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 	if err != nil {
 		return nil, err
 	}
-	return newDataSyncServiceWrapper(input, ds), nil
+	return newDataSyncServiceWrapper(recoverInfo.Info.ChannelName, input, ds), nil
 }
