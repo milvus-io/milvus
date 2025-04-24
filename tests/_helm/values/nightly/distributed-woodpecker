@@ -41,7 +41,7 @@ indexNode:
     enabled: true
   replicas: 2
 woodpecker:
-  enabled: true:
+  enabled: true
 log:
   level: debug
 metrics:
