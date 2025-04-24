@@ -15,7 +15,7 @@ struct Tokenizer {
     explicit Tokenizer(std::string&& params) {
         auto shared_params = std::make_shared<std::string>(std::move(params));
         auto res =
-            RustResultWrapper(tantivy_create_tokenizer(shared_params->c_str()));
+            RustResultWrapper(tantivy_create_analyzer(shared_params->c_str()));
         AssertInfo(res.result_->success,
                    "Tokenizer creation failed: {}",
                    res.result_->error);
@@ -27,7 +27,7 @@ struct Tokenizer {
 
     ~Tokenizer() {
         if (ptr_ != nullptr) {
-            tantivy_free_tokenizer(ptr_);
+            tantivy_free_analyzer(ptr_);
         }
     }
 
@@ -41,7 +41,7 @@ struct Tokenizer {
 
     std::unique_ptr<Tokenizer>
     Clone() {
-        auto newptr = tantivy_clone_tokenizer(ptr_);
+        auto newptr = tantivy_clone_analyzer(ptr_);
         return std::make_unique<milvus::tantivy::Tokenizer>(newptr);
     }
 

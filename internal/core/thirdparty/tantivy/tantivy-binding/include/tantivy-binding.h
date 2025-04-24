@@ -71,6 +71,14 @@ struct RustResult {
   const char *error;
 };
 
+struct TantivyToken {
+  const char *token;
+  int64_t start_offset;
+  int64_t end_offset;
+  int64_t position;
+  int64_t position_length;
+};
+
 extern "C" {
 
 void free_rust_array(RustArray array);
@@ -349,11 +357,13 @@ bool tantivy_token_stream_advance(void *token_stream);
 
 const char *tantivy_token_stream_get_token(void *token_stream);
 
-RustResult tantivy_create_tokenizer(const char *analyzer_params);
+TantivyToken tantivy_token_stream_get_detailed_token(void *token_stream);
 
-void *tantivy_clone_tokenizer(void *ptr);
+RustResult tantivy_create_analyzer(const char *analyzer_params);
 
-void tantivy_free_tokenizer(void *tokenizer);
+void *tantivy_clone_analyzer(void *ptr);
+
+void tantivy_free_analyzer(void *tokenizer);
 
 bool tantivy_index_exist(const char *path);
 

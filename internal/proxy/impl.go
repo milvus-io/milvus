@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -7023,4 +7024,44 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, nil
+}
+
+func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	// TODO: use collection analyzer when collection name and field name not none
+	tokenizer, err := ctokenizer.NewTokenizer(req.GetAnalyzerParams())
+	if err != nil {
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	defer tokenizer.Destroy()
+
+	results := make([]*milvuspb.AnalyzerResult, len(req.GetPlaceholder()))
+	for i, text := range req.GetPlaceholder() {
+		stream := tokenizer.NewTokenStream(string(text))
+		defer stream.Destroy()
+
+		results[i] = &milvuspb.AnalyzerResult{
+			Tokens: make([]*milvuspb.AnalyzerToken, 0),
+		}
+
+		for stream.Advance() {
+			var token *milvuspb.AnalyzerToken
+			if req.GetWithDetail() {
+				token = stream.DetailedToken()
+			} else {
+				token = &milvuspb.AnalyzerToken{Token: stream.Token()}
+			}
+
+			if req.GetWithHash() {
+				token.Hash = typeutil.HashString2LessUint32(token.GetToken())
+			}
+			results[i].Tokens = append(results[i].Tokens, token)
+		}
+	}
+
+	return &milvuspb.RunAnalyzerResponse{
+		Status:  merr.Status(nil),
+		Results: results,
+	}, nil
 }

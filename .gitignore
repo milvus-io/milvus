@@ -100,6 +100,7 @@ cwrapper_rocksdb_build/
 
 # local file data
 **/data/*
+!**/tantivy-binding/src/analyzer/data/*
 
 internal/proto/**/*.pb.go
 internal/core/src/pb/*.pb.h
