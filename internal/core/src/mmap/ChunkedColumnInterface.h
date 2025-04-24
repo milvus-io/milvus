@@ -17,7 +17,7 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
-
+#include "common/bson_view.h"
 namespace milvus {
 
 using namespace milvus::cachinglayer;
@@ -124,6 +124,13 @@ class ChunkedColumnInterface {
         PanicInfo(
             ErrorCode::Unsupported,
             "RawJsonAt only supported for ChunkColumnInterface of Json type");
+    }
+
+    virtual BsonView
+    RawBsonAt(size_t offset) const {
+        PanicInfo(
+            ErrorCode::Unsupported,
+            "RawBsonAt only supported for ChunkColumnInterface of Bson type");
     }
 
     virtual void

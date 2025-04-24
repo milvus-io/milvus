@@ -304,6 +304,8 @@ type commonConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"true"`
 
 	EnableConfigParamTypeCheck ParamItem `refreshable:"true"`
+
+	UsingJsonStatsForQuery ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1023,6 +1025,16 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnabledOptimizeExpr.Init(base.mgr)
+
+	p.UsingJsonStatsForQuery = ParamItem{
+		Key:          "common.usingJsonStatsForQuery",
+		Version:      "2.5.6",
+		DefaultValue: "true",
+		Doc:          "Indicates whether to use json stats when query",
+		Export:       true,
+	}
+	p.UsingJsonStatsForQuery.Init(base.mgr)
+
 	p.EnabledJSONKeyStats = ParamItem{
 		Key:          "common.enabledJSONKeyStats",
 		Version:      "2.5.5",
@@ -2794,6 +2806,7 @@ type queryNodeConfig struct {
 	MmapVectorIndex                     ParamItem `refreshable:"false"`
 	MmapScalarField                     ParamItem `refreshable:"false"`
 	MmapScalarIndex                     ParamItem `refreshable:"false"`
+	MmapJSONStats                       ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
@@ -3387,6 +3400,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export: true,
 	}
 	p.MmapScalarIndex.Init(base.mgr)
+
+	p.MmapJSONStats = ParamItem{
+		Key:          "queryNode.mmap.jsonStats",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "Enable mmap for loading json stats",
+		Export:       true,
+	}
+	p.MmapJSONStats.Init(base.mgr)
 
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
@@ -4006,6 +4028,9 @@ type dataCoordConfig struct {
 	JSONStatsTriggerInterval          ParamItem `refreshable:"true"`
 	EnabledJSONKeyStatsInSort         ParamItem `refreshable:"true"`
 	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
+	JSONStatsMaxShreddingColumns      ParamItem `refreshable:"true"`
+	JSONStatsShreddingRatioThreshold  ParamItem `refreshable:"true"`
+	JSONStatsWriteBatchSize           ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
@@ -5068,6 +5093,33 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export:       true,
 	}
 	p.JSONKeyStatsMemoryBudgetInTantivy.Init(base.mgr)
+
+	p.JSONStatsMaxShreddingColumns = ParamItem{
+		Key:          "dataCoord.jsonStatsMaxShreddingColumns",
+		Version:      "2.6",
+		DefaultValue: "1024",
+		Doc:          "the max number of columns to shred",
+		Export:       true,
+	}
+	p.JSONStatsMaxShreddingColumns.Init(base.mgr)
+
+	p.JSONStatsShreddingRatioThreshold = ParamItem{
+		Key:          "dataCoord.jsonStatsShreddingRatioThreshold",
+		Version:      "2.6",
+		DefaultValue: "0.3",
+		Doc:          "the ratio threshold to shred",
+		Export:       true,
+	}
+	p.JSONStatsShreddingRatioThreshold.Init(base.mgr)
+
+	p.JSONStatsWriteBatchSize = ParamItem{
+		Key:          "dataCoord.jsonStatsWriteBatchSize",
+		Version:      "2.6",
+		DefaultValue: "81920",
+		Doc:          "the batch size to write",
+		Export:       true,
+	}
+	p.JSONStatsWriteBatchSize.Init(base.mgr)
 
 	p.EnabledJSONKeyStatsInSort = ParamItem{
 		Key:          "dataCoord.enabledJSONKeyStatsInSort",

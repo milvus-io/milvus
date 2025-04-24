@@ -599,6 +599,55 @@ MinioChunkManager::PutObjectBuffer(const std::string& bucket_name,
     return true;
 }
 
+// TODO: using storage v2 to replace
+bool
+MinioChunkManager::PutObjectFromFile(const std::string& bucket_name,
+                                     const std::string& object_name,
+                                     const std::string& local_file_path) {
+    Aws::S3::Model::PutObjectRequest request;
+    request.SetBucket(bucket_name.c_str());
+    request.SetKey(object_name.c_str());
+
+    auto input_data = Aws::MakeShared<Aws::FStream>(
+        "UploadFileTag",
+        local_file_path.c_str(),
+        std::ios_base::in | std::ios_base::binary);
+
+    if (!input_data->good()) {
+        LOG_ERROR("Failed to open local file: {}", local_file_path);
+        return false;
+    }
+
+    request.SetBody(input_data);
+
+    auto start = std::chrono::system_clock::now();
+    auto outcome = client_->PutObject(request);
+
+    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::system_clock::now() - start)
+                       .count();
+
+    monitor::internal_storage_request_latency_put.Observe(latency);
+
+    uint64_t size = std::filesystem::file_size(local_file_path);
+    monitor::internal_storage_kv_size_put.Observe(size);
+
+    if (!outcome.IsSuccess()) {
+        monitor::internal_storage_op_count_put_fail.Increment();
+        const auto& err = outcome.GetError();
+        ThrowS3Error("PutObjectFromFile",
+                     err,
+                     "params, bucket={}, object={}, file={}",
+                     bucket_name,
+                     object_name,
+                     local_file_path);
+        return false;
+    }
+
+    monitor::internal_storage_op_count_put_suc.Increment();
+    return true;
+}
+
 class AwsStreambuf : public std::streambuf {
  public:
     AwsStreambuf(char* buffer, std::streamsize buffer_size) {
