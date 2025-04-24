@@ -13,6 +13,7 @@ import (
 	planparserv2 "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -146,6 +147,9 @@ func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, exprTempl
 				Predicates: expr,
 			},
 		},
+		PlanOptions: &planpb.PlanOption{
+			ExprUseJsonStats: paramtable.Get().CommonCfg.UsingJsonStatsForQuery.GetAsBool(),
+		},
 	}
 	return planNode, nil
 }
@@ -202,6 +206,9 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 				PlaceholderTag: "$0",
 				FieldId:        fieldID,
 			},
+		},
+		PlanOptions: &planpb.PlanOption{
+			ExprUseJsonStats: paramtable.Get().CommonCfg.UsingJsonStatsForQuery.GetAsBool(),
 		},
 	}
 	return planNode, nil
