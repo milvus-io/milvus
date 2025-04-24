@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models/siliconflow"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -40,7 +41,7 @@ type SiliconflowEmbeddingProvider struct {
 
 func createSiliconflowEmbeddingClient(apiKey string, url string) (*siliconflow.SiliconflowEmbedding, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", siliconflowAKEnvStr)
+		return nil, fmt.Errorf("Missing credentials conifg or configure the %s environment variable in the Milvus service.", siliconflowAKEnvStr)
 	}
 
 	if url == "" {
@@ -51,12 +52,15 @@ func createSiliconflowEmbeddingClient(apiKey string, url string) (*siliconflow.S
 	return c, nil
 }
 
-func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*SiliconflowEmbeddingProvider, error) {
+func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.CredentialsManager) (*SiliconflowEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	apiKey, url := parseAKAndURL(functionSchema.Params, params, siliconflowAKEnvStr)
+	apiKey, url, err := parseAKAndURL(credentials, functionSchema.Params, params, siliconflowAKEnvStr)
+	if err != nil {
+		return nil, err
+	}
 	var modelName string
 
 	for _, param := range functionSchema.Params {

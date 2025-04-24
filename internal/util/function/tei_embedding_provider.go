@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -54,12 +55,12 @@ func createTEIEmbeddingClient(apiKey string, endpoint string) (*tei.TEIEmbedding
 	return tei.NewTEIEmbeddingClient(apiKey, endpoint)
 }
 
-func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*TeiEmbeddingProvider, error) {
+func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.CredentialsManager) (*TeiEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	var apiKey, endpoint, ingestionPrompt, searchPrompt string
+	var endpoint, ingestionPrompt, searchPrompt string
 	// TEI default client batch size
 	maxBatch := 32
 	truncate := false
@@ -68,8 +69,6 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
-		case apiKeyParamKey:
-			apiKey = param.Value
 		case endpointParamKey:
 			endpoint = param.Value
 		case ingestionPromptParamKey:
@@ -92,6 +91,10 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 		}
 	}
 
+	apiKey, _, err := parseAKAndURL(credentials, functionSchema.Params, params, "")
+	if err != nil {
+		return nil, err
+	}
 	c, err := createTEIEmbeddingClient(apiKey, endpoint)
 	if err != nil {
 		return nil, err

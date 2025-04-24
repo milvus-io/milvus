@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -42,7 +43,7 @@ type CohereEmbeddingProvider struct {
 
 func createCohereEmbeddingClient(apiKey string, url string) (*cohere.CohereEmbedding, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", cohereAIAKEnvStr)
+		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", cohereAIAKEnvStr)
 	}
 
 	if url == "" {
@@ -53,12 +54,15 @@ func createCohereEmbeddingClient(apiKey string, url string) (*cohere.CohereEmbed
 	return c, nil
 }
 
-func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*CohereEmbeddingProvider, error) {
+func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.CredentialsManager) (*CohereEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	apiKey, url := parseAKAndURL(functionSchema.Params, params, cohereAIAKEnvStr)
+	apiKey, url, err := parseAKAndURL(credentials, functionSchema.Params, params, cohereAIAKEnvStr)
+	if err != nil {
+		return nil, err
+	}
 	var modelName string
 	truncate := "END"
 	for _, param := range functionSchema.Params {

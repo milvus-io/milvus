@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -45,6 +46,13 @@ type TextEmbeddingFunctionSuite struct {
 
 func (s *TextEmbeddingFunctionSuite) SetupTest() {
 	paramtable.Init()
+	paramtable.Get().CredentialCfg.Credential.GetFunc = func() map[string]string {
+		return map[string]string{
+			"mock.apikey":            "mock",
+			"mock.access_key_id":     "mock",
+			"mock.secret_access_key": "mock",
+		}
+	}
 	s.schema = &schemapb.CollectionSchema{
 		Name: "test",
 		Fields: []*schemapb.FieldSchema{
@@ -92,8 +100,7 @@ func (s *TextEmbeddingFunctionSuite) TestInvalidProvider() {
 			{Key: Provider, Value: openAIProvider},
 			{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
 			{Key: dimParamKey, Value: "4"},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: "mock"},
+			{Key: credentialParamKey, Value: "mock"},
 		},
 	}
 	providerName, err := getProvider(fSchema)
@@ -110,6 +117,12 @@ func (s *TextEmbeddingFunctionSuite) TestProcessInsert() {
 	ts := CreateOpenAIEmbeddingServer()
 	defer ts.Close()
 	{
+		paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+			key := openAIProvider + "." + embeddingURLParamKey
+			return map[string]string{
+				key: ts.URL,
+			}
+		}
 		runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
 			Name:             "test",
 			Type:             schemapb.FunctionType_TextEmbedding,
@@ -121,8 +134,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessInsert() {
 				{Key: Provider, Value: openAIProvider},
 				{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
 				{Key: dimParamKey, Value: "4"},
-				{Key: apiKeyParamKey, Value: "mock"},
-				{Key: embeddingURLParamKey, Value: ts.URL},
+				{Key: credentialParamKey, Value: "mock"},
 			},
 		})
 		s.NoError(err)
@@ -142,6 +154,12 @@ func (s *TextEmbeddingFunctionSuite) TestProcessInsert() {
 		}
 	}
 	{
+		paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+			key := azureOpenAIProvider + "." + embeddingURLParamKey
+			return map[string]string{
+				key: ts.URL,
+			}
+		}
 		runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
 			Name:             "test",
 			Type:             schemapb.FunctionType_TextEmbedding,
@@ -153,8 +171,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessInsert() {
 				{Key: Provider, Value: azureOpenAIProvider},
 				{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
 				{Key: dimParamKey, Value: "4"},
-				{Key: apiKeyParamKey, Value: "mock"},
-				{Key: embeddingURLParamKey, Value: ts.URL},
+				{Key: credentialParamKey, Value: "mock"},
 			},
 		})
 		s.NoError(err)
@@ -178,6 +195,12 @@ func (s *TextEmbeddingFunctionSuite) TestProcessInsert() {
 func (s *TextEmbeddingFunctionSuite) TestAliEmbedding() {
 	ts := CreateAliEmbeddingServer()
 	defer ts.Close()
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		key := aliDashScopeProvider + "." + embeddingURLParamKey
+		return map[string]string{
+			key: ts.URL,
+		}
+	}
 
 	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
 		Name:             "test",
@@ -190,8 +213,7 @@ func (s *TextEmbeddingFunctionSuite) TestAliEmbedding() {
 			{Key: Provider, Value: aliDashScopeProvider},
 			{Key: modelNameParamKey, Value: TestModel},
 			{Key: dimParamKey, Value: "4"},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: ts.URL},
+			{Key: credentialParamKey, Value: "mock"},
 		},
 	})
 	s.NoError(err)
@@ -336,8 +358,7 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 				{Key: Provider, Value: openAIProvider},
 				{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
 				{Key: dimParamKey, Value: "4"},
-				{Key: apiKeyParamKey, Value: "mock"},
-				{Key: embeddingURLParamKey, Value: "mock"},
+				{Key: credentialParamKey, Value: "mock"},
 			},
 		})
 		s.Error(err)
@@ -375,8 +396,7 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 				{Key: Provider, Value: openAIProvider},
 				{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
 				{Key: dimParamKey, Value: "4"},
-				{Key: apiKeyParamKey, Value: "mock"},
-				{Key: embeddingURLParamKey, Value: "mock"},
+				{Key: credentialParamKey, Value: "mock"},
 			},
 		})
 		s.Error(err)
@@ -395,8 +415,7 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 				{Key: Provider, Value: openAIProvider},
 				{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
 				{Key: dimParamKey, Value: "4"},
-				{Key: apiKeyParamKey, Value: "mock"},
-				{Key: embeddingURLParamKey, Value: "mock"},
+				{Key: credentialParamKey, Value: "mock"},
 			},
 		})
 		s.Error(err)
@@ -432,8 +451,7 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: bedrockProvider},
 				{Key: modelNameParamKey, Value: TestModel},
-				{Key: awsAKIdParamKey, Value: "mock"},
-				{Key: awsSAKParamKey, Value: "mock"},
+				{Key: credentialParamKey, Value: "mock"},
 				{Key: regionParamKey, Value: "mock"},
 			},
 		}
@@ -456,7 +474,7 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: aliDashScopeProvider},
 				{Key: modelNameParamKey, Value: TestModel},
-				{Key: apiKeyParamKey, Value: "mock"},
+				{Key: credentialParamKey, Value: "mock"},
 			},
 		}
 
@@ -478,7 +496,7 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: voyageAIProvider},
 				{Key: modelNameParamKey, Value: TestModel},
-				{Key: apiKeyParamKey, Value: "mock"},
+				{Key: credentialParamKey, Value: "mock"},
 			},
 		}
 
@@ -500,7 +518,7 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: siliconflowProvider},
 				{Key: modelNameParamKey, Value: TestModel},
-				{Key: apiKeyParamKey, Value: "mock"},
+				{Key: credentialParamKey, Value: "mock"},
 			},
 		}
 
@@ -522,7 +540,7 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			Params: []*commonpb.KeyValuePair{
 				{Key: Provider, Value: cohereProvider},
 				{Key: modelNameParamKey, Value: TestModel},
-				{Key: apiKeyParamKey, Value: "mock"},
+				{Key: credentialParamKey, Value: "mock"},
 			},
 		}
 
@@ -607,6 +625,12 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 func (s *TextEmbeddingFunctionSuite) TestProcessSearchFloat32() {
 	ts := CreateOpenAIEmbeddingServer()
 	defer ts.Close()
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		key := openAIProvider + "." + embeddingURLParamKey
+		return map[string]string{
+			key: ts.URL,
+		}
+	}
 	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
 		Name:             "test",
 		Type:             schemapb.FunctionType_TextEmbedding,
@@ -618,8 +642,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearchFloat32() {
 			{Key: Provider, Value: openAIProvider},
 			{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
 			{Key: dimParamKey, Value: "4"},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: ts.URL},
+			{Key: credentialParamKey, Value: "mock"},
 		},
 	})
 	s.NoError(err)
@@ -692,6 +715,12 @@ func (s *TextEmbeddingFunctionSuite) TestProcessInsertInt8() {
 			},
 		},
 	}
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		key := cohereProvider + "." + embeddingURLParamKey
+		return map[string]string{
+			key: ts.URL,
+		}
+	}
 	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
 		Name:             "test",
 		Type:             schemapb.FunctionType_TextEmbedding,
@@ -703,8 +732,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessInsertInt8() {
 			{Key: Provider, Value: cohereProvider},
 			{Key: modelNameParamKey, Value: TestModel},
 			{Key: dimParamKey, Value: "4"},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: ts.URL},
+			{Key: credentialParamKey, Value: "mock"},
 		},
 	})
 	s.NoError(err)
@@ -750,8 +778,8 @@ func (s *TextEmbeddingFunctionSuite) TestUnsupportedVec() {
 			{Key: Provider, Value: cohereProvider},
 			{Key: modelNameParamKey, Value: TestModel},
 			{Key: dimParamKey, Value: "4"},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: "mock"},
+			{Key: credentialParamKey, Value: "mock"},
+			// {Key: embeddingURLParamKey, Value: "mock"},
 		},
 	})
 	s.Error(err)
@@ -774,6 +802,12 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearchInt8() {
 			},
 		},
 	}
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		key := cohereProvider + "." + embeddingURLParamKey
+		return map[string]string{
+			key: ts.URL,
+		}
+	}
 	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
 		Name:             "test",
 		Type:             schemapb.FunctionType_TextEmbedding,
@@ -785,8 +819,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearchInt8() {
 			{Key: Provider, Value: cohereProvider},
 			{Key: modelNameParamKey, Value: TestModel},
 			{Key: dimParamKey, Value: "4"},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: ts.URL},
+			{Key: credentialParamKey, Value: "mock"},
 		},
 	})
 	s.NoError(err)
@@ -845,6 +878,12 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearchInt8() {
 func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertFloat32() {
 	ts := CreateOpenAIEmbeddingServer()
 	defer ts.Close()
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		key := openAIProvider + "." + embeddingURLParamKey
+		return map[string]string{
+			key: ts.URL,
+		}
+	}
 	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
 		Name:             "test",
 		Type:             schemapb.FunctionType_TextEmbedding,
@@ -856,8 +895,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertFloat32() {
 			{Key: Provider, Value: openAIProvider},
 			{Key: modelNameParamKey, Value: "text-embedding-ada-002"},
 			{Key: dimParamKey, Value: "4"},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: ts.URL},
+			{Key: credentialParamKey, Value: "mock"},
 		},
 	})
 	s.NoError(err)
@@ -894,6 +932,26 @@ func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertFloat32() {
 	}
 }
 
+func (s *TextEmbeddingFunctionSuite) TestParseCredentail() {
+	{
+		cred := credentials.NewCredentialsManager(map[string]string{})
+		ak, url, err := parseAKAndURL(cred, []*commonpb.KeyValuePair{}, map[string]string{}, "")
+		s.Equal(ak, "")
+		s.Equal(url, "")
+		s.NoError(err)
+	}
+	{
+		cred := credentials.NewCredentialsManager(map[string]string{})
+		_, _, err := parseAKAndURL(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "NotExist"}, "")
+		s.ErrorContains(err, "is not a apikey crediential, can not find key")
+	}
+	{
+		cred := credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"})
+		_, _, err := parseAKAndURL(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "mock"}, "")
+		s.NoError(err)
+	}
+}
+
 func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertInt8() {
 	ts := CreateCohereEmbeddingServer[int8]()
 	defer ts.Close()
@@ -910,6 +968,12 @@ func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertInt8() {
 			},
 		},
 	}
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		key := cohereProvider + "." + embeddingURLParamKey
+		return map[string]string{
+			key: ts.URL,
+		}
+	}
 	runner, err := NewTextEmbeddingFunction(s.schema, &schemapb.FunctionSchema{
 		Name:             "test",
 		Type:             schemapb.FunctionType_TextEmbedding,
@@ -921,8 +985,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertInt8() {
 			{Key: Provider, Value: cohereProvider},
 			{Key: modelNameParamKey, Value: TestModel},
 			{Key: dimParamKey, Value: "4"},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: ts.URL},
+			{Key: credentialParamKey, Value: "mock"},
 		},
 	})
 	s.NoError(err)

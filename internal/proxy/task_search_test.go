@@ -974,8 +974,19 @@ func TestSearchTask_PreExecute(t *testing.T) {
 }
 
 func TestSearchTask_WithFunctions(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().CredentialCfg.Credential.GetFunc = func() map[string]string {
+		return map[string]string{
+			"mock.apikey": "mock",
+		}
+	}
 	ts := function.CreateOpenAIEmbeddingServer()
 	defer ts.Close()
+	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+		return map[string]string{
+			"openai.url": ts.URL,
+		}
+	}
 	collectionName := "TestSearchTask_function"
 	schema := &schemapb.CollectionSchema{
 		Name:        collectionName,
@@ -1016,8 +1027,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 				Params: []*commonpb.KeyValuePair{
 					{Key: "provider", Value: "openai"},
 					{Key: "model_name", Value: "text-embedding-ada-002"},
-					{Key: "api_key", Value: "mock"},
-					{Key: "url", Value: ts.URL},
+					{Key: "credential", Value: "mock"},
 					{Key: "dim", Value: "4"},
 				},
 			},
@@ -1031,8 +1041,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 				Params: []*commonpb.KeyValuePair{
 					{Key: "provider", Value: "openai"},
 					{Key: "model_name", Value: "text-embedding-ada-002"},
-					{Key: "api_key", Value: "mock"},
-					{Key: "url", Value: ts.URL},
+					{Key: "credential", Value: "mock"},
 					{Key: "dim", Value: "4"},
 				},
 			},

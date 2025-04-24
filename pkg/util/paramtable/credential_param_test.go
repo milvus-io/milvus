@@ -22,38 +22,18 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestFunctionConfig(t *testing.T) {
+func TestCredentialConfig(t *testing.T) {
 	params := ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
-	cfg := &params.FunctionCfg
-	teiConf := cfg.GetTextEmbeddingProviderConfig("tei")
-	assert.Equal(t, teiConf["enable"], "true")
-	openaiConf := cfg.GetTextEmbeddingProviderConfig("openai")
-	assert.Equal(t, openaiConf["credential"], "")
-	assert.Equal(t, openaiConf["url"], "")
-
+	cfg := &params.CredentialCfg
 	keys := []string{
-		"tei.enable",
-		"tei.credential",
-		"azure_openai.credential",
-		"azure_openai.url",
-		"azure_openai.resource_name",
-		"openai.credential",
-		"openai.url",
-		"dashscope.credential",
-		"dashscope.url",
-		"cohere.credential",
-		"cohere.url",
-		"voyageai.credential",
-		"voyageai.url",
-		"siliconflow.url",
-		"siliconflow.credential",
-		"bedrock.credential",
-		"vertexai.url",
-		"vertexai.credential",
+		"aksk1.access_key_id",
+		"aksk1.secret_access_key",
+		"apikey1.apikey",
+		"gcp1.credential_json",
 	}
 	for _, key := range keys {
-		assert.True(t, cfg.TextEmbeddingProviders.GetDoc(key) != "")
+		assert.True(t, cfg.Credential.GetDoc(key) != "")
 	}
-	assert.True(t, cfg.TextEmbeddingProviders.GetDoc("Unknow") == "")
+	assert.True(t, cfg.Credential.GetDoc("Unknow") == "")
 }
