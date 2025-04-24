@@ -44,6 +44,7 @@
 #include "google/protobuf/message_lite.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
+#include "index/JsonFlatIndex.h"
 #include "index/VectorMemIndex.h"
 #include "mmap/ChunkedColumn.h"
 #include "mmap/Types.h"
@@ -163,11 +164,12 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
     if (field_meta.get_data_type() == DataType::JSON) {
         auto path = info.index_params.at(JSON_PATH);
-        JSONIndexKey key;
-        key.nested_path = path;
-        key.field_id = field_id;
-        json_indexings_[key] =
-            std::move(const_cast<LoadIndexInfo&>(info).index);
+        JsonIndex index;
+        index.nested_path = path;
+        index.field_id = field_id;
+        index.index = std::move(const_cast<LoadIndexInfo&>(info).index);
+        index.cast_type = index.index->GetCastType();
+        json_indices.push_back(std::move(index));
         return;
     }
 
