@@ -77,7 +77,7 @@ type ShardDelegator interface {
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
-	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema) error
+	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, version uint64) error
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -858,7 +858,7 @@ func (sd *shardDelegator) GetTSafe() uint64 {
 	return sd.latestTsafe.Load()
 }
 
-func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema) error {
+func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schVersion uint64) error {
 	log := sd.getLogger(ctx)
 	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
 		return err
@@ -880,6 +880,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		),
 		CollectionID: sd.collectionID,
 		Schema:       schema,
+		Version:      schVersion,
 	}, sealed, growing, sd, func(req *querypb.UpdateSchemaRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.UpdateSchemaRequest {
 		nodeReq := typeutil.Clone(req)
 		nodeReq.GetBase().TargetID = targetID

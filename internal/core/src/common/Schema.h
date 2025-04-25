@@ -23,8 +23,12 @@
 #include <utility>
 #include <vector>
 
+#include <boost/stacktrace.hpp>
 #include "FieldMeta.h"
+#include "boost/stacktrace/frame.hpp"
+#include "boost/stacktrace/stacktrace_fwd.hpp"
 #include "pb/schema.pb.h"
+#include "log/Log.h"
 #include "Consts.h"
 
 #include "arrow/type.h"
@@ -188,6 +192,16 @@ class Schema {
         this->dynamic_field_id_opt_ = field_id;
     }
 
+    void
+    set_schema_version(uint64_t version) {
+        this->schema_version_ = version;
+    }
+
+    uint64_t
+    get_schema_version() const {
+        return this->schema_version_;
+    }
+
     auto
     begin() const {
         return fields_.begin();
@@ -266,6 +280,9 @@ class Schema {
         field_ids_.emplace_back(field_id);
     }
 
+    std::vector<FieldMeta>
+    absent_fields(Schema& old_schema) const;
+
  private:
     int64_t debug_id = START_USER_FIELDID;
     std::vector<FieldId> field_ids_;
@@ -279,6 +296,9 @@ class Schema {
 
     std::optional<FieldId> primary_field_id_opt_;
     std::optional<FieldId> dynamic_field_id_opt_;
+
+    // schema_version_, currently marked with update timestamp
+    uint64_t schema_version_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

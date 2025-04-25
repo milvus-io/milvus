@@ -140,6 +140,51 @@ func (_c *MockCSegment_Delete_Call) RunAndReturn(run func(context.Context, *segc
 	return _c
 }
 
+// FinishLoad provides a mock function with no fields
+func (_m *MockCSegment) FinishLoad() error {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for FinishLoad")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func() error); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCSegment_FinishLoad_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FinishLoad'
+type MockCSegment_FinishLoad_Call struct {
+	*mock.Call
+}
+
+// FinishLoad is a helper method to define mock.On call
+func (_e *MockCSegment_Expecter) FinishLoad() *MockCSegment_FinishLoad_Call {
+	return &MockCSegment_FinishLoad_Call{Call: _e.mock.On("FinishLoad")}
+}
+
+func (_c *MockCSegment_FinishLoad_Call) Run(run func()) *MockCSegment_FinishLoad_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCSegment_FinishLoad_Call) Return(_a0 error) *MockCSegment_FinishLoad_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCSegment_FinishLoad_Call) RunAndReturn(run func() error) *MockCSegment_FinishLoad_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // HasRawData provides a mock function with given fields: fieldID
 func (_m *MockCSegment) HasRawData(fieldID int64) bool {
 	ret := _m.Called(fieldID)

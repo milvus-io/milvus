@@ -1332,6 +1332,10 @@ func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error
 	return nil
 }
 
+func (s *LocalSegment) FinishLoad() error {
+	return s.csegment.FinishLoad()
+}
+
 type ReleaseScope int
 
 const (

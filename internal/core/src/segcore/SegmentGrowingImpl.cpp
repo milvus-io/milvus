@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <queue>
@@ -24,6 +25,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
+#include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Common.h"
 #include "fmt/format.h"
@@ -32,6 +34,7 @@
 #include "query/PlanNode.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -1163,6 +1166,49 @@ SegmentGrowingImpl::GetJsonData(FieldId field_id, size_t offset) const {
                               valid_data_ptr->is_valid(offset));
     }
     return std::make_pair(std::string_view(src[offset]), true);
+}
+
+void
+SegmentGrowingImpl::lazy_check_schema(const query::Plan* plan) {
+    if (plan->schema_.get_schema_version() > schema_->get_schema_version()) {
+        reopen(std::make_shared<Schema>(plan->schema_));
+    }
+}
+
+void
+SegmentGrowingImpl::reopen(SchemaPtr sch) {
+    std::unique_lock lck(mutex_);
+
+    auto absent_fields = sch->absent_fields(*schema_);
+
+    for (const auto& field_meta : absent_fields) {
+        fill_empty_field(field_meta);
+    }
+
+    schema_ = sch;
+}
+
+void
+SegmentGrowingImpl::finish_load() {
+    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (!insert_record_.is_data_exist(field_id)) {
+            fill_empty_field(field_meta);
+        }
+    }
+}
+
+void
+SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
+    auto field_id = field_meta.get_id();
+    insert_record_.append_field_meta(field_id, field_meta, size_per_chunk());
+
+    auto total_row_num = insert_record_.size();
+
+    auto data = bulk_subscript_not_exist_field(field_meta, total_row_num);
+    insert_record_.get_data_base(field_id)->set_data_raw(
+        0, total_row_num, data.get(), field_meta);
+    insert_record_.get_valid_data(field_id)->set_data_raw(
+        total_row_num, data.get(), field_meta);
 }
 
 }  // namespace milvus::segcore

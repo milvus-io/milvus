@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -87,6 +88,19 @@ Schema::ConvertToArrowSchema() const {
         arrow_fields.push_back(arrow_field);
     }
     return arrow::schema(arrow_fields);
+}
+
+std::vector<FieldMeta>
+Schema::absent_fields(Schema& old_schema) const {
+    std::vector<FieldMeta> result;
+    for (const auto& [field_id, field_meta] : fields_) {
+        auto it = old_schema.fields_.find(field_id);
+        if (it == old_schema.fields_.end()) {
+            result.emplace_back(field_meta);
+        }
+    }
+
+    return result;
 }
 
 }  // namespace milvus

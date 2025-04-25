@@ -49,7 +49,7 @@ type CollectionManager interface {
 	// return false otherwise
 	Unref(collectionID int64, count uint32) bool
 	// UpdateSchema update the underlying collection schema of the provided collection.
-	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema) error
+	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, version uint64) error
 }
 
 type collectionManager struct {
@@ -109,7 +109,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	return nil
 }
 
-func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema) error {
+func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, version uint64) error {
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
@@ -118,7 +118,7 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
 	}
 
-	if err := collection.ccollection.UpdateSchema(schema); err != nil {
+	if err := collection.ccollection.UpdateSchema(schema, version); err != nil {
 		return err
 	}
 	collection.schema.Store(schema)

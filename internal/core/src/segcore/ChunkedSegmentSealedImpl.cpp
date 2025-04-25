@@ -38,6 +38,7 @@
 #include "common/File.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
+#include "common/Schema.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "google/protobuf/message_lite.h"
@@ -1121,13 +1122,14 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
     AssertInfo(request_fields.size() >= field_ready_bitset.size(),
                "Request fields size less than field ready bitset size when "
                "check search");
+
     auto absent_fields = request_fields - field_ready_bitset;
 
     if (absent_fields.any()) {
         // absent_fields.find_first() returns std::optional<>
         auto field_id =
             FieldId(absent_fields.find_first().value() + START_USER_FIELDID);
-        auto& field_meta = schema_->operator[](field_id);
+        auto& field_meta = plan->schema_.operator[](field_id);
         // request field may has added field
         if (!field_meta.is_nullable()) {
             PanicInfo(FieldNotLoaded,
@@ -2141,6 +2143,67 @@ ChunkedSegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
             return;
         }
     }
+}
+
+void
+ChunkedSegmentSealedImpl::lazy_check_schema(const query::Plan* plan) {
+    if (plan->schema_.get_schema_version() > schema_->get_schema_version()) {
+        reopen(std::make_shared<Schema>(plan->schema_));
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::reopen(SchemaPtr sch) {
+    std::unique_lock lck(mutex_);
+
+    field_data_ready_bitset_.resize(sch->size());
+    index_ready_bitset_.resize(sch->size());
+    binlog_index_bitset_.resize(sch->size());
+
+    auto absent_fields = sch->absent_fields(*schema_);
+    for (const auto& field_meta : absent_fields) {
+        fill_empty_field(field_meta);
+    }
+
+    schema_ = sch;
+}
+
+void
+ChunkedSegmentSealedImpl::finish_load() {
+    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+        // cannot use is_field_exist, since it check schema only
+        // this shall check the ready bitset here
+        if (!get_bit(field_data_ready_bitset_, field_id) &&
+            !get_bit(index_ready_bitset_, field_id)) {
+            fill_empty_field(field_meta);
+        }
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
+    int64_t size = num_rows_.value();
+    AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
+    auto column = std::make_shared<ChunkedColumn>(field_meta);
+    auto builder = storage::CreateArrowBuilder(field_meta.get_data_type());
+    auto ast = builder->AppendNulls(size);
+    AssertInfo(
+        ast.ok(), "append nulls to arrow builder failed: {}", ast.ToString());
+    arrow::ArrayVector array_vec;
+    array_vec.emplace_back(builder->Finish().ValueOrDie());
+
+    auto chunk = create_chunk(
+        field_meta,
+        IsVectorDataType(field_meta.get_data_type()) &&
+                !IsSparseFloatVectorDataType(field_meta.get_data_type())
+            ? field_meta.get_dim()
+            : 1,
+        array_vec);
+    column->AddChunk(chunk);
+    auto field_id = field_meta.get_id();
+    fields_.emplace(field_id, column);
+
+    set_bit(field_data_ready_bitset_, field_id, true);
 }
 
 }  // namespace milvus::segcore
