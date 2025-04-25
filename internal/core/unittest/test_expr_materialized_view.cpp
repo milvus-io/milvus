@@ -143,6 +143,9 @@ class ExprMaterializedViewTest : public testing::Test {
 
     static void
     TearDownTestSuite() {
+        exec_plan_node_visitor = nullptr;
+        segment = nullptr;
+        gen_data = nullptr;
     }
 
  protected:
