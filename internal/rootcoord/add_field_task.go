@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
@@ -59,17 +60,23 @@ func (t *addCollectionFieldTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	id, err := t.core.idAllocator.AllocOne()
-	if err != nil {
-		return err
-	}
 	// assign field id
-	t.fieldSchema.FieldID = id
+	t.fieldSchema.FieldID = t.nextFieldID(oldColl)
 
 	newField := model.UnmarshalFieldModel(t.fieldSchema)
 
-	ts := t.GetTs()
-	return executeAddCollectionFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req, ts)
+	// ts := t.GetTs()
+	return executeAddCollectionFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req)
+}
+
+func (t *addCollectionFieldTask) nextFieldID(coll *model.Collection) int64 {
+	maxFieldID := int64(common.StartOfUserFieldID)
+	for _, field := range coll.Fields {
+		if field.FieldID > maxFieldID {
+			maxFieldID = field.FieldID
+		}
+	}
+	return maxFieldID + 1
 }
 
 func (t *addCollectionFieldTask) GetLockerKey() LockerKey {
@@ -86,15 +93,23 @@ func executeAddCollectionFieldTaskSteps(ctx context.Context,
 	col *model.Collection,
 	newField *model.Field,
 	req *milvuspb.AddCollectionFieldRequest,
-	ts Timestamp,
+	// ts Timestamp,
 ) error {
-	oldColl := col.Clone()
 	redoTask := newBaseRedoTask(core.stepExecutor)
+
+	updatedCollection := col.Clone()
+	updatedCollection.Fields = append(updatedCollection.Fields, newField)
+	redoTask.AddSyncStep(&WriteSchemaChangeWALStep{
+		baseStep:   baseStep{core: core},
+		collection: updatedCollection,
+	})
+
+	oldColl := col.Clone()
 	redoTask.AddSyncStep(&AddCollectionFieldStep{
-		baseStep: baseStep{core: core},
-		oldColl:  oldColl,
-		newField: newField,
-		ts:       ts,
+		baseStep:          baseStep{core: core},
+		oldColl:           oldColl,
+		updatedCollection: updatedCollection,
+		newField:          newField,
 	})
 
 	req.CollectionID = oldColl.CollectionID

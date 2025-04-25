@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/credentials"
 )
 
 type TextEmbeddingMode int
@@ -45,12 +46,11 @@ const (
 
 // common params
 const (
-	modelNameParamKey           string = "model_name"
-	dimParamKey                 string = "dim"
-	embeddingURLParamKey        string = "url"
-	apiKeyParamKey              string = "api_key"
-	truncateParamKey            string = "truncate"
-	enableVerifiInfoInParamsKey string = "enableVerifiInfoInParams"
+	modelNameParamKey    string = "model_name"
+	dimParamKey          string = "dim"
+	embeddingURLParamKey string = "url"
+	credentialParamKey   string = "credential"
+	truncateParamKey     string = "truncate"
 )
 
 // ali text embedding
@@ -72,8 +72,8 @@ const (
 // bedrock emebdding
 
 const (
-	awsAKIdParamKey   string = "aws_access_key_id"
-	awsSAKParamKey    string = "aws_secret_access_key"
+	// awsAKIdParamKey   string = "aws_access_key_id"
+	// awsSAKParamKey    string = "aws_secret_access_key"
 	regionParamKey    string = "region"
 	normalizeParamKey string = "normalize"
 
@@ -121,41 +121,29 @@ const (
 	enableTeiEnvStr string = "MILVUSAI_ENABLE_TEI"
 )
 
-const enableVerifiInfoInParams string = "ENABLE_VERIFI_INFO_IN_PARAMS"
-
-func isEnableVerifiInfoInParamsKey(confParams map[string]string) bool {
-	enable := true
-	if strings.ToLower(confParams[enableVerifiInfoInParamsKey]) != "" {
-		// If enableVerifiInfoInParamsKey is configured in milvus.yaml, the configuration in milvus.yaml will be used.
-		enable, _ = strconv.ParseBool(confParams[enableVerifiInfoInParamsKey])
-	} else {
-		// If enableVerifiInfoInParamsKey is not configured in milvus.yaml, the configuration in env will be used.
-		if strings.ToLower(os.Getenv(enableVerifiInfoInParams)) != "" {
-			enable, _ = strconv.ParseBool(confParams[enableVerifiInfoInParamsKey])
-		}
-	}
-	return enable
-}
-
-func parseAKAndURL(params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string) (string, string) {
-	// function param > env > yaml
+func parseAKAndURL(credentials *credentials.CredentialsManager, params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string) (string, string, error) {
+	// function param > yaml > env
+	var err error
 	var apiKey, url string
 
-	// from function params
-	if isEnableVerifiInfoInParamsKey(confParams) {
-		for _, param := range params {
-			switch strings.ToLower(param.Key) {
-			case apiKeyParamKey:
-				apiKey = param.Value
-			case embeddingURLParamKey:
-				url = param.Value
+	for _, param := range params {
+		switch strings.ToLower(param.Key) {
+		case credentialParamKey:
+			credentialName := param.Value
+			if apiKey, err = credentials.GetAPIKeyCredential(credentialName); err != nil {
+				return "", "", err
 			}
 		}
 	}
 
 	// from milvus.yaml
 	if apiKey == "" {
-		apiKey = confParams[apiKeyParamKey]
+		credentialName := confParams[credentialParamKey]
+		if credentialName != "" {
+			if apiKey, err = credentials.GetAPIKeyCredential(credentialName); err != nil {
+				return "", "", err
+			}
+		}
 	}
 
 	if url == "" {
@@ -164,9 +152,9 @@ func parseAKAndURL(params []*commonpb.KeyValuePair, confParams map[string]string
 
 	// from env, url doesn't support configuration in in env
 	if apiKey == "" {
-		url = os.Getenv(apiKeyEnv)
+		apiKey = os.Getenv(apiKeyEnv)
 	}
-	return apiKey, url
+	return apiKey, url, nil
 }
 
 func parseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int64, error) {

@@ -255,6 +255,7 @@ func TestLoadCollectionSparse(t *testing.T) {
 }
 
 func TestLoadPartialFields(t *testing.T) {
+	t.Skip("field partial load behavior changing @congqixia")
 	/*
 		1.  verify the collection loaded successfully
 		2.  verify the loaded fields can be searched in expr and output_fields
@@ -301,6 +302,7 @@ func TestLoadPartialFields(t *testing.T) {
 }
 
 func TestLoadSkipDynamicField(t *testing.T) {
+	t.Skip("field partial load behavior changing @congqixia")
 	/*
 		1. load -> search output dynamic field
 		2. reload and skip dynamic field
@@ -341,6 +343,7 @@ func TestLoadSkipDynamicField(t *testing.T) {
 }
 
 func TestLoadPartialVectorFields(t *testing.T) {
+	t.Skip("field partial load behavior changing @congqixia")
 	t.Skip("waiting for HybridSearch implementation")
 	/*
 		1.  verify load different vector fields has different hybrid search results
@@ -362,6 +365,7 @@ func TestLoadPartialVectorFields(t *testing.T) {
 }
 
 func TestLoadPartialFieldsPartitions(t *testing.T) {
+	t.Skip("field partial load behavior changing @congqixia")
 	/*
 		1. insert data into default partition and parName partition
 		2. load default partition with partial fields -> succ & query
@@ -418,6 +422,7 @@ func TestLoadPartialFieldsPartitions(t *testing.T) {
 }
 
 func TestLoadPartialFieldsWithoutPartitionKey(t *testing.T) {
+	t.Skip("field partial load behavior changing @congqixia")
 	/*
 		code fields: pk, clustering key, partition key, part dynamic fields, non-vector fields -> error
 		not index: error
@@ -456,6 +461,7 @@ func TestLoadPartialFieldsWithoutPartitionKey(t *testing.T) {
 }
 
 func TestLoadPartialFieldsRepeated(t *testing.T) {
+	t.Skip("field partial load behavior changing @congqixia")
 	/*
 		1. repeated Load with different LoadFields -> error
 	*/

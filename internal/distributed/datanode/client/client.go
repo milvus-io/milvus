@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -58,11 +59,11 @@ type Client struct {
 // NewClient creates a client for DataNode.
 func NewClient(ctx context.Context, addr string, serverID int64, encryption bool) (types.DataNodeClient, error) {
 	if addr == "" {
-		return nil, fmt.Errorf("address is empty")
+		return nil, errors.New("address is empty")
 	}
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("DataNodeClient New Etcd Session failed", zap.Error(err))
 		return nil, err
 	}

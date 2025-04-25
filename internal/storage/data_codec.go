@@ -22,6 +22,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -63,6 +64,15 @@ type (
 
 // InvalidUniqueID is used when the UniqueID is not set (like in return with err)
 const InvalidUniqueID = UniqueID(-1)
+
+// Value is the return value of Next
+type Value struct {
+	ID        int64
+	PK        PrimaryKey
+	Timestamp int64
+	IsDeleted bool
+	Value     interface{}
+}
 
 // Blob is a pack of key&value
 type Blob struct {
@@ -133,7 +143,7 @@ func NewInsertCodecWithSchema(schema *etcdpb.CollectionMeta) *InsertCodec {
 // Serialize Pk stats log
 func (insertCodec *InsertCodec) SerializePkStats(stats *PrimaryKeyStats, rowNum int64) (*Blob, error) {
 	if stats == nil || stats.BF == nil {
-		return nil, fmt.Errorf("sericalize empty pk stats")
+		return nil, errors.New("sericalize empty pk stats")
 	}
 
 	// Serialize by pk stats
@@ -178,10 +188,10 @@ func (insertCodec *InsertCodec) SerializePkStatsList(stats []*PrimaryKeyStats, r
 func (insertCodec *InsertCodec) SerializePkStatsByData(data *InsertData) (*Blob, error) {
 	timeFieldData, ok := data.Data[common.TimeStampField]
 	if !ok {
-		return nil, fmt.Errorf("data doesn't contains timestamp field")
+		return nil, errors.New("data doesn't contains timestamp field")
 	}
 	if timeFieldData.RowNum() <= 0 {
-		return nil, fmt.Errorf("there's no data in InsertData")
+		return nil, errors.New("there's no data in InsertData")
 	}
 	rowNum := int64(timeFieldData.RowNum())
 
@@ -204,7 +214,7 @@ func (insertCodec *InsertCodec) SerializePkStatsByData(data *InsertData) (*Blob,
 			RowNum: rowNum,
 		}, nil
 	}
-	return nil, fmt.Errorf("there is no pk field")
+	return nil, errors.New("there is no pk field")
 }
 
 // Serialize transforms insert data to blob. It will sort insert data by timestamp.
@@ -215,7 +225,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	blobs := make([]*Blob, 0)
 	var writer *InsertBinlogWriter
 	if insertCodec.Schema == nil {
-		return nil, fmt.Errorf("schema is not set")
+		return nil, errors.New("schema is not set")
 	}
 
 	var rowNum int64
@@ -225,7 +235,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	for _, block := range data {
 		timeFieldData, ok := block.Data[common.TimeStampField]
 		if !ok {
-			return nil, fmt.Errorf("data doesn't contains timestamp field")
+			return nil, errors.New("data doesn't contains timestamp field")
 		}
 
 		rowNum += int64(timeFieldData.RowNum())
@@ -406,7 +416,7 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 	err error,
 ) {
 	if len(blobs) == 0 {
-		return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("blobs is empty")
+		return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, errors.New("blobs is empty")
 	}
 
 	var blobList BlobList = blobs
@@ -733,7 +743,7 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 	defer eventWriter.Close()
 	length := len(data.Pks)
 	if length != len(data.Tss) {
-		return nil, fmt.Errorf("the length of pks, and TimeStamps is not equal")
+		return nil, errors.New("the length of pks, and TimeStamps is not equal")
 	}
 
 	sizeTotal := 0
@@ -786,7 +796,7 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 // Deserialize deserializes the deltalog blobs into DeleteData
 func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *DeltaData, err error) {
 	if len(blobs) == 0 {
-		return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("blobs is empty")
+		return InvalidUniqueID, InvalidUniqueID, nil, errors.New("blobs is empty")
 	}
 
 	rowNum := lo.SumBy(blobs, func(blob *Blob) int64 {
@@ -983,7 +993,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 // It returns origin @ts and @ddRequests in the end.
 func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts []Timestamp, ddRequests []string, err error) {
 	if len(blobs) == 0 {
-		return nil, nil, fmt.Errorf("blobs is empty")
+		return nil, nil, errors.New("blobs is empty")
 	}
 	var requestsStrings []string
 	var resultTs []Timestamp

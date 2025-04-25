@@ -1,11 +1,9 @@
-import jieba
-
 import utils.util_pymilvus as ut
 from utils.util_log import test_log as log
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
-from common.phrase_match_generator import KoreanTextGenerator
+from common.text_generator import KoreanTextGenerator, ICUTextGenerator
 from common.code_mapping import ConnectionErrorMessage as cem
 from base.client_base import TestcaseBase
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_EVENTUALLY
@@ -17,7 +15,6 @@ from pymilvus import (
 import threading
 from pymilvus import DefaultConfig
 import time
-
 import pytest
 import random
 import numpy as np
@@ -2354,7 +2351,7 @@ class TestQueryOperation(TestcaseBase):
         expected: return the latest entity; verify the result is same as dedup entities
         """
         collection_w = self.init_collection_general(prefix, dim=16, is_flush=False, insert_data=False, is_index=False,
-                                                    vector_data_type=ct.float_type, with_json=False)[0]
+                                                    vector_data_type=DataType.FLOAT_VECTOR, with_json=False)[0]
         nb = 50
         rounds = 10
         for i in range(rounds):
@@ -2468,7 +2465,7 @@ class TestQueryOperation(TestcaseBase):
         assert res[0].keys() == set(fields)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("vector_data_type", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.mark.parametrize("vector_data_type", ct.all_dense_vector_types)
     def test_query_output_all_vector_type(self, vector_data_type):
         """
         target: test query output different vector type
@@ -4628,7 +4625,10 @@ class TestQueryTextMatch(TestcaseBase):
             wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
         # query single field for one token
         for field in text_fields:
-            token = wf_map[field].most_common()[0][0]
+            most_common_tokens = wf_map[field].most_common(10)
+            mid = len(most_common_tokens) // 2
+            idx = random.randint(0, max(0, mid - 1))
+            token = most_common_tokens[idx][0]
             expr = f"text_match({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
@@ -4773,7 +4773,10 @@ class TestQueryTextMatch(TestcaseBase):
 
         # query single field for one token
         for field in text_fields:
-            token = wf_map[field].most_common()[0][0]
+            most_common_tokens = wf_map[field].most_common(10)
+            mid = len(most_common_tokens) // 2
+            idx = random.randint(0, max(0, mid - 1))
+            token = most_common_tokens[idx][0]
             expr = f"text_match({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
@@ -4805,6 +4808,140 @@ class TestQueryTextMatch(TestcaseBase):
             for r in res:
                 assert any(
                     [token in r[field] for token in top_10_tokens]), f"top 10 tokens {top_10_tokens} not in {r[field]}"
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    @pytest.mark.parametrize("enable_inverted_index", [True, False])
+    @pytest.mark.parametrize("tokenizer", ["icu"])
+    def test_query_text_match_with_icu_tokenizer(
+            self, tokenizer, enable_inverted_index, enable_partition_key
+    ):
+        """
+        target: test text match with icu tokenizer
+        method: 1. enable text match and insert data with varchar
+                2. get the most common words and query with text match
+                3. verify the result
+        expected: text match successfully and result is correct
+        """
+        analyzer_params = {
+            "tokenizer": tokenizer,
+        }
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="word",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+                enable_match=True,
+                is_partition_key=enable_partition_key,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+                enable_match=True,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(
+                name="paragraph",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+                enable_match=True,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(
+                name="text",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+                enable_match=True,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        data_size = 3000
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix), schema=schema
+        )
+        fake = ICUTextGenerator()
+        data = [
+            {
+                "id": i,
+                "word": fake.word().lower(),
+                "sentence": fake.sentence().lower(),
+                "paragraph": fake.paragraph().lower(),
+                "text": fake.text().lower(),
+                "emb": [random.random() for _ in range(dim)],
+            }
+            for i in range(data_size)
+        ]
+        df = pd.DataFrame(data)
+        log.info(f"dataframe\n{df}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(
+                data[i: i + batch_size]
+                if i + batch_size < len(df)
+                else data[i: len(df)]
+            )
+        # only if the collection is flushed, the inverted index ca be applied.
+        # growing segment may be not applied, although in strong consistency.
+        collection_w.flush()
+        collection_w.create_index(
+            "emb",
+            {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
+        )
+        if enable_inverted_index:
+            collection_w.create_index("word", {"index_type": "INVERTED"})
+        collection_w.load()
+        # analyze the croup
+        text_fields = ["word", "sentence", "paragraph", "text"]
+        wf_map = {}
+        for field in text_fields:
+            wf_map[field] = cf.analyze_documents_with_analyzer_params(df[field].tolist(), analyzer_params)
+        # query single field for one token
+        for field in text_fields:
+            most_common_tokens = wf_map[field].most_common(10)
+            mid = len(most_common_tokens) // 2
+            idx = random.randint(0, max(0, mid - 1))
+            token = most_common_tokens[idx][0]
+            expr = f"text_match({field}, '{token}')"
+            log.info(f"expr: {expr}")
+            res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+            assert len(res) > 0
+            log.info(f"res len {len(res)}")
+            for r in res:
+                assert token in r[field]
+
+            # verify inverted index
+            if enable_inverted_index:
+                if field == "word":
+                    expr = f"{field} == '{token}'"
+                    log.info(f"expr: {expr}")
+                    res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+                    log.info(f"res len {len(res)}")
+                    for r in res:
+                        assert r[field] == token
+        # query single field for multi-word
+        for field in text_fields:
+            # match top 10 most common words
+            top_10_tokens = []
+            for word, count in wf_map[field].most_common(10):
+                top_10_tokens.append(word)
+            string_of_top_10_words = " ".join(top_10_tokens)
+            expr = f"text_match({field}, '{string_of_top_10_words}')"
+            log.info(f"expr {expr}")
+            res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+            log.info(f"res len {len(res)}")
+            for r in res:
+                assert any([token in r[field] for token in top_10_tokens])
+
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_partition_key", [True])
@@ -4908,7 +5045,10 @@ class TestQueryTextMatch(TestcaseBase):
             wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
         # query single field for one token
         for field in text_fields:
-            token = wf_map[field].most_common()[0][0]
+            most_common_tokens = wf_map[field].most_common(10)
+            mid = len(most_common_tokens) // 2
+            idx = random.randint(0, max(0, mid - 1))
+            token = most_common_tokens[idx][0]
             expr = f"text_match({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
@@ -5047,7 +5187,10 @@ class TestQueryTextMatch(TestcaseBase):
             wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
         # query single field for one token
         for field in text_fields:
-            token = wf_map[field].most_common()[0][0]
+            most_common_tokens = wf_map[field].most_common(10)
+            mid = len(most_common_tokens) // 2
+            idx = random.randint(0, max(0, mid - 1))
+            token = most_common_tokens[idx][0]
             expr = f"text_match({field}, '{token}')"
             log.info(f"expr: {expr}")
             res, _ = collection_w.query(expr=expr, output_fields=["id", field])
@@ -6426,7 +6569,10 @@ class TestQueryTextMatch(TestcaseBase):
             wf_map[field] = cf.analyze_documents(df[field].tolist(), language="en")
         # query single field for one word
         for field in text_fields:
-            token = wf_map[field].most_common()[0][0]
+            most_common_tokens = wf_map[field].most_common(10)
+            mid = len(most_common_tokens) // 2
+            idx = random.randint(0, max(0, mid - 1))
+            token = most_common_tokens[idx][0]
             tm_expr = f"text_match({field}, '{token}')"
             int_expr = "age > 10"
             combined_expr = f"{tm_expr} {combine_op} {int_expr}"

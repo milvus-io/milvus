@@ -20,15 +20,16 @@ package function
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models/voyageai"
 )
 
@@ -69,16 +70,15 @@ func createVoyageAIProvider(url string, schema *schemapb.FieldSchema, providerNa
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: modelNameParamKey, Value: TestModel},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: url},
+			{Key: credentialParamKey, Value: "mock"},
 			{Key: dimParamKey, Value: "1024"},
 		},
 	}
 	switch providerName {
 	case voyageAIProvider:
-		return NewVoyageAIEmbeddingProvider(schema, functionSchema, map[string]string{})
+		return NewVoyageAIEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 	default:
-		return nil, fmt.Errorf("Unknow provider")
+		return nil, errors.New("Unknow provider")
 	}
 }
 
@@ -293,36 +293,35 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() 
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: modelNameParamKey, Value: TestModel},
-			{Key: apiKeyParamKey, Value: "mock"},
-			{Key: embeddingURLParamKey, Value: "mock"},
+			{Key: credentialParamKey, Value: "mock"},
 			{Key: dimParamKey, Value: "1024"},
 			{Key: truncationParamKey, Value: "true"},
 		},
 	}
-	provider, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
+	provider, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{embeddingURLParamKey: "mock"}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(1024))
 	s.True(provider.MaxBatch() > 0)
 
 	// Invalid truncation
 	{
-		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: truncationParamKey, Value: "Invalid"}
-		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
+		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: truncationParamKey, Value: "Invalid"}
+		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 		s.Error(err)
-		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: truncationParamKey, Value: "false"}
+		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: truncationParamKey, Value: "false"}
 	}
 
 	// Invalid dim
 	{
-		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "9"}
-		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
+		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "9"}
+		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 		s.Error(err)
 	}
 
 	// Invalid dim type
 	{
-		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalied"}
-		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{})
+		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: dimParamKey, Value: "Invalied"}
+		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
 		s.Error(err)
 	}
 }

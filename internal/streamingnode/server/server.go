@@ -64,7 +64,7 @@ func (s *Server) initBasicComponent() {
 	var err error
 	s.walManager, err = walmanager.OpenManager()
 	if err != nil {
-		panic("open wal manager failed")
+		panic(fmt.Sprintf("open wal manager failed, %+v", err))
 	}
 	// Register the wal manager to the local registry.
 	registry.RegisterLocalWALManager(s.walManager)

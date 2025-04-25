@@ -22,6 +22,7 @@ import (
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -382,7 +383,7 @@ func (w *SegmentWriter) WriteRecord(r storage.Record) error {
 		for fieldID, stats := range w.bm25Stats {
 			field, ok := r.Column(fieldID).(*array.Binary)
 			if !ok {
-				return fmt.Errorf("bm25 field value not found")
+				return errors.New("bm25 field value not found")
 			}
 			stats.AppendBytes(field.Value(i))
 		}
@@ -405,12 +406,12 @@ func (w *SegmentWriter) Write(v *storage.Value) error {
 	for fieldID, stats := range w.bm25Stats {
 		data, ok := v.Value.(map[storage.FieldID]interface{})[fieldID]
 		if !ok {
-			return fmt.Errorf("bm25 field value not found")
+			return errors.New("bm25 field value not found")
 		}
 
 		bytes, ok := data.([]byte)
 		if !ok {
-			return fmt.Errorf("bm25 field value not sparse bytes")
+			return errors.New("bm25 field value not sparse bytes")
 		}
 		stats.AppendBytes(bytes)
 	}

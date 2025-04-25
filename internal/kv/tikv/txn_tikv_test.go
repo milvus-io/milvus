@@ -301,7 +301,7 @@ func TestTiKVLoad(te *testing.T) {
 		defer kv.Close()
 
 		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
-			return nil, fmt.Errorf("bad txn!")
+			return nil, errors.New("bad txn!")
 		}
 		defer func() {
 			beginTxn = tiTxnBegin
@@ -326,7 +326,7 @@ func TestTiKVLoad(te *testing.T) {
 		defer kv.Close()
 
 		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
-			return fmt.Errorf("bad txn commit!")
+			return errors.New("bad txn commit!")
 		}
 		defer func() {
 			commitTxn = tiTxnCommit

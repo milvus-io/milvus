@@ -120,14 +120,14 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 	} else {
 		// Validate existing token is a valid UUID
 		if _, err := uuid.Parse(token); err != nil {
-			return nil, fmt.Errorf("invalid token format")
+			return nil, errors.New("invalid token format")
 		}
 	}
 
 	// parse batch size, required non-zero value
 	batchSizeStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterBatchSizeKey, searchParamsPair)
 	if batchSizeStr == "" {
-		return nil, fmt.Errorf("batch size is required")
+		return nil, errors.New("batch size is required")
 	}
 	batchSize, err := strconv.ParseInt(batchSizeStr, 0, 64)
 	if err != nil {
@@ -439,10 +439,6 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 		fields := schema.GetFields()
 		for _, field := range fields {
 			if field.Name == groupByFieldName {
-				if field.GetNullable() {
-					ret.err = merr.WrapErrParameterInvalidMsg(fmt.Sprintf("groupBy field(%s) not support nullable == true", groupByFieldName))
-					return ret
-				}
 				groupByFieldId = field.FieldID
 				break
 			}
@@ -571,6 +567,7 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 		UseDefaultConsistency: req.GetUseDefaultConsistency(),
 		SearchByPrimaryKeys:   false,
 		SubReqs:               nil,
+		FunctionScore:         req.FunctionScore,
 	}
 
 	for _, sub := range req.GetRequests() {

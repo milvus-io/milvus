@@ -22,6 +22,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -297,7 +298,7 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 		for fieldID, stats := range pw.bm25Stats {
 			field, ok := r.Column(fieldID).(*array.Binary)
 			if !ok {
-				return fmt.Errorf("bm25 field value not found")
+				return errors.New("bm25 field value not found")
 			}
 			stats.AppendBytes(field.Value(i))
 		}

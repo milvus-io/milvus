@@ -18,8 +18,8 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -46,7 +46,7 @@ func (b *baseUndoTask) AddStep(todoStep, undoStep nestedStep) {
 
 func (b *baseUndoTask) Execute(ctx context.Context) error {
 	if len(b.todoStep) != len(b.undoStep) {
-		return fmt.Errorf("todo step and undo step length not equal")
+		return errors.New("todo step and undo step length not equal")
 	}
 	for i := 0; i < len(b.todoStep); i++ {
 		todoStep := b.todoStep[i]

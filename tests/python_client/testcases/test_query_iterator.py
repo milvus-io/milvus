@@ -127,7 +127,7 @@ class TestQueryIterator(TestcaseBase):
                                                  "batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("vector_data_type", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.mark.parametrize("vector_data_type", ct.all_dense_vector_types)
     def test_query_iterator_output_different_vector_type(self, vector_data_type):
         """
         target: test query iterator with output fields

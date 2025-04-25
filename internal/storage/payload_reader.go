@@ -621,7 +621,7 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 
 	for _, value := range values {
 		if len(value)%8 != 0 {
-			return nil, -1, fmt.Errorf("invalid bytesData length")
+			return nil, -1, errors.New("invalid bytesData length")
 		}
 
 		fieldData.Contents = append(fieldData.Contents, value)
@@ -750,7 +750,7 @@ func (s *DataSet[T, E]) HasNext() bool {
 
 func (s *DataSet[T, E]) NextBatch(batch int64) ([]T, error) {
 	if s.groupID > s.reader.NumRowGroups() || (s.groupID == s.reader.NumRowGroups() && s.cnt >= s.numRows) || s.numRows == 0 {
-		return nil, fmt.Errorf("has no more data")
+		return nil, errors.New("has no more data")
 	}
 
 	if s.groupID == 0 || s.cnt >= s.numRows {

@@ -715,7 +715,7 @@ func TestServer_Check(t *testing.T) {
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, ret.Status)
 
 	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock grpc unexpected error"))
+	mockProxy.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, errors.New("mock grpc unexpected error"))
 
 	ret, err = server.Check(ctx, req)
 	assert.Error(t, err)
@@ -769,7 +769,7 @@ func TestServer_Watch(t *testing.T) {
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, ret.Status)
 
 	mockProxy.ExpectedCalls = nil
-	mockProxy.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock grpc unexpected error"))
+	mockProxy.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, errors.New("mock grpc unexpected error"))
 
 	err = server.Watch(req, watchServer)
 	ret = <-resultChan

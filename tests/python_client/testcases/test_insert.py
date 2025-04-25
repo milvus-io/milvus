@@ -1429,7 +1429,7 @@ class TestInsertInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
-    @pytest.mark.parametrize("invalid_vector_type ", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.mark.parametrize("invalid_vector_type ", ct.all_dense_vector_types)
     def test_invalid_sparse_vector_data(self, index, invalid_vector_type):
         """
         target: insert illegal data type

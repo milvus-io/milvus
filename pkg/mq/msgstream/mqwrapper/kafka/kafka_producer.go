@@ -2,10 +2,10 @@ package kafka
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"go.uber.org/zap"
 
@@ -36,7 +36,7 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqcommon.ProducerMes
 	if kp.isClosed {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
 		log.Error("kafka produce message fail because the producer has been closed", zap.String("topic", kp.topic))
-		return nil, common.NewIgnorableError(fmt.Errorf("kafka producer is closed"))
+		return nil, common.NewIgnorableError(errors.New("kafka producer is closed"))
 	}
 
 	headers := make([]kafka.Header, 0, len(message.Properties))
@@ -61,7 +61,7 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqcommon.ProducerMes
 	case <-kp.stopCh:
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
 		log.Error("kafka produce message fail because of kafka producer is closed", zap.String("topic", kp.topic))
-		return nil, common.NewIgnorableError(fmt.Errorf("kafka producer is closed"))
+		return nil, common.NewIgnorableError(errors.New("kafka producer is closed"))
 	case e := <-resultCh:
 		m = e.(*kafka.Message)
 	}

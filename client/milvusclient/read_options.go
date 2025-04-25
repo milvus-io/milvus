@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -55,7 +56,7 @@ type SearchOption interface {
 var _ SearchOption = (*searchOption)(nil)
 
 type searchOption struct {
-	annRequest                 *annRequest
+	annRequest                 *AnnRequest
 	collectionName             string
 	partitionNames             []string
 	outputFields               []string
@@ -63,7 +64,7 @@ type searchOption struct {
 	useDefaultConsistencyLevel bool
 }
 
-type annRequest struct {
+type AnnRequest struct {
 	vectors []entity.Vector
 
 	annField        string
@@ -80,8 +81,8 @@ type annRequest struct {
 	templateParams  map[string]any
 }
 
-func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *annRequest {
-	return &annRequest{
+func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnRequest {
+	return &AnnRequest{
 		annField:       annField,
 		vectors:        vectors,
 		topK:           limit,
@@ -90,7 +91,7 @@ func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *annReq
 	}
 }
 
-func (r *annRequest) searchRequest() (*milvuspb.SearchRequest, error) {
+func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 	request := &milvuspb.SearchRequest{
 		Nq:      int64(len(r.vectors)),
 		Dsl:     r.expr,
@@ -226,52 +227,52 @@ func slice2TmplValue(val any) (*schemapb.TemplateValue, error) {
 	}, nil
 }
 
-func (r *annRequest) WithANNSField(annsField string) *annRequest {
+func (r *AnnRequest) WithANNSField(annsField string) *AnnRequest {
 	r.annField = annsField
 	return r
 }
 
-func (r *annRequest) WithGroupByField(groupByField string) *annRequest {
+func (r *AnnRequest) WithGroupByField(groupByField string) *AnnRequest {
 	r.groupByField = groupByField
 	return r
 }
 
-func (r *annRequest) WithGroupSize(groupSize int) *annRequest {
+func (r *AnnRequest) WithGroupSize(groupSize int) *AnnRequest {
 	r.groupSize = groupSize
 	return r
 }
 
-func (r *annRequest) WithStrictGroupSize(strictGroupSize bool) *annRequest {
+func (r *AnnRequest) WithStrictGroupSize(strictGroupSize bool) *AnnRequest {
 	r.strictGroupSize = strictGroupSize
 	return r
 }
 
-func (r *annRequest) WithSearchParam(key, value string) *annRequest {
+func (r *AnnRequest) WithSearchParam(key, value string) *AnnRequest {
 	r.searchParam[key] = value
 	return r
 }
 
-func (r *annRequest) WithAnnParam(ap index.AnnParam) *annRequest {
+func (r *AnnRequest) WithAnnParam(ap index.AnnParam) *AnnRequest {
 	r.annParam = ap
 	return r
 }
 
-func (r *annRequest) WithFilter(expr string) *annRequest {
+func (r *AnnRequest) WithFilter(expr string) *AnnRequest {
 	r.expr = expr
 	return r
 }
 
-func (r *annRequest) WithTemplateParam(key string, val any) *annRequest {
+func (r *AnnRequest) WithTemplateParam(key string, val any) *AnnRequest {
 	r.templateParams[key] = val
 	return r
 }
 
-func (r *annRequest) WithOffset(offset int) *annRequest {
+func (r *AnnRequest) WithOffset(offset int) *AnnRequest {
 	r.offset = offset
 	return r
 }
 
-func (r *annRequest) WithIgnoreGrowing(ignoreGrowing bool) *annRequest {
+func (r *AnnRequest) WithIgnoreGrowing(ignoreGrowing bool) *AnnRequest {
 	r.ignoreGrowing = ignoreGrowing
 	return r
 }
@@ -423,7 +424,7 @@ type hybridSearchOption struct {
 	collectionName string
 	partitionNames []string
 
-	reqs []*annRequest
+	reqs []*AnnRequest
 
 	outputFields          []string
 	useDefaultConsistency bool
@@ -490,10 +491,9 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 	}, nil
 }
 
-func NewHybridSearchOption(collectionName string, limit int, annRequests ...*annRequest) *hybridSearchOption {
+func NewHybridSearchOption(collectionName string, limit int, annRequests ...*AnnRequest) *hybridSearchOption {
 	return &hybridSearchOption{
-		collectionName: collectionName,
-
+		collectionName:        collectionName,
 		reqs:                  annRequests,
 		useDefaultConsistency: true,
 		limit:                 limit,
@@ -608,5 +608,44 @@ func NewQueryOption(collectionName string) *queryOption {
 		useDefaultConsistencyLevel: true,
 		consistencyLevel:           entity.ClBounded,
 		templateParams:             make(map[string]any),
+	}
+}
+
+type RunAnalyzerOption interface {
+	Request() (*milvuspb.RunAnalyzerRequest, error)
+}
+
+type runAnalyzerOption struct {
+	text           []string
+	analyzerParams string
+	withDetail     bool
+	withHash       bool
+}
+
+func (opt *runAnalyzerOption) Request() (*milvuspb.RunAnalyzerRequest, error) {
+	return &milvuspb.RunAnalyzerRequest{
+		Placeholder:    lo.Map(opt.text, func(str string, _ int) []byte { return []byte(str) }),
+		AnalyzerParams: opt.analyzerParams,
+	}, nil
+}
+
+func (opt *runAnalyzerOption) WithAnalyzerParams(params string) *runAnalyzerOption {
+	opt.analyzerParams = params
+	return opt
+}
+
+func (opt *runAnalyzerOption) WithDetail() *runAnalyzerOption {
+	opt.withDetail = true
+	return opt
+}
+
+func (opt *runAnalyzerOption) WithHash() *runAnalyzerOption {
+	opt.withHash = true
+	return opt
+}
+
+func NewRunAnalyzerOption(text []string) *runAnalyzerOption {
+	return &runAnalyzerOption{
+		text: text,
 	}
 }

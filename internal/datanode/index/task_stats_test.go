@@ -18,10 +18,10 @@ package index
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -145,7 +145,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			}
 			return result, nil
 		})
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
+		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		ctx, cancel := context.WithCancel(context.Background())
 

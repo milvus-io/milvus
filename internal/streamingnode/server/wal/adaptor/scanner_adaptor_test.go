@@ -30,11 +30,11 @@ func TestScannerAdaptorReadError(t *testing.T) {
 
 	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
 	operator.EXPECT().Channel().Return(types.PChannelInfo{})
-	operator.EXPECT().Sync(mock.Anything).Run(func(ctx context.Context) {
+	operator.EXPECT().Sync(mock.Anything, mock.Anything).Run(func(ctx context.Context, forcePersisted bool) {
 		sig1.Close()
 	})
 	wb := mock_wab.NewMockROWriteAheadBuffer(t)
-	operator.EXPECT().WriteAheadBuffer(mock.Anything).Return(wb, nil)
+	operator.EXPECT().WriteAheadBuffer().Return(wb)
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
 
 	err := errors.New("read error")

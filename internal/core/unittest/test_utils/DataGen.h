@@ -43,6 +43,7 @@
 #include "storage/PayloadWriter.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "storage/Util.h"
+#include "milvus-storage/common/constants.h"
 
 using boost::algorithm::starts_with;
 
@@ -1381,6 +1382,48 @@ NewCollection(const milvus::proto::schema::CollectionSchema* schema,
     collection->set_index_meta(
         std::make_shared<CollectionIndexMeta>(col_index_meta));
     return (void*)collection.release();
+}
+
+inline std::shared_ptr<arrow::RecordBatch>
+ConvertToArrowRecordBatch(const GeneratedData& dataset,
+                          int64_t dim,
+                          const std::shared_ptr<arrow::Schema>& arrow_schema) {
+    if (!dataset.raw_ || dataset.raw_->fields_data_size() == 0) {
+        return nullptr;
+    }
+
+    // Create a map of field_id to field_data for quick lookup
+    std::unordered_map<int64_t, const DataArray*> field_data_map;
+    for (const auto& field_data : dataset.raw_->fields_data()) {
+        field_data_map[field_data.field_id()] = &field_data;
+    }
+
+    // Create arrays in the order specified by arrow_schema
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    for (int i = 0; i < arrow_schema->num_fields(); ++i) {
+        const auto& field = arrow_schema->field(i);
+        auto field_id = std::stol(field->metadata()
+                                      ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                                      .ValueOrDie());
+
+        auto it = field_data_map.find(field_id);
+        if (it != field_data_map.end()) {
+            auto field_meta = dataset.schema_->operator[](FieldId(field_id));
+            auto field_data_ptr = CreateFieldDataFromDataArray(
+                dataset.raw_->num_rows(), it->second, field_meta);
+            auto arrow_data_wrapper =
+                storage::ConvertFieldDataToArrowDataWrapper(field_data_ptr);
+            std::shared_ptr<arrow::RecordBatch> batch;
+            arrow_data_wrapper->reader->ReadNext(&batch);
+            if (batch) {
+                arrays.push_back(batch->column(0));
+            }
+        } else {
+            std::cout << "field_id: " << field_id << " not found" << std::endl;
+        }
+    }
+    return arrow::RecordBatch::Make(
+        arrow_schema, dataset.raw_->num_rows(), arrays);
 }
 
 }  // namespace milvus::segcore

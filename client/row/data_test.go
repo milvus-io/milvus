@@ -26,7 +26,7 @@ type ValidStruct struct {
 type ValidStruct2 struct {
 	ID      int64 `milvus:"primary_key"`
 	Vector  [16]float32
-	Vector2 [4]byte
+	Attr1   float64
 	Ignored bool `milvus:"-"`
 }
 
@@ -110,7 +110,7 @@ func (s *RowsSuite) TestRowsToColumns() {
 		_, err = AnyToColumns([]any{&ValidStruct{}}, &entity.Schema{
 			Fields: []*entity.Field{
 				{
-					Name:     "int64",
+					Name:     "Attr1",
 					DataType: entity.FieldTypeInt64,
 				},
 			},

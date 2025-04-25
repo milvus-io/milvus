@@ -124,7 +124,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
     def random_primary_key(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.fixture(scope="function", params=ct.all_dense_vector_types)
     def vector_data_type(self, request):
         yield request.param
 
@@ -242,7 +242,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 3. prepare search params
         req_list = []
         weights = [1]
-        vectors = cf.gen_vectors_based_on_vector_type(nq, default_dim, "FLOAT_VECTOR")
+        vectors = cf.gen_vectors(nq, default_dim, vector_data_type=DataType.FLOAT_VECTOR)
         # 4. get hybrid search req list
         for i in range(len(vector_name_list)):
             search_param = {
@@ -276,7 +276,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 3. prepare search params
         req_list = []
         weights = [1]
-        vectors = cf.gen_vectors_based_on_vector_type(nq, default_dim, "FLOAT_VECTOR")
+        vectors = cf.gen_vectors(nq, default_dim, vector_data_type=DataType.FLOAT_VECTOR)
         # 4. get hybrid search req list
         for i in range(len(vector_name_list)):
             search_param = {
@@ -311,7 +311,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 3. prepare search params
         req_list = []
         weights = [1]
-        vectors = cf.gen_vectors_based_on_vector_type(nq, default_dim, "FLOAT_VECTOR")
+        vectors = cf.gen_vectors(nq, default_dim, vector_data_type=DataType.FLOAT_VECTOR)
         # 4. get hybrid search req list
         for i in range(len(vector_name_list)):
             search_param = {
@@ -344,7 +344,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
         vector_name_list.append(ct.default_float_vec_field_name)
         # 3. prepare search params
-        vectors = cf.gen_vectors_based_on_vector_type(nq, default_dim, "FLOAT_VECTOR")
+        vectors = cf.gen_vectors(nq, default_dim, vector_data_type=DataType.FLOAT_VECTOR)
 
         # get hybrid search req list
         search_param = {
@@ -1757,7 +1757,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         metrics = []
         search_res_dict_array = []
         search_res_dict_array_nq = []
-        vectors = cf.gen_vectors_based_on_vector_type(nq, default_dim, "FLOAT_VECTOR")
+        vectors = cf.gen_vectors(nq, default_dim, vector_data_type=DataType.FLOAT_VECTOR)
 
         # get hybrid search req list
         for i in range(len(vector_name_list)):
@@ -2014,7 +2014,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 1. init collection
         collection_w, insert_vectors, _, insert_ids = \
             self.init_collection_general(prefix, True, nb=nb, multiple_dim_array=[dim, dim * 2],
-                                         with_json=False, vector_data_type="SPARSE_FLOAT_VECTOR")[0:4]
+                                         with_json=False, vector_data_type=DataType.SPARSE_FLOAT_VECTOR)[0:4]
         # 2. extract vector field name
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
         # 3. prepare search params

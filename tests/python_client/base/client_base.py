@@ -1,4 +1,3 @@
-import pytest
 import sys
 from typing import Dict, List
 from pymilvus import DefaultConfig
@@ -18,7 +17,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_params import IndexPrams
 
-from pymilvus import ResourceGroupInfo, DataType, utility
+from pymilvus import ResourceGroupInfo, DataType, utility, MilvusClient
 import pymilvus
 
 
@@ -170,6 +169,22 @@ class TestcaseBase(Base):
         log.info(f"server version: {server_version}")
         return res
 
+
+    def get_tokens_by_analyzer(self, text, analyzer_params):
+        if cf.param_info.param_uri:
+            uri = cf.param_info.param_uri
+        else:
+            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+
+        client = MilvusClient(
+            uri = uri,
+            token = cf.param_info.param_token
+        )
+        res = client.run_analyzer(text, analyzer_params, with_detail=True, with_hash=True)
+        tokens = [r['token'] for r in res.tokens]
+        return tokens
+        
+
     # def init_async_milvus_client(self):
     #     uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
     #     kwargs = {
@@ -260,7 +275,7 @@ class TestcaseBase(Base):
                                 auto_id=False, dim=ct.default_dim, is_index=True,
                                 primary_field=ct.default_int64_field_name, is_flush=True, name=None,
                                 enable_dynamic_field=False, with_json=True, random_primary_key=False,
-                                multiple_dim_array=[], is_partition_key=None, vector_data_type="FLOAT_VECTOR",
+                                multiple_dim_array=[], is_partition_key=None, vector_data_type=DataType.FLOAT_VECTOR,
                                 nullable_fields={}, default_value_fields={}, language=None, **kwargs):
         """
         target: create specified collections
@@ -302,7 +317,7 @@ class TestcaseBase(Base):
                                                                      primary_field=primary_field,
                                                                      nullable_fields=nullable_fields,
                                                                      default_value_fields=default_value_fields)
-        if vector_data_type == ct.sparse_vector:
+        if vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
             default_schema = cf.gen_default_sparse_schema(auto_id=auto_id, primary_field=primary_field,
                                                           enable_dynamic_field=enable_dynamic_field,
                                                           with_json=with_json,
@@ -339,7 +354,7 @@ class TestcaseBase(Base):
             # This condition will be removed after auto index feature
             if is_binary:
                 collection_w.create_index(ct.default_binary_vec_field_name, ct.default_bin_flat_index)
-            elif vector_data_type == ct.sparse_vector:
+            elif vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
                 for vector_name in vector_name_list:
                     collection_w.create_index(vector_name, ct.default_sparse_inverted_index)
             else:
@@ -347,7 +362,7 @@ class TestcaseBase(Base):
                     vector_name_list.append(ct.default_float_vec_field_name)
                 for vector_name in vector_name_list:
                     # Unlike dense vectors, sparse vectors cannot create flat index.
-                    if ct.sparse_vector in vector_name:
+                    if DataType.SPARSE_FLOAT_VECTOR.name in vector_name:
                         collection_w.create_index(vector_name, ct.default_sparse_inverted_index)
                     else:
                         collection_w.create_index(vector_name, ct.default_flat_index)

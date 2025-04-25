@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -400,7 +401,7 @@ func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	s.session = session
 	s.icSession = session
 	if s.session == nil {
-		return fmt.Errorf("session is nil, the etcd client connection may have failed")
+		return errors.New("session is nil, the etcd client connection may have failed")
 	}
 	return nil
 }
@@ -816,7 +817,8 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 		case sessionutil.SessionAddEvent:
 			log.Info("received querynode register",
 				zap.String("address", event.Session.Address),
-				zap.Int64("serverID", event.Session.ServerID))
+				zap.Int64("serverID", event.Session.ServerID),
+				zap.Bool("indexNonEncoding", event.Session.IndexNonEncoding))
 			s.indexEngineVersionManager.AddNode(event.Session)
 		case sessionutil.SessionDelEvent:
 			log.Info("received querynode unregister",

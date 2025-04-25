@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !darwin && !openbsd && !freebsd
-// +build !darwin,!openbsd,!freebsd
+//go:build !darwin && !openbsd && !freebsd && !windows
+// +build !darwin,!openbsd,!freebsd,!windows
 
 package hardware
 

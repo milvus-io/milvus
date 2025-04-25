@@ -240,6 +240,11 @@ func WriteYaml(w io.Writer) {
 # 2. cluster mode:  Pulsar(default) > Kafka (rocksmq and natsmq is unsupported in cluster mode)`,
 		},
 		{
+			name: "woodpecker",
+			header: `
+# Related configuration of woodpecker, used to manage Milvus logs of recent mutation operations, output streaming log, and provide embedded log sequential read and write.`,
+		},
+		{
 			name: "pulsar",
 			header: `
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.`,
@@ -354,6 +359,20 @@ func WriteYaml(w io.Writer) {
 			name: "knowhere",
 			header: `
 # Any configuration related to the knowhere vector search engine`,
+		},
+		{
+			name: "credential",
+			header: `
+# credential configs, support apikey, AKSK, gcp credential
+# examples:
+# credential:
+#  your_apikey_crendential_name:
+#    apikey:  # Your apikey credential
+#  your_aksk_crendential_name:
+#    access_key_id:
+#    secret_access_key:
+#  your_gcp_credential_name:
+#    credential_json:`,
 		},
 		{
 			name: "function",

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
 
@@ -47,7 +48,7 @@ func (b etcd210) loadTtAliases() (meta.TtAliasesMeta210, error) {
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, fmt.Errorf("length mismatch")
+		return nil, errors.New("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -79,7 +80,7 @@ func (b etcd210) loadAliases() (meta.AliasesMeta210, error) {
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, fmt.Errorf("length mismatch")
+		return nil, errors.New("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -107,7 +108,7 @@ func (b etcd210) loadTtCollections() (meta.TtCollectionsMeta210, error) {
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, fmt.Errorf("length mismatch")
+		return nil, errors.New("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -149,7 +150,7 @@ func (b etcd210) loadCollections() (meta.CollectionsMeta210, error) {
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, fmt.Errorf("length mismatch")
+		return nil, errors.New("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -204,7 +205,7 @@ func (b etcd210) loadCollectionIndexes() (meta.CollectionIndexesMeta210, error) 
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, fmt.Errorf("length mismatch")
+		return nil, errors.New("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -232,7 +233,7 @@ func (b etcd210) loadSegmentIndexes() (meta.SegmentIndexesMeta210, error) {
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, fmt.Errorf("length mismatch")
+		return nil, errors.New("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -255,7 +256,7 @@ func (b etcd210) loadIndexBuildMeta() (meta.IndexBuildMeta210, error) {
 		return nil, err
 	}
 	if len(keys) != len(values) {
-		return nil, fmt.Errorf("length mismatch")
+		return nil, errors.New("length mismatch")
 	}
 	l := len(keys)
 	for i := 0; i < l; i++ {
@@ -284,7 +285,7 @@ func (b etcd210) loadLastDDLRecords() (meta.LastDDLRecords, error) {
 			return nil, err
 		}
 		if len(keys) != len(values) {
-			return nil, fmt.Errorf("length mismatch")
+			return nil, errors.New("length mismatch")
 		}
 		for i, k := range keys {
 			records.AddRecord(k, values[i])

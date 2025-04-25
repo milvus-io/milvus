@@ -118,12 +118,12 @@ func (nc *nmqClient) Subscribe(ctx context.Context, options mqwrapper.ConsumerOp
 
 	if options.Topic == "" {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
-		return nil, fmt.Errorf("invalid consumer config: empty topic")
+		return nil, errors.New("invalid consumer config: empty topic")
 	}
 
 	if options.SubscriptionName == "" {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
-		return nil, fmt.Errorf("invalid consumer config: empty subscription name")
+		return nil, errors.New("invalid consumer config: empty subscription name")
 	}
 	// TODO: inject jetstream options.
 	js, err := nc.conn.JetStream()

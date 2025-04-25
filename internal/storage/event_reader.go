@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
@@ -34,7 +36,7 @@ type EventReader struct {
 
 func (reader *EventReader) readHeader() error {
 	if reader.isClosed {
-		return fmt.Errorf("event reader is closed")
+		return errors.New("event reader is closed")
 	}
 	header, err := readEventHeader(reader.buffer)
 	if err != nil {
@@ -46,7 +48,7 @@ func (reader *EventReader) readHeader() error {
 
 func (reader *EventReader) readData() error {
 	if reader.isClosed {
-		return fmt.Errorf("event reader is closed")
+		return errors.New("event reader is closed")
 	}
 	var data eventData
 	var err error

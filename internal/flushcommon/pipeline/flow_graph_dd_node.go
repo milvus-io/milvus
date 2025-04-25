@@ -296,6 +296,21 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			} else {
 				logger.Info("handle import message success")
 			}
+		case commonpb.MsgType_AddCollectionField:
+			schemaMsg := msg.(*adaptor.SchemaChangeMessageBody)
+			header := schemaMsg.SchemaChangeMessage.Header()
+			if header.GetCollectionId() != ddn.collectionID {
+				continue
+			}
+			logger := log.With(zap.String("vchannel", ddn.Name()))
+			logger.Info("receive schema change message")
+			body, err := schemaMsg.SchemaChangeMessage.Body()
+			if err != nil {
+				logger.Warn("failed to unmarshal schema change message body", zap.Error(err))
+				continue
+			}
+			fgMsg.updatedSchema = body.GetSchema()
+			ddn.msgHandler.HandleSchemaChange(ddn.ctx, ddn.vChannelName, schemaMsg)
 		}
 	}
 

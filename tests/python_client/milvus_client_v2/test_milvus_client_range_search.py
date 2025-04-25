@@ -92,7 +92,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                 pytest.skip(f"skip index type {request.param}")
         yield request.param
 
-    @pytest.fixture(scope="function", params=ct.float_metrics)
+    @pytest.fixture(scope="function", params=ct.dense_metrics)
     def metric(self, request):
         tags = request.config.getoption("--tags")
         if CaseLabel.L2 not in tags:
@@ -1574,7 +1574,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, True, nb=5000,
                                                     with_json=True,
-                                                    vector_data_type=ct.sparse_vector)[0]
+                                                    vector_data_type=DataType.SPARSE_FLOAT_VECTOR)[0]
         range_filter = random.uniform(0.5, 1)
         radius = random.uniform(0, 0.5)
 

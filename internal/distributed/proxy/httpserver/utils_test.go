@@ -17,6 +17,7 @@
 package httpserver
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -1087,14 +1088,14 @@ func TestConvertQueries2Placeholder(t *testing.T) {
 				dataType,
 				0,
 				func() [][]byte {
-					return [][]byte{nil, nil}
+					return [][]byte{{}, {}}
 				},
 			}, {
 				`"{"data": [""]}"`,
 				dataType,
 				0,
 				func() [][]byte {
-					return [][]byte{nil}
+					return [][]byte{{}}
 				},
 			},
 		}...)
@@ -1159,7 +1160,8 @@ func TestConvertQueries2Placeholder(t *testing.T) {
 	for _, testcase := range testCases {
 		phv, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim)
 		assert.Nil(t, err)
-		assert.Equal(t, testcase.placehoderValue(), phv.GetValues())
+		assert.Equal(t, testcase.placehoderValue(), phv.GetValues(),
+			fmt.Sprintf("check equal fail, data: %s, type: %s, dim: %d", testcase.requestBody, testcase.dataType, testcase.dim))
 	}
 
 	for _, testcase := range []testCase{
@@ -1186,7 +1188,8 @@ func TestConvertQueries2Placeholder(t *testing.T) {
 	} {
 		phv, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim)
 		assert.Nil(t, err)
-		assert.NotEqual(t, testcase.placehoderValue(), phv.GetValues())
+		assert.NotEqual(t, testcase.placehoderValue(), phv.GetValues(),
+			fmt.Sprintf("check not equal fail, data: %s, type: %s, dim: %d", testcase.requestBody, testcase.dataType, testcase.dim))
 	}
 
 	for _, testcase := range []testCase{

@@ -13,21 +13,21 @@ type TimeTickSyncOperator interface {
 	Channel() types.PChannelInfo
 
 	// MVCCManager returns the related mvcc timestamp manager of current wal.
-	MVCCManager(ctx context.Context) (*mvcc.MVCCManager, error)
+	MVCCManager() *mvcc.MVCCManager
 
 	// WriteAheadBuffer get the related WriteAhead buffer.
-	WriteAheadBuffer(ctx context.Context) (wab.ROWriteAheadBuffer, error)
+	WriteAheadBuffer() wab.ROWriteAheadBuffer
 
 	// Sync trigger a sync operation, try to send the timetick message into wal.
 	// Sync operation is a blocking operation, and not thread-safe, will only call in one goroutine.
-	Sync(ctx context.Context)
+	Sync(ctx context.Context, forcePersisted bool)
 }
 
 // TimeTickSyncInspector is the inspector to sync time tick.
 type TimeTickSyncInspector interface {
 	// TriggerSync adds a pchannel info and notify the sync operation.
 	// manually trigger the sync operation of pchannel.
-	TriggerSync(pChannelInfo types.PChannelInfo)
+	TriggerSync(pChannelInfo types.PChannelInfo, forcePersisted bool)
 
 	// RegisterSyncOperator registers a sync operator.
 	RegisterSyncOperator(operator TimeTickSyncOperator)

@@ -29,9 +29,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	milvusCredentials "github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -53,13 +55,13 @@ type BedrockEmbeddingProvider struct {
 
 func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey string, region string) (*bedrockruntime.Client, error) {
 	if awsAccessKeyId == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `aws_access_key_id`, or configure the %s environment variable in the Milvus service.", bedrockAccessKeyId)
+		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", bedrockAccessKeyId)
 	}
 	if awsSecretAccessKey == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `aws_secret_access_key`, or configure the %s environment variable in the Milvus service.", bedrockSAKEnvStr)
+		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", bedrockSAKEnvStr)
 	}
 	if region == "" {
-		return nil, fmt.Errorf("Missing AWS Service region. Please pass `region` param.")
+		return nil, errors.New("Missing AWS Service region. Please pass `region` param.")
 	}
 
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region),
@@ -73,28 +75,29 @@ func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey stri
 	return bedrockruntime.NewFromConfig(cfg), nil
 }
 
-func parseAccessInfo(params []*commonpb.KeyValuePair, confParams map[string]string) (string, string) {
-	// function param > env > yaml
+func parseAKSKInfo(credentials *milvusCredentials.CredentialsManager, params []*commonpb.KeyValuePair, confParams map[string]string) (string, string, error) {
+	// function param > yaml > env
 	var awsAccessKeyId, awsSecretAccessKey string
+	var err error
 
-	// from function params
-	if isEnableVerifiInfoInParamsKey(confParams) {
-		for _, param := range params {
-			switch strings.ToLower(param.Key) {
-			case awsAKIdParamKey:
-				awsAccessKeyId = param.Value
-			case awsSAKParamKey:
-				awsSecretAccessKey = param.Value
+	for _, param := range params {
+		switch strings.ToLower(param.Key) {
+		case credentialParamKey:
+			credentialName := param.Value
+			if awsAccessKeyId, awsSecretAccessKey, err = credentials.GetAKSKCredential(credentialName); err != nil {
+				return "", "", err
 			}
 		}
 	}
 
 	// from milvus.yaml
-	if awsAccessKeyId == "" {
-		awsAccessKeyId = confParams[awsAKIdParamKey]
-	}
-	if awsSecretAccessKey == "" {
-		awsSecretAccessKey = confParams[awsSAKParamKey]
+	if awsAccessKeyId == "" && awsSecretAccessKey == "" {
+		credentialName := confParams[credentialParamKey]
+		if credentialName != "" {
+			if awsAccessKeyId, awsSecretAccessKey, err = credentials.GetAKSKCredential(credentialName); err != nil {
+				return "", "", err
+			}
+		}
 	}
 
 	// from env
@@ -105,10 +108,10 @@ func parseAccessInfo(params []*commonpb.KeyValuePair, confParams map[string]stri
 		awsSecretAccessKey = os.Getenv(bedrockSAKEnvStr)
 	}
 
-	return awsAccessKeyId, awsSecretAccessKey
+	return awsAccessKeyId, awsSecretAccessKey, nil
 }
 
-func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c BedrockClient, params map[string]string) (*BedrockEmbeddingProvider, error) {
+func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c BedrockClient, params map[string]string, credentials *milvusCredentials.CredentialsManager) (*BedrockEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
@@ -141,7 +144,10 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 		}
 	}
 
-	awsAccessKeyId, awsSecretAccessKey := parseAccessInfo(functionSchema.Params, params)
+	awsAccessKeyId, awsSecretAccessKey, err := parseAKSKInfo(credentials, functionSchema.Params, params)
+	if err != nil {
+		return nil, err
+	}
 
 	var client BedrockClient
 	if c == nil {

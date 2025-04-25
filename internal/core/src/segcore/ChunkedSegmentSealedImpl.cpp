@@ -285,8 +285,10 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                                  std::nullopt);
             std::shared_ptr<milvus::ArrowDataWrapper> r;
             while (data.arrow_reader_channel->pop(r)) {
+                arrow::ArrayVector array_vec =
+                    read_single_column_batches(r->reader);
                 auto chunk = std::dynamic_pointer_cast<FixedWidthChunk>(
-                    create_chunk(field_meta, 1, r->reader));
+                    create_chunk(field_meta, 1, array_vec));
                 std::copy_n(static_cast<const Timestamp*>(chunk->Span().data()),
                             chunk->Span().row_count(),
                             timestamps.data() + offset);
@@ -349,7 +351,9 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             field_meta);
                     std::shared_ptr<milvus::ArrowDataWrapper> r;
                     while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
+                        arrow::ArrayVector array_vec =
+                            read_single_column_batches(r->reader);
+                        auto chunk = create_chunk(field_meta, 1, array_vec);
                         var_column->AddChunk(chunk);
                     }
                     // var_column->Seal();
@@ -365,7 +369,9 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             field_meta);
                     std::shared_ptr<milvus::ArrowDataWrapper> r;
                     while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
+                        arrow::ArrayVector array_vec =
+                            read_single_column_batches(r->reader);
+                        auto chunk = create_chunk(field_meta, 1, array_vec);
                         var_column->AddChunk(chunk);
                     }
                     // var_column->Seal();
@@ -379,7 +385,9 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         std::make_shared<ChunkedArrayColumn>(field_meta);
                     std::shared_ptr<milvus::ArrowDataWrapper> r;
                     while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
+                        arrow::ArrayVector array_vec =
+                            read_single_column_batches(r->reader);
+                        auto chunk = create_chunk(field_meta, 1, array_vec);
                         var_column->AddChunk(chunk);
                     }
                     column = std::move(var_column);
@@ -390,7 +398,9 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         std::make_shared<ChunkedSparseFloatColumn>(field_meta);
                     std::shared_ptr<milvus::ArrowDataWrapper> r;
                     while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
+                        arrow::ArrayVector array_vec =
+                            read_single_column_batches(r->reader);
+                        auto chunk = create_chunk(field_meta, 1, array_vec);
                         col->AddChunk(chunk);
                     }
                     column = std::move(col);
@@ -409,6 +419,8 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             column = std::make_shared<ChunkedColumn>(field_meta);
             std::shared_ptr<milvus::ArrowDataWrapper> r;
             while (data.arrow_reader_channel->pop(r)) {
+                arrow::ArrayVector array_vec =
+                    read_single_column_batches(r->reader);
                 auto chunk =
                     create_chunk(field_meta,
                                  IsVectorDataType(field_meta.get_data_type()) &&
@@ -416,7 +428,7 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                                              field_meta.get_data_type())
                                      ? field_meta.get_dim()
                                      : 1,
-                                 r->reader);
+                                 array_vec);
                 // column->AppendBatch(field_data);
                 // stats_.mem_size += field_data->Size();
                 column->AddChunk(chunk);
@@ -501,13 +513,7 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
     size_t file_offset = 0;
     std::vector<std::shared_ptr<Chunk>> chunks;
     while (data.arrow_reader_channel->pop(r)) {
-        // WriteFieldData(file,
-        //                data_type,
-        //                field_data,
-        //                total_written,
-        //                indices,
-        //                element_indices,
-        //                valid_data);
+        arrow::ArrayVector array_vec = read_single_column_batches(r->reader);
         auto chunk = create_chunk(
             field_meta,
             IsVectorDataType(field_meta.get_data_type()) &&
@@ -516,7 +522,7 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
                 : 1,
             file,
             file_offset,
-            r->reader);
+            array_vec);
         file_offset += chunk->Size();
         chunks.push_back(chunk);
     }
@@ -1110,8 +1116,10 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
     auto& request_fields = plan->extra_info_opt_.value().involved_fields_;
     auto field_ready_bitset =
         field_data_ready_bitset_ | index_ready_bitset_ | binlog_index_bitset_;
-    AssertInfo(request_fields.size() == field_ready_bitset.size(),
-               "Request fields size not equal to field ready bitset size when "
+
+    // allow absent fields after supporting add fields
+    AssertInfo(request_fields.size() >= field_ready_bitset.size(),
+               "Request fields size less than field ready bitset size when "
                "check search");
     auto absent_fields = request_fields - field_ready_bitset;
 

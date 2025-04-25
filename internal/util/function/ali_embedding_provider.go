@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -41,7 +42,7 @@ type AliEmbeddingProvider struct {
 
 func createAliEmbeddingClient(apiKey string, url string) (*ali.AliDashScopeEmbedding, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials. Please pass `api_key`, or configure the %s environment variable in the Milvus service.", dashscopeAKEnvStr)
+		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", dashscopeAKEnvStr)
 	}
 
 	if url == "" {
@@ -51,12 +52,15 @@ func createAliEmbeddingClient(apiKey string, url string) (*ali.AliDashScopeEmbed
 	return c, nil
 }
 
-func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string) (*AliEmbeddingProvider, error) {
+func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.CredentialsManager) (*AliEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	apiKey, url := parseAKAndURL(functionSchema.Params, params, dashscopeAKEnvStr)
+	apiKey, url, err := parseAKAndURL(credentials, functionSchema.Params, params, dashscopeAKEnvStr)
+	if err != nil {
+		return nil, err
+	}
 	var modelName string
 	var dim int64
 

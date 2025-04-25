@@ -165,7 +165,7 @@ minio:
 # 2. cluster mode:  Pulsar(default) > Kafka (rocksmq and natsmq is unsupported in cluster mode)
 mq:
   # Default value: "default"
-  # Valid values: [default, pulsar, kafka, rocksmq, natsmq]
+  # Valid values: [default, pulsar, kafka, rocksmq, natsmq, woodpecker]
   type: default
   enablePursuitMode: true # Default value: "true"
   pursuitLag: 10 # time tick lag threshold to enter pursuit mode, in seconds
@@ -176,6 +176,36 @@ mq:
     mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
     targetBufSize: 16 # the lenth of channel buffer for targe
     maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
+
+# Related configuration of woodpecker, used to manage Milvus logs of recent mutation operations, output streaming log, and provide embedded log sequential read and write.
+woodpecker:
+  meta:
+    type: etcd # The Type of the metadata provider. currently only support etcd.
+    prefix: woodpecker # The Prefix of the metadata provider. default is woodpecker.
+  client:
+    segmentAppend:
+      queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
+      maxRetries: 3 # Maximum number of retries for segment append operations.
+    segmentRollingPolicy:
+      maxSize: 2000000000 # Maximum entries count of a segment, default is 2GB
+      maxInterval: 600 # Maximum interval between two segments in seconds, default is 10 minutes.
+    auditor:
+      maxInterval: 10 # Maximum interval between two auditing operations in seconds, default is 10 seconds.
+  logstore:
+    logFileSyncPolicy:
+      maxInterval: 1000 # Maximum interval between two sync operations in milliseconds.
+      maxBytes: 64000000 # Maximum size of write buffer in bytes.
+      maxEntries: 100000 # Maximum entries number of write buffer.
+      maxFlushRetries: 5 # Maximum size of write buffer in bytes.
+      retryInterval: 1000 # Maximum interval between two retries in milliseconds.
+      maxFlushSize: 8000000 # Maximum size of a fragment in bytes to flush, default is 8M.
+      maxFlushThreads: 4 # Maximum number of threads to flush data
+    fragmentManager:
+      maxBytes: 1000000000 # Maximum size of fragment cached data in bytes.
+      maxInterval: 1000 # Maximum interval between two fragment evicts in milliseconds.
+  storage:
+    type: minio # The Type of the storage provider. Valid values: [default, minio, local, service], default is minio.
+    rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -423,7 +453,7 @@ queryNode:
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
   cache:
-    memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
+    memoryLimit: 2147483648 # Deprecated: 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
     # options: async, sync, disable. 
     # Specifies the necessity for warming up the chunk cache. 
@@ -1189,32 +1219,50 @@ knowhere:
     search:
       beam_width_ratio: 4 # Ratio between the maximum number of IO requests per search iteration and CPU number
 
+# credential configs, support apikey, AKSK, gcp credential
+# examples:
+# credential:
+#  your_apikey_crendential_name:
+#    apikey:  # Your apikey credential
+#  your_aksk_crendential_name:
+#    access_key_id:
+#    secret_access_key:
+#  your_gcp_credential_name:
+#    credential_json:
+credential:
+  aksk1:
+    access_key_id:  # Your access_key_id
+    secret_access_key:  # Your secret_access_key
+  apikey1:
+    apikey:  # Your apikey credential
+  gcp1:
+    credential_json:  # base64 based gcp credential data
+
 # Any configuration related to functions
 function:
   textEmbedding:
-    enableVerifiInfoInParams: true # Controls whether to allow configuration of apikey and model service url on function parameters
     providers:
       azure_openai:
-        api_key:  # Your azure openai embedding url, Default is the official embedding url
+        credential:  # The name in the crendential configuration item
         resource_name:  # Your azure openai resource name
-        url:  # Your azure openai api key
+        url:  # Your azure openai embedding url, Default is the official embedding url
       bedrock:
-        aws_access_key_id:  # Your aws_access_key_id
-        aws_secret_access_key:  # Your aws_secret_access_key
+        credential:  # The name in the crendential configuration item
       cohere:
-        api_key:  # Your cohere embedding url, Default is the official embedding url
-        url:  # Your cohere api key
+        credential:  # The name in the crendential configuration item
+        url:  # Your cohere embedding url, Default is the official embedding url
       dashscope:
-        api_key:  # Your dashscope embedding url, Default is the official embedding url
-        url:  # Your dashscope api key
+        credential:  # The name in the crendential configuration item
+        url:  # Your dashscope embedding url, Default is the official embedding url
       openai:
-        api_key:  # Your openai embedding url, Default is the official embedding url
-        url:  # Your openai api key
+        credential:  # The name in the crendential configuration item
+        url:  # Your openai embedding url, Default is the official embedding url
       siliconflow:
-        api_key:  # Your siliconflow api key
+        credential:  # The name in the crendential configuration item
         url:  # Your siliconflow embedding url, Default is the official embedding url
       tei:
+        credential:  # The name in the crendential configuration item
         enable: true # Whether to enable TEI model service
       vertexai:
-        credentials_file_path:  # Path to your google application credentials, change the file path to refresh the configuration
+        credential:  # The name in the crendential configuration item
         url:  # Your VertexAI embedding url

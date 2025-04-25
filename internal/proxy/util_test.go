@@ -931,7 +931,7 @@ func TestPasswordVerify(t *testing.T) {
 	mockedRootCoord := NewMixCoordMock()
 	mockedRootCoord.GetGetCredentialFunc = func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
 		invokedCount++
-		return nil, fmt.Errorf("get cred not found credential")
+		return nil, errors.New("get cred not found credential")
 	}
 
 	metaCache := &MetaCache{
@@ -2851,8 +2851,19 @@ func TestValidateFunction(t *testing.T) {
 
 func TestValidateModelFunction(t *testing.T) {
 	t.Run("Valid model function schema", func(t *testing.T) {
+		paramtable.Init()
+		paramtable.Get().CredentialCfg.Credential.GetFunc = func() map[string]string {
+			return map[string]string{
+				"mock.apikey": "mock",
+			}
+		}
 		ts := function.CreateOpenAIEmbeddingServer()
 		defer ts.Close()
+		paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
+			return map[string]string{
+				"openai.url": ts.URL,
+			}
+		}
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
@@ -2879,8 +2890,7 @@ func TestValidateModelFunction(t *testing.T) {
 					Params: []*commonpb.KeyValuePair{
 						{Key: "provider", Value: "openai"},
 						{Key: "model_name", Value: "text-embedding-ada-002"},
-						{Key: "api_key", Value: "mock"},
-						{Key: "url", Value: ts.URL},
+						{Key: "credential", Value: "mock"},
 						{Key: "dim", Value: "4"},
 					},
 				},

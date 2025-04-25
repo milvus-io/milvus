@@ -21,16 +21,19 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 )
@@ -497,21 +500,99 @@ func (b *BroadcastAlteredCollectionStep) Desc() string {
 
 type AddCollectionFieldStep struct {
 	baseStep
-	oldColl  *model.Collection
-	newField *model.Field
-	ts       Timestamp
+	oldColl           *model.Collection
+	updatedCollection *model.Collection
+	newField          *model.Field
+	ts                Timestamp
 }
 
 func (a *AddCollectionFieldStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	newColl := a.oldColl.Clone()
-	newColl.Fields = append(newColl.Fields, a.newField)
-	err := a.core.meta.AlterCollection(ctx, a.oldColl, newColl, a.ts)
+	// newColl := a.oldColl.Clone()
+	// newColl.Fields = append(newColl.Fields, a.newField)
+	err := a.core.meta.AlterCollection(ctx, a.oldColl, a.updatedCollection, a.updatedCollection.UpdateTimestamp)
 	log.Ctx(ctx).Info("add field done", zap.Int64("collectionID", a.oldColl.CollectionID), zap.Any("new field", a.newField))
 	return nil, err
 }
 
 func (a *AddCollectionFieldStep) Desc() string {
 	return fmt.Sprintf("add field, collectionID: %d, fieldID: %d, ts: %d", a.oldColl.CollectionID, a.newField.FieldID, a.ts)
+}
+
+type WriteSchemaChangeWALStep struct {
+	baseStep
+	collection *model.Collection
+	ts         Timestamp
+}
+
+func (s *WriteSchemaChangeWALStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	vchannels := s.collection.VirtualChannelNames
+	schema := &schemapb.CollectionSchema{
+		Name:               s.collection.Name,
+		Description:        s.collection.Description,
+		AutoID:             s.collection.AutoID,
+		Fields:             model.MarshalFieldModels(s.collection.Fields),
+		Functions:          model.MarshalFunctionModels(s.collection.Functions),
+		EnableDynamicField: s.collection.EnableDynamicField,
+		Properties:         s.collection.Properties,
+	}
+
+	schemaMsg, err := message.NewSchemaChangeMessageBuilderV2().
+		WithBroadcast(vchannels).
+		WithHeader(&message.SchemaChangeMessageHeader{
+			CollectionId: s.collection.CollectionID,
+		}).
+		WithBody(&message.SchemaChangeMessageBody{
+			Schema:   schema,
+			ModifyTs: s.ts,
+		}).BuildBroadcast()
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := streaming.WAL().Broadcast().Append(ctx, schemaMsg)
+	if err != nil {
+		return nil, err
+	}
+
+	// use broadcast max msg timestamp as update timestamp here
+	s.collection.UpdateTimestamp = lo.Max(lo.Map(vchannels, func(channelName string, _ int) uint64 {
+		return resp.GetAppendResult(channelName).TimeTick
+	}))
+	log.Ctx(ctx).Info(
+		"broadcast schema change success",
+		zap.Uint64("broadcastID", resp.BroadcastID),
+		zap.Uint64("WALUpdateTimestamp", s.collection.UpdateTimestamp),
+		zap.Any("appendResults", resp.AppendResults),
+	)
+
+	flushMsg, err := message.NewManualFlushMessageBuilderV2().
+		WithBroadcast(vchannels).
+		WithHeader(&messagespb.ManualFlushMessageHeader{
+			CollectionId: s.collection.CollectionID,
+			FlushTs:      s.ts,
+		}).
+		WithBody(&message.ManualFlushMessageBody{}).BuildBroadcast()
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO remove manual flush and make schema change trigger flush as well
+	resp, err = streaming.WAL().Broadcast().Append(ctx, flushMsg)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Ctx(ctx).Info(
+		"broadcast schema manual flush success",
+		zap.Uint64("broadcastID", resp.BroadcastID),
+		zap.Any("appendResults", resp.AppendResults),
+	)
+
+	return nil, nil
+}
+
+func (s *WriteSchemaChangeWALStep) Desc() string {
+	return fmt.Sprintf("write schema change WALcollectionID: %d, ts: %d", s.collection.CollectionID, s.ts)
 }
 
 type AlterDatabaseStep struct {

@@ -164,11 +164,14 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
 
 VectorPtr
 PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
-    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
-                               ? active_count_ - current_data_chunk_pos_
-                               : batch_size_;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (cached_index_chunk_id_ != 0) {
+        cached_index_chunk_id_ = 0;
         const segcore::SegmentInternalInterface* segment = nullptr;
         if (segment_->type() == SegmentType::Growing) {
             segment =
@@ -196,12 +199,11 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
                                                      is_strong_consistency,
                                                      filter_func)
                                       .clone();
-        cached_index_chunk_id_ = 0;
     }
     TargetBitmap result;
     result.append(
-        cached_index_chunk_res_, current_data_chunk_pos_, real_batch_size);
-    current_data_chunk_pos_ += real_batch_size;
+        cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
 }

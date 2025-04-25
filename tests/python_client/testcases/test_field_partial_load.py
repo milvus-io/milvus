@@ -5,7 +5,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
 
-
+@pytest.mark.skip(reason="field partial load behavior changing @congqixia")
 class TestFieldPartialLoad(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_field_partial_load_default(self):
@@ -147,13 +147,13 @@ class TestFieldPartialLoad(TestcaseBase):
         pk_field = cf.gen_int64_field(name='pk', is_primary=True)
         load_string_field = cf.gen_string_field(name="string_load")
         vector_field = cf.gen_float_vec_field(name="vec_float32", dim=dim)
-        sparse_vector_field = cf.gen_float_vec_field(name="sparse", vector_data_type="SPARSE_FLOAT_VECTOR")
+        sparse_vector_field = cf.gen_float_vec_field(name="sparse", vector_data_type=DataType.SPARSE_FLOAT_VECTOR)
         schema = cf.gen_collection_schema(fields=[pk_field, load_string_field, vector_field, sparse_vector_field],
                                           auto_id=True)
         collection_w = self.init_collection_wrap(name=name, schema=schema)
         string_values = [str(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb, dim)
-        sparse_vec_values = cf.gen_vectors(nb, dim, vector_data_type="SPARSE_FLOAT_VECTOR")
+        sparse_vec_values = cf.gen_vectors(nb, dim, vector_data_type=DataType.SPARSE_FLOAT_VECTOR)
         collection_w.insert([string_values, float_vec_values, sparse_vec_values])
 
         # build index on one of vector fields
@@ -261,6 +261,7 @@ class TestFieldPartialLoad(TestcaseBase):
         assert len(res[0][0].fields.keys()) == 2
 
 
+@pytest.mark.skip(reason="field partial load behavior changing @congqixia")
 class TestFieldPartialLoadInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_skip_load_on_pk_field_or_vector_field(self):

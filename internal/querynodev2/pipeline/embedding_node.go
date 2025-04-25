@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -104,7 +106,7 @@ func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.In
 
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
 	if err != nil {
-		err = fmt.Errorf("failed to get primary keys, err = %d", err)
+		err = fmt.Errorf("failed to get primary keys, err = %v", err)
 		log.Error(err.Error(), zap.String("channel", eNode.channel))
 		return err
 	}
@@ -139,24 +141,23 @@ func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.In
 }
 
 func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, msg *msgstream.InsertMsg, stats map[int64]*storage.BM25Stats) error {
-	functionSchema := runner.GetSchema()
-	inputFieldID := functionSchema.GetInputFieldIds()[0]
-	outputFieldID := functionSchema.GetOutputFieldIds()[0]
+	inputFields := runner.GetInputFields()
 	outputField := runner.GetOutputFields()[0]
 
-	data, err := GetEmbeddingFieldData(msg.GetFieldsData(), inputFieldID)
-	if data == nil || err != nil {
-		return merr.WrapErrFieldNotFound(fmt.Sprint(inputFieldID))
+	outputFieldID := outputField.GetFieldID()
+	datas, err := getEmbeddingFieldDatas(msg.FieldsData, lo.Map(inputFields, func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
+	if err != nil {
+		return err
 	}
 
-	output, err := runner.BatchRun(data)
+	output, err := runner.BatchRun(datas...)
 	if err != nil {
 		return err
 	}
 
 	sparseArray, ok := output[0].(*schemapb.SparseFloatArray)
 	if !ok {
-		return fmt.Errorf("BM25 runner return unknown type output")
+		return errors.New("BM25 runner return unknown type output")
 	}
 
 	if _, ok := stats[outputFieldID]; !ok {
@@ -178,7 +179,7 @@ func (eNode *embeddingNode) embedding(msg *msgstream.InsertMsg, stats map[int64]
 			}
 		default:
 			log.Warn("pipeline embedding with unknown function type", zap.Any("type", functionSchema.GetType()))
-			return fmt.Errorf("unknown function type")
+			return errors.New("unknown function type")
 		}
 	}
 
@@ -205,7 +206,19 @@ func (eNode *embeddingNode) Operate(in Msg) Msg {
 	return nodeMsg
 }
 
-func GetEmbeddingFieldData(datas []*schemapb.FieldData, fieldID int64) ([]string, error) {
+func getEmbeddingFieldDatas(datas []*schemapb.FieldData, fieldIDs ...int64) ([]any, error) {
+	result := []any{}
+	for _, fieldID := range fieldIDs {
+		data, err := getEmbeddingFieldData(datas, fieldID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, data)
+	}
+	return result, nil
+}
+
+func getEmbeddingFieldData(datas []*schemapb.FieldData, fieldID int64) ([]string, error) {
 	for _, data := range datas {
 		if data.GetFieldId() == fieldID {
 			return data.GetScalars().GetStringData().GetData(), nil

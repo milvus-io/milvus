@@ -30,10 +30,7 @@ JsonKeyStatsInvertedIndex::AddJSONEncodeValue(
     uint16_t length,
     int32_t value,
     std::map<std::string, std::vector<int64_t>>& mp) {
-    std::string key = "";
-    if (!paths.empty()) {
-        key = std::string("/") + Join(paths, "/");
-    }
+    std::string key = milvus::Json::pointer(paths);
     LOG_DEBUG(
         "insert inverted key: {}, flag: {}, type: {}, row_id: {}, offset: "
         "{}, length:{}, value:{}",
@@ -61,6 +58,9 @@ JsonKeyStatsInvertedIndex::AddInvertedRecord(
     std::vector<uintptr_t> json_offsets_lens;
     std::vector<const char*> keys;
     std::vector<const int64_t*> json_offsets;
+    if (mp.empty()) {
+        return;
+    }
     for (auto& iter : mp) {
         keys.push_back(iter.first.c_str());
         json_offsets.push_back(iter.second.data());
@@ -382,7 +382,8 @@ JsonKeyStatsInvertedIndex::Load(milvus::tracer::TraceContext ctx,
     disk_file_manager_->CacheJsonKeyIndexToDisk(index_files.value());
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(path_.c_str());
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(path_.c_str(),
+                                                     milvus::index::SetBitset);
     LOG_INFO("load json key index done for field id:{} with dir:{}",
              field_id_,
              path_);

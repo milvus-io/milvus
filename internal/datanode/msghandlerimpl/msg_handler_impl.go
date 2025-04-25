@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -87,6 +88,13 @@ func (m *msgHandlerImpl) HandleImport(ctx context.Context, vchannel string, impo
 		log.Ctx(ctx).Info("import message handled", zap.String("job_id", importResp.GetJobID()))
 		return nil
 	}, retry.AttemptAlways())
+}
+
+func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, vchannel string, msg *adaptor.SchemaChangeMessageBody) error {
+	return streaming.WAL().Broadcast().Ack(ctx, types.BroadcastAckRequest{
+		BroadcastID: msg.BroadcastID,
+		VChannel:    vchannel,
+	})
 }
 
 func NewMsgHandlerImpl(broker broker.Broker) *msgHandlerImpl {

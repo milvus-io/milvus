@@ -26,40 +26,34 @@ func TestFunctionConfig(t *testing.T) {
 	params := ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 	cfg := &params.FunctionCfg
-	notExistProvider := cfg.GetTextEmbeddingProviderConfig("notExist")
-
-	// Only has enableVerifiInfoInParams config
-	assert.Equal(t, len(notExistProvider), 1)
-
 	teiConf := cfg.GetTextEmbeddingProviderConfig("tei")
 	assert.Equal(t, teiConf["enable"], "true")
-	assert.Equal(t, teiConf["enableVerifiInfoInParams"], "true")
 	openaiConf := cfg.GetTextEmbeddingProviderConfig("openai")
-	assert.Equal(t, openaiConf["api_key"], "")
+	assert.Equal(t, openaiConf["credential"], "")
 	assert.Equal(t, openaiConf["url"], "")
-	assert.Equal(t, openaiConf["enableVerifiInfoInParams"], "true")
 
 	keys := []string{
 		"tei.enable",
-		"azure_openai.api_key",
+		"tei.credential",
+		"azure_openai.credential",
 		"azure_openai.url",
 		"azure_openai.resource_name",
-		"openai.api_key",
+		"openai.credential",
 		"openai.url",
-		"dashscope.api_key",
+		"dashscope.credential",
 		"dashscope.url",
-		"cohere.api_key",
+		"cohere.credential",
 		"cohere.url",
-		"voyageai.api_key",
+		"voyageai.credential",
 		"voyageai.url",
 		"siliconflow.url",
-		"siliconflow.api_key",
-		"bedrock.aws_access_key_id",
-		"bedrock.aws_secret_access_key",
+		"siliconflow.credential",
+		"bedrock.credential",
 		"vertexai.url",
-		"vertexai.credentials_file_path",
+		"vertexai.credential",
 	}
 	for _, key := range keys {
 		assert.True(t, cfg.TextEmbeddingProviders.GetDoc(key) != "")
 	}
+	assert.True(t, cfg.TextEmbeddingProviders.GetDoc("Unknow") == "")
 }

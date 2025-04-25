@@ -28,13 +28,22 @@ serde_json = "1.0.128"
 jieba-rs = "0.6.8"
 regex = "1.11.1"
 either = "1.13.0"
+icu_segmenter = "2.0.0-beta2"
+whatlang = "0.16.4"
+lingua = "1.7.1"
+fancy-regex = "0.14.0"
 
 [dev-dependencies]
 rand = "0.3"
+criterion = "0.4"
 tempfile = "3.0"
 
 [build-dependencies]
 cbindgen = "0.26.0"
 
+[[bench]]
+name = "analyzer_bench"
+harness = false
+
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]

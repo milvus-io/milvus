@@ -721,7 +721,7 @@ func TestInsertRowFieldNameNotMatch(t *testing.T) {
 	// insert rows, with json key name: int64
 	rows := hp.GenInt64VecRows(10, false, false, *hp.TNewDataOption())
 	_, errInsert := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rows...))
-	common.CheckErr(t, errInsert, false, "row 0 does not has field pk")
+	common.CheckErr(t, errInsert, false, "fieldSchema(pk) has no corresponding fieldData pass in")
 }
 
 // test field name: pk, row json name: int64
@@ -806,7 +806,7 @@ func TestInsertDisableAutoIDRow(t *testing.T) {
 		rowsWithoutPk = append(rowsWithoutPk, &baseRow)
 	}
 	_, err1 := mc.Insert(ctx, client.NewRowBasedInsertOption(schema.CollectionName, rowsWithoutPk...))
-	common.CheckErr(t, err1, false, "row 0 does not has field int64")
+	common.CheckErr(t, err1, false, "fieldSchema(int64) has no corresponding fieldData pass in")
 }
 
 func TestInsertEnableAutoIDRow(t *testing.T) {

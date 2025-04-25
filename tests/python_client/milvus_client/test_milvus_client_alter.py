@@ -228,13 +228,11 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
                                     field_params={"mmap.enabled": False})
         self.alter_collection_field(client, collection_name, field_name=array_field_name,
                                     field_params={"max_length": new_max_length})
+        self.alter_collection_field(client, collection_name, field_name=array_field_name,
+                                    field_params={"max_capacity": 20})
         error = {ct.err_code: 999, ct.err_msg: f"can not modify the maxlength for non-string types"}
         self.alter_collection_field(client, collection_name, field_name=vector_field_name,
                                     field_params={"max_length": new_max_length},
-                                    check_task=CheckTasks.err_res, check_items=error)
-        error = {ct.err_code: 999, ct.err_msg: "max_capacity does not allow update in collection field param"}
-        self.alter_collection_field(client, collection_name, field_name=array_field_name,
-                                    field_params={"max_capacity": 20},
                                     check_task=CheckTasks.err_res, check_items=error)
         error = {ct.err_code: 999, ct.err_msg: "element_type does not allow update in collection field param"}
         self.alter_collection_field(client, collection_name, field_name=array_field_name,
@@ -244,7 +242,7 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
                                  check_items={str_field_name: {"max_length": new_max_length, "mmap_enabled": False},
                                               vector_field_name: {"mmap_enabled": False},
                                               json_field_name: {"mmap_enabled": True},
-                                              array_field_name: {"max_length": new_max_length, "max_capacity": 10}})
+                                              array_field_name: {"max_length": new_max_length, "max_capacity": 20}})
 
         # verify that cannot insert data with the old max_length
         for alter_field in [pk_field_name, str_field_name, array_field_name]:

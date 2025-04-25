@@ -1,7 +1,7 @@
 package indexparamcheck
 
 import (
-	"fmt"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -18,7 +18,7 @@ func (c *TRIEChecker) CheckTrain(dataType schemapb.DataType, params map[string]s
 
 func (c *TRIEChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	if !typeutil.IsStringType(field.GetDataType()) {
-		return fmt.Errorf("TRIE are only supported on varchar field")
+		return errors.New("TRIE are only supported on varchar field")
 	}
 	return nil
 }

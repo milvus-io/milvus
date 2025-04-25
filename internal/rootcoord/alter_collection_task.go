@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
@@ -44,7 +43,7 @@ type alterCollectionTask struct {
 
 func (a *alterCollectionTask) Prepare(ctx context.Context) error {
 	if a.Req.GetCollectionName() == "" {
-		return fmt.Errorf("alter collection failed, collection name does not exists")
+		return errors.New("alter collection failed, collection name does not exists")
 	}
 
 	return nil
@@ -244,11 +243,11 @@ type alterCollectionFieldTask struct {
 
 func (a *alterCollectionFieldTask) Prepare(ctx context.Context) error {
 	if a.Req.GetCollectionName() == "" {
-		return fmt.Errorf("alter collection field failed, collection name does not exists")
+		return errors.New("alter collection field failed, collection name does not exists")
 	}
 
 	if a.Req.GetFieldName() == "" {
-		return fmt.Errorf("alter collection field failed, filed name does not exists")
+		return errors.New("alter collection field failed, field name does not exists")
 	}
 
 	return nil
@@ -294,15 +293,15 @@ func executeAlterCollectionFieldTaskSteps(ctx context.Context,
 	ts Timestamp,
 ) error {
 	var err error
-	filedName := request.GetFieldName()
+	fieldName := request.GetFieldName()
 	newFieldProperties := UpdateFieldPropertyParams(oldFieldProperties, request.GetProperties())
 	oldColl := col.Clone()
-	err = ResetFieldProperties(oldColl, filedName, oldFieldProperties)
+	err = ResetFieldProperties(oldColl, fieldName, oldFieldProperties)
 	if err != nil {
 		return err
 	}
 	newColl := col.Clone()
-	err = ResetFieldProperties(newColl, filedName, newFieldProperties)
+	err = ResetFieldProperties(newColl, fieldName, newFieldProperties)
 	if err != nil {
 		return err
 	}

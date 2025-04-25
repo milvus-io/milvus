@@ -919,7 +919,7 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 		}
 
 		if consumer == nil {
-			return false, fmt.Errorf("consumer is nil")
+			return false, errors.New("consumer is nil")
 		}
 
 		seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
@@ -960,7 +960,7 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 	for idx := range msgPositions {
 		mp = msgPositions[idx]
 		if len(mp.MsgID) == 0 {
-			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
+			return errors.New("when msgID's length equal to 0, please use AsConsumer interface")
 		}
 		err = retry.Handle(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		// err = retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
@@ -984,7 +984,7 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*MsgPosition, 
 				log.Info("seek loop tick", zap.Int("loopMsgCnt", loopMsgCnt), zap.String("channel", mp.ChannelName))
 			case msg, ok := <-consumer.Chan():
 				if !ok {
-					return fmt.Errorf("consumer closed")
+					return errors.New("consumer closed")
 				}
 				loopMsgCnt++
 				consumer.Ack(msg)

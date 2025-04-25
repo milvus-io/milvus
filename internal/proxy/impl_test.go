@@ -19,7 +19,6 @@ package proxy
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -1262,7 +1261,7 @@ func TestProxy_Delete(t *testing.T) {
 		).Return(partitionID, nil)
 		cache.On("GetCollectionInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(basicInfo, nil)
 		chMgr.On("getVChannels", mock.Anything).Return(channels, nil)
-		chMgr.On("getChannels", mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		chMgr.On("getChannels", mock.Anything).Return(nil, errors.New("mock error"))
 		globalMetaCache = cache
 		rc := mocks.NewMockRootCoordClient(t)
 		tsoAllocator := &mockTsoAllocator{}

@@ -12,11 +12,11 @@
 package client
 
 import (
-	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
@@ -156,7 +156,7 @@ func TestClient_SubscribeError(t *testing.T) {
 	mockMQ.EXPECT().ExistConsumerGroup(testTopic, testGroupName).Return(false, nil, nil)
 	mockMQ.EXPECT().CreateConsumerGroup(testTopic, testGroupName).Return(nil)
 	mockMQ.EXPECT().RegisterConsumer(mock.Anything).Return(nil)
-	mockMQ.EXPECT().SeekToLatest(testTopic, testGroupName).Return(fmt.Errorf("test error"))
+	mockMQ.EXPECT().SeekToLatest(testTopic, testGroupName).Return(errors.New("test error"))
 
 	consumer, err := client.Subscribe(ConsumerOptions{
 		Topic:                       testTopic,
