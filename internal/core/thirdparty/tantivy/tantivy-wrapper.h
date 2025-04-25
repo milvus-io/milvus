@@ -87,7 +87,8 @@ struct TantivyIndexWrapper {
                         bool inverted_single_semgnent = false,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
-                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+                        bool enable_user_specified_doc_id = true) {
         RustResultWrapper res;
         if (inverted_single_semgnent) {
             AssertInfo(tantivy_index_version == 5,
@@ -102,7 +103,8 @@ struct TantivyIndexWrapper {
                                      path,
                                      tantivy_index_version,
                                      num_threads,
-                                     overall_memory_budget_in_bytes));
+                                     overall_memory_budget_in_bytes,
+                                     enable_user_specified_doc_id));
         }
         AssertInfo(res.result_->success,
                    "failed to create index: {}",

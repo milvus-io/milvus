@@ -30,6 +30,7 @@ impl IndexWriterWrapper {
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         tanviy_index_version: TantivyIndexVersion,
+        enable_user_specified_doc_id: bool,
     ) -> Result<IndexWriterWrapper> {
         init_log();
         match tanviy_index_version {
@@ -50,6 +51,7 @@ impl IndexWriterWrapper {
                     path,
                     num_threads,
                     overall_memory_budget_in_bytes,
+                    enable_user_specified_doc_id,
                 )?;
                 Ok(IndexWriterWrapper::V7(writer))
             }
@@ -182,6 +184,7 @@ mod tests {
                 1,
                 50_000_000,
                 TantivyIndexVersion::V5,
+                false,
             )
             .unwrap();
 
