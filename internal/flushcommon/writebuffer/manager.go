@@ -280,6 +280,5 @@ func (m *bufferManager) DropPartitions(channel string, partitionIDs []int64) {
 		log.Warn("failed to drop partition, channel not maintained in manager", zap.String("channel", channel), zap.Int64s("partitionIDs", partitionIDs))
 		return
 	}
-
 	buf.DropPartitions(partitionIDs)
 }

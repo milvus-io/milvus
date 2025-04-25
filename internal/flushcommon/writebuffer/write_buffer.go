@@ -202,8 +202,8 @@ func (wb *writeBufferBase) SealSegments(ctx context.Context, segmentIDs []int64)
 func (wb *writeBufferBase) DropPartitions(partitionIDs []int64) {
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
-
 	wb.dropPartitions(partitionIDs)
+	wb.metaWriter.NotifyDropPartition(context.Background(), partitionIDs)
 }
 
 func (wb *writeBufferBase) SetFlushTimestamp(flushTs uint64) {

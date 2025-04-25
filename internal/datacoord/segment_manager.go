@@ -683,3 +683,6 @@ func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel stri
 	})
 	s.channel2Growing.Remove(channel)
 }
+
+func (s *SegmentManager) DropSegmentsOfPartition(ctx context.Context, partitionID UniqueID) {
+}

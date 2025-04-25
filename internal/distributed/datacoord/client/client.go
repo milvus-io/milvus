@@ -781,3 +781,9 @@ func (c *Client) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest
 		return client.ListIndexes(ctx, in)
 	})
 }
+
+func (c *Client) NotifyDropPartition(ctx context.Context, in *datapb.NotifyDropPartitionRequest, opts ...grpc.CallOption) (*datapb.NotifyDropPartitionResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*datapb.NotifyDropPartitionResponse, error) {
+		return client.NotifyDropPartition(ctx, in)
+	})
+}

@@ -1488,3 +1488,37 @@ func TestMeta_GetSegmentsJSON(t *testing.T) {
 	assert.Equal(t, "Sealed", segments[1].State)
 	assert.True(t, segments[1].Compacted)
 }
+
+func Test_meta_DropSegmentsOfPartition(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	assert.NoError(t, err)
+
+	err = meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           1,
+		PartitionID:  1,
+		CollectionID: 1,
+	}))
+	assert.NoError(t, err)
+	err = meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           2,
+		PartitionID:  1,
+		CollectionID: 1,
+	}))
+	assert.NoError(t, err)
+	err = meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           3,
+		PartitionID:  2,
+		CollectionID: 1,
+	}))
+	assert.NoError(t, err)
+
+	err = meta.DropSegmentsOfPartition(context.Background(), 1)
+	assert.NoError(t, err)
+
+	segment := meta.GetSegment(context.Background(), 1)
+	assert.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+	segment = meta.GetSegment(context.Background(), 2)
+	assert.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+	segment = meta.GetSegment(context.Background(), 3)
+	assert.NotEqual(t, commonpb.SegmentState_Dropped, segment.GetState())
+}

@@ -2188,3 +2188,38 @@ func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
 
 	return segments
 }
+
+func (m *meta) DropSegmentsOfPartition(ctx context.Context, partitionID int64) error {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+
+	// Filter out the segments of the partition to be dropped.
+	metricMutation := &segMetricMutation{
+		stateChange: make(map[string]map[string]map[string]int),
+	}
+	modSegments := make([]*SegmentInfo, 0)
+	segments := make([]*datapb.SegmentInfo, 0)
+	// set existed segments of channel to Dropped
+	for _, seg := range m.segments.segments {
+		if seg.PartitionID != partitionID {
+			continue
+		}
+		clonedSeg := seg.Clone()
+		updateSegStateAndPrepareMetrics(clonedSeg, commonpb.SegmentState_Dropped, metricMutation)
+		modSegments = append(modSegments, clonedSeg)
+		segments = append(segments, clonedSeg.SegmentInfo)
+	}
+
+	// Save dropped segments in batch into meta.
+	err := m.catalog.SaveDroppedSegmentsInBatch(m.ctx, segments)
+	if err != nil {
+		return err
+	}
+
+	// update memory info
+	for _, segment := range modSegments {
+		m.segments.SetSegment(segment.GetID(), segment)
+	}
+	metricMutation.commit()
+	return nil
+}

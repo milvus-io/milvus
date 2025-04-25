@@ -329,6 +329,15 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, merr.Ok(ret.GetStatus()))
 	})
+
+	t.Run("NotifyDropPartition", func(t *testing.T) {
+		mockDataCoord.EXPECT().NotifyDropPartition(mock.Anything, mock.Anything).Return(&datapb.NotifyDropPartitionResponse{
+			Status: merr.Success(),
+		}, nil)
+		ret, err := server.NotifyDropPartition(ctx, &datapb.NotifyDropPartitionRequest{})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(ret.GetStatus()))
+	})
 }
 
 func Test_Run(t *testing.T) {

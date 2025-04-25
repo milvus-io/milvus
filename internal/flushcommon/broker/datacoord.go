@@ -154,3 +154,14 @@ func (dc *dataCoordBroker) DropVirtualChannel(ctx context.Context, req *datapb.D
 
 	return resp, nil
 }
+
+func (dc *dataCoordBroker) NotifyDropPartition(ctx context.Context, req *datapb.NotifyDropPartitionRequest) (*datapb.NotifyDropPartitionResponse, error) {
+	log := log.Ctx(ctx)
+	resp, err := dc.client.NotifyDropPartition(ctx, req)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		log.Warn("failed to NotifyDropPartition", zap.Error(err))
+		return resp, err
+	}
+
+	return resp, nil
+}

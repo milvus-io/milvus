@@ -514,3 +514,8 @@ func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequ
 func (s *Server) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {
 	return s.dataCoord.ListIndexes(ctx, in)
 }
+
+// DropVirtualChannel drop virtual channel in datacoord
+func (s *Server) NotifyDropPartition(ctx context.Context, req *datapb.NotifyDropPartitionRequest) (*datapb.NotifyDropPartitionResponse, error) {
+	return s.dataCoord.NotifyDropPartition(ctx, req)
+}
