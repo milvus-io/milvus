@@ -127,6 +127,30 @@ func NewMqMsgStream(initCtx context.Context,
 	return stream, nil
 }
 
+func (ms *mqMsgStream) createProducer(ctx context.Context, channel string) error {
+	fn := func() error {
+		pp, err := ms.client.CreateProducer(ctx, common.ProducerOptions{Topic: channel, EnableCompression: true})
+		if err != nil {
+			return err
+		}
+		if pp == nil {
+			return errors.New("Producer is nil")
+		}
+
+		ms.producerLock.Lock()
+		defer ms.producerLock.Unlock()
+		ms.producers[channel] = pp
+		ms.producerChannels = append(ms.producerChannels, channel)
+		return nil
+	}
+	err := retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+	if err != nil {
+		errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
+		return errors.New(errMsg)
+	}
+	return nil
+}
+
 // AsProducer create producer to send message to channels
 func (ms *mqMsgStream) AsProducer(ctx context.Context, channels []string) {
 	for _, channel := range channels {
@@ -135,25 +159,8 @@ func (ms *mqMsgStream) AsProducer(ctx context.Context, channels []string) {
 			break
 		}
 
-		fn := func() error {
-			pp, err := ms.client.CreateProducer(ctx, common.ProducerOptions{Topic: channel, EnableCompression: true})
-			if err != nil {
-				return err
-			}
-			if pp == nil {
-				return errors.New("Producer is nil")
-			}
-
-			ms.producerLock.Lock()
-			defer ms.producerLock.Unlock()
-			ms.producers[channel] = pp
-			ms.producerChannels = append(ms.producerChannels, channel)
-			return nil
-		}
-		err := retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
-		if err != nil {
-			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
-			panic(errMsg)
+		if err := ms.createProducer(ctx, channel); err != nil {
+			panic(err)
 		}
 	}
 }
@@ -298,6 +305,35 @@ func (ms *mqMsgStream) checkReplicateID(msg TsMsg) (bool, bool) {
 	return msgBase.GetBase().GetReplicateInfo().GetReplicateID() == ms.replicateID, true
 }
 
+func (ms *mqMsgStream) getOrCreateProducer(ctx context.Context, channelIdx int32) (mqwrapper.Producer, error) {
+	ms.producerLock.RLock()
+	channel := ms.producerChannels[channelIdx]
+	producer, ok := ms.producers[channel]
+	ms.producerLock.RUnlock()
+
+	if ok && producer != nil && producer.Healthy() {
+		return producer, nil
+	}
+
+	if producer != nil {
+		producer.Close()
+	}
+
+	if err := ms.createProducer(ctx, channel); err != nil {
+		return nil, err
+	}
+
+	ms.producerLock.RLock()
+	channel = ms.producerChannels[channelIdx]
+	producer = ms.producers[channel]
+	ms.producerLock.RUnlock()
+
+	if producer == nil {
+		return nil, errors.New("producer not found for channel: " + channel)
+	}
+	return producer, nil
+}
+
 func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 	if !ms.isEnabledProduce() {
 		log.Ctx(ms.ctx).Warn("can't produce the msg in the backup instance", zap.Stack("stack"))
@@ -335,14 +371,10 @@ func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
 		k := k
 		v := v
 		eg.Go(func() error {
-			ms.producerLock.RLock()
-			channel := ms.producerChannels[k]
-			producer, ok := ms.producers[channel]
-			ms.producerLock.RUnlock()
-			if !ok {
-				return errors.New("producer not found for channel: " + channel)
+			producer, err := ms.getOrCreateProducer(ctx, k)
+			if err != nil {
+				return err
 			}
-
 			for i := 0; i < len(v.Msgs); i++ {
 				spanCtx, sp := MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
 				defer sp.End()

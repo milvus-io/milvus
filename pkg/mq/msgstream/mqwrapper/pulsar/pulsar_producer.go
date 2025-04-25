@@ -27,11 +27,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
+type pulsarProducerState int32
+
+const (
+	Healthy pulsarProducerState = iota
+	Unhealthy
+)
+
 // implementation assertion
 var _ mqwrapper.Producer = (*pulsarProducer)(nil)
 
 type pulsarProducer struct {
-	p pulsar.Producer
+	p     pulsar.Producer
+	state pulsarProducerState
 }
 
 // Topic returns the topic name of pulsar producer
@@ -47,6 +55,7 @@ func (pp *pulsarProducer) Send(ctx context.Context, message *common.ProducerMess
 	pmID, err := pp.p.Send(ctx, ppm)
 	if err != nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
+		pp.state = Unhealthy
 		return &pulsarID{messageID: pmID}, err
 	}
 
@@ -57,4 +66,8 @@ func (pp *pulsarProducer) Send(ctx context.Context, message *common.ProducerMess
 
 func (pp *pulsarProducer) Close() {
 	pp.p.Close()
+}
+
+func (pp *pulsarProducer) Healthy() bool {
+	return pp.state == Healthy
 }

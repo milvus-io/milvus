@@ -97,3 +97,7 @@ func (kp *kafkaProducer) Close() {
 		}
 	})
 }
+
+func (kp *kafkaProducer) Healthy() bool {
+	return !kp.isClosed
+}

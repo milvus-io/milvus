@@ -98,7 +98,7 @@ func (pc *pulsarClient) CreateProducer(ctx context.Context, options mqcommon.Pro
 	elapsed := start.ElapseSpan()
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.SuccessLabel).Inc()
-	producer := &pulsarProducer{p: pp}
+	producer := &pulsarProducer{p: pp, state: Healthy}
 	return producer, nil
 }
 
