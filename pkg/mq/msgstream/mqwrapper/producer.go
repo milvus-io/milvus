@@ -31,4 +31,6 @@ type Producer interface {
 	Send(ctx context.Context, message *common.ProducerMessage) (common.MessageID, error)
 
 	Close()
+
+	Healthy() bool
 }

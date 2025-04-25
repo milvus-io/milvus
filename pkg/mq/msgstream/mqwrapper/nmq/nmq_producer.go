@@ -76,3 +76,7 @@ func (np *nmqProducer) Close() {
 	// No specific producer to be closed.
 	// stream doesn't close here.
 }
+
+func (np *nmqProducer) Healthy() bool {
+	return true
+}

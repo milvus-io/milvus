@@ -56,3 +56,7 @@ func (rp *rmqProducer) Close() {
 	// TODO: close producer. Now it has bug
 	// rp.p.Close()
 }
+
+func (rp *rmqProducer) Healthy() bool {
+	return true
+}
