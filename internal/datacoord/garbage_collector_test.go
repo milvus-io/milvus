@@ -193,6 +193,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		segment.Statslogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, stats[0])}
 		segment.Deltalogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, delta[0])}
 
+		meta.DropSegment(context.TODO(), segment.ID)
 		err = meta.AddSegment(context.TODO(), segment)
 		require.NoError(t, err)
 
