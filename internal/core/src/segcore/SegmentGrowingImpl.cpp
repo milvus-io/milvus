@@ -1181,7 +1181,7 @@ SegmentGrowingImpl::reopen(SchemaPtr sch) {
 
     auto absent_fields = sch->absent_fields(*schema_);
 
-    for (const auto& field_meta : absent_fields) {
+    for (const auto& field_meta : *absent_fields) {
         fill_empty_field(field_meta);
     }
 
@@ -1191,6 +1191,9 @@ SegmentGrowingImpl::reopen(SchemaPtr sch) {
 void
 SegmentGrowingImpl::finish_load() {
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (field_id.get() < START_USER_FIELDID) {
+            continue;
+        }
         if (!insert_record_.is_data_exist(field_id)) {
             fill_empty_field(field_meta);
         }

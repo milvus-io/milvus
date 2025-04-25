@@ -90,7 +90,7 @@ Schema::ConvertToArrowSchema() const {
     return arrow::schema(arrow_fields);
 }
 
-std::vector<FieldMeta>
+std::unique_ptr<std::vector<FieldMeta>>
 Schema::absent_fields(Schema& old_schema) const {
     std::vector<FieldMeta> result;
     for (const auto& [field_id, field_meta] : fields_) {
@@ -100,7 +100,7 @@ Schema::absent_fields(Schema& old_schema) const {
         }
     }
 
-    return result;
+    return std::make_unique<std::vector<FieldMeta>>(result);
 }
 
 }  // namespace milvus

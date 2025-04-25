@@ -280,7 +280,7 @@ class Schema {
         field_ids_.emplace_back(field_id);
     }
 
-    std::vector<FieldMeta>
+    std::unique_ptr<std::vector<FieldMeta>>
     absent_fields(Schema& old_schema) const;
 
  private:

@@ -2161,7 +2161,7 @@ ChunkedSegmentSealedImpl::reopen(SchemaPtr sch) {
     binlog_index_bitset_.resize(sch->size());
 
     auto absent_fields = sch->absent_fields(*schema_);
-    for (const auto& field_meta : absent_fields) {
+    for (const auto& field_meta : *absent_fields) {
         fill_empty_field(field_meta);
     }
 
@@ -2171,6 +2171,9 @@ ChunkedSegmentSealedImpl::reopen(SchemaPtr sch) {
 void
 ChunkedSegmentSealedImpl::finish_load() {
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (field_id.get() < START_USER_FIELDID) {
+            continue;
+        }
         // cannot use is_field_exist, since it check schema only
         // this shall check the ready bitset here
         if (!get_bit(field_data_ready_bitset_, field_id) &&
