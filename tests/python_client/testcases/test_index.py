@@ -1124,7 +1124,7 @@ class TestIndexInvalid(TestcaseBase):
     def scalar_index(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.fixture(scope="function", params=ct.all_dense_vector_types)
     def vector_data_type(self, request):
         yield request.param
 
@@ -2171,7 +2171,7 @@ class TestInvertedIndexValid(TestcaseBase):
     def scalar_index(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.fixture(scope="function", params=ct.all_dense_vector_types)
     def vector_data_type(self, request):
         yield request.param
 

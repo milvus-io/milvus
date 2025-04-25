@@ -857,16 +857,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
         for f in [df.float_vec_field, df.bf16_vec_field, df.fp16_vec_field]:
-            vector_data_type = "FLOAT_VECTOR"
+            vector_data_type = DataType.FLOAT_VECTOR
             if f == df.float_vec_field:
                 dim = float_vec_field_dim
-                vector_data_type = "FLOAT_VECTOR"
+                vector_data_type = DataType.FLOAT_VECTOR
             elif f == df.bf16_vec_field:
                 dim = bf16_vec_field_dim
-                vector_data_type = "BFLOAT16_VECTOR"
+                vector_data_type = DataType.BFLOAT16_VECTOR
             else:
                 dim = fp16_vec_field_dim
-                vector_data_type = "FLOAT16_VECTOR"
+                vector_data_type = DataType.FLOAT16_VECTOR
 
             search_data = cf.gen_vectors(1, dim, vector_data_type=vector_data_type)
             search_params = ct.default_search_params
@@ -1043,16 +1043,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
         for f in [df.float_vec_field, df.bf16_vec_field, df.fp16_vec_field]:
-            vector_data_type = "FLOAT_VECTOR"
+            vector_data_type = DataType.FLOAT_VECTOR
             if f == df.float_vec_field:
                 dim = float_vec_field_dim
-                vector_data_type = "FLOAT_VECTOR"
+                vector_data_type = DataType.FLOAT_VECTOR
             elif f == df.bf16_vec_field:
                 dim = bf16_vec_field_dim
-                vector_data_type = "BFLOAT16_VECTOR"
+                vector_data_type = DataType.BFLOAT16_VECTOR
             else:
                 dim = fp16_vec_field_dim
-                vector_data_type = "FLOAT16_VECTOR"
+                vector_data_type = DataType.FLOAT16_VECTOR
 
             search_data = cf.gen_vectors(1, dim, vector_data_type=vector_data_type)
             search_params = ct.default_search_params
@@ -1217,16 +1217,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
         for f in [df.float_vec_field, df.bf16_vec_field, df.fp16_vec_field]:
-            vector_data_type = "FLOAT_VECTOR"
+            vector_data_type = DataType.FLOAT_VECTOR
             if f == df.float_vec_field:
                 dim = float_vec_field_dim
-                vector_data_type = "FLOAT_VECTOR"
+                vector_data_type = DataType.FLOAT_VECTOR
             elif f == df.bf16_vec_field:
                 dim = bf16_vec_field_dim
-                vector_data_type = "BFLOAT16_VECTOR"
+                vector_data_type = DataType.BFLOAT16_VECTOR
             else:
                 dim = fp16_vec_field_dim
-                vector_data_type = "FLOAT16_VECTOR"
+                vector_data_type = DataType.FLOAT16_VECTOR
 
             search_data = cf.gen_vectors(1, dim, vector_data_type=vector_data_type)
             search_params = ct.default_search_params
@@ -1616,8 +1616,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.array_string_field: ["string1", "string2"] if not (nullable and random.random() < 0.5) else None,
                     df.array_bool_field: [True, False] if not (nullable and random.random() < 0.5) else None,
                     df.float_vec_field: cf.gen_vectors(1, dim)[0],
-                    df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type="FLOAT16_VECTOR")[0],
-                    df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type="BFLOAT16_VECTOR")[0],
+                    df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)[0],
+                    df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.BFLOAT16_VECTOR)[0],
                     df.sparse_vec_field: cf.gen_sparse_vectors(1, dim, sparse_format=sparse_format)[0]
                 }
                 if auto_id:
@@ -1922,8 +1922,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.string_field: "string",
                     df.json_field: json_value[i%len(json_value)],
                     df.float_vec_field: cf.gen_vectors(1, dim)[0],
-                    df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type="FLOAT16_VECTOR")[0],
-                    df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type="BFLOAT16_VECTOR")[0],
+                    df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT16_VECTOR)[0],
+                    df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.BFLOAT16_VECTOR)[0],
                 }
                 if auto_id:
                     row.pop(df.pk_field)
@@ -2064,8 +2064,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.array_string_field: ["string1", "string2"] if not (nullable and random.random() < 0.5) else None,
                     df.array_bool_field: [True, False] if not (nullable and random.random() < 0.5) else None,
                     df.float_vec_field: cf.gen_vectors(1, dim)[0],
-                    df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type="FLOAT16_VECTOR")[0],
-                    df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type="BFLOAT16_VECTOR")[0],
+                    df.fp16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT16_VECTOR)[0],
+                    df.bf16_vec_field: cf.gen_vectors(1, dim, vector_data_type=DataType.BFLOAT16_VECTOR)[0],
                     df.sparse_vec_field: cf.gen_sparse_vectors(1, dim, sparse_format=sparse_format)[0]
                 }
                 if auto_id:
@@ -2536,7 +2536,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         # verify search
         self.collection_wrap.search(
-            data=cf.gen_vectors(ct.default_nq, ct.default_dim, vector_data_type=DataType.FLOAT_VECTOR.name),
+            data=cf.gen_vectors(ct.default_nq, ct.default_dim, vector_data_type=DataType.FLOAT_VECTOR),
             anns_field=df.float_vec_field, param=DefaultVectorSearchParams.IVF_SQ8(),
             limit=ct.default_limit,
             check_task=CheckTasks.check_search_results,

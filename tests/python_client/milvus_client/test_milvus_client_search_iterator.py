@@ -665,7 +665,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("metric_type", ct.float_metrics)
+    @pytest.mark.parametrize("metric_type", ct.dense_metrics)
     def test_milvus_client_search_iterator_default(self, metric_type):
         """
         target: test search iterator (high level api) normal case
@@ -892,7 +892,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         pass
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("metric_type", ct.float_metrics)
+    @pytest.mark.parametrize("metric_type", ct.dense_metrics)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     def test_milvus_client_search_iterator_after_json_path_index(self, metric_type, enable_dynamic_field,
                                                                  supported_json_cast_type,

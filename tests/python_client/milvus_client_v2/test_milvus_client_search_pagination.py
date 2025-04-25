@@ -62,6 +62,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
     def setup_class(self):
         super().setup_class(self)
         self.collection_name = "TestMilvusClientSearchPagination" + cf.gen_unique_str("_")
+        self.partition_names = ["partition_1", "partition_2"]
         self.float_vector_field_name = "float_vector"
         self.bfloat16_vector_field_name = "bfloat16_vector" 
         self.sparse_vector_field_name = "sparse_vector"
@@ -92,32 +93,60 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         collection_schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=256)
         collection_schema.add_field(default_int64_field_name, DataType.INT64)
         self.create_collection(client, self.collection_name, schema=collection_schema, force_teardown=False)
+        for partition_name in self.partition_names:
+            self.create_partition(client, self.collection_name, partition_name=partition_name)
 
         # Define number of insert iterations
         insert_times = 10
         
         # Generate vectors for each type and store in self
-        float_vectors = cf.gen_vectors(default_nb * insert_times, dim=self.float_vector_dim, vector_data_type='FLOAT_VECTOR')
-        bfloat16_vectors = cf.gen_vectors(default_nb * insert_times, dim=self.bf16_vector_dim, vector_data_type='BFLOAT16_VECTOR')
+        float_vectors = cf.gen_vectors(default_nb * insert_times, dim=self.float_vector_dim,
+                                       vector_data_type=DataType.FLOAT_VECTOR)
+        bfloat16_vectors = cf.gen_vectors(default_nb * insert_times, dim=self.bf16_vector_dim,
+                                          vector_data_type=DataType.BFLOAT16_VECTOR)
         sparse_vectors = cf.gen_sparse_vectors(default_nb * insert_times, empty_percentage=2)
         _, binary_vectors = cf.gen_binary_vectors(default_nb * insert_times, dim=self.binary_vector_dim)
 
         # Insert data multiple times with non-duplicated primary keys
         for j in range(insert_times):
-            rows = [{
-                default_primary_key_field_name: i + j * default_nb,
-                self.float_vector_field_name: list(float_vectors[i + j * default_nb]),
-                self.bfloat16_vector_field_name: bfloat16_vectors[i + j * default_nb],
-                self.sparse_vector_field_name: sparse_vectors[i + j * default_nb],
-                self.binary_vector_field_name: binary_vectors[i + j * default_nb],
-                default_float_field_name: (i + j * default_nb) * 1.0,
-                default_string_field_name: str(i + j * default_nb),
-                default_int64_field_name: i + j * default_nb
-            }
-                for i in range(default_nb)]
-            self.datas.extend(rows)
+            # Group rows by partition based on primary key mod 3
+            default_rows = []
+            partition1_rows = []
+            partition2_rows = []
+            
+            for i in range(default_nb):
+                pk = i + j * default_nb
+                row = {
+                    default_primary_key_field_name: pk,
+                    self.float_vector_field_name: list(float_vectors[pk]),
+                    self.bfloat16_vector_field_name: bfloat16_vectors[pk],
+                    self.sparse_vector_field_name: sparse_vectors[pk], 
+                    self.binary_vector_field_name: binary_vectors[pk],
+                    default_float_field_name: pk * 1.0,
+                    default_string_field_name: str(pk),
+                    default_int64_field_name: pk
+                }
+                self.datas.append(row)
+
+                # Distribute to partitions based on pk mod 3
+                if pk % 3 == 0:
+                    default_rows.append(row)
+                elif pk % 3 == 1:
+                    partition1_rows.append(row)
+                else:
+                    partition2_rows.append(row)
+            
+            # Insert into respective partitions
+            if default_rows:
+                self.insert(client, self.collection_name, data=default_rows)
+            if partition1_rows:
+                self.insert(client, self.collection_name, data=partition1_rows, partition_name=self.partition_names[0])
+            if partition2_rows:
+                self.insert(client, self.collection_name, data=partition2_rows, partition_name=self.partition_names[1])
+                
+            # Track all inserted data and primary keys
             self.primary_keys.extend([i + j * default_nb for i in range(default_nb)])
-            self.insert(client, self.collection_name, data=rows)
+            
         self.flush(client, self.collection_name)
 
         # Create index
@@ -165,7 +194,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         # 2. Search with pagination for 10 pages
         limit = 100
         pages = 10
-        vectors_to_search = cf.gen_vectors(default_nq, default_dim)
+        vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
         all_pages_results = []
         for page in range(pages):
             offset = page * limit
@@ -224,7 +253,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         # 2. Search with pagination for 10 pages
         limit = 100
         pages = 10
-        vectors_to_search = cf.gen_vectors(default_nq, self.bf16_vector_dim, vector_data_type='BFLOAT16_VECTOR')
+        vectors_to_search = cf.gen_vectors(default_nq, self.bf16_vector_dim, vector_data_type=DataType.BFLOAT16_VECTOR)
         all_pages_results = []
         for page in range(pages):
             offset = page * limit
@@ -374,11 +403,13 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             for i in range(default_nq):
                 page_ids = [page_res[i][j].get('id') for j in range(limit)]
                 ids_in_full = [search_res_full[i][p * limit:p * limit + limit][j].get('id') for j in range(limit)]
-                # Calculate percentage of matching items
-                matching_items = sum(1 for x, y in zip(page_ids, ids_in_full) if x == y)
-                match_percentage = (matching_items / len(page_ids)) * 100
-                assert match_percentage >= 80, f"Only {match_percentage}% items matched, expected >= 80%"
-    
+
+                # Calculate intersection between paginated results and baseline full results
+                common_ids = set(page_ids) & set(ids_in_full) 
+                # Calculate overlap ratio using full results as baseline
+                overlap_ratio = len(common_ids) / len(ids_in_full) * 100
+                assert overlap_ratio >= 80, f"Only {overlap_ratio}% overlap with baseline results, expected >= 80%"
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [100, 3000, 10000])
     def test_search_with_pagination_topk(self, limit):
@@ -399,8 +430,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         topK=16384
         offset = topK - limit
         search_param = {"nprobe": 10, "offset": offset}
-        vectors_to_search = [[random.random() for _ in range(default_dim)]
-                   for _ in range(default_nq)]
+        vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
         client.search(collection_name, vectors_to_search[:default_nq], anns_field=self.float_vector_field_name,
                       search_params=search_param, limit=limit, check_task=CheckTasks.check_search_results,
                       check_items={"enable_milvus_client_api": True,
@@ -438,7 +468,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 limit = 0
             elif len(filter_ids) - offset < default_limit:
                 limit = len(filter_ids) - offset
-            search_params = {"metric_type": "COSINE", "params": {"nprobe": 128}, "offset": offset}
+            # 3. search with a high nprobe for better accuracy
+            search_params = {"metric_type": "COSINE", "params": {"nprobe": 128}, "offset": offset} 
             vectors_to_search = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
             search_res_with_offset, _ = self.search(
                 client,
@@ -454,7 +485,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                              "limit": limit}
             )
 
-            # 3. search with offset+limit
+            # 4. search with offset+limit
             search_params_full = {"metric_type": "COSINE", "params": {"nprobe": 128}}
             search_res_full, _ = self.search(
                 client,
@@ -466,7 +497,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 filter=expr
             )
 
-            # 4. Compare results
+            # 5. Compare results
             filter_ids_set = set(filter_ids)
             for hits in search_res_with_offset:
                 ids = [hit.get('id') for hit in hits]
@@ -477,7 +508,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             ids_in_full = [search_res_full[0][offset:offset + limit][j].get('id') for j in range(limit)]
             assert page_ids == ids_in_full
 
-            # 5. search again with expression template
+            # 6. search again with expression template
             expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
             expr_params = cf.get_expr_params_from_template(expressions[1])
             search_res_with_offset, _ = self.search(
@@ -495,7 +526,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                              "limit": limit}
             )
 
-            # 6. search with offset+limit
+            # 7. search with offset+limit
             search_res_full, _ = self.search(
                 client,
                 collection_name,
@@ -507,7 +538,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 filter_params=expr_params
             )
 
-            # Compare results
+            # 8. Compare results
             filter_ids_set = set(filter_ids)
             for hits in search_res_with_offset:
                 ids = [hit.get('id') for hit in hits]
@@ -517,349 +548,467 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             page_ids = [search_res_with_offset[0][j].get('id') for j in range(limit)]
             ids_in_full = [search_res_full[0][offset:offset + limit][j].get('id') for j in range(limit)]
             assert page_ids == ids_in_full
-
-
-class TestSearchPagination(TestcaseBase):
-    """ Test case of search pagination """
-
-    @pytest.fixture(scope="function", params=[0, 10, 100])
-    def offset(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[False, True])
-    def auto_id(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[False, True])
-    def _async(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[True, False])
-    def enable_dynamic_field(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
-    def vector_data_type(self, request):
-        yield request.param
-
-    """
-    ******************************************************************
-    #  The following are valid base cases
-    ******************************************************************
-    """
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_search_pagination_with_index_partition(self, offset, _async):
+    
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_pagination_in_partitions(self):
         """
-        target: test search pagination with index and partition
-        method: create connection, collection, insert data, create index and search
-        expected: searched successfully
+        target: test search pagination in partitions
+        method: 1. create collection and insert data
+                2. search with pagination in partitions
+                3. compare with the search results whose corresponding ids should be the same
         """
-        # 1. initialize with data
-        auto_id = False
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                      partition_num=1,
-                                                                      auto_id=auto_id,
-                                                                      is_index=False)[0:4]
-        vectors = [[random.random() for _ in range(default_dim)]
-                   for _ in range(default_nq)]
-        # 2. create index
-        default_index = {"index_type": "IVF_FLAT",
-                         "params": {"nlist": 128}, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
-        collection_w.load()
-        # 3. search through partitions
-        par = collection_w.partitions
-        limit = 100
-        search_params = {"metric_type": "L2",
-                         "params": {"nprobe": 10}, "offset": offset}
-        search_res = collection_w.search(vectors[:default_nq], default_search_field,
-                                         search_params, limit, default_search_exp,
-                                         [par[0].name, par[1].name], _async=_async,
-                                         check_task=CheckTasks.check_search_results,
-                                         check_items={"nq": default_nq,
-                                                      "ids": insert_ids,
-                                                      "limit": limit,
-                                                      "_async": _async})[0]
-        # 3. search through partitions with offset+limit
-        search_params = {"metric_type": "L2"}
-        res = collection_w.search(vectors[:default_nq], default_search_field, search_params,
-                                  limit + offset, default_search_exp,
-                                  [par[0].name, par[1].name], _async=_async)[0]
-        if _async:
-            search_res.done()
-            search_res = search_res.result()
-            res.done()
-            res = res.result()
-        res_distance = res[0].distances[offset:]
-        # assert cf.sort_search_distance(search_res[0].distances) == cf.sort_search_distance(res_distance)
-        assert set(search_res[0].ids) == set(res[0].ids[offset:])
+        client = self._client() 
+        collection_name = self.collection_name
+        vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
+        # search with pagination in partition_1
+        limit = 50
+        pages = 10
+        for page in range(pages):
+            offset = page * limit
+            search_params = {"offset": offset}
+            search_res_with_offset, _ = self.search(
+                client,
+                collection_name,
+                vectors_to_search[:default_nq],
+                partition_names=[self.partition_names[0]],
+                anns_field=self.float_vector_field_name,
+                search_params=search_params,
+                limit=limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={"enable_milvus_client_api": True,
+                             "nq": default_nq, "limit": limit})
+            
+            # assert every id in search_res_with_offset %3 ==1
+            for hits in search_res_with_offset:
+                for hit in hits:
+                    assert hit.get('id') % 3 == 1
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_search_pagination_with_inserted_data(self, offset, _async):
+        # search with pagination in partition_1 and partition_2
+        for page in range(pages):
+            offset = page * limit
+            search_params = {"offset": offset}
+            search_res_with_offset, _ = self.search(
+                client,
+                collection_name,
+                vectors_to_search[:default_nq],
+                partition_names=self.partition_names,
+                anns_field=self.float_vector_field_name,
+                search_params=search_params,
+                limit=limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={"enable_milvus_client_api": True,
+                             "nq": default_nq, "limit": limit})
+
+            # assert every id in search_res_with_offset %3 ==1 or ==2
+            for hits in search_res_with_offset:
+                for hit in hits:
+                    assert hit.get('id') % 3 == 1 or hit.get('id') % 3 == 2
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_pagination_with_different_offset(self):
         """
-        target: test search pagination with inserted data
-        method: create connection, collection, insert data and search
-                check the results by searching with limit+offset
-        expected: searched successfully
+        target: test search pagination with different offset
+        method: 1. create collection and insert data
+                2. search with different offset, including offset > limit, offset = 0
+                3. compare with the search results whose corresponding ids should be the same
         """
-        # 1. create collection
-        collection_w = self.init_collection_general(
-            prefix, False, dim=default_dim)[0]
-        # 2. insert data
-        data = cf.gen_default_dataframe_data(dim=default_dim)
-        collection_w.insert(data)
-        collection_w.load()
-        # 3. search
+        client = self._client()
+        collection_name = self.collection_name
+        vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
+        # search with offset > limit
+        offset = default_limit + 10
         search_params = {"offset": offset}
-        search_res = collection_w.search(vectors[:default_nq], default_search_field,
-                                         search_params, default_limit,
-                                         default_search_exp, _async=_async,
-                                         check_task=CheckTasks.check_search_results,
-                                         check_items={"nq": default_nq,
-                                                      "limit": default_limit,
-                                                      "_async": _async})[0]
-        # 4. search through partitions with offset+limit
-        search_params = {}
-        res = collection_w.search(vectors[:default_nq], default_search_field, search_params,
-                                  default_limit + offset, default_search_exp, _async=_async)[0]
-        if _async:
-            search_res.done()
-            search_res = search_res.result()
-            res.done()
-            res = res.result()
-        res_distance = res[0].distances[offset:]
-        assert sorted(search_res[0].distances) == sorted(res_distance)
-        assert set(search_res[0].ids) == set(res[0].ids[offset:])
+        self.search(client, collection_name, vectors_to_search[:default_nq],
+                    anns_field=self.float_vector_field_name,
+                    search_params=search_params, limit=default_limit,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": default_nq, "limit": default_limit})
+        # search with offset = 0
+        offset = 0
+        search_params = {"offset": offset}
+        self.search(client, collection_name, vectors_to_search[:default_nq],
+                    anns_field=self.float_vector_field_name,
+                    search_params=search_params, limit=default_limit,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": default_nq, "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_pagination_empty(self, offset, _async):
-        """
-        target: test search pagination empty
-        method: connect, create collection, insert data and search
-        expected: search successfully
-        """
-        # 1. initialize without data
-        auto_id = False
-        collection_w = self.init_collection_general(
-            prefix, True, auto_id=auto_id, dim=default_dim)[0]
-        # 2. search collection without data
-        search_param = {"metric_type": "COSINE",
-                        "params": {"nprobe": 10}, "offset": offset}
-        search_res = collection_w.search([], default_search_field, search_param,
-                                         default_limit, default_search_exp, _async=_async,
-                                         check_task=CheckTasks.check_search_results,
-                                         check_items={"nq": 0,
-                                                      "_async": _async})[0]
-        if _async:
-            search_res.done()
-            search_res = search_res.result()
-        assert len(search_res) == 0
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("offset", [3000, 5000])
-    def test_search_pagination_with_offset_over_num_entities(self, offset):
-        """
-        target: test search pagination with offset over num_entities
-        method: create connection, collection, insert 3000 entities and search with offset over 3000
-        expected: return an empty list
-        """
-        # 1. initialize
-        collection_w = self.init_collection_general(
-            prefix, True, dim=default_dim)[0]
-        # 2. search
-        search_param = {"metric_type": "COSINE",
-                        "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(default_dim)]
-                   for _ in range(default_nq)]
-        res = collection_w.search(vectors[:default_nq], default_search_field,
-                                  search_param, default_limit,
-                                  default_search_exp,
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": default_nq,
-                                               "limit": 0})[0]
-        assert res[0].ids == []
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
-    def test_search_pagination_after_different_index(self, index, offset, _async):
-        """
-        target: test search pagination after different index
-        method: test search pagination after different index and corresponding search params
-        expected: search successfully
-        """
-        # 1. initialize with data
-        dim = 128
-        auto_id = True
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 1000,
-                                                                                  partition_num=1,
-                                                                                  auto_id=auto_id,
-                                                                                  dim=dim, is_index=False)[0:5]
-        # 2. create index and load
-        params = cf.get_index_params_params(index)
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
-        collection_w.load()
-        # 3. search
-        search_params = cf.gen_search_param(index)
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        for search_param in search_params:
-            res = collection_w.search(vectors[:default_nq], default_search_field, search_param,
-                                      default_limit + offset, default_search_exp, _async=_async)[0]
-            search_param["offset"] = offset
-            log.info("Searching with search params: {}".format(search_param))
-            search_res = collection_w.search(vectors[:default_nq], default_search_field,
-                                             search_param, default_limit,
-                                             default_search_exp, _async=_async,
-                                             check_task=CheckTasks.check_search_results,
-                                             check_items={"nq": default_nq,
-                                                          "ids": insert_ids,
-                                                          "limit": default_limit,
-                                                          "_async": _async})[0]
-            if _async:
-                search_res.done()
-                search_res = search_res.result()
-                res.done()
-                res = res.result()
-            res_distance = res[0].distances[offset:]
-            # assert sorted(search_res[0].distances, key=numpy.float32) == sorted(res_distance, key=numpy.float32)
-            assert set(search_res[0].ids) == set(res[0].ids[offset:])
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("offset", [100, default_nb // 2])
+    @pytest.mark.parametrize("offset", [0, 20, 100, 200])
     def test_search_offset_different_position(self, offset):
         """
-        target: test search pagination with offset in different position
-        method: create connection, collection, insert entities and search with offset
+        target: test search offset param in different position
+        method: create connection, collection, insert data, search with offset in different position
         expected: search successfully
         """
-        # 1. initialize
-        collection_w = self.init_collection_general(prefix, True)[0]
-        # 2. search with offset in params
-        search_params = {"metric_type": "COSINE",
-                         "params": {"nprobe": 10}, "offset": offset}
-        res1 = collection_w.search(vectors[:default_nq], default_search_field,
-                                   search_params, default_limit)[0]
+        client = self._client()
+        collection_name = self.collection_name
+        vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
 
-        # 3. search with offset outside params
-        res2 = collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
-                                   default_limit, offset=offset)[0]
-        assert res1[0].ids == res2[0].ids
+        # 1. search with offset in search_params
+        limit = 100
+        search_params = {"offset": offset}
+        res1, _ = self.search(client, collection_name, vectors_to_search[:default_nq],
+                              anns_field=self.float_vector_field_name,
+                              search_params=search_params,
+                              limit=limit,
+                              check_task=CheckTasks.check_search_results,
+                              check_items={"enable_milvus_client_api": True,
+                                           "nq": default_nq, "limit": limit})
+
+        # 2. search with offset in search 
+        search_params = {}
+        res2, _ = self.search(client, collection_name, vectors_to_search[:default_nq],
+                              anns_field=self.float_vector_field_name,
+                              search_params=search_params,
+                              offset=offset,
+                              limit=limit,
+                              check_task=CheckTasks.check_search_results,
+                              check_items={"enable_milvus_client_api": True,
+                                           "nq": default_nq, "limit": limit})
+        # 3. compare results
+        assert res1 == res2
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("offset", [1, 5, 20])
-    def test_search_sparse_with_pagination(self, offset):
+    def test_search_pagination_empty_list(self):
         """
-        target: test search sparse with pagination
-        method: 1. connect and create a collection
-                2. search pagination with offset
-                3. search with offset+limit
-                4. compare with the search results whose corresponding ids should be the same
-        expected: search successfully and ids is correct
+        target: test search pagination with empty list of vectors
+        method: create connection, collection, insert data, search with offset
+        expected: search successfully
         """
-        # 1. create a collection
-        auto_id = False
-        collection_w, _, _, insert_ids = \
-            self.init_collection_general(
-                prefix, True, auto_id=auto_id, vector_data_type=ct.sparse_vector)[0:4]
-        # 2. search with offset+limit
-        search_param = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}, "offset": offset}
-        search_vectors = cf.gen_default_list_sparse_data()[-1][-2:]
-        search_res = collection_w.search(search_vectors, ct.default_sparse_vec_field_name,
-                                         search_param, default_limit)[0]
-        # 3. search
-        _search_param = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}}
-        res = collection_w.search(search_vectors[:default_nq], ct.default_sparse_vec_field_name, _search_param,
-                                  default_limit + offset)[0]
-        assert len(search_res[0].ids) == len(res[0].ids[offset:])
-        assert sorted(search_res[0].distances, key=np.float32) == sorted(
-            res[0].distances[offset:], key=np.float32)
-
-
-class TestSearchPaginationInvalid(TestMilvusClientV2Base):
-    """ Test case of search pagination """
-    """
-    ******************************************************************
-    #  The following are invalid cases
-    ******************************************************************
-    """
-   
+        client = self._client()
+        collection_name = self.collection_name
+        vectors_to_search = []
+        offset = 10
+        limit = 100
+        search_params = {"offset": offset}
+        error ={"err_code": 1, "err_msg": "list index out of range"}
+        self.search(client, collection_name, vectors_to_search,
+                    anns_field=self.float_vector_field_name,
+                    search_params=search_params,
+                    limit=limit,
+                    check_task=CheckTasks.err_res,
+                    check_items=error)
+    
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_pagination_with_invalid_offset_type(self):
+    @pytest.mark.parametrize("offset", [" ", 1.0, [1, 2], {1}, "12 s"])
+    def test_search_pagination_with_invalid_offset_type(self, offset):
         """
         target: test search pagination with invalid offset type
         method: create connection, collection, insert and search with invalid offset type
         expected: raise exception
         """
         client = self._client()
+        collection_name = self.collection_name
+        vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
 
-        # 1. Create collection with schema
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, default_dim)
-
-        # Insert data
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-
-        # Search with invalid offset types
-        vectors_to_search = cf.gen_vectors(default_nq, default_dim)
-        invalid_offsets = [" ", [1, 2], {1}, "12 s"]
-
-        for offset in invalid_offsets:
-            log.debug(f"assert search error if offset={offset}")
-            search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
-            self.search(
-                client,
-                collection_name,
-                vectors_to_search[:default_nq],
-                anns_field=default_vector_field_name,
-                search_params=search_params,
-                limit=default_limit,
-                check_task=CheckTasks.err_res,
-                check_items={
-                    "err_code": 1,
-                    "err_msg": "wrong type for offset, expect int"
-                }
-            )
+        search_params = {"offset": offset}
+        error = {"err_code": 1, "err_msg": "wrong type for offset, expect int"}
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search[:default_nq],
+            anns_field=self.float_vector_field_name,
+            search_params=search_params,
+            limit=default_limit,
+            check_task=CheckTasks.err_res,
+            check_items=error)
+    
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_pagination_with_invalid_offset_value(self):
+    @pytest.mark.parametrize("offset", [-1, 16385])
+    def test_search_pagination_with_invalid_offset_value(self, offset):
         """
         target: test search pagination with invalid offset value
         method: create connection, collection, insert and search with invalid offset value
         expected: raise exception
         """
         client = self._client()
+        collection_name = self.collection_name
+        vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
+        search_params = {"offset": offset}
+        error = {"err_code": 1, "err_msg": f"offset [{offset}] is invalid, it should be in range [1, 16384]"}
+        self.search(
+            client,
+            collection_name,
+            vectors_to_search[:default_nq],
+            anns_field=self.float_vector_field_name,
+            search_params=search_params,
+            limit=default_limit,
+            check_task=CheckTasks.err_res,
+            check_items=error
+            )
 
-        # 1. Create collection with schema
-        collection_name = cf.gen_collection_name_by_testcase_name() 
-        self.create_collection(client, collection_name, default_dim)
 
-        # Insert data
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
+class TestSearchPaginationIndependent(TestMilvusClientV2Base):
+    """ Test case of search pagination with independent collection """
 
-        # Search with invalid offset values
-        vectors_to_search = cf.gen_vectors(default_nq, default_dim)
-        invalid_offsets = [-1, 16385]
-
-        for offset in invalid_offsets:
-            log.debug(f"assert search error if offset={offset}")
-            search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
-            self.search(
+    def do_search_pagination_and_assert(self, client, collection_name,
+                                        limit=10, pages=10,
+                                        dim=default_dim,
+                                        vector_dtype=DataType.FLOAT_VECTOR,
+                                        index=ct.L0_index_types[0],
+                                        metric_type=ct.default_L0_metric,
+                                        expected_overlap_ratio=80):
+        # 2. Search with pagination for 5 pages
+        vectors_to_search = cf.gen_vectors(default_nq, dim, vector_data_type=vector_dtype)
+        all_pages_results = []
+        for page in range(pages):
+            offset = page * limit
+            search_params = {"offset": offset}
+            search_res_with_offset, _ = self.search(
                 client,
                 collection_name,
                 vectors_to_search[:default_nq],
                 anns_field=default_vector_field_name,
                 search_params=search_params,
-                limit=default_limit,
-                check_task=CheckTasks.err_res,
-                check_items={
-                    "err_code": 1,
-                    "err_msg": f"offset [{offset}] is invalid, it should be in range [1, 16384]"
-                }
+                limit=limit,
+                check_task=CheckTasks.check_search_results,
+                check_items={"enable_milvus_client_api": True,
+                             "nq": default_nq,
+                             "limit": limit,
+                             "metric": metric_type,
+                             }
             )
+            all_pages_results.append(search_res_with_offset)
+
+        # 3. Search without pagination
+        search_params_full = {}
+        search_res_full, _ = self.search(
+            client,
+            collection_name,
+            vectors_to_search[:default_nq],
+            anns_field=default_vector_field_name,
+            search_params=search_params_full,
+            limit=limit * pages
+        )
+
+        # 4. Compare results - verify pagination results equal the results in full search with offsets
+        for p in range(pages):
+            page_res = all_pages_results[p]
+            for i in range(default_nq):
+                page_ids = [page_res[i][j].get('id') for j in range(limit)]
+                ids_in_full = [search_res_full[i][p * limit:p * limit + limit][j].get('id') for j in range(limit)]
+                # Calculate intersection between paginated results and baseline full results
+                common_ids = set(page_ids) & set(ids_in_full)
+                # Calculate overlap ratio using full results as baseline
+                overlap_ratio = len(common_ids) / len(ids_in_full) * 100
+                log.debug(
+                    f"range search {vector_dtype.name} {index} {metric_type} results overlap {overlap_ratio}")
+                assert overlap_ratio >= expected_overlap_ratio, \
+                    f"Only {overlap_ratio}% overlap with baseline results, expected >= {expected_overlap_ratio}%"
+
+    """
+    ******************************************************************
+    #  The following are invalid cases
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize('vector_dtype', ct.all_dense_vector_types)
+    @pytest.mark.parametrize('index', ct.all_index_types[:7])
+    @pytest.mark.parametrize('metric_type', ct.dense_metrics)
+    def test_search_pagination_dense_vectors_indices_metrics_growing(self, vector_dtype, index, metric_type):
+        """
+        target: test search pagination with growing data
+        method: create connection, collection, insert data and search
+                check the results by searching with limit+offset
+        expected: searched successfully
+        """
+        client = self._client()
+
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client)
+        schema.add_field(default_primary_key_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, datatype=vector_dtype, dim=default_dim)
+        schema.add_field(default_float_field_name, datatype=DataType.FLOAT)
+        schema.add_field(default_string_field_name, datatype=DataType.VARCHAR, max_length=100)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Insert data in 3 batches with unique primary keys using a loop
+        insert_times = 3
+        random_vectors = list(cf.gen_vectors(default_nb*insert_times, default_dim, vector_data_type=vector_dtype)) \
+            if vector_dtype == DataType.FLOAT_VECTOR \
+            else cf.gen_vectors(default_nb*insert_times, default_dim, vector_data_type=vector_dtype)
+        for j in range(insert_times):
+            start_pk = j * default_nb
+            rows = [{
+                default_primary_key_field_name: i + start_pk,
+                default_vector_field_name: random_vectors[i + start_pk],
+                default_float_field_name: (i + start_pk) * 1.0,
+                default_string_field_name: str(i + start_pk)
+            } for i in range(default_nb)]
+            self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # build index
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(default_vector_field_name, index_type=index,
+                               metric_type=metric_type,
+                               params=cf.get_index_params_params(index_type=index))
+        self.create_index(client, collection_name, index_params=index_params)
+
+        # load the collection with index
+        assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=120)
+        self.load_collection(client, collection_name)
+
+        # search and assert
+        limit = 50
+        pages = 5
+        expected_overlap_ratio = 20
+        self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
+                                             vector_dtype=vector_dtype, index=index, metric_type=metric_type,
+                                             expected_overlap_ratio=expected_overlap_ratio)
+
+        # insert additional data without flush
+        random_vectors = list(cf.gen_vectors(default_nb, default_dim, vector_data_type=vector_dtype)) \
+            if vector_dtype == DataType.FLOAT_VECTOR \
+            else cf.gen_vectors(default_nb, default_dim, vector_data_type=vector_dtype)
+        start_pk = default_nb * insert_times
+        rows = [{
+            default_primary_key_field_name: i + start_pk,
+            default_vector_field_name: random_vectors[i],
+            default_float_field_name: (i + start_pk) * 1.0,
+            default_string_field_name: str(i + start_pk)
+        } for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+
+        # search and assert
+        self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
+                                             vector_dtype=vector_dtype, index=index, metric_type=metric_type,
+                                             expected_overlap_ratio=expected_overlap_ratio)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize('index', ct.binary_supported_index_types)
+    @pytest.mark.parametrize('metric_type', ct.binary_metrics[:2])
+    def test_search_pagination_binary_index_growing(self, index, metric_type):
+        """
+        target: test search pagination with binary index
+        method: create connection, collection, insert data, create index and search
+        expected: searched successfully
+        """
+
+        vector_dtype = DataType.BINARY_VECTOR
+        client = self._client()
+
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client)
+        schema.add_field(default_primary_key_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, datatype=vector_dtype, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Insert data in 3 batches with unique primary keys using a loop
+        insert_times = 3
+        random_vectors = list(cf.gen_vectors(default_nb * insert_times, default_dim, vector_data_type=vector_dtype)) \
+            if vector_dtype == DataType.FLOAT_VECTOR \
+            else cf.gen_vectors(default_nb * insert_times, default_dim, vector_data_type=vector_dtype)
+        for j in range(insert_times):
+            start_pk = j * default_nb
+            rows = [{
+                default_primary_key_field_name: i + start_pk,
+                default_vector_field_name: random_vectors[i + start_pk]
+            } for i in range(default_nb)]
+            self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # build index
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(default_vector_field_name, index_type=index,
+                               metric_type=metric_type,
+                               params=cf.get_index_params_params(index_type=index))
+        self.create_index(client, collection_name, index_params=index_params)
+
+        # load the collection with index
+        assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=120)
+        self.load_collection(client, collection_name)
+
+        # search and assert
+        limit = 50
+        pages = 5
+        expected_overlap_ratio = 20
+        self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
+                                             vector_dtype=vector_dtype, index=index, metric_type=metric_type,
+                                             expected_overlap_ratio=expected_overlap_ratio)
+
+        # insert additional data without flush
+        random_vectors = list(cf.gen_vectors(default_nb, default_dim, vector_data_type=vector_dtype)) \
+            if vector_dtype == DataType.FLOAT_VECTOR \
+            else cf.gen_vectors(default_nb, default_dim, vector_data_type=vector_dtype)
+        start_pk = default_nb * insert_times
+        rows = [{
+            default_primary_key_field_name: i + start_pk,
+            default_vector_field_name: random_vectors[i]
+        } for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+
+        # search and assert
+        self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
+                                             vector_dtype=vector_dtype, index=index, metric_type=metric_type,
+                                             expected_overlap_ratio=expected_overlap_ratio)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize('index', ct.sparse_supported_index_types)
+    @pytest.mark.parametrize('metric_type', ["IP"])
+    def test_search_pagination_sparse_index_growing(self, index, metric_type):
+        """
+        target: test search pagination with sparse index
+        method: create connection, collection, insert data, create index and search
+        expected: searched successfully
+        """
+        vector_dtype = DataType.SPARSE_FLOAT_VECTOR
+        client = self._client()
+
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client)
+        schema.add_field(default_primary_key_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, datatype=vector_dtype)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Insert data in 3 batches with unique primary keys using a loop
+        insert_times = 3
+        random_vectors = list(cf.gen_vectors(default_nb * insert_times, default_dim, vector_data_type=vector_dtype)) \
+            if vector_dtype == DataType.FLOAT_VECTOR \
+            else cf.gen_vectors(default_nb * insert_times, default_dim, vector_data_type=vector_dtype)
+        for j in range(insert_times):
+            start_pk = j * default_nb
+            rows = [{
+                default_primary_key_field_name: i + start_pk,
+                default_vector_field_name: random_vectors[i + start_pk]
+            } for i in range(default_nb)]
+            self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # build index
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(default_vector_field_name, index_type=index,
+                               metric_type=metric_type,
+                               params=cf.get_index_params_params(index_type=index))
+        self.create_index(client, collection_name, index_params=index_params)
+
+        # load the collection with index
+        assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=120)
+        self.load_collection(client, collection_name)
+
+        # search and assert
+        limit = 50
+        pages = 5
+        expected_overlap_ratio = 20
+        self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
+                                             vector_dtype=vector_dtype, index=index, metric_type=metric_type,
+                                             expected_overlap_ratio=expected_overlap_ratio)
+
+        # insert additional data without flush
+        random_vectors = list(cf.gen_vectors(default_nb, default_dim, vector_data_type=vector_dtype)) \
+            if vector_dtype == DataType.FLOAT_VECTOR \
+            else cf.gen_vectors(default_nb, default_dim, vector_data_type=vector_dtype)
+        start_pk = default_nb * insert_times
+        rows = [{
+            default_primary_key_field_name: i + start_pk,
+            default_vector_field_name: random_vectors[i]
+        } for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+
+        # search and assert
+        self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
+                                             vector_dtype=vector_dtype, index=index, metric_type=metric_type,
+                                             expected_overlap_ratio=expected_overlap_ratio)

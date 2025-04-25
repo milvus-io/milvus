@@ -288,7 +288,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
 
         # hybrid_search
         search_param = {
-            "data": cf.gen_vectors(ct.default_nq, ct.default_dim, vector_data_type="FLOAT_VECTOR"),
+            "data": cf.gen_vectors(ct.default_nq, ct.default_dim, vector_data_type=DataType.FLOAT_VECTOR),
             "anns_field": ct.default_float_vec_field_name,
             "param": {"metric_type": "COSINE", "params": {"ef": "96"}},
             "limit": ct.default_limit,
@@ -296,7 +296,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         req = AnnSearchRequest(**search_param)
 
         search_param2 = {
-            "data": cf.gen_vectors(ct.default_nq, ct.default_dim, vector_data_type="FLOAT_VECTOR"),
+            "data": cf.gen_vectors(ct.default_nq, ct.default_dim, vector_data_type=DataType.FLOAT_VECTOR),
             "anns_field": default_vector_name,
             "param": {"metric_type": "L2", "params": {"nprobe": "32"}},
             "limit": ct.default_limit
