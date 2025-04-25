@@ -193,6 +193,7 @@ func (q *sealQueue) startBackoffOrNot(backoff *typeutil.BackoffTimer) <-chan tim
 		)
 		return backOffTimer
 	}
+	backoff.DisableBackoff()
 	return nil
 }
 

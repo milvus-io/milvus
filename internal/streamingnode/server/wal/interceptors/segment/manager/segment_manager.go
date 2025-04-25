@@ -17,12 +17,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
-const dirtyThreshold = 30 * 1024 * 1024 // 30MB
-
 var (
-	ErrTimeTickTooOld = errors.New("time tick is too old")
-	ErrNotEnoughSpace = stats.ErrNotEnoughSpace
-	ErrTooLargeInsert = stats.ErrTooLargeInsert
+	ErrTimeTickTooOld    = errors.New("time tick is too old")
+	ErrWaitForNewSegment = errors.New("wait for new segment")
+	ErrNotEnoughSpace    = stats.ErrNotEnoughSpace
+	ErrTooLargeInsert    = stats.ErrTooLargeInsert
 )
 
 // newSegmentAllocManagerFromProto creates a new segment assignment meta from proto.
@@ -38,12 +37,11 @@ func newSegmentAllocManagerFromProto(
 	// Async sealed policy will use it.
 	growingStat = stat
 	return &segmentAllocManager{
-		pchannel:   pchannel,
-		inner:      inner,
-		ackSem:     atomic.NewInt32(0),
-		txnSem:     atomic.NewInt32(0),
-		dirtyBytes: 0,
-		metrics:    metrics,
+		pchannel: pchannel,
+		inner:    inner,
+		ackSem:   atomic.NewInt32(0),
+		txnSem:   atomic.NewInt32(0),
+		metrics:  metrics,
 	}, growingStat
 }
 
@@ -79,12 +77,11 @@ func newSegmentAllocManager(
 		SegmentID:    segment.SegmentId,
 	}, stat)
 	return &segmentAllocManager{
-		pchannel:   pchannel,
-		inner:      meta,
-		ackSem:     atomic.NewInt32(0),
-		dirtyBytes: 0,
-		txnSem:     atomic.NewInt32(0),
-		metrics:    metrics,
+		pchannel: pchannel,
+		inner:    meta,
+		ackSem:   atomic.NewInt32(0),
+		txnSem:   atomic.NewInt32(0),
+		metrics:  metrics,
 	}
 }
 
@@ -106,7 +103,6 @@ type segmentAllocManager struct {
 	pchannel   types.PChannelInfo
 	inner      *streamingpb.SegmentAssignmentMeta
 	ackSem     *atomic.Int32 // the ackSem is increased when segment allocRows, decreased when the segment is acked.
-	dirtyBytes uint64        // records the dirty bytes that didn't persist.
 	txnSem     *atomic.Int32 // the runnint txn count of the segment.
 	stats      *stats.SegmentStats
 	metrics    *metricsutil.SegmentAssignMetrics
@@ -168,11 +164,6 @@ func (s *segmentAllocManager) TxnSem() int32 {
 	return s.txnSem.Load()
 }
 
-// IsDrityEnough returns true if the segment is dirty enough to persist.
-func (s *segmentAllocManager) IsDirtyEnough() bool {
-	return s.dirtyBytes > dirtyThreshold
-}
-
 // AllocRows ask for rows from current segment.
 // Only growing and not fenced segment can alloc rows.
 func (s *segmentAllocManager) AllocRows(ctx context.Context, req *AssignSegmentRequest) (*AssignSegmentResult, error) {
@@ -186,7 +177,6 @@ func (s *segmentAllocManager) AllocRows(ctx context.Context, req *AssignSegmentR
 	if err != nil {
 		return nil, err
 	}
-	s.dirtyBytes += req.InsertMetrics.BinarySize
 	s.ackSem.Inc()
 
 	// register the txn session cleanup to the segment.

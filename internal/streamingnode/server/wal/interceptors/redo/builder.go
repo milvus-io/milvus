@@ -12,5 +12,7 @@ type interceptorBuilder struct{}
 
 // Build creates a new redo interceptor.
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
-	return &redoAppendInterceptor{}
+	return &redoAppendInterceptor{
+		gracefulStop: make(chan struct{}),
+	}
 }

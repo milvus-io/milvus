@@ -88,6 +88,7 @@ func adaptImplsToWAL(
 		flusher:                flusher,
 		writeMetrics:           metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
 	}
+	wal.writeMetrics.SetLogger(logger)
 	param.WAL.Set(wal)
 	return wal, nil
 }

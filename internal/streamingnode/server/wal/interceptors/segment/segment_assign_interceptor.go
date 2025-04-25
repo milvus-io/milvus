@@ -167,9 +167,16 @@ func (impl *segmentInterceptor) handleInsertMessage(ctx context.Context, msg mes
 			TimeTick:   msg.TimeTick(),
 			TxnSession: txn.GetTxnSessionFromContext(ctx),
 		})
-		if errors.Is(err, manager.ErrTimeTickTooOld) {
+		if errors.IsAny(err, manager.ErrTimeTickTooOld, manager.ErrWaitForNewSegment, manager.ErrFencedAssign) {
 			// If current time tick of insert message is too old to alloc segment,
 			// we just redo it to refresh a new latest timetick.
+			if impl.logger.Level().Enabled(zap.DebugLevel) {
+				impl.logger.Debug("segment assign interceptor redo insert message",
+					zap.Int64("collectionID", header.GetCollectionId()),
+					zap.Int64("partitionID", partition.GetPartitionId()),
+					zap.Uint64("timetick", msg.TimeTick()),
+					zap.Error(err))
+			}
 			return nil, redo.ErrRedo
 		}
 		if errors.Is(err, manager.ErrTooLargeInsert) {

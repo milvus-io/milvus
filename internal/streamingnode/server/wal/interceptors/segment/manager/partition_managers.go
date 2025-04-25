@@ -25,6 +25,7 @@ func buildNewPartitionManagers(
 	pchannel types.PChannelInfo,
 	recoverInfos *recovery.RecoverySnapshot,
 	metrics *metricsutil.SegmentAssignMetrics,
+	allocSegmentWorker *allocSegmentWorker,
 ) (partitionManager *partitionSegmentManagers,
 	growingBelongs []stats.SegmentBelongs,
 	growingStats []*stats.SegmentStats,
@@ -88,6 +89,7 @@ func buildNewPartitionManagers(
 				collectionID,
 				partitionID,
 				segmentManagers,
+				allocSegmentWorker,
 				metrics,
 			))
 			if ok {
@@ -101,11 +103,12 @@ func buildNewPartitionManagers(
 			log.FieldComponent("segment-assigner"),
 			zap.String("pchannel", pchannel.Name),
 		),
-		wal:             wal,
-		pchannel:        pchannel,
-		managers:        managers,
-		collectionInfos: collectionInfoMap,
-		metrics:         metrics,
+		wal:                wal,
+		pchannel:           pchannel,
+		managers:           managers,
+		collectionInfos:    collectionInfoMap,
+		allocSegmentWorker: allocSegmentWorker,
+		metrics:            metrics,
 	}
 	m.updateMetrics()
 	return m, growingBelongs, growingStats, waitForSealed
@@ -115,12 +118,13 @@ func buildNewPartitionManagers(
 type partitionSegmentManagers struct {
 	mu sync.Mutex
 
-	logger          *log.MLogger
-	wal             *syncutil.Future[wal.WAL]
-	pchannel        types.PChannelInfo
-	managers        *typeutil.ConcurrentMap[int64, *partitionSegmentManager] // map partitionID to partition manager
-	collectionInfos map[int64]*CollectionInfo                                // map collectionID to collectionInfo
-	metrics         *metricsutil.SegmentAssignMetrics
+	logger             *log.MLogger
+	wal                *syncutil.Future[wal.WAL]
+	pchannel           types.PChannelInfo
+	managers           *typeutil.ConcurrentMap[int64, *partitionSegmentManager] // map partitionID to partition manager
+	collectionInfos    map[int64]*CollectionInfo                                // map collectionID to collectionInfo
+	allocSegmentWorker *allocSegmentWorker
+	metrics            *metricsutil.SegmentAssignMetrics
 }
 
 type CollectionInfo struct {
@@ -149,6 +153,7 @@ func (m *partitionSegmentManagers) NewCollection(collectionID int64, vchannel st
 			collectionID,
 			partitionID,
 			make([]*segmentAllocManager, 0),
+			m.allocSegmentWorker,
 			m.metrics,
 		)); loaded {
 			m.logger.Warn("partition already exists when NewCollection in segment assignment service, it's may be a bug in system",
@@ -192,6 +197,7 @@ func (m *partitionSegmentManagers) NewPartition(collectionID int64, partitionID 
 		collectionID,
 		partitionID,
 		make([]*segmentAllocManager, 0),
+		m.allocSegmentWorker,
 		m.metrics,
 	)); loaded {
 		m.logger.Warn(

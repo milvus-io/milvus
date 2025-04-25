@@ -24,6 +24,7 @@ type ExtraAppendResult struct {
 	TimeTick uint64
 	TxnCtx   *message.TxnContext
 	Extra    protoreflect.ProtoMessage
+	RedoWait <-chan struct{} // The channel for redo interceptor should wait.
 }
 
 // NotPersistedHint is the hint of not persisted message.
@@ -45,6 +46,15 @@ func GetNotPersisted(ctx context.Context) *NotPersistedHint {
 	return val.(*NotPersistedHint)
 }
 
+// GetRedoWait get redo wait from context
+func GetRedoWait(ctx context.Context) <-chan struct{} {
+	result := ctx.Value(extraAppendResultValue)
+	if result == nil {
+		return nil
+	}
+	return result.(*ExtraAppendResult).RedoWait
+}
+
 // WithExtraAppendResult set extra to context
 func WithExtraAppendResult(ctx context.Context, r *ExtraAppendResult) context.Context {
 	return context.WithValue(ctx, extraAppendResultValue, r)
@@ -63,6 +73,12 @@ func ModifyAppendResultExtra[M protoreflect.ProtoMessage](ctx context.Context, m
 		return
 	}
 	result.(*ExtraAppendResult).Extra = new
+}
+
+// ReplaceRedoWait set redo wait to context
+func ReplaceRedoWait(ctx context.Context, redoWait <-chan struct{}) {
+	result := ctx.Value(extraAppendResultValue)
+	result.(*ExtraAppendResult).RedoWait = redoWait
 }
 
 // ReplaceAppendResultTimeTick set time tick to context

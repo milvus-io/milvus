@@ -7,16 +7,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
@@ -30,39 +28,42 @@ func newPartitionSegmentManager(
 	collectionID int64,
 	paritionID int64,
 	segments []*segmentAllocManager,
+	allocSegmentWorker *allocSegmentWorker,
 	metrics *metricsutil.SegmentAssignMetrics,
 ) *partitionSegmentManager {
 	return &partitionSegmentManager{
 		mu: sync.Mutex{},
 		logger: resource.Resource().Logger().With(
 			log.FieldComponent("segment-assigner"),
-			zap.Any("pchannel", pchannel),
-			zap.Any("pchannel", pchannel),
+			zap.String("pchannel", pchannel.String()),
 			zap.String("vchannel", vchannel),
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("partitionID", paritionID)),
-		wal:          wal,
-		pchannel:     pchannel,
-		vchannel:     vchannel,
-		collectionID: collectionID,
-		paritionID:   paritionID,
-		segments:     segments,
-		metrics:      metrics,
+		wal:                wal,
+		pchannel:           pchannel,
+		vchannel:           vchannel,
+		collectionID:       collectionID,
+		paritionID:         paritionID,
+		segments:           segments,
+		allocSegmentWorker: allocSegmentWorker,
+		metrics:            metrics,
 	}
 }
 
 // partitionSegmentManager is a assign manager of determined partition on determined vchannel.
 type partitionSegmentManager struct {
-	mu                   sync.Mutex
-	logger               *log.MLogger
-	wal                  *syncutil.Future[wal.WAL]
-	pchannel             types.PChannelInfo
-	vchannel             string
-	collectionID         int64
-	paritionID           int64
-	segments             []*segmentAllocManager // there will be very few segments in this list.
-	fencedAssignTimeTick uint64                 // the time tick that the assign operation is fenced.
-	metrics              *metricsutil.SegmentAssignMetrics
+	mu                         sync.Mutex
+	logger                     *log.MLogger
+	wal                        *syncutil.Future[wal.WAL]
+	pchannel                   types.PChannelInfo
+	vchannel                   string
+	collectionID               int64
+	paritionID                 int64
+	pendingAllocSegmentRequest *syncutil.Future[message.ImmutableCreateSegmentMessageV2] // the pending segment that is on-allocating.
+	segments                   []*segmentAllocManager                                    // there will be very few segments in this list.
+	fencedAssignTimeTick       uint64                                                    // the time tick that the assign operation is fenced.
+	allocSegmentWorker         *allocSegmentWorker
+	metrics                    *metricsutil.SegmentAssignMetrics
 }
 
 func (m *partitionSegmentManager) CollectionID() int64 {
@@ -136,63 +137,9 @@ func (m *partitionSegmentManager) CollectAllAndClear(sealPolicy policy.SealPolic
 	return canBeSealed
 }
 
-// allocNewGrowingSegment allocates a new growing segment.
-// After this operation, the growing segment can be seen at datacoord.
-func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*segmentAllocManager, error) {
-	// Allocate new segment id and create ts from remote.
-	segmentID, err := resource.Resource().IDAllocator().Allocate(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to allocate segment id")
-	}
-	storageVersion := storage.StorageV1
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		storageVersion = storage.StorageV2
-	}
-	// Getnerate growing segment limitation.
-	limitation := getSegmentLimitationPolicy().GenerateLimitation()
-	// Create a new segment by sending a create segment message into wal directly.
-	msg, err := message.NewCreateSegmentMessageBuilderV2().
-		WithVChannel(m.vchannel).
-		WithHeader(&message.CreateSegmentMessageHeader{}).
-		WithBody(&message.CreateSegmentMessageBody{
-			CollectionId: m.collectionID,
-			Segments: []*messagespb.CreateSegmentInfo{{
-				// We only execute one segment creation operation at a time.
-				// But in future, we need to modify the segment creation operation to support batch creation.
-				// Because the partition-key based collection may create huge amount of segments at the same time.
-				PartitionId:    m.paritionID,
-				SegmentId:      int64(segmentID),
-				StorageVersion: storageVersion,
-				MaxSegmentSize: limitation.SegmentSize,
-			}},
-		}).BuildMutable()
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to create new segment message, segmentID: %d", segmentID)
-	}
-	// Send CreateSegmentMessage into wal.
-	msgID, err := m.wal.Get().Append(ctx, msg)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to send create segment message into wal, segmentID: %d", segmentID)
-	}
-
-	immutableMessage := msg.IntoImmutableMessage(msgID.MessageID)
-	createSegmentMsg, _ := message.AsImmutableCreateSegmentMessageV2(immutableMessage)
-
-	pendingSegment := newSegmentAllocManager(m.pchannel, createSegmentMsg, m.metrics)
-	m.logger.Info("generate new growing segment",
-		zap.Int64("segmentID", int64(segmentID)),
-		zap.String("messageID", msgID.MessageID.String()),
-		zap.Uint64("timetick", msgID.TimeTick),
-		zap.String("limitationPolicy", limitation.PolicyName),
-		zap.Uint64("segmentBinarySize", limitation.SegmentSize),
-		zap.Any("extraInfo", limitation.ExtraInfo),
-	)
-	m.segments = append(m.segments, pendingSegment)
-	return pendingSegment, nil
-}
-
 // assignSegment assigns a segment for a assign segment request and return should trigger a seal operation.
 func (m *partitionSegmentManager) assignSegment(ctx context.Context, req *AssignSegmentRequest) (*AssignSegmentResult, error) {
+	m.checkIfPendingSegmentReady()
 	hitTimeTickTooOld := false
 	// Alloc segment for insert at allocated segments.
 	for _, segment := range m.segments {
@@ -209,18 +156,46 @@ func (m *partitionSegmentManager) assignSegment(ctx context.Context, req *Assign
 			hitTimeTickTooOld = true
 		}
 	}
-
+	// There is no segment can be allocated for the insert request.
+	// Ask a new peding segment to insert.
+	m.asyncAllocNewGrowingSegment()
+	if m.pendingAllocSegmentRequest != nil {
+		// wait for the pending segment to be ready.
+		utility.ReplaceRedoWait(ctx, m.pendingAllocSegmentRequest.Done())
+	}
 	// If the timetick is too old for existing segment, it can not be inserted even allocate new growing segment,
 	// (new growing segment's timetick is always greater than the old gorwing segmet's timetick).
 	// Return directly to avoid unnecessary growing segment allocation.
 	if hitTimeTickTooOld {
 		return nil, ErrTimeTickTooOld
 	}
+	return nil, ErrWaitForNewSegment
+}
 
-	// If not inserted, ask a new growing segment to insert.
-	newGrowingSegment, err := m.allocNewGrowingSegment(ctx)
-	if err != nil {
-		return nil, err
+func (m *partitionSegmentManager) checkIfPendingSegmentReady() {
+	// check if there's a pending segment.
+	if m.pendingAllocSegmentRequest != nil && m.pendingAllocSegmentRequest.Ready() {
+		createSegmentMessage := m.pendingAllocSegmentRequest.Get()
+		newSegmentManager := newSegmentAllocManager(m.pchannel, createSegmentMessage, m.metrics)
+		m.logger.Info(
+			"pending segment is ready",
+			zap.Int64("segmentID", newSegmentManager.GetSegmentID()),
+			zap.String("createSegmentMessageID", createSegmentMessage.MessageID().String()),
+			zap.Uint64("createSegmentTimeTick", createSegmentMessage.TimeTick()),
+		)
+		m.segments = append(m.segments, newSegmentManager)
+		m.pendingAllocSegmentRequest = nil
 	}
-	return newGrowingSegment.AllocRows(ctx, req)
+}
+
+// asyncAllocNewGrowingSegment allocates a new growing segment asynchronously.
+func (m *partitionSegmentManager) asyncAllocNewGrowingSegment() {
+	if m.pendingAllocSegmentRequest == nil {
+		m.pendingAllocSegmentRequest = m.allocSegmentWorker.AsyncAllocNewGrowingSegment(
+			&AsyncAllocRequest{
+				CollectionID: m.collectionID,
+				PartitionID:  m.paritionID,
+				VChannel:     m.vchannel,
+			})
+	}
 }

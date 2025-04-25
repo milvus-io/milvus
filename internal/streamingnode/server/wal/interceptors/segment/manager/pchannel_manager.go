@@ -29,17 +29,24 @@ func RecoverPChannelSegmentAllocManager(
 	param *interceptors.InterceptorBuildParam,
 ) (*PChannelSegmentAllocManager, error) {
 	metrics := metricsutil.NewSegmentAssignMetrics(param.ChannelInfo.Name)
-	managers, growingBelongs, growingStats, waitForSealed := buildNewPartitionManagers(param.WAL, param.ChannelInfo, param.InitialRecoverSnapshot, metrics)
-
 	// PChannelSegmentAllocManager is the segment assign manager of determined pchannel.
-	logger := log.With(zap.Stringer("pchannel", param.ChannelInfo))
+	logger := resource.Resource().Logger().With(zap.Stringer("pchannel", param.ChannelInfo))
+	allocSegmentWorker := newAllocWorker(logger, param.WAL)
+	managers, growingBelongs, growingStats, waitForSealed := buildNewPartitionManagers(
+		param.WAL,
+		param.ChannelInfo,
+		param.InitialRecoverSnapshot,
+		metrics,
+		allocSegmentWorker,
+	)
 	m := &PChannelSegmentAllocManager{
-		lifetime:   typeutil.NewLifetime(),
-		logger:     logger,
-		pchannel:   param.ChannelInfo,
-		managers:   managers,
-		sealWorker: newSealQueue(logger, param.WAL, param.TxnManager, metrics),
-		metrics:    metrics,
+		lifetime:           typeutil.NewLifetime(),
+		logger:             logger,
+		pchannel:           param.ChannelInfo,
+		managers:           managers,
+		sealWorker:         newSealQueue(logger, param.WAL, param.TxnManager, metrics),
+		allocSegmentWorker: allocSegmentWorker,
+		metrics:            metrics,
 	}
 	// seal the sealed segments from recovery asynchronously.
 	if err := m.sealWorker.AsyncSeal(waitForSealed); err != nil {
@@ -58,8 +65,9 @@ type PChannelSegmentAllocManager struct {
 	pchannel types.PChannelInfo
 	managers *partitionSegmentManagers
 	// There should always
-	sealWorker *sealQueue
-	metrics    *metricsutil.SegmentAssignMetrics
+	sealWorker         *sealQueue
+	allocSegmentWorker *allocSegmentWorker
+	metrics            *metricsutil.SegmentAssignMetrics
 }
 
 // Channel returns the pchannel info.
@@ -188,6 +196,10 @@ func (m *PChannelSegmentAllocManager) Close() {
 
 	m.sealWorker.Close()
 	m.logger.Info("seal worker closed")
+
+	m.allocSegmentWorker.Close()
+	m.logger.Info("alloc segment worker closed")
+
 	// Remove the segment assignment manager from the global manager.
 	resource.Resource().SegmentAssignStatsManager().UnregisterSealOperator(m)
 	m.metrics.Close()
