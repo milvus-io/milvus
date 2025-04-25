@@ -44,8 +44,9 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     const TargetBitmap
     IsNull() override {
-        TargetBitmap bitset(this->Count(), true);
+        TargetBitmap bitset(this->Count());
         this->wrapper_->json_exist_query(json_path_, &bitset);
+        bitset.flip();
         return bitset;
     }
 
@@ -79,10 +80,12 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     const TargetBitmap
     NotIn(size_t n, const T* values) override {
-        TargetBitmap bitset(this->Count(), true);
+        TargetBitmap bitset(this->Count());
         for (size_t i = 0; i < n; ++i) {
             this->wrapper_->json_term_query(json_path_, values[i], &bitset);
         }
+
+        bitset.flip();
 
         // TODO: optimize this
         auto null_bitset = IsNotNull();

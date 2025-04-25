@@ -129,7 +129,9 @@ class JsonFlatIndexTest : public ::testing::Test {
         }
         field_data->FillFieldData(json_vec.data(), json_vec.size());
 
-        storage::InsertData insert_data(field_data);
+        auto payload_reader =
+            std::make_shared<milvus::storage::PayloadReader>(field_data);
+        storage::InsertData insert_data(payload_reader);
         insert_data.SetFieldDataMeta(field_meta_);
         insert_data.SetTimestamps(0, 100);
 

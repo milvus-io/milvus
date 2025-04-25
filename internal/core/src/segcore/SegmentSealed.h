@@ -56,14 +56,19 @@ class SegmentSealed : public SegmentInternalInterface {
 
     virtual index::IndexBase*
     GetJsonIndex(FieldId field_id, std::string path) const override {
-        auto it = std::find_if(json_indices.begin(),
-                               json_indices.end(),
-                               [field_id, path](const JsonIndex& index) {
-                                   if (index.field_id != field_id) {
-                                       return false;
-                                   }
-                                   return index.nested_path == path;
-                               });
+        auto it = std::find_if(
+            json_indices.begin(),
+            json_indices.end(),
+            [field_id, path](const JsonIndex& index) {
+                if (index.field_id != field_id) {
+                    return false;
+                }
+                if (index.cast_type == DataType::JSON) {
+                    return path.substr(0, index.nested_path.length()) ==
+                           index.nested_path;
+                }
+                return index.nested_path == path;
+            });
         return it != json_indices.end() ? it->index.get() : nullptr;
     }
 
