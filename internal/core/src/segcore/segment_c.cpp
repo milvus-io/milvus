@@ -123,6 +123,8 @@ AsyncSearch(CTraceContext c_trace,
             auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
             milvus::tracer::SetRootSpan(span);
 
+            segment->lazy_check_schema(plan);
+
             auto search_result =
                 segment->Search(plan, phg_ptr, timestamp, consistency_level);
             if (!milvus::PositivelyRelated(
@@ -631,6 +633,18 @@ CreateTextIndex(CSegmentInterface c_segment, int64_t field_id) {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         segment_interface->CreateTextIndex(milvus::FieldId(field_id));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+    }
+}
+
+CStatus
+FinishLoad(CSegmentInterface c_segment) {
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        segment_interface->finish_load();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());

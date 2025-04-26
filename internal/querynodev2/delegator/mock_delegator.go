@@ -1107,17 +1107,17 @@ func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) RunAndReturn(run fun
 	return _c
 }
 
-// UpdateSchema provides a mock function with given fields: ctx, sch
-func (_m *MockShardDelegator) UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema) error {
-	ret := _m.Called(ctx, sch)
+// UpdateSchema provides a mock function with given fields: ctx, sch, version
+func (_m *MockShardDelegator) UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, version uint64) error {
+	ret := _m.Called(ctx, sch, version)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateSchema")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *schemapb.CollectionSchema) error); ok {
-		r0 = rf(ctx, sch)
+	if rf, ok := ret.Get(0).(func(context.Context, *schemapb.CollectionSchema, uint64) error); ok {
+		r0 = rf(ctx, sch, version)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -1133,13 +1133,14 @@ type MockShardDelegator_UpdateSchema_Call struct {
 // UpdateSchema is a helper method to define mock.On call
 //   - ctx context.Context
 //   - sch *schemapb.CollectionSchema
-func (_e *MockShardDelegator_Expecter) UpdateSchema(ctx interface{}, sch interface{}) *MockShardDelegator_UpdateSchema_Call {
-	return &MockShardDelegator_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", ctx, sch)}
+//   - version uint64
+func (_e *MockShardDelegator_Expecter) UpdateSchema(ctx interface{}, sch interface{}, version interface{}) *MockShardDelegator_UpdateSchema_Call {
+	return &MockShardDelegator_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", ctx, sch, version)}
 }
 
-func (_c *MockShardDelegator_UpdateSchema_Call) Run(run func(ctx context.Context, sch *schemapb.CollectionSchema)) *MockShardDelegator_UpdateSchema_Call {
+func (_c *MockShardDelegator_UpdateSchema_Call) Run(run func(ctx context.Context, sch *schemapb.CollectionSchema, version uint64)) *MockShardDelegator_UpdateSchema_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*schemapb.CollectionSchema))
+		run(args[0].(context.Context), args[1].(*schemapb.CollectionSchema), args[2].(uint64))
 	})
 	return _c
 }
@@ -1149,7 +1150,7 @@ func (_c *MockShardDelegator_UpdateSchema_Call) Return(_a0 error) *MockShardDele
 	return _c
 }
 
-func (_c *MockShardDelegator_UpdateSchema_Call) RunAndReturn(run func(context.Context, *schemapb.CollectionSchema) error) *MockShardDelegator_UpdateSchema_Call {
+func (_c *MockShardDelegator_UpdateSchema_Call) RunAndReturn(run func(context.Context, *schemapb.CollectionSchema, uint64) error) *MockShardDelegator_UpdateSchema_Call {
 	_c.Call.Return(run)
 	return _c
 }

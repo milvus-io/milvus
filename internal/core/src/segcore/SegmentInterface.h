@@ -147,6 +147,18 @@ class SegmentInterface {
 
     virtual std::pair<std::string_view, bool>
     GetJsonData(FieldId field_id, size_t offset) const = 0;
+
+    virtual void
+    lazy_check_schema(const query::Plan* plan) = 0;
+
+    // reopen segment with new schema
+    virtual void
+    reopen(SchemaPtr sch) = 0;
+
+    // finish_load notifies the segment that all load operation are done
+    // currently it's used to sync field data list with updated schema.
+    virtual void
+    finish_load() = 0;
 };
 
 // internal API for DSL calculation

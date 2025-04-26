@@ -28,6 +28,7 @@
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"
 #include "common/EasyAssert.h"
+#include "common/Schema.h"
 #include "google/protobuf/message_lite.h"
 #include "mmap/ChunkedColumn.h"
 #include "index/ScalarIndex.h"
@@ -122,6 +123,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_valid = column->IsValid(offset);
         return std::make_pair(std::move(column->RawAt(offset)), is_valid);
     }
+
+    void
+    reopen(SchemaPtr sch) override;
+
+    void
+    lazy_check_schema(const query::Plan* plan) override;
+
+    void
+    finish_load() override;
 
  public:
     size_t
@@ -385,6 +395,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     bool
     generate_interim_index(const FieldId field_id);
+
+    void
+    fill_empty_field(const FieldMeta& field_meta);
 
  private:
     // mmap descriptor, used in chunk cache

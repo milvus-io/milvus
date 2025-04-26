@@ -172,6 +172,9 @@ RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id);
 CStatus
 CreateTextIndex(CSegmentInterface c_segment, int64_t field_id);
 
+CStatus
+FinishLoad(CSegmentInterface c_segment);
+
 #ifdef __cplusplus
 }
 #endif

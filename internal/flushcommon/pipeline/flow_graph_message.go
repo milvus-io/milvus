@@ -63,6 +63,7 @@ type FlowGraphMsg struct {
 	dropPartitions []typeutil.UniqueID
 
 	updatedSchema *schemapb.CollectionSchema
+	schemaVersion uint64
 }
 
 func (fgMsg *FlowGraphMsg) TimeTick() typeutil.Timestamp {
