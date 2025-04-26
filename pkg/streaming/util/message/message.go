@@ -130,6 +130,9 @@ type ImmutableMessage interface {
 	// Available only when the message's version greater than 0.
 	// Otherwise, it will panic.
 	LastConfirmedMessageID() MessageID
+
+	// CloneAsMutable converts the immutable message to mutable message.
+	CloneAsMutable() MutableMessage
 }
 
 // ImmutableTxnMessage is the read-only transaction message interface.

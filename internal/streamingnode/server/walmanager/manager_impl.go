@@ -7,7 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/flusher"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
@@ -27,7 +27,7 @@ func OpenManager() (Manager, error) {
 	resource.Resource().Logger().Info("open wal manager", zap.String("walName", walName))
 	opener, err := registry.MustGetBuilder(walName,
 		redo.NewInterceptorBuilder(),
-		flusher.NewInterceptorBuilder(),
+		lock.NewInterceptorBuilder(),
 		timetick.NewInterceptorBuilder(),
 		segment.NewInterceptorBuilder(),
 	).Build()

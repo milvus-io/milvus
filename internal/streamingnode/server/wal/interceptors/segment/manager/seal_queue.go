@@ -2,113 +2,237 @@ package manager
 
 import (
 	"context"
-	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-// newSealQueue creates a new seal helper queue.
+var ErrSealWorkerClosed = errors.New("seal worker is closed")
+
+// newSealQueue creates a new seal worker.
 func newSealQueue(
 	logger *log.MLogger,
 	wal *syncutil.Future[wal.WAL],
-	waitForSealed []*segmentAllocManager,
+	txnManager *txn.TxnManager,
 	metrics *metricsutil.SegmentAssignMetrics,
 ) *sealQueue {
-	return &sealQueue{
-		cond:          syncutil.NewContextCond(&sync.Mutex{}),
-		logger:        logger,
-		wal:           wal,
-		waitForSealed: waitForSealed,
-		waitCounter:   len(waitForSealed),
-		metrics:       metrics,
+	w := &sealQueue{
+		backgroundTask: syncutil.NewAsyncTaskNotifier[struct{}](),
+		gracefulClose:  make(chan struct{}),
+		reqCh:          make(chan *asyncSealRequest),
+		logger:         logger,
+		wal:            wal,
+		txnManager:     txnManager,
+		metrics:        metrics,
 	}
+	go w.background()
+	return w
 }
 
-// sealQueue is a helper to seal segments.
+// sealQueue is a worker that seals segments asynchronously.
 type sealQueue struct {
-	cond          *syncutil.ContextCond
-	logger        *log.MLogger
-	wal           *syncutil.Future[wal.WAL]
-	waitForSealed []*segmentAllocManager
-	waitCounter   int // wait counter count the real wait segment count, it is not equal to waitForSealed length.
-	// some segments may be in sealing process.
-	metrics *metricsutil.SegmentAssignMetrics
+	backgroundTask *syncutil.AsyncTaskNotifier[struct{}]
+	pendings       []*asyncSealRequest
+	gracefulClose  chan struct{}
+	reqCh          chan *asyncSealRequest
+	logger         *log.MLogger
+	wal            *syncutil.Future[wal.WAL]
+	txnManager     *txn.TxnManager
+	metrics        *metricsutil.SegmentAssignMetrics
+}
+
+// asyncSealRequest is a request to seal segments asynchronously.
+type asyncSealRequest struct {
+	segments []*segmentAllocManager
 }
 
 // AsyncSeal adds a segment into the queue, and will be sealed at next time.
-func (q *sealQueue) AsyncSeal(manager ...*segmentAllocManager) {
+// The seal operation does not block the caller, and it may not success if node crash or graceful shutdown happens.
+func (q *sealQueue) AsyncSeal(managers []*segmentAllocManager) error {
+	if len(managers) == 0 {
+		return nil
+	}
 	if q.logger.Level().Enabled(zap.DebugLevel) {
-		for _, m := range manager {
+		for _, m := range managers {
+			policy := m.SealPolicy()
 			q.logger.Debug("segment is added into seal queue",
 				zap.Int("collectionID", int(m.GetCollectionID())),
 				zap.Int("partitionID", int(m.GetPartitionID())),
 				zap.Int("segmentID", int(m.GetSegmentID())),
-				zap.String("policy", string(m.SealPolicy())))
+				zap.String("policy", string(policy.Policy)),
+				zap.Any("policyExtra", policy.Extra),
+			)
 		}
 	}
-
-	q.cond.LockAndBroadcast()
-	defer q.cond.L.Unlock()
-
-	q.waitForSealed = append(q.waitForSealed, manager...)
-	q.waitCounter += len(manager)
+	r := &asyncSealRequest{
+		segments: managers,
+	}
+	select {
+	case <-q.backgroundTask.Context().Done():
+		return ErrSealWorkerClosed
+	case q.reqCh <- r:
+		return nil
+	}
 }
 
-// SealAllWait seals all segments in the queue.
-// If the operation is failure, the segments will be collected and will be retried at next time.
-// Return true if all segments are sealed, otherwise return false.
-func (q *sealQueue) SealAllWait(ctx context.Context) {
-	q.cond.L.Lock()
-	segments := q.waitForSealed
-	q.waitForSealed = make([]*segmentAllocManager, 0)
-	q.cond.L.Unlock()
-
-	q.tryToSealSegments(ctx, segments...)
+// background is a background working that will run in a separate goroutine.
+func (q *sealQueue) background() {
+	defer q.backgroundTask.Finish(struct{}{})
+	if err := q.prepare(); err != nil {
+		return
+	}
+	q.execute()
 }
 
-// IsEmpty returns whether the queue is empty.
-func (q *sealQueue) IsEmpty() bool {
-	q.cond.L.Lock()
-	defer q.cond.L.Unlock()
+// prepare prepares the seal worker.
+func (q *sealQueue) prepare() (err error) {
+	pendings := q.getPendingSegmentIDs()
+	defer func() {
+		if err != nil {
+			segmentIDs := q.getPendingSegmentIDs()
+			q.logger.Error("seal worker prepare failed", zap.Int64s("pendingSegmentIDs", segmentIDs), zap.Error(err))
+			return
+		}
+		q.logger.Info("seal worker prepare done", zap.Int64s("pendingSegmentIDs", pendings))
+	}()
 
-	return q.waitCounter == 0
-}
-
-// WaitCounter returns the wait counter.
-func (q *sealQueue) WaitCounter() int {
-	q.cond.L.Lock()
-	defer q.cond.L.Unlock()
-
-	return q.waitCounter
-}
-
-// WaitUntilNoWaitSeal waits until no segment in the queue.
-func (q *sealQueue) WaitUntilNoWaitSeal(ctx context.Context) error {
-	// wait until the wait counter becomes 0.
-	q.cond.L.Lock()
-	for q.waitCounter > 0 {
-		if err := q.cond.Wait(ctx); err != nil {
-			return err
+	// The segment assignment manager lost the txnSem for the recovered txn message,
+	// So the seal worker should wait for all the recovered txn to be done.
+	// Otherwise, the flush message may be sent into wal before the txn is done.
+	// Break the wal consistency: All insert message is writen into wal before the flush message.
+	//
+	for {
+		select {
+		case <-q.backgroundTask.Context().Done():
+			return ErrSealWorkerClosed
+		case <-q.gracefulClose:
+			return ErrSealWorkerClosed
+		case req := <-q.reqCh:
+			// before the txn manager recover is done,
+			// we only collect the pending segments that need to be sealed.
+			q.pendings = append(q.pendings, req)
+		case <-q.txnManager.RecoverDone():
+			// the txn manager is recovered, so we can start seal worker and seal all pending segments.
+			q.flushAllPendings()
+			return nil
 		}
 	}
-	q.cond.L.Unlock()
+}
+
+// background is a background working that will run in a separate goroutine.
+func (q *sealQueue) execute() {
+	defer func() {
+		q.flushAllPendings()
+		if len(q.pendings) > 0 {
+			segmentIDs := q.getPendingSegmentIDs()
+			q.logger.Warn("there're some segments in pending queue after graceful closing", zap.Int("segmentCount", len(segmentIDs)), zap.Int64s("segmentIDs", segmentIDs))
+		}
+	}()
+
+	backoff := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
+		Default: time.Second,
+		Backoff: typeutil.BackoffConfig{
+			InitialInterval: 20 * time.Millisecond,
+			Multiplier:      2,
+			MaxInterval:     time.Second,
+		},
+	})
+	// backoffTimer will enabled if there's any pending segments that's need to be flushed.
+	var backoffTimer <-chan time.Time
+	for {
+		select {
+		case <-q.backgroundTask.Context().Done():
+			return
+		case <-q.gracefulClose:
+			q.logger.Info("seal worker is on graceful closing")
+			return
+		case req := <-q.reqCh:
+			q.pendings = append(q.pendings, req)
+			q.flushAllPendings()
+		case <-backoffTimer:
+			q.flushAllPendings()
+		}
+		backoffTimer = q.startBackoffOrNot(backoff)
+	}
+}
+
+// Close closes the seal worker.
+func (q *sealQueue) Close() {
+	q.logger.Info("seal worker is on graceful closing")
+	// perform a graceful close first.
+	close(q.gracefulClose)
+
+	// wait for the background task to finish.
+	select {
+	case <-time.After(gracefulCloseTimeout):
+		q.logger.Warn("seal worker is not closed after graceful close, force to close it")
+	case <-q.backgroundTask.FinishChan():
+	}
+	q.backgroundTask.Cancel()
+	q.backgroundTask.BlockUntilFinish()
+	q.logger.Info("seal worker is closed")
+}
+
+// startBackoffOrNot starts the backoff timer or not.
+func (q *sealQueue) startBackoffOrNot(backoff *typeutil.BackoffTimer) <-chan time.Time {
+	if len(q.pendings) > 0 {
+		backoff.EnableBackoff()
+		backOffTimer, nextInterval := backoff.NextTimer()
+		q.logger.Info("there're some segment need to be sealed in pending queue",
+			zap.Duration("nextInterval", nextInterval),
+			zap.Int("pendingCount", len(q.pendings)),
+			zap.Int64s("segmentIDs", q.getPendingSegmentIDs()),
+		)
+		return backOffTimer
+	}
+	backoff.DisableBackoff()
 	return nil
 }
 
-// tryToSealSegments tries to seal segments, return the undone segments.
-func (q *sealQueue) tryToSealSegments(ctx context.Context, segments ...*segmentAllocManager) {
-	if len(segments) == 0 {
-		return
+// flushAllPendings flushes all pendings.
+func (q *sealQueue) flushAllPendings() {
+	newPendings := make([]*asyncSealRequest, 0, len(q.pendings))
+	for _, req := range q.pendings {
+		q.handleSealRequest(q.backgroundTask.Context(), req)
+		if len(req.segments) > 0 {
+			newPendings = append(newPendings, req)
+		}
 	}
-	undone, sealedSegments := q.transferSegmentStateIntoSealed(ctx, segments...)
+	q.pendings = newPendings
+}
+
+// getPendingSegmentIDs returns the pending segment IDs.
+func (q *sealQueue) getPendingSegmentIDs() []int64 {
+	segmentIDs := make([]int64, 0, len(q.pendings))
+	for _, req := range q.pendings {
+		for _, segment := range req.segments {
+			segmentIDs = append(segmentIDs, segment.GetSegmentID())
+		}
+	}
+	return segmentIDs
+}
+
+// handleSealRequest handles the seal request.
+func (q *sealQueue) handleSealRequest(ctx context.Context, req *asyncSealRequest) {
+	// try to seal segments, return the undone segments.
+	req.segments = q.tryToSealSegments(ctx, req.segments...)
+}
+
+// tryToSealSegments tries to seal segments, return the undone segments.
+func (q *sealQueue) tryToSealSegments(ctx context.Context, segments ...*segmentAllocManager) []*segmentAllocManager {
+	if len(segments) == 0 {
+		return nil
+	}
+	undone, sealedSegments := q.collectFlushableSegments(ctx, segments...)
 
 	// send flush message into wal.
 	for collectionID, vchannelSegments := range sealedSegments {
@@ -116,75 +240,53 @@ func (q *sealQueue) tryToSealSegments(ctx context.Context, segments ...*segmentA
 			if err := q.sendFlushSegmentsMessageIntoWAL(ctx, collectionID, vchannel, segments); err != nil {
 				q.logger.Warn("fail to send flush message into wal", zap.String("vchannel", vchannel), zap.Int64("collectionID", collectionID), zap.Error(err))
 				undone = append(undone, segments...)
-				continue
 			}
 			for _, segment := range segments {
-				tx := segment.BeginModification()
-				tx.IntoFlushed()
-				if err := tx.Commit(ctx); err != nil {
-					q.logger.Warn("flushed segment failed at commit, maybe sent repeated flush message into wal", zap.Int64("segmentID", segment.GetSegmentID()), zap.Error(err))
-					undone = append(undone, segment)
-					continue
-				}
+				policy := segment.SealPolicy()
 				q.metrics.ObserveSegmentFlushed(
-					string(segment.SealPolicy()),
+					string(policy.Policy),
 					int64(segment.GetStat().Insert.BinarySize))
 				q.logger.Info("segment has been flushed",
 					zap.Int64("collectionID", segment.GetCollectionID()),
 					zap.Int64("partitionID", segment.GetPartitionID()),
 					zap.String("vchannel", segment.GetVChannel()),
 					zap.Int64("segmentID", segment.GetSegmentID()),
-					zap.String("sealPolicy", string(segment.SealPolicy())))
+					zap.String("sealPolicy", string(policy.Policy)),
+					zap.Any("sealPolicyExtra", policy.Extra),
+				)
 			}
 		}
 	}
-
-	q.cond.LockAndBroadcast()
-	q.waitForSealed = append(q.waitForSealed, undone...)
-	// the undone one should be retried at next time, so the counter should not decrease.
-	q.waitCounter -= (len(segments) - len(undone))
-	q.cond.L.Unlock()
+	return undone
 }
 
-// transferSegmentStateIntoSealed transfers the segment state into sealed.
-func (q *sealQueue) transferSegmentStateIntoSealed(ctx context.Context, segments ...*segmentAllocManager) ([]*segmentAllocManager, map[int64]map[string][]*segmentAllocManager) {
+// collectFlushableSegments collects all flushable segments from the given segments.
+func (q *sealQueue) collectFlushableSegments(ctx context.Context, segments ...*segmentAllocManager) ([]*segmentAllocManager, map[int64]map[string][]*segmentAllocManager) {
 	// undone sealed segment should be done at next time.
 	undone := make([]*segmentAllocManager, 0)
 	sealedSegments := make(map[int64]map[string][]*segmentAllocManager)
 	for _, segment := range segments {
+		policy := segment.SealPolicy()
 		logger := q.logger.With(
 			zap.Int64("collectionID", segment.GetCollectionID()),
 			zap.Int64("partitionID", segment.GetPartitionID()),
 			zap.String("vchannel", segment.GetVChannel()),
 			zap.Int64("segmentID", segment.GetSegmentID()),
-			zap.String("sealPolicy", string(segment.SealPolicy())))
-
-		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
-			tx := segment.BeginModification()
-			tx.IntoSealed()
-			if err := tx.Commit(ctx); err != nil {
-				logger.Warn("seal segment failed at commit", zap.Error(err))
-				undone = append(undone, segment)
-				continue
-			}
-		}
-		// assert here.
-		if segment.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED {
-			panic("unreachable code: segment should be sealed here")
-		}
-
+			zap.String("sealPolicy", string(policy.Policy)),
+			zap.Any("sealPolicyExtra", policy.Extra),
+		)
 		// if there'are flying acks, wait them acked, delay the sealed at next retry.
 		ackSem := segment.AckSem()
 		if ackSem > 0 {
 			undone = append(undone, segment)
-			logger.Info("segment has been sealed, but there are flying acks, delay it", zap.Int32("ackSem", ackSem))
+			logger.Info("segment has flying acks, delay it", zap.Int32("ackSem", ackSem))
 			continue
 		}
 
 		txnSem := segment.TxnSem()
 		if txnSem > 0 {
 			undone = append(undone, segment)
-			logger.Info("segment has been sealed, but there are flying txns, delay it", zap.Int32("txnSem", txnSem))
+			logger.Info("segment has flying txns, delay it", zap.Int32("txnSem", txnSem))
 			continue
 		}
 
@@ -196,7 +298,7 @@ func (q *sealQueue) transferSegmentStateIntoSealed(ctx context.Context, segments
 			sealedSegments[segment.GetCollectionID()][segment.GetVChannel()] = make([]*segmentAllocManager, 0)
 		}
 		sealedSegments[segment.GetCollectionID()][segment.GetVChannel()] = append(sealedSegments[segment.GetCollectionID()][segment.GetVChannel()], segment)
-		logger.Info("segment has been mark as sealed, can be flushed")
+		logger.Info("all message of segment has been commited, ready to flush")
 	}
 	return undone, sealedSegments
 }

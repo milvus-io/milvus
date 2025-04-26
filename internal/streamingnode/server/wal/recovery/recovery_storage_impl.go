@@ -66,7 +66,6 @@ func newRecoveryStorage(channel types.PChannelInfo) *RecoveryStorage {
 // It will consume the message from the wal, consume the message in wal, and update the checkpoint for it.
 type RecoveryStorage struct {
 	log.Binder
-
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
 	cfg                    *config
 	mu                     sync.Mutex
@@ -141,6 +140,7 @@ func (r *RecoveryStorage) observeMessage(msg message.ImmutableMessage) {
 	if msg.TimeTick() <= r.checkpoint.TimeTick {
 		if r.Logger().Level().Enabled(zap.DebugLevel) {
 			r.Logger().Debug("skip the message before the checkpoint",
+				log.FieldMessage(msg),
 				zap.Uint64("checkpoint", r.checkpoint.TimeTick),
 				zap.Uint64("incoming", msg.TimeTick()),
 			)

@@ -9,7 +9,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/manager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
@@ -31,8 +30,7 @@ var (
 
 // segmentInterceptor is the implementation of segment assignment interceptor.
 type segmentInterceptor struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	notifier *syncutil.AsyncTaskNotifier[struct{}]
 
 	logger        *log.MLogger
 	assignManager *syncutil.Future[*manager.PChannelSegmentAllocManager]
@@ -97,8 +95,13 @@ func (impl *segmentInterceptor) handleDropCollection(ctx context.Context, msg me
 	if err := impl.assignManager.Get().RemoveCollection(ctx, h.GetCollectionId()); err != nil {
 		return nil, err
 	}
+	dropCollectionMessage.OverwriteHeader(&messagespb.DropCollectionMessageHeader{
+		CollectionId: h.GetCollectionId(),
+	})
 
-	// send the drop collection message.
+	// It may be failure if the underlying wal write failure,
+	// make the wal state and memory state of wal inconsistent.
+	// But the drop collection message will be retried by the broadcast service until it is success.
 	return appendOp(ctx, msg)
 }
 
@@ -133,8 +136,14 @@ func (impl *segmentInterceptor) handleDropPartition(ctx context.Context, msg mes
 	if err := impl.assignManager.Get().RemovePartition(ctx, h.GetCollectionId(), h.GetPartitionId()); err != nil {
 		return nil, err
 	}
+	dropPartitionMessage.OverwriteHeader(&messagespb.DropPartitionMessageHeader{
+		CollectionId: h.GetCollectionId(),
+		PartitionId:  h.GetPartitionId(),
+	})
 
-	// send the create collection message.
+	// It may be failure if the underlying wal write failure,
+	// make the wal state and memory state of wal inconsistent.
+	// But the drop partition message will be retried by the broadcast service until it is success.
 	return appendOp(ctx, msg)
 }
 
@@ -158,9 +167,16 @@ func (impl *segmentInterceptor) handleInsertMessage(ctx context.Context, msg mes
 			TimeTick:   msg.TimeTick(),
 			TxnSession: txn.GetTxnSessionFromContext(ctx),
 		})
-		if errors.Is(err, manager.ErrTimeTickTooOld) {
+		if errors.IsAny(err, manager.ErrTimeTickTooOld, manager.ErrWaitForNewSegment, manager.ErrFencedAssign) {
 			// If current time tick of insert message is too old to alloc segment,
 			// we just redo it to refresh a new latest timetick.
+			if impl.logger.Level().Enabled(zap.DebugLevel) {
+				impl.logger.Debug("segment assign interceptor redo insert message",
+					zap.Int64("collectionID", header.GetCollectionId()),
+					zap.Int64("partitionID", partition.GetPartitionId()),
+					zap.Uint64("timetick", msg.TimeTick()),
+					zap.Error(err))
+			}
 			return nil, redo.ErrRedo
 		}
 		if errors.Is(err, manager.ErrTooLargeInsert) {
@@ -193,7 +209,7 @@ func (impl *segmentInterceptor) handleManualFlushMessage(ctx context.Context, ms
 		return nil, err
 	}
 	header := maunalFlushMsg.Header()
-	segmentIDs, err := impl.assignManager.Get().SealAndFenceSegmentUntil(ctx, header.GetCollectionId(), header.GetFlushTs())
+	segmentIDs, err := impl.assignManager.Get().SealAndFenceSegmentUntil(ctx, header.GetCollectionId(), msg.TimeTick())
 	if err != nil {
 		return nil, status.NewInner("segment seal failure with error: %s", err.Error())
 	}
@@ -204,37 +220,31 @@ func (impl *segmentInterceptor) handleManualFlushMessage(ctx context.Context, ms
 		}
 		return &messagespb.ManualFlushExtraResponse{SegmentIds: append(old.GetSegmentIds(), segmentIDs...)}
 	})
-	if len(segmentIDs) > 0 {
-		// There's some new segment sealed, we need to retry the manual flush operation refresh the context.
-		// If we don't refresh the context, the sequence of message in wal will be:
-		// FlushTsHere -> ManualFlush -> FlushSegment1 -> FlushSegment2 -> FlushSegment3.
-		// After refresh the context, keep the sequence of the message in the wal with following seq:
-		// FlushTsHere -> FlushSegment1 -> FlushSegment2 -> FlushSegment3 -> ManualFlush.
-		return nil, redo.ErrRedo
-	}
+	header.SegmentIds = segmentIDs
+	maunalFlushMsg.OverwriteHeader(header)
 
-	// send the manual flush message.
-	msgID, err := appendOp(ctx, msg)
-	if err != nil {
-		return nil, err
-	}
-
-	return msgID, nil
+	// TODO: it should be retried until success, otherwise segment flush leak here.
+	// It may be failure if the underlying wal write failure,
+	// make the wal state and memory state of wal inconsistent.
+	// But the manual flush message will be retried by the broadcast service until it is success.
+	return appendOp(ctx, msg)
 }
 
 // Close closes the segment interceptor.
 func (impl *segmentInterceptor) Close() {
-	impl.cancel()
+	impl.notifier.Cancel()
+	impl.notifier.BlockUntilFinish()
+
 	assignManager := impl.assignManager.Get()
 	if assignManager != nil {
-		// unregister the pchannels
-		inspector.GetSegmentSealedInspector().UnregisterPChannelManager(assignManager)
-		assignManager.Close(context.Background())
+		assignManager.Close()
 	}
 }
 
 // recoverPChannelManager recovers PChannel Assignment Manager.
 func (impl *segmentInterceptor) recoverPChannelManager(param *interceptors.InterceptorBuildParam) {
+	defer impl.notifier.Finish(struct{}{})
+
 	timer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
 		Default: time.Second,
 		Backoff: typeutil.BackoffConfig{
@@ -245,13 +255,13 @@ func (impl *segmentInterceptor) recoverPChannelManager(param *interceptors.Inter
 	})
 	timer.EnableBackoff()
 	for counter := 0; ; counter++ {
-		pm, err := manager.RecoverPChannelSegmentAllocManager(impl.ctx, param.ChannelInfo, param.WAL)
+		pm, err := manager.RecoverPChannelSegmentAllocManager(impl.notifier.Context(), param)
 		if err != nil {
 			ch, d := timer.NextTimer()
 			impl.logger.Warn("recover PChannel Assignment Manager failed, wait a backoff", zap.Int("retry", counter), zap.Duration("nextRetryInterval", d), zap.Error(err))
 			select {
-			case <-impl.ctx.Done():
-				impl.logger.Info("segment interceptor has been closed", zap.Error(impl.ctx.Err()))
+			case <-impl.notifier.Context().Done():
+				impl.logger.Info("segment interceptor has been closed", zap.Error(impl.notifier.Context().Err()))
 				impl.assignManager.Set(nil)
 				return
 			case <-ch:
@@ -260,7 +270,6 @@ func (impl *segmentInterceptor) recoverPChannelManager(param *interceptors.Inter
 		}
 
 		// register the manager into inspector, to do the seal asynchronously
-		inspector.GetSegmentSealedInspector().RegisterPChannelManager(pm)
 		impl.assignManager.Set(pm)
 		impl.logger.Info("recover PChannel Assignment Manager success")
 		return

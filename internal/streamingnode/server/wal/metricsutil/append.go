@@ -71,7 +71,9 @@ func (m *AppendMetrics) IntoLogFields() []zap.Field {
 	}
 	for name, ims := range m.interceptors {
 		for i, im := range ims {
-			fields = append(fields, zap.Any(fmt.Sprintf("%s_%d", name, i), im))
+			if i <= 3 {
+				fields = append(fields, zap.Any(fmt.Sprintf("%s_%d", name, i), im))
+			}
 		}
 	}
 	if m.err != nil {

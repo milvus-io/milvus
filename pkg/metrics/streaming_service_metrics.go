@@ -232,6 +232,21 @@ var (
 	}, WALChannelLabelName, WALTxnStateLabelName)
 
 	// Segment related metrics
+	WALGrowingSegmentBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "growing_segment_bytes",
+		Help: "Bytes of segment growing on wal",
+	}, WALChannelLabelName)
+
+	WALGrowingSegmentHWMBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "growing_segment_hwm_bytes",
+		Help: "HWM of segment growing bytes on node",
+	})
+
+	WALGrowingSegmentLWMBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "growing_segment_lwm_bytes",
+		Help: "LWM of segment growing bytes on node",
+	})
+
 	WALSegmentAllocTotal = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "segment_assign_segment_alloc_total",
 		Help: "Total of segment alloc on wal",
@@ -434,6 +449,9 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALTimeTickSyncTimeTick)
 	registry.MustRegister(WALInflightTxn)
 	registry.MustRegister(WALTxnDurationSeconds)
+	registry.MustRegister(WALGrowingSegmentBytes)
+	registry.MustRegister(WALGrowingSegmentHWMBytes)
+	registry.MustRegister(WALGrowingSegmentLWMBytes)
 	registry.MustRegister(WALSegmentAllocTotal)
 	registry.MustRegister(WALSegmentFlushedTotal)
 	registry.MustRegister(WALSegmentBytes)

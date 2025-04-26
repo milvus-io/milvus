@@ -344,6 +344,15 @@ func (m *immutableMessageImpl) overwriteLastConfirmedMessageID(id MessageID) {
 	m.WithLastConfirmed(id)
 }
 
+// CloneAsMutable clones the current immutable message as mutable message.
+func (m *immutableMessageImpl) CloneAsMutable() MutableMessage {
+	// payload and message id is always immutable, so we only clone the prop here is ok.
+	return &messageImpl{
+		payload:    m.payload,
+		properties: m.properties.Clone(),
+	}
+}
+
 // immutableTxnMessageImpl is a immutable transaction message.
 type immutableTxnMessageImpl struct {
 	immutableMessageImpl

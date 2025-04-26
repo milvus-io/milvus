@@ -5248,6 +5248,10 @@ type streamingConfig struct {
 
 	// logging
 	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
+	// memory usage control
+	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
+	FlushGrowingSegmentBytesHwmThreshold ParamItem `refreshable:"true"`
+	FlushGrowingSegmentBytesLwmThreshold ParamItem `refreshable:"true"`
 
 	// recovery configuration.
 	WALRecoveryPersistInterval      ParamItem `refreshable:"true"`
@@ -5390,6 +5394,39 @@ If the wal implementation is woodpecker, the minimum threshold is 3s`,
 		Export:       true,
 	}
 	p.LoggingAppendSlowThreshold.Init(base.mgr)
+
+	p.FlushMemoryThreshold = ParamItem{
+		Key:     "streaming.flush.memoryThreshold",
+		Version: "2.6.0",
+		Doc: `The threshold of memory usage for one streaming node,
+If the memory usage is higher than this threshold, the node will try to trigger flush action to decrease the total of growing segment until growingSegmentBytesLwmThreshold,
+the value should be in the range of (0, 1), 0.6 by default.`,
+		DefaultValue: "0.6",
+		Export:       true,
+	}
+	p.FlushMemoryThreshold.Init(base.mgr)
+
+	p.FlushGrowingSegmentBytesHwmThreshold = ParamItem{
+		Key:     "streaming.flush.growingSegmentBytesHwmThreshold",
+		Version: "2.6.0",
+		Doc: `The high watermark of total growing segment bytes for one streaming node,
+If the total bytes of growing segment is greater than this threshold,
+a flush process will be triggered to decrease total bytes of growing segment until growingSegmentBytesLwmThreshold, 0.4 by default`,
+		DefaultValue: "0.4",
+		Export:       true,
+	}
+	p.FlushGrowingSegmentBytesHwmThreshold.Init(base.mgr)
+
+	p.FlushGrowingSegmentBytesLwmThreshold = ParamItem{
+		Key:     "streaming.flush.growingSegmentBytesLwmThreshold",
+		Version: "2.6.0",
+		Doc: `The lower watermark of total growing segment bytes for one streaming node,
+growing segment flush process will try to flush some growing segment into sealed 
+until the total bytes of growing segment is less than this threshold, 0.2 by default.`,
+		DefaultValue: "0.2",
+		Export:       true,
+	}
+	p.FlushGrowingSegmentBytesLwmThreshold.Init(base.mgr)
 
 	p.WALRecoveryPersistInterval = ParamItem{
 		Key:     "streaming.walRecovery.persistInterval",

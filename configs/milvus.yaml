@@ -59,8 +59,8 @@ etcd:
     dir: default.etcd # Embedded Etcd only. please adjust in embedded Milvus: /tmp/milvus/etcdData/
   auth:
     enabled: false # Whether to enable authentication
-    userName:  # username for etcd authentication
-    password:  # password for etcd authentication
+    userName: # username for etcd authentication
+    password: # password for etcd authentication
 
 metastore:
   type: etcd # Default value: etcd, Valid values: [etcd, tikv]
@@ -80,9 +80,9 @@ tikv:
   snapshotScanSize: 256 # batch size of tikv snapshot scan
   ssl:
     enabled: false # Whether to support TiKV secure connection mode
-    tlsCert:  # path to your cert file
-    tlsKey:  # path to your key file
-    tlsCACert:  # path to your CACert file
+    tlsCert: # path to your cert file
+    tlsKey: # path to your key file
+    tlsCACert: # path to your CACert file
 
 localStorage:
   # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
@@ -146,15 +146,15 @@ minio:
   cloudProvider: aws
   # The JSON content contains the gcs service account credentials.
   # Used only for the "gcpnative" cloud provider.
-  gcpCredentialJSON: 
+  gcpCredentialJSON:
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
   # Leave it empty if you want to use AWS default endpoint
-  iamEndpoint: 
+  iamEndpoint:
   logLevel: fatal # Log level for aws sdk log. Supported level:  off, fatal, error, warn, info, debug, trace
-  region:  # Specify minio storage system location region
+  region: # Specify minio storage system location region
   useVirtualHost: false # Whether use virtual host mode for bucket
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
-  # The maximum number of objects requested per batch in minio ListObjects rpc, 
+  # The maximum number of objects requested per batch in minio ListObjects rpc,
   # 0 means using oss client by default, decrease these configration if ListObjects timeout
   listObjectsMaxKeys: 0
 
@@ -231,10 +231,10 @@ pulsar:
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:
 #   brokerList: localhost:9092
-#   saslUsername: 
-#   saslPassword: 
-#   saslMechanisms: 
-#   securityProtocol: 
+#   saslUsername:
+#   saslPassword:
+#   saslMechanisms:
+#   securityProtocol:
 #   ssl:
 #     enabled: false # whether to enable ssl mode
 #     tlsCert:  # path to client's public key (PEM) used for authentication
@@ -274,7 +274,7 @@ rootCoord:
   maxDatabaseNum: 64 # Maximum number of database
   maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
-  ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
+  ip: # TCP/IP address of rootCoord. If not specified, use the first unicastable address
   port: 53100 # TCP port of rootCoord
   grpc:
     serverMaxSendSize: 536870912 # The maximum size of each RPC request that the rootCoord can send, unit: byte
@@ -306,7 +306,7 @@ proxy:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
     localPath: /tmp/milvus_access # The local folder path where the access log file is stored. This parameter can be specified when proxy.accessLog.filename is not empty.
-    filename:  # The name of the access log file. If you leave this parameter empty, access logs will be printed to stdout.
+    filename: # The name of the access log file. If you leave this parameter empty, access logs will be printed to stdout.
     maxSize: 64 # The maximum size allowed for a single access log file. If the log file size reaches this limit, a rotation process will be triggered. This process seals the current access log file, creates a new log file, and clears the contents of the original log file. Unit: MB.
     rotatedTime: 0 # The maximum time interval allowed for rotating a single access log file. Upon reaching the specified time interval, a rotation process is triggered, resulting in the creation of a new access log file and sealing of the previous one. Unit: seconds
     remotePath: access_log/ # The path of the object storage for uploading access log files.
@@ -332,10 +332,10 @@ proxy:
   http:
     enabled: true # Whether to enable the http server
     debug_mode: false # Whether to enable http server debug mode
-    port:  # high-level restful api
+    port: # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
     enablePprof: true # Whether to enable pprof middleware on the metrics port
-  ip:  # TCP/IP address of proxy. If not specified, use the first unicastable address
+  ip: # TCP/IP address of proxy. If not specified, use the first unicastable address
   port: 19530 # TCP port of proxy
   internalPort: 19529
   grpc:
@@ -363,7 +363,7 @@ queryCoord:
   rowCountFactor: 0.4 # the row count weight used when balancing segments among queryNodes
   segmentCountFactor: 0.4 # the segment count weight used when balancing segments among queryNodes
   globalSegmentCountFactor: 0.1 # the segment count weight used when balancing segments among queryNodes
-  # the channel count weight used when balancing channels among queryNodes, 
+  # the channel count weight used when balancing channels among queryNodes,
   # 		A higher value reduces the likelihood of assigning channels from the same collection to the same QueryNode. Set to 1 to disable this feature.
   collectionChannelCountFactor: 10
   segmentCountMaxSteps: 50 # segment count based plan generator max steps
@@ -401,7 +401,7 @@ queryCoord:
   checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist
   updateCollectionLoadStatusInterval: 5 # 5m, max interval of updating collection loaded status for check health
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
-  ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
+  ip: # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
   grpc:
     serverMaxSendSize: 536870912 # The maximum size of each RPC request that the queryCoord can send, unit: byte
@@ -438,9 +438,9 @@ queryNode:
   cache:
     memoryLimit: 2147483648 # Deprecated: 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
-    # options: async, sync, disable. 
-    # Specifies the necessity for warming up the chunk cache. 
-    # 1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the 
+    # options: async, sync, disable.
+    # Specifies the necessity for warming up the chunk cache.
+    # 1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the
     # chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
     # for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
     # 2. If set to "disable" original vector data will only be loaded into the chunk cache during search/query.
@@ -451,8 +451,8 @@ queryNode:
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
     chunkCache: true # Enable mmap for chunk cache (raw vector retrieving).
-    # Enable memory mapping (mmap) to optimize the handling of growing raw data. 
-    # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
+    # Enable memory mapping (mmap) to optimize the handling of growing raw data.
+    # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
     growingMmapEnabled: false
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
@@ -504,7 +504,7 @@ queryNode:
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool
-  ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
+  ip: # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:
     serverMaxSendSize: 536870912 # The maximum size of each RPC request that the queryNode can send, unit: byte
@@ -546,7 +546,7 @@ dataCoord:
     # The max idle time of segment in seconds, 10*60.
     maxIdleTime: 600
     minSizeFromIdleToSealed: 16 # The min size in MB of segment which can be idle from sealed.
-    # The max number of binlog (which is equal to the binlog file num of primary key) for one segment, 
+    # The max number of binlog (which is equal to the binlog file num of primary key) for one segment,
     # the segment will be sealed if the number of binlog file reaches to max value.
     maxBinlogFileNumber: 32
     smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
@@ -555,22 +555,22 @@ dataCoord:
     compactableProportion: 0.85
     # over (compactableProportion * segment max # of rows) rows.
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
-    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
+    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%.
     expansionRate: 1.25
   sealPolicy:
     channel:
-      # The size threshold in MB, if the total size of growing segments of each shard 
+      # The size threshold in MB, if the total size of growing segments of each shard
       # exceeds this threshold, the largest growing segment will be sealed.
       growingSegmentsMemSize: 4096
-      # If the total entry number of l0 logs of each shard 
+      # If the total entry number of l0 logs of each shard
       # exceeds this threshold, the earliest growing segments will be sealed.
       blockingL0EntryNum: 5000000
-      # The size threshold in MB, if the total entry number of l0 logs of each shard 
+      # The size threshold in MB, if the total entry number of l0 logs of each shard
       # exceeds this threshold, the earliest growing segments will be sealed.
       blockingL0SizeInMB: 64
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
-  # Switch value to control if to enable segment compaction. 
+  # Switch value to control if to enable segment compaction.
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
   enableCompaction: true
   compaction:
@@ -578,7 +578,7 @@ dataCoord:
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true
     indexBasedCompaction: true
-    # compaction task prioritizer, options: [default, level, mix]. 
+    # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
     # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
@@ -657,7 +657,7 @@ dataCoord:
   jsonStatsTriggerInterval: 10 # jsonkey task interval per trigger
   enabledJSONKeyStatsInSort: false # Indicates whether to enable JSON key stats task with sort
   jsonKeyStatsMemoryBudgetInTantivy: 16777216 # the memory budget for the JSON index In Tantivy, the unit is bytes
-  ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
+  ip: # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
     serverMaxSendSize: 536870912 # The maximum size of each RPC request that the dataCoord can send, unit: byte
@@ -720,7 +720,7 @@ dataNode:
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   storage:
     deltalog: json # deltalog format, options: [json, parquet]
-  ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
+  ip: # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode
   grpc:
     serverMaxSendSize: 536870912 # The maximum size of each RPC request that the dataNode can send, unit: byte
@@ -778,7 +778,7 @@ msgChannel:
 
 # Configures the system log output.
 log:
-  # Milvus log level. Option: debug, info, warn, error, panic, and fatal. 
+  # Milvus log level. Option: debug, info, warn, error, panic, and fatal.
   # It is recommended to use debug level under test and development environments, and info level in production environment.
   level: info
   file:
@@ -786,7 +786,7 @@ log:
     # The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
     # If this parameter is set to a valid local path, Milvus writes and stores log files in this path.
     # Set this parameter as the path that you have permission to write.
-    rootPath: 
+    rootPath:
     maxSize: 300 # The maximum size of a log file, unit: MB.
     maxAge: 10 # The maximum retention time before a log file is automatically cleared, unit: day. The minimum value is 1.
     maxBackups: 20 # The maximum number of log files to back up, unit: day. The minimum value is 1.
@@ -852,7 +852,7 @@ common:
     authorizationEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
-    superUsers: 
+    superUsers:
     defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
@@ -895,8 +895,8 @@ common:
   storage:
     scheme: s3
     enablev2: false
-  # Whether to disable the internal time messaging mechanism for the system. 
-  # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches. 
+  # Whether to disable the internal time messaging mechanism for the system.
+  # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
   # This helps Milvus-CDC synchronize incremental data
   ttMsgEnabled: true
   traceLogMode: 0 # trace request info
@@ -986,7 +986,7 @@ quotaAndLimits:
     # Maximum number of db-related requests per second.
     # Setting this item to 10 indicates that Milvus processes no more than 10 db-related requests per second, including db creation/drop/alter requests.
     # To use this setting, set quotaAndLimits.dbRate.enabled to true at the same time.
-    # 		
+    #
     max: -1
   dml:
     enabled: false # Whether DML request throttling is enabled.
@@ -1124,10 +1124,10 @@ trace:
   # Fractions >= 1 will always sample. Fractions < 0 are treated as zero.
   sampleFraction: 0
   jaeger:
-    url:  # when exporter is jaeger should set the jaeger's URL
+    url: # when exporter is jaeger should set the jaeger's URL
   otlp:
-    endpoint:  # example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http
-    method:  # otlp export method, acceptable values: ["grpc", "http"],  using "grpc" by default
+    endpoint: # example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http
+    method: # otlp export method, acceptable values: ["grpc", "http"],  using "grpc" by default
     secure: true
   initTimeoutSeconds: 10 # segcore initialization timeout in seconds, preventing otlp grpc hangs forever
 
@@ -1144,7 +1144,7 @@ gpu:
 
 # Any configuration related to the streaming node server.
 streamingNode:
-  ip:  # TCP/IP address of streamingNode. If not specified, use the first unicastable address
+  ip: # TCP/IP address of streamingNode. If not specified, use the first unicastable address
   port: 22222 # TCP port of streamingNode
   grpc:
     serverMaxSendSize: 268435456 # The maximum size of each RPC request that the streamingNode can send, unit: byte
@@ -1155,23 +1155,23 @@ streamingNode:
 # Any configuration related to the streaming service.
 streaming:
   walBalancer:
-    # The interval of balance task trigger at background, 1 min by default. 
+    # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     triggerInterval: 1m
-    # The initial interval of balance task trigger backoff, 50 ms by default. 
+    # The initial interval of balance task trigger backoff, 50 ms by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffInitialInterval: 50ms
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       vchannelFair:
-        # The weight of pchannel count in vchannelFair balance policy, 
+        # The weight of pchannel count in vchannelFair balance policy,
         # the pchannel count will more evenly distributed if the weight is greater, 0.4 by default
         pchannelWeight: 0.4
-        # The weight of vchannel count in vchannelFair balance policy, 
+        # The weight of vchannel count in vchannelFair balance policy,
         # the vchannel count will more evenly distributed if the weight is greater, 0.3 by default
         vchannelWeight: 0.3
-        # The weight of affinity in vchannelFair balance policy, 
+        # The weight of affinity in vchannelFair balance policy,
         # the fewer VChannels belonging to the same Collection between two PChannels, the higher the affinity,
         # the vchannel of one collection will more evenly distributed if the weight is greater, 0.01 by default
         antiAffinityWeight: 0.01
@@ -1179,7 +1179,7 @@ streaming:
         # the balance result will be ignored, the lower tolerance, the sensitive rebalance, 0.01 by default
         rebalanceTolerance: 0.01
         # Indicates how many pchannels will be considered as a batch for rebalancing,
-        # the larger step, more aggressive and accurate rebalance, 
+        # the larger step, more aggressive and accurate rebalance,
         # it also determine the depth of depth first search method that is used to find the best balance result, 3 by default
         rebalanceMaxStep: 3
   walBroadcaster:
@@ -1194,18 +1194,32 @@ streaming:
     # If the wal implementation is woodpecker, the minimum threshold is 3s
     appendSlowThreshold: 1s
   walRecovery:
-    # The interval of persist recovery info, 10s by default. 
+    # The interval of persist recovery info, 10s by default.
     # Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.
     # Currently it only affect the recovery of wal, but not affect the recovery of data flush into object storage
     persistInterval: 10s
     # The max dirty message count of wal recovery, 100 by default.
     # If there are more than this count of dirty message in wal recovery info, it will be persisted immediately, 
+    # If there are more than this count of dirty message in wal recovery info, it will be persisted immediately,
     # but not wait for the persist interval.
     maxDirtyMessage: 100
     # The graceful close timeout for wal recovery, 3s by default.
     # When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
     # If that persist operation exceeds this timeout, the wal recovery module will close right now.
     gracefulCloseTimeout: 3s
+  flush:
+    # The threshold of memory usage for one streaming node,
+    # If the memory usage is higher than this threshold, the node will try to trigger flush action to decrease the total of growing segment until growingSegmentBytesLwmThreshold,
+    # the value should be in the range of (0, 1), 0.6 by default.
+    memoryThreshold: 0.6
+    # The high watermark of total growing segment bytes for one streaming node,
+    # If the total bytes of growing segment is greater than this threshold,
+    # a flush process will be triggered to decrease total bytes of growing segment until growingSegmentBytesLwmThreshold, 0.4 by default
+    growingSegmentBytesHwmThreshold: 0.4
+    # The lower watermark of total growing segment bytes for one streaming node,
+    # growing segment flush process will try to flush some growing segment into sealed
+    # until the total bytes of growing segment is less than this threshold, 0.2 by default.
+    growingSegmentBytesLwmThreshold: 0.2
 
 # Any configuration related to the knowhere vector search engine
 knowhere:
@@ -1231,37 +1245,37 @@ knowhere:
 #    credential_json:
 credential:
   aksk1:
-    access_key_id:  # Your access_key_id
-    secret_access_key:  # Your secret_access_key
+    access_key_id: # Your access_key_id
+    secret_access_key: # Your secret_access_key
   apikey1:
-    apikey:  # Your apikey credential
+    apikey: # Your apikey credential
   gcp1:
-    credential_json:  # base64 based gcp credential data
+    credential_json: # base64 based gcp credential data
 
 # Any configuration related to functions
 function:
   textEmbedding:
     providers:
       azure_openai:
-        credential:  # The name in the crendential configuration item
-        resource_name:  # Your azure openai resource name
-        url:  # Your azure openai embedding url, Default is the official embedding url
+        credential: # The name in the crendential configuration item
+        resource_name: # Your azure openai resource name
+        url: # Your azure openai embedding url, Default is the official embedding url
       bedrock:
-        credential:  # The name in the crendential configuration item
+        credential: # The name in the crendential configuration item
       cohere:
-        credential:  # The name in the crendential configuration item
-        url:  # Your cohere embedding url, Default is the official embedding url
+        credential: # The name in the crendential configuration item
+        url: # Your cohere embedding url, Default is the official embedding url
       dashscope:
-        credential:  # The name in the crendential configuration item
-        url:  # Your dashscope embedding url, Default is the official embedding url
+        credential: # The name in the crendential configuration item
+        url: # Your dashscope embedding url, Default is the official embedding url
       openai:
-        credential:  # The name in the crendential configuration item
-        url:  # Your openai embedding url, Default is the official embedding url
+        credential: # The name in the crendential configuration item
+        url: # Your openai embedding url, Default is the official embedding url
       siliconflow:
-        credential:  # The name in the crendential configuration item
-        url:  # Your siliconflow embedding url, Default is the official embedding url
+        credential: # The name in the crendential configuration item
+        url: # Your siliconflow embedding url, Default is the official embedding url
       tei:
-        credential:  # The name in the crendential configuration item
+        credential: # The name in the crendential configuration item
         enable: true # Whether to enable TEI model service
       vertexai:
         credential:  # The name in the crendential configuration item

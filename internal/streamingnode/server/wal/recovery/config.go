@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 

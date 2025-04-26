@@ -1,11 +1,11 @@
 affinity:
   nodeAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
-    - preference:
-        matchExpressions:
-        - key: node-role.kubernetes.io/e2e
-          operator: Exists
-      weight: 1
+      - preference:
+          matchExpressions:
+            - key: node-role.kubernetes.io/e2e
+              operator: Exists
+        weight: 1
 cluster:
   enabled: true
 streaming:
@@ -29,11 +29,11 @@ etcd:
   affinity:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
-      - preference:
-          matchExpressions:
-          - key: node-role.kubernetes.io/e2e
-            operator: Exists
-        weight: 1
+        - preference:
+            matchExpressions:
+              - key: node-role.kubernetes.io/e2e
+                operator: Exists
+          weight: 1
   metrics:
     enabled: true
     podMonitor:
@@ -44,9 +44,9 @@ etcd:
       cpu: "0.3"
       memory: 100Mi
   tolerations:
-  - effect: NoSchedule
-    key: node-role.kubernetes.io/e2e
-    operator: Exists
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/e2e
+      operator: Exists
 image:
   all:
     pullPolicy: Always
@@ -76,19 +76,19 @@ kafka:
   affinity:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
-      - preference:
-          matchExpressions:
-          - key: node-role.kubernetes.io/e2e
-            operator: Exists
-        weight: 1
+        - preference:
+            matchExpressions:
+              - key: node-role.kubernetes.io/e2e
+                operator: Exists
+          weight: 1
   resources:
     requests:
       cpu: "0.5"
       memory: 1Gi
   tolerations:
-  - effect: NoSchedule
-    key: node-role.kubernetes.io/e2e
-    operator: Exists
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/e2e
+      operator: Exists
   zookeeper:
     replicaCount: 1
     resources:
@@ -109,20 +109,20 @@ minio:
   affinity:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
-      - preference:
-          matchExpressions:
-          - key: node-role.kubernetes.io/e2e
-            operator: Exists
-        weight: 1
+        - preference:
+            matchExpressions:
+              - key: node-role.kubernetes.io/e2e
+                operator: Exists
+          weight: 1
   mode: standalone
   resources:
     requests:
       cpu: "0.3"
       memory: 512Mi
   tolerations:
-  - effect: NoSchedule
-    key: node-role.kubernetes.io/e2e
-    operator: Exists
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/e2e
+      operator: Exists
 proxy:
   resources:
     limits:
@@ -135,11 +135,11 @@ pulsar:
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
-        - preference:
-            matchExpressions:
-            - key: node-role.kubernetes.io/e2e
-              operator: Exists
-          weight: 1
+          - preference:
+              matchExpressions:
+                - key: node-role.kubernetes.io/e2e
+                  operator: Exists
+            weight: 1
     configData:
       PULSAR_GC: |
         -Dio.netty.leakDetectionLevel=disabled -Dio.netty.recycler.linkCapacity=1024 -XX:+UseG1GC -XX:MaxGCPauseMillis=10 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+DoEscapeAnalysis -XX:ParallelGCThreads=32 -XX:ConcGCThreads=32 -XX:G1NewSizePercent=50 -XX:+DisableExplicitGC -XX:-ResizePLAB -XX:+ExitOnOutOfMemoryError -XX:+PerfDisableSharedMem -XX:+PrintGCDetails
@@ -151,18 +151,18 @@ pulsar:
         cpu: "0.5"
         memory: 4Gi
     tolerations:
-    - effect: NoSchedule
-      key: node-role.kubernetes.io/e2e
-      operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/e2e
+        operator: Exists
   broker:
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
-        - preference:
-            matchExpressions:
-            - key: node-role.kubernetes.io/e2e
-              operator: Exists
-          weight: 1
+          - preference:
+              matchExpressions:
+                - key: node-role.kubernetes.io/e2e
+                  operator: Exists
+            weight: 1
     configData:
       PULSAR_GC: |
         -Dio.netty.leakDetectionLevel=disabled -Dio.netty.recycler.linkCapacity=1024 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+DoEscapeAnalysis -XX:ParallelGCThreads=32 -XX:ConcGCThreads=32 -XX:G1NewSizePercent=50 -XX:+DisableExplicitGC -XX:-ResizePLAB -XX:+ExitOnOutOfMemoryError
@@ -179,20 +179,20 @@ pulsar:
         cpu: "0.5"
         memory: 4Gi
     tolerations:
-    - effect: NoSchedule
-      key: node-role.kubernetes.io/e2e
-      operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/e2e
+        operator: Exists
   components:
     autorecovery: false
   proxy:
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
-        - preference:
-            matchExpressions:
-            - key: node-role.kubernetes.io/e2e
-              operator: Exists
-          weight: 1
+          - preference:
+              matchExpressions:
+                - key: node-role.kubernetes.io/e2e
+                  operator: Exists
+            weight: 1
     configData:
       PULSAR_GC: |
         -XX:MaxDirectMemorySize=2048m
@@ -204,9 +204,9 @@ pulsar:
         cpu: "0.5"
         memory: 1Gi
     tolerations:
-    - effect: NoSchedule
-      key: node-role.kubernetes.io/e2e
-      operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/e2e
+        operator: Exists
     wsResources:
       requests:
         cpu: "0.1"
@@ -215,11 +215,11 @@ pulsar:
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
-        - preference:
-            matchExpressions:
-            - key: node-role.kubernetes.io/e2e
-              operator: Exists
-          weight: 1
+          - preference:
+              matchExpressions:
+                - key: node-role.kubernetes.io/e2e
+                  operator: Exists
+            weight: 1
     configData:
       PULSAR_GC: |
         -Dcom.sun.management.jmxremote -Djute.maxbuffer=10485760 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+DoEscapeAnalysis -XX:+DisableExplicitGC -XX:+PerfDisableSharedMem -Dzookeeper.forceSync=no
@@ -231,9 +231,9 @@ pulsar:
         cpu: "0.3"
         memory: 512Mi
     tolerations:
-    - effect: NoSchedule
-      key: node-role.kubernetes.io/e2e
-      operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/e2e
+        operator: Exists
 queryCoordinator:
   enabled: false
   resources:
@@ -252,6 +252,7 @@ queryNode:
       cpu: "0.5"
       memory: 512Mi
 streamingNode:
+  replicas: 2
   resources:
     limits:
       cpu: "2"
@@ -285,6 +286,6 @@ standalone:
       cpu: "1"
       memory: 3.5Gi
 tolerations:
-- effect: NoSchedule
-  key: node-role.kubernetes.io/e2e
-  operator: Exists
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/e2e
+    operator: Exists

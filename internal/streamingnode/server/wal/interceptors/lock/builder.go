@@ -1,6 +1,9 @@
-package redo
+package lock
 
-import "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+import (
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+)
 
 // NewInterceptorBuilder creates a new redo interceptor builder.
 func NewInterceptorBuilder() interceptors.InterceptorBuilder {
@@ -12,7 +15,8 @@ type interceptorBuilder struct{}
 
 // Build creates a new redo interceptor.
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
-	return &redoAppendInterceptor{
-		gracefulStop: make(chan struct{}),
+	return &lockAppendInterceptor{
+		vchannelLocker: lock.NewKeyLock[string](),
+		txnManager:     param.TxnManager,
 	}
 }
