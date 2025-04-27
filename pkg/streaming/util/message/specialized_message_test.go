@@ -41,12 +41,19 @@ func TestAsSpecializedMessage(t *testing.T) {
 		SegmentId: 1,
 	}
 	insertMsg.OverwriteHeader(h)
+	assert.True(t, insertMsg.IsPersisted())
 
 	createColMsg, err := message.AsMutableCreateCollectionMessageV1(m)
 	assert.NoError(t, err)
 	assert.Nil(t, createColMsg)
 
-	m2 := m.IntoImmutableMessage(mock_message.NewMockMessageID(t))
+	id := mock_message.NewMockMessageID(t)
+	id.EXPECT().String().Return("1")
+	m2 := m.IntoImmutableMessage(id)
+
+	assert.Panics(t, func() {
+		_ = message.MustAsImmutableDeleteMessageV1(m2)
+	})
 
 	insertMsg2, err := message.AsImmutableInsertMessageV1(m2)
 	assert.NoError(t, err)

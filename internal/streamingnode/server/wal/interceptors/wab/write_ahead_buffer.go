@@ -65,6 +65,7 @@ func (w *WriteAheadBuffer) Append(msgs []message.ImmutableMessage, tsMsg message
 	if tsMsg.TimeTick() <= w.lastTimeTickMessage.TimeTick() {
 		panic("the time tick of the message is less or equal than the last time tick message")
 	}
+
 	if len(msgs) > 0 {
 		if msgs[0].TimeTick() <= w.lastTimeTickMessage.TimeTick() {
 			panic("the time tick of the message is less than or equal to the last time tick message")
@@ -72,14 +73,15 @@ func (w *WriteAheadBuffer) Append(msgs []message.ImmutableMessage, tsMsg message
 		if msgs[len(msgs)-1].TimeTick() > tsMsg.TimeTick() {
 			panic("the time tick of the message is greater than the time tick message")
 		}
-		// if the len(msgs) > 0, the tsMsg is a persisted message.
 		w.pendingMessages.Push(msgs)
-		w.pendingMessages.Push([]message.ImmutableMessage{tsMsg})
-	} else {
-		w.pendingMessages.Evict()
 	}
-	w.lastTimeTickMessage = tsMsg
+	if tsMsg.IsPersisted() {
+		// The message is persisted, so we need to push it to the pending queue.
+		w.pendingMessages.Push([]message.ImmutableMessage{tsMsg})
+	}
+	w.pendingMessages.Evict()
 
+	w.lastTimeTickMessage = tsMsg
 	w.metrics.Observe(
 		w.pendingMessages.Len(),
 		w.pendingMessages.Size(),
