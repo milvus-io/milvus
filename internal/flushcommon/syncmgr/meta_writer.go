@@ -203,7 +203,7 @@ func (b *brokerMetaWriter) NotifyDropPartition(ctx context.Context, collectionID
 
 	log.Info("successfully notified drop partition",
 		zap.String("channel", channelName),
-		zap.Int64s("partitionIDs", partitionIDs),
+		zap.Int64s("collectionID", collectionID),
 		zap.Int64s("partitionIDs", partitionIDs))
 
 	return nil
