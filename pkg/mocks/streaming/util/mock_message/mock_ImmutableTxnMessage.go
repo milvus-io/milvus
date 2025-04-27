@@ -251,6 +251,51 @@ func (_c *MockImmutableTxnMessage_EstimateSize_Call) RunAndReturn(run func() int
 	return _c
 }
 
+// IsPersisted provides a mock function with no fields
+func (_m *MockImmutableTxnMessage) IsPersisted() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsPersisted")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockImmutableTxnMessage_IsPersisted_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsPersisted'
+type MockImmutableTxnMessage_IsPersisted_Call struct {
+	*mock.Call
+}
+
+// IsPersisted is a helper method to define mock.On call
+func (_e *MockImmutableTxnMessage_Expecter) IsPersisted() *MockImmutableTxnMessage_IsPersisted_Call {
+	return &MockImmutableTxnMessage_IsPersisted_Call{Call: _e.mock.On("IsPersisted")}
+}
+
+func (_c *MockImmutableTxnMessage_IsPersisted_Call) Run(run func()) *MockImmutableTxnMessage_IsPersisted_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableTxnMessage_IsPersisted_Call) Return(_a0 bool) *MockImmutableTxnMessage_IsPersisted_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableTxnMessage_IsPersisted_Call) RunAndReturn(run func() bool) *MockImmutableTxnMessage_IsPersisted_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LastConfirmedMessageID provides a mock function with no fields
 func (_m *MockImmutableTxnMessage) LastConfirmedMessageID() message.MessageID {
 	ret := _m.Called()

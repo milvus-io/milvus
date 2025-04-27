@@ -549,6 +549,10 @@ func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
 	log.Info("meta update: adding segment - Start", zap.Int64("segmentID", segment.GetID()))
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
+	if info := m.segments.GetSegment(segment.GetID()); info != nil {
+		log.Info("segment is already exists, ignore the operation", zap.Int64("segmentID", segment.ID))
+		return nil
+	}
 	if err := m.catalog.AddSegment(ctx, segment.SegmentInfo); err != nil {
 		log.Error("meta update: adding segment failed",
 			zap.Int64("segmentID", segment.GetID()),

@@ -41,7 +41,7 @@ func TestTimeTickSyncOperator(t *testing.T) {
 	msgID := walimplstest.NewTestMessageID(1)
 	channel := types.PChannelInfo{Name: "test", Term: 1}
 	ts, _ := resource.Resource().TSOAllocator().Allocate(ctx)
-	lastMsg, _ := NewTimeTickMsg(ts, nil, 0)
+	lastMsg := NewTimeTickMsg(ts, nil, 0, true)
 
 	param := &interceptors.InterceptorBuildParam{
 		ChannelInfo:          channel,

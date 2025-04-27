@@ -288,7 +288,8 @@ TEST(CApiTest, UpdateSchemaTest) {
     // UpdateSchema(CCollection, const void*, const int64_t)
     auto status = UpdateSchema(collection,
                                updated_schema_string.c_str(),
-                               updated_schema_string.length());
+                               updated_schema_string.length(),
+                               100);
     ASSERT_EQ(status.error_code, Success);
 
     auto col = static_cast<milvus::segcore::Collection*>(collection);
@@ -298,7 +299,7 @@ TEST(CApiTest, UpdateSchemaTest) {
     ASSERT_EQ(add_field.get_name().get(), "added_field");
 
     // Test failure case, no panicking with failure code
-    status = UpdateSchema(collection, nullptr, 0);
+    status = UpdateSchema(collection, nullptr, 0, 200);
     ASSERT_NE(status.error_code, Success);
 
     DeleteCollection(collection);

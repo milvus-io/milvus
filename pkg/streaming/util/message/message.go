@@ -47,6 +47,9 @@ type BasicMessage interface {
 	// BroadcastHeader returns the broadcast common header of the message.
 	// If the message is not a broadcast message, it will return 0.
 	BroadcastHeader() *BroadcastHeader
+
+	// IsPersisted returns true if the message is persisted into underlying log storage.
+	IsPersisted() bool
 }
 
 // MutableMessage is the mutable message interface.
@@ -150,6 +153,9 @@ type ImmutableTxnMessage interface {
 type specializedMutableMessage[H proto.Message, B proto.Message] interface {
 	BasicMessage
 
+	// VChannel returns the virtual channel of current message.
+	VChannel() string
+
 	// MessageHeader returns the message header.
 	// Modifications to the returned header will be reflected in the message.
 	Header() H
@@ -173,4 +179,7 @@ type specializedImmutableMessage[H proto.Message, B proto.Message] interface {
 	// Body returns the message body.
 	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
 	Body() (B, error)
+
+	// MustBody return the message body, panic if error occurs.
+	MustBody() B
 }

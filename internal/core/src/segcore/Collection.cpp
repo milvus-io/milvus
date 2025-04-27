@@ -65,8 +65,14 @@ Collection::parseIndexMeta(const void* index_proto, const int64_t length) {
 }
 
 void
-Collection::parse_schema(const void* schema_proto_blob, const int64_t length) {
+Collection::parse_schema(const void* schema_proto_blob,
+                         const int64_t length,
+                         const uint64_t version) {
     Assert(schema_proto_blob != nullptr);
+
+    if (version <= schema_->get_schema_version()) {
+        return;
+    }
 
     milvus::proto::schema::CollectionSchema collection_schema;
     auto suc = collection_schema.ParseFromArray(schema_proto_blob, length);
@@ -74,6 +80,7 @@ Collection::parse_schema(const void* schema_proto_blob, const int64_t length) {
     AssertInfo(suc, "parse schema proto failed");
 
     schema_ = Schema::ParseFrom(collection_schema);
+    schema_->set_schema_version(version);
 }
 
 }  // namespace milvus::segcore

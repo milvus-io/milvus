@@ -63,7 +63,7 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			Nullable: true,
 		})
 
-		err := s.cm.UpdateSchema(1, schema)
+		err := s.cm.UpdateSchema(1, schema, 100)
 		s.NoError(err)
 	})
 
@@ -76,13 +76,13 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			Nullable: true,
 		})
 
-		err := s.cm.UpdateSchema(2, schema)
+		err := s.cm.UpdateSchema(2, schema, 100)
 		s.Error(err)
 	})
 
 	s.Run("nil_schema", func() {
 		s.NotPanics(func() {
-			err := s.cm.UpdateSchema(1, nil)
+			err := s.cm.UpdateSchema(1, nil, 100)
 			s.Error(err)
 		})
 	})

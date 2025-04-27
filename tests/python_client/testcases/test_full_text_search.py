@@ -2419,6 +2419,7 @@ class TestSearchWithFullTextSearch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
+        collection_w.flush()
         collection_w.create_index(
             "emb",
             {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 16, "efConstruction": 500}},

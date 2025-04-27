@@ -950,4 +950,5 @@ message UpdateSchemaRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
     schema.CollectionSchema schema = 3;
+    uint64 version = 4;
 }

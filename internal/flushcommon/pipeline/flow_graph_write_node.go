@@ -117,7 +117,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 
 	// update schema after all data processed
 	if fgMsg.updatedSchema != nil {
-		wNode.metacache.UpdateSchema(fgMsg.updatedSchema)
+		wNode.metacache.UpdateSchema(fgMsg.updatedSchema, fgMsg.schemaVersion)
 	}
 
 	res := FlowGraphMsg{

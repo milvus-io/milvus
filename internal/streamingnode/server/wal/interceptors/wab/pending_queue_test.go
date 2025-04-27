@@ -27,6 +27,7 @@ func TestPendingQueue(t *testing.T) {
 		newImmutableMessage(t, 103, 30),
 		newImmutableMessage(t, 104, 40),
 	})
+	pq.Evict()
 	assert.Equal(t, pq.CurrentOffset(), 4)
 	assert.Len(t, pq.buf, 5)
 
@@ -82,6 +83,7 @@ func TestPendingQueue(t *testing.T) {
 	pq.Push([]message.ImmutableMessage{
 		newImmutableMessage(t, 105, 60),
 	})
+	pq.Evict()
 	assert.Equal(t, pq.CurrentOffset(), 5)
 	assert.Len(t, pq.buf, 2)
 
@@ -108,6 +110,7 @@ func TestPendingQueue(t *testing.T) {
 	pq.Push([]message.ImmutableMessage{
 		newImmutableMessage(t, 100, 10),
 	})
+	pq.Evict()
 	assert.Equal(t, pq.CurrentOffset(), 1)
 	assert.Len(t, pq.buf, 2)
 	time.Sleep(20 * time.Millisecond)

@@ -310,6 +310,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				continue
 			}
 			fgMsg.updatedSchema = body.GetSchema()
+			fgMsg.schemaVersion = schemaMsg.BeginTs()
 			ddn.msgHandler.HandleSchemaChange(ddn.ctx, ddn.vChannelName, schemaMsg)
 		}
 	}

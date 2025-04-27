@@ -97,6 +97,15 @@ class SegmentGrowingImpl : public SegmentGrowing {
                            FieldId primary_field_id,
                            size_t num_rows);
 
+    void
+    reopen(SchemaPtr sch) override;
+
+    void
+    lazy_check_schema(const query::Plan* plan) override;
+
+    void
+    finish_load() override;
+
  public:
     const InsertRecord<>&
     get_insert_record() const {
@@ -419,6 +428,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     get_timestamps() const override {
         return insert_record_.timestamps_;
     }
+
+    void
+    fill_empty_field(const FieldMeta& field_meta);
 
  private:
     void

@@ -359,6 +359,10 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return errors.Wrap(err, "At LoadDeltaLogs")
 		}
 
+		if err = segment.FinishLoad(); err != nil {
+			return errors.Wrap(err, "At FinishLoad")
+		}
+
 		if segment.Level() != datapb.SegmentLevel_L0 {
 			loader.manager.Segment.Put(ctx, segmentType, segment)
 		}
