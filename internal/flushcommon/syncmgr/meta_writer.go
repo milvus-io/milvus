@@ -21,7 +21,7 @@ import (
 type MetaWriter interface {
 	UpdateSync(context.Context, *SyncTask) error
 	DropChannel(context.Context, string) error
-	NotifyDropPartition(context.Context, []int64) error
+	NotifyDropPartition(context.Context, string, []int64) error
 }
 
 type brokerMetaWriter struct {
@@ -175,14 +175,15 @@ func (b *brokerMetaWriter) DropChannel(ctx context.Context, channelName string) 
 	return err
 }
 
-func (b *brokerMetaWriter) NotifyDropPartition(ctx context.Context, partitionIDs []int64) error {
+func (b *brokerMetaWriter) NotifyDropPartition(ctx context.Context, channelName string, partitionIDs []int64) error {
 	if len(partitionIDs) == 0 {
 		return merr.WrapErrParameterInvalid("non-empty partitionIDs", "empty partitionIDs")
 	}
 
 	err := retry.Handle(ctx, func() (bool, error) {
 		status, err := b.broker.NotifyDropPartition(context.Background(), &datapb.NotifyDropPartitionRequest{
-			PartitionId: partitionIDs[0],
+			Channel:      channelName,
+			PartitionIDs: partitionIDs,
 		})
 		err = merr.CheckRPCCall(status, err)
 		if err != nil {

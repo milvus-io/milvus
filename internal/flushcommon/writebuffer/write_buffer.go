@@ -203,7 +203,7 @@ func (wb *writeBufferBase) DropPartitions(partitionIDs []int64) {
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 	wb.dropPartitions(partitionIDs)
-	wb.metaWriter.NotifyDropPartition(context.Background(), partitionIDs)
+	wb.metaWriter.NotifyDropPartition(context.Background(), wb.channelName, partitionIDs)
 }
 
 func (wb *writeBufferBase) SetFlushTimestamp(flushTs uint64) {

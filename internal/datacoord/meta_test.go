@@ -1512,7 +1512,7 @@ func Test_meta_DropSegmentsOfPartition(t *testing.T) {
 	}))
 	assert.NoError(t, err)
 
-	err = meta.DropSegmentsOfPartition(context.Background(), 1)
+	err = meta.DropSegmentsOfPartition(context.Background(), []int64{1})
 	assert.NoError(t, err)
 
 	segment := meta.GetSegment(context.Background(), 1)

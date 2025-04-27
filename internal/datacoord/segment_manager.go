@@ -92,6 +92,8 @@ type Manager interface {
 	DropSegmentsOfChannel(ctx context.Context, channel string)
 	// CleanZeroSealedSegmentsOfChannel try to clean real empty sealed segments in a channel
 	CleanZeroSealedSegmentsOfChannel(ctx context.Context, channel string, cpTs Timestamp)
+
+	DropSegmentsOfPartition(ctx context.Context, channel string, partitionID []int64)
 }
 
 // Allocation records the allocation info
@@ -684,5 +686,47 @@ func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel stri
 	s.channel2Growing.Remove(channel)
 }
 
-func (s *SegmentManager) DropSegmentsOfPartition(ctx context.Context, partitionID UniqueID) {
+func (s *SegmentManager) DropSegmentsOfPartition(ctx context.Context, channel string, partitionIDs []int64) {
+	s.channelLock.Lock(channel)
+	defer s.channelLock.Unlock(channel)
+	if growing, ok := s.channel2Growing.Get(channel); ok {
+		for sid := range growing {
+			segment := s.meta.GetHealthySegment(ctx, sid)
+			if segment == nil {
+				log.Warn("failed to get segment, remove it",
+					zap.String("channel", channel),
+					zap.Int64("segmentID", sid))
+				growing.Remove(sid)
+				continue
+			}
+
+			if contains(partitionIDs, segment.GetPartitionID()) {
+				growing.Remove(sid)
+			}
+			s.meta.SetAllocations(sid, nil)
+			for _, allocation := range segment.allocations {
+				putAllocation(allocation)
+			}
+		}
+	}
+
+	if sealed, ok := s.channel2Sealed.Get(channel); ok {
+		for sid := range sealed {
+			segment := s.meta.GetHealthySegment(ctx, sid)
+			if segment == nil {
+				log.Warn("failed to get segment, remove it",
+					zap.String("channel", channel),
+					zap.Int64("segmentID", sid))
+				sealed.Remove(sid)
+				continue
+			}
+			if contains(partitionIDs, segment.GetPartitionID()) {
+				sealed.Remove(sid)
+			}
+			s.meta.SetAllocations(sid, nil)
+			for _, allocation := range segment.allocations {
+				putAllocation(allocation)
+			}
+		}
+	}
 }

@@ -704,11 +704,11 @@ func (s *Server) notifyDropPartition(ctx context.Context, req *datapb.NotifyDrop
 		return err
 	}
 	log.Ctx(ctx).Info("receive NotifyDropPartition request",
-		zap.Int64("collectionID", req.GetCollectionId()),
-		zap.Int64("partitionID", req.GetPartitionId()))
-
+		zap.String("channelname", req.GetChannel()),
+		zap.Any("partitionID", req.GetPartitionIDs()))
+	s.segmentManager.DropSegmentsOfPartition(ctx, req.GetChannel(), req.GetPartitionIDs())
 	// release all segments of the partition.
-	return s.meta.DropSegmentsOfPartition(ctx, req.GetPartitionId())
+	return s.meta.DropSegmentsOfPartition(ctx, req.GetPartitionIDs())
 }
 
 // SetSegmentState reset the state of the given segment.

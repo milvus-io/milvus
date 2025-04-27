@@ -1017,8 +1017,9 @@ message DropCompactionPlanRequest {
 
 
 message NotifyDropPartitionRequest {
-  int64 collection_id = 1;
-  int64 partition_id = 2;
+  string channel = 1;
+  int64 collection_id = 2;
+  repeated int64 partitionIDs = 3;
 }
 
 message NotifyDropPartitionResponse {

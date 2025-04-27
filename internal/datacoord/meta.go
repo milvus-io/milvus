@@ -2189,7 +2189,7 @@ func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
 	return segments
 }
 
-func (m *meta) DropSegmentsOfPartition(ctx context.Context, partitionID int64) error {
+func (m *meta) DropSegmentsOfPartition(ctx context.Context, partitionIDs []int64) error {
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
 
@@ -2201,13 +2201,12 @@ func (m *meta) DropSegmentsOfPartition(ctx context.Context, partitionID int64) e
 	segments := make([]*datapb.SegmentInfo, 0)
 	// set existed segments of channel to Dropped
 	for _, seg := range m.segments.segments {
-		if seg.PartitionID != partitionID {
-			continue
+		if contains(partitionIDs, seg.PartitionID) {
+			clonedSeg := seg.Clone()
+			updateSegStateAndPrepareMetrics(clonedSeg, commonpb.SegmentState_Dropped, metricMutation)
+			modSegments = append(modSegments, clonedSeg)
+			segments = append(segments, clonedSeg.SegmentInfo)
 		}
-		clonedSeg := seg.Clone()
-		updateSegStateAndPrepareMetrics(clonedSeg, commonpb.SegmentState_Dropped, metricMutation)
-		modSegments = append(modSegments, clonedSeg)
-		segments = append(segments, clonedSeg.SegmentInfo)
 	}
 
 	// Save dropped segments in batch into meta.
@@ -2222,4 +2221,13 @@ func (m *meta) DropSegmentsOfPartition(ctx context.Context, partitionID int64) e
 	}
 	metricMutation.commit()
 	return nil
+}
+
+func contains(arr []int64, target int64) bool {
+	for _, val := range arr {
+		if val == target {
+			return true
+		}
+	}
+	return false
 }

@@ -250,13 +250,13 @@ func (s *dataCoordSuite) TestNotifyDropPartition() {
 	defer cancel()
 
 	req := &datapb.NotifyDropPartitionRequest{
-		PartitionId: 1,
+		PartitionIDs: []int64{1},
 	}
 
 	s.Run("normal_case", func() {
 		s.dc.EXPECT().NotifyDropPartition(mock.Anything, mock.Anything).
 			Run(func(_ context.Context, req *datapb.NotifyDropPartitionRequest, _ ...grpc.CallOption) {
-				s.Equal(int64(1), req.GetPartitionId())
+				s.Equal([]int64{1}, req.GetPartitionIDs())
 			}).
 			Return(&datapb.NotifyDropPartitionResponse{Status: merr.Status(nil)}, nil)
 		_, err := s.broker.NotifyDropPartition(ctx, req)

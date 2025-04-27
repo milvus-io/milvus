@@ -68,17 +68,17 @@ func (_c *MockMetaWriter_DropChannel_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// NotifyDropPartition provides a mock function with given fields: _a0, _a1
-func (_m *MockMetaWriter) NotifyDropPartition(_a0 context.Context, _a1 []int64) error {
-	ret := _m.Called(_a0, _a1)
+// NotifyDropPartition provides a mock function with given fields: _a0, _a1, _a2
+func (_m *MockMetaWriter) NotifyDropPartition(_a0 context.Context, _a1 string, _a2 []int64) error {
+	ret := _m.Called(_a0, _a1, _a2)
 
 	if len(ret) == 0 {
 		panic("no return value specified for NotifyDropPartition")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, []int64) error); ok {
-		r0 = rf(_a0, _a1)
+	if rf, ok := ret.Get(0).(func(context.Context, string, []int64) error); ok {
+		r0 = rf(_a0, _a1, _a2)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -93,14 +93,15 @@ type MockMetaWriter_NotifyDropPartition_Call struct {
 
 // NotifyDropPartition is a helper method to define mock.On call
 //   - _a0 context.Context
-//   - _a1 []int64
-func (_e *MockMetaWriter_Expecter) NotifyDropPartition(_a0 interface{}, _a1 interface{}) *MockMetaWriter_NotifyDropPartition_Call {
-	return &MockMetaWriter_NotifyDropPartition_Call{Call: _e.mock.On("NotifyDropPartition", _a0, _a1)}
+//   - _a1 string
+//   - _a2 []int64
+func (_e *MockMetaWriter_Expecter) NotifyDropPartition(_a0 interface{}, _a1 interface{}, _a2 interface{}) *MockMetaWriter_NotifyDropPartition_Call {
+	return &MockMetaWriter_NotifyDropPartition_Call{Call: _e.mock.On("NotifyDropPartition", _a0, _a1, _a2)}
 }
 
-func (_c *MockMetaWriter_NotifyDropPartition_Call) Run(run func(_a0 context.Context, _a1 []int64)) *MockMetaWriter_NotifyDropPartition_Call {
+func (_c *MockMetaWriter_NotifyDropPartition_Call) Run(run func(_a0 context.Context, _a1 string, _a2 []int64)) *MockMetaWriter_NotifyDropPartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].([]int64))
+		run(args[0].(context.Context), args[1].(string), args[2].([]int64))
 	})
 	return _c
 }
@@ -110,7 +111,7 @@ func (_c *MockMetaWriter_NotifyDropPartition_Call) Return(_a0 error) *MockMetaWr
 	return _c
 }
 
-func (_c *MockMetaWriter_NotifyDropPartition_Call) RunAndReturn(run func(context.Context, []int64) error) *MockMetaWriter_NotifyDropPartition_Call {
+func (_c *MockMetaWriter_NotifyDropPartition_Call) RunAndReturn(run func(context.Context, string, []int64) error) *MockMetaWriter_NotifyDropPartition_Call {
 	_c.Call.Return(run)
 	return _c
 }
