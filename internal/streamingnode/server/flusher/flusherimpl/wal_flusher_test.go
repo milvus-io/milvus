@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -60,15 +59,11 @@ func TestWALFlusher(t *testing.T) {
 			},
 		},
 	}, nil)
-	snMeta := mock_metastore.NewMockStreamingNodeCataLog(t)
-	snMeta.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil)
-	snMeta.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	fMixcoord.Set(mixcoord)
 	resource.InitForTest(
 		t,
 		resource.OptMixCoordClient(fMixcoord),
-		resource.OptStreamingNodeCatalog(snMeta),
 		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
 	)
 	l := newMockWAL(t, false)
