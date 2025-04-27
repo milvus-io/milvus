@@ -4,6 +4,7 @@ filename: "mock_{{.InterfaceName}}.go"
 dir: 'internal/mocks/{{trimPrefix .PackagePath "github.com/milvus-io/milvus/internal" | dir }}/mock_{{.PackageName}}'
 mockname: "Mock{{.InterfaceName}}"
 outpkg: "mock_{{.PackageName}}"
+resolve-type-alias: False
 packages:
   github.com/milvus-io/milvus/internal/distributed/streaming:
     interfaces:
@@ -90,9 +91,9 @@ packages:
   github.com/milvus-io/milvus/internal/util/searchutil/optimizers:
     interfaces:
       QueryHook:
-#  github.com/milvus-io/milvus/internal/flushcommon/util:
-#    interfaces:
-#      MsgHandler:
+  github.com/milvus-io/milvus/internal/flushcommon/util:
+   interfaces:
+     MsgHandler:
   google.golang.org/grpc/resolver:
     interfaces:
       ClientConn:
