@@ -19,6 +19,7 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
+#include "storage/ThreadPools.h"
 
 CStatus
 GetLocalUsedSize(const char* c_dir, int64_t* size) {
@@ -115,4 +116,10 @@ InitMmapManager(CMmapConfig c_mmap_config) {
 void
 CleanRemoteChunkManagerSingleton() {
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Release();
+}
+
+void
+ResizeTheadPool(int64_t priority, float ratio) {
+    milvus::ThreadPools::ResizeThreadPool(
+        static_cast<milvus::ThreadPoolPriority>(priority), ratio);
 }

@@ -176,11 +176,11 @@ func (i *IndexNode) initSegcore() {
 	C.InitIndexSliceSize(cIndexSliceSize)
 
 	// set up thread pool for different priorities
-	cHighPriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt64())
+	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
 	C.InitHighPriorityThreadCoreCoefficient(cHighPriorityThreadCoreCoefficient)
-	cMiddlePriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt64())
+	cMiddlePriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsFloat())
 	C.InitMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
-	cLowPriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt64())
+	cLowPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat())
 	C.InitLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
 
 	cCPUNum := C.int(hardware.GetCPUNum())
