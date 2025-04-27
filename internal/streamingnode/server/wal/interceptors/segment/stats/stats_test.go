@@ -23,16 +23,16 @@ func TestStatsConvention(t *testing.T) {
 	assert.Equal(t, stat.MaxBinarySize, pb.MaxBinarySize)
 	assert.Equal(t, stat.Insert.Rows, pb.InsertedRows)
 	assert.Equal(t, stat.Insert.BinarySize, pb.InsertedBinarySize)
-	assert.Equal(t, stat.CreateTime.UnixNano(), pb.CreateTimestampNanoseconds)
-	assert.Equal(t, stat.LastModifiedTime.UnixNano(), pb.LastModifiedTimestampNanoseconds)
+	assert.Equal(t, stat.CreateTime.Unix(), pb.CreateTimestamp)
+	assert.Equal(t, stat.LastModifiedTime.Unix(), pb.LastModifiedTimestamp)
 	assert.Equal(t, stat.BinLogCounter, pb.BinlogCounter)
 
 	stat2 := NewSegmentStatFromProto(pb)
 	assert.Equal(t, stat.MaxBinarySize, stat2.MaxBinarySize)
 	assert.Equal(t, stat.Insert.Rows, stat2.Insert.Rows)
 	assert.Equal(t, stat.Insert.BinarySize, stat2.Insert.BinarySize)
-	assert.Equal(t, stat.CreateTime.UnixNano(), stat2.CreateTime.UnixNano())
-	assert.Equal(t, stat.LastModifiedTime.UnixNano(), stat2.LastModifiedTime.UnixNano())
+	assert.Equal(t, stat.CreateTime.Unix(), stat2.CreateTime.Unix())
+	assert.Equal(t, stat.LastModifiedTime.Unix(), stat2.LastModifiedTime.Unix())
 	assert.Equal(t, stat.BinLogCounter, stat2.BinLogCounter)
 }
 

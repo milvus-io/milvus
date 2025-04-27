@@ -1215,6 +1215,19 @@ streaming:
     # The threshold of slow log, 1s by default. 
     # If the wal implementation is woodpecker, the minimum threshold is 3s
     appendSlowThreshold: 1s
+  walRecovery:
+    # The interval of persist recovery info, 10s by default. 
+    # Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.
+    # Currently it only affect the recovery of wal, but not affect the recovery of data flush into object storage
+    persistInterval: 10s
+    # The max dirty message count of wal recovery, 100 by default.
+    # If there are more than this count of dirty message in wal recovery info, it will be persisted immediately, 
+    # but not wait for the persist interval.
+    maxDirtyMessage: 100
+    # The graceful close timeout for wal recovery, 3s by default.
+    # When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
+    # If that persist operation exceeds this timeout, the wal recovery module will close right now.
+    gracefulCloseTimeout: 3s
 
 # Any configuration related to the knowhere vector search engine
 knowhere:

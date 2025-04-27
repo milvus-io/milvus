@@ -79,10 +79,13 @@ func marshalSpecializedHeader(t MessageType, h string, enc zapcore.ObjectEncoder
 	case *InsertMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
 		segmentIDs := make([]string, 0, len(header.GetPartitions()))
+		rows := make([]string, 0)
 		for _, partition := range header.GetPartitions() {
 			segmentIDs = append(segmentIDs, strconv.FormatInt(partition.GetSegmentAssignment().GetSegmentId(), 10))
+			rows = append(rows, strconv.FormatUint(partition.Rows, 10))
 		}
 		enc.AddString("segmentIDs", strings.Join(segmentIDs, "|"))
+		enc.AddString("rows", strings.Join(rows, "|"))
 	case *DeleteMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
 	case *CreateCollectionMessageHeader:
@@ -97,21 +100,22 @@ func marshalSpecializedHeader(t MessageType, h string, enc zapcore.ObjectEncoder
 		enc.AddInt64("partitionID", header.GetPartitionId())
 	case *CreateSegmentMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
-		segmentIDs := make([]string, 0, len(header.GetSegmentIds()))
-		for _, segmentID := range header.GetSegmentIds() {
-			segmentIDs = append(segmentIDs, strconv.FormatInt(segmentID, 10))
-		}
-		enc.AddString("segmentIDs", strings.Join(segmentIDs, "|"))
+		encodeSegmentIDs(header.GetSegmentIds(), enc)
 	case *FlushMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
-		segmentIDs := make([]string, 0, len(header.GetSegmentIds()))
-		for _, segmentID := range header.GetSegmentIds() {
-			segmentIDs = append(segmentIDs, strconv.FormatInt(segmentID, 10))
-		}
-		enc.AddString("segmentIDs", strings.Join(segmentIDs, "|"))
+		encodeSegmentIDs(header.GetSegmentIds(), enc)
 	case *ManualFlushMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
+		encodeSegmentIDs(header.GetSegmentIds(), enc)
 	case *SchemaChangeMessageHeader:
 	case *ImportMessageHeader:
 	}
+}
+
+func encodeSegmentIDs(segmentIDs []int64, enc zapcore.ObjectEncoder) {
+	ids := make([]string, 0, len(segmentIDs))
+	for _, id := range segmentIDs {
+		ids = append(ids, strconv.FormatInt(id, 10))
+	}
+	enc.AddString("segmentIDs", strings.Join(ids, "|"))
 }

@@ -47,7 +47,7 @@ func (impl *WALFlusherImpl) getVchannels(ctx context.Context, pchannel string) (
 }
 
 // getRecoveryInfos gets the recovery info of the vchannels from datacoord
-func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []string) (map[string]*datapb.GetChannelRecoveryInfoResponse, map[string]message.MessageID, error) {
+func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []string) (map[string]*datapb.GetChannelRecoveryInfoResponse, message.MessageID, error) {
 	futures := make([]*conc.Future[interface{}], 0, len(vchannel))
 	for _, v := range vchannel {
 		v := v
@@ -69,11 +69,15 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 		}
 		return nil, nil, errors.Wrapf(err, "when get recovery info of vchannel %s", vchannel[i])
 	}
-	messageIDs := make(map[string]message.MessageID, len(recoveryInfos))
-	for v, info := range recoveryInfos {
-		messageIDs[v] = adaptor.MustGetMessageIDFromMQWrapperIDBytes(impl.wal.Get().WALName(), info.GetInfo().GetSeekPosition().GetMsgID())
+
+	var checkpoint message.MessageID
+	for _, info := range recoveryInfos {
+		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytes(impl.wal.Get().WALName(), info.GetInfo().GetSeekPosition().GetMsgID())
+		if checkpoint == nil || messageID.LT(checkpoint) {
+			checkpoint = messageID
+		}
 	}
-	return recoveryInfos, messageIDs, nil
+	return recoveryInfos, checkpoint, nil
 }
 
 // getRecoveryInfo gets the recovery info of the vchannel.
