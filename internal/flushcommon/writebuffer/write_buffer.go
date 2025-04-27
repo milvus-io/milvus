@@ -200,10 +200,14 @@ func (wb *writeBufferBase) SealSegments(ctx context.Context, segmentIDs []int64)
 }
 
 func (wb *writeBufferBase) DropPartitions(partitionIDs []int64) {
+	err := wb.metaWriter.NotifyDropPartition(context.Background(), wb.channelName, partitionIDs)
+	if err != nil {
+		log.Error("failed to drop partition", zap.Error(err))
+		panic(err)
+	}
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 	wb.dropPartitions(partitionIDs)
-	wb.metaWriter.NotifyDropPartition(context.Background(), wb.channelName, partitionIDs)
 }
 
 func (wb *writeBufferBase) SetFlushTimestamp(flushTs uint64) {
