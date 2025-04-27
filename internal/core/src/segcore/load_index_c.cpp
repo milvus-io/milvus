@@ -205,9 +205,9 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
                 .value_or(1);
 
         index_info.tantivy_index_version =
-            milvus::index::GetValueFromConfig<int32_t>(
-                config, milvus::index::TANTIVY_INDEX_VERSION)
-                .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
+            index_info.scalar_index_engine_version <= 1
+                ? milvus::index::TANTIVY_INDEX_MINIMUM_VERSION
+                : milvus::index::TANTIVY_INDEX_LATEST_VERSION;
 
         load_index_info->index =
             milvus::index::IndexFactory::GetInstance().CreateIndex(
