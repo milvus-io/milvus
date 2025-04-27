@@ -87,6 +87,7 @@ func TestOpenerAdaptor(t *testing.T) {
 				msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
 				msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
 				msg.EXPECT().EstimateSize().Return(1).Maybe()
+				msg.EXPECT().IsPersisted().Return(false).Maybe()
 
 				msgID, err := wal.Append(context.Background(), msg)
 				time.Sleep(time.Millisecond * 10)

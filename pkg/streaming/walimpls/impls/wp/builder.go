@@ -21,14 +21,14 @@ import (
 )
 
 const (
-	walName = "woodpecker"
+	WALName = "woodpecker"
 )
 
 func init() {
 	// register the builder to the wal registry.
 	registry.RegisterBuilder(&builderImpl{})
 	// register the unmarshaler to the message registry.
-	message.RegisterMessageIDUnmsarshaler(walName, UnmarshalMessageID)
+	message.RegisterMessageIDUnmsarshaler(WALName, UnmarshalMessageID)
 }
 
 // builderImpl is the builder for woodpecker opener.
@@ -36,7 +36,7 @@ type builderImpl struct{}
 
 // Name of the wal builder, should be a lowercase string.
 func (b *builderImpl) Name() string {
-	return walName
+	return WALName
 }
 
 // Build build a wal instance.

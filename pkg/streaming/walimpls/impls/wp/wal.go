@@ -21,7 +21,7 @@ type walImpl struct {
 }
 
 func (w *walImpl) WALName() string {
-	return walName
+	return WALName
 }
 
 func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {

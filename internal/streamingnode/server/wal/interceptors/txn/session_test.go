@@ -176,7 +176,7 @@ func TestManager(t *testing.T) {
 	assert.Equal(t, int32(0), count.Load())
 }
 
-func TestWithCo(t *testing.T) {
+func TestWithContext(t *testing.T) {
 	session := &TxnSession{}
 	ctx := WithTxnSession(context.Background(), session)
 

@@ -149,6 +149,8 @@ func TestWALAdaptor(t *testing.T) {
 	msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
 	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
 	msg.EXPECT().EstimateSize().Return(1).Maybe()
+	msg.EXPECT().IsPersisted().Return(true).Maybe()
+	msg.EXPECT().MarshalLogObject(mock.Anything).Return(nil).Maybe()
 	_, err = lAdapted.Append(context.Background(), msg)
 	assert.NoError(t, err)
 	lAdapted.AppendAsync(context.Background(), msg, func(mi *wal.AppendResult, err error) {
@@ -214,9 +216,11 @@ func TestNoInterceptor(t *testing.T) {
 	assert.NoError(t, err)
 
 	msg := mock_message.NewMockMutableMessage(t)
+	msg.EXPECT().IsPersisted().Return(true).Maybe()
 	msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
 	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
 	msg.EXPECT().EstimateSize().Return(1).Maybe()
+	msg.EXPECT().MarshalLogObject(mock.Anything).Return(nil).Maybe()
 	_, err = lWithInterceptors.Append(context.Background(), msg)
 	assert.NoError(t, err)
 	lWithInterceptors.Close()
@@ -253,6 +257,8 @@ func TestWALWithInterceptor(t *testing.T) {
 	msg.EXPECT().WithWALTerm(mock.Anything).Return(msg).Maybe()
 	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
 	msg.EXPECT().EstimateSize().Return(1).Maybe()
+	msg.EXPECT().IsPersisted().Return(true).Maybe()
+	msg.EXPECT().MarshalLogObject(mock.Anything).Return(nil).Maybe()
 	_, err = lWithInterceptors.Append(ctx, msg)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 

@@ -223,9 +223,7 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 			s.metrics.ObserveTimeTickViolation(isTailing, msg.MessageType())
 		}
 		s.logger.Warn("failed to push message into reorder buffer",
-			zap.Any("msgID", msg.MessageID()),
-			zap.Uint64("timetick", msg.TimeTick()),
-			zap.String("vchannel", msg.VChannel()),
+			zap.Object("message", msg),
 			zap.Bool("tailing", isTailing),
 			zap.Error(err))
 	}

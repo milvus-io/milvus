@@ -5200,6 +5200,9 @@ type streamingConfig struct {
 	// write ahead buffer
 	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
 	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
+
+	// logging
+	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -5327,6 +5330,16 @@ it also determine the depth of depth first search method that is used to find th
 		Export:       true,
 	}
 	p.WALWriteAheadBufferKeepalive.Init(base.mgr)
+
+	p.LoggingAppendSlowThreshold = ParamItem{
+		Key:     "streaming.logging.appendSlowThreshold",
+		Version: "2.6.0",
+		Doc: `The threshold of slow log, 1s by default. 
+If the wal implementation is woodpecker, the minimum threshold is 3s`,
+		DefaultValue: "1s",
+		Export:       true,
+	}
+	p.LoggingAppendSlowThreshold.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.
