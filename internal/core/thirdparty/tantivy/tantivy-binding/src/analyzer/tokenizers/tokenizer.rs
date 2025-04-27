@@ -53,6 +53,23 @@ pub fn lindera_builder(
     Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
+pub fn ngram_builder(
+    params: Option<&json::Map<String, json::Value>>,
+) -> Result<TextAnalyzerBuilder> {
+    if params.is_none() {
+        return Err(TantivyBindingError::InvalidArgument(format!(
+            "ngram tokenizer must be costum"
+        )));
+    }
+    let params = params.unwrap();
+    // todo: handle error
+    let min = params.get("min").unwrap().as_u64().unwrap();
+    let max = params.get("max").unwrap().as_u64().unwrap();
+    let prefix_only = params.get("prefix_only").unwrap().as_bool().unwrap();
+    let tokenizer = NgramTokenizer::new(min as usize, max as usize, prefix_only)?;
+    Ok(TextAnalyzer::builder(tokenizer).dynamic())
+}
+
 pub fn get_builder_with_tokenizer(
     params: &json::Value,
     fc: fn(&json::Map<String, json::Value>) -> Result<TextAnalyzer>,
@@ -89,6 +106,7 @@ pub fn get_builder_with_tokenizer(
         "lindera" => lindera_builder(params_map),
         "icu" => Ok(icu_builder()),
         "language_identifier" => lang_ident_builder(params_map, fc),
+        "ngram" => ngram_builder(params_map),
         other => {
             warn!("unsupported tokenizer: {}", other);
             Err(TantivyBindingError::InvalidArgument(format!(

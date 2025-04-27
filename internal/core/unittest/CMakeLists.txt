@@ -100,6 +100,7 @@ set(MILVUS_TEST_FILES
         test_types.cpp
         test_growing_storage_v2.cpp
         test_memory_planner.cpp
+        test_ngram_query.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

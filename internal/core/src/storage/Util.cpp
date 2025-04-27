@@ -581,6 +581,29 @@ GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
 }
 
 std::string
+GenNgramIndexPathIdentifier(int64_t build_id,
+                            int64_t index_version,
+                            int64_t segment_id,
+                            int64_t field_id) {
+    return std::to_string(build_id) + "/" + std::to_string(index_version) +
+           "/" + std::to_string(segment_id) + "/" + std::to_string(field_id) +
+           "/";
+}
+
+std::string
+GenNgramIndexPrefix(ChunkManagerPtr cm,
+                    int64_t build_id,
+                    int64_t index_version,
+                    int64_t segment_id,
+                    int64_t field_id) {
+    boost::filesystem::path prefix = cm->GetRootPath();
+    boost::filesystem::path path = std::string(NGRAM_LOG_ROOT_PATH);
+    boost::filesystem::path path1 = GenNgramIndexPathIdentifier(
+        build_id, index_version, segment_id, field_id);
+    return (prefix / path / path1).string();
+}
+
+std::string
 GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id) {
     boost::filesystem::path prefix = cm->GetRootPath();
     boost::filesystem::path path = std::string(INDEX_ROOT_PATH);

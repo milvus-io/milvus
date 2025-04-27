@@ -163,6 +163,8 @@ impl AnalyzerBuilder<'_> {
 
         //build custom analyzer
         let tokenizer_params = self.get_tokenizer_params()?;
+        println!("params: {:?}", self.params);
+        println!("tokenizer params: {:?}", tokenizer_params);
         let mut builder = get_builder_with_tokenizer(&tokenizer_params, create_analyzer_by_json)?;
 
         // build and check other options

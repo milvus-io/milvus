@@ -230,6 +230,23 @@ pub extern "C" fn tantivy_term_query_keyword_i64(
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_inner_match_ngram(
+    ptr: *mut c_void,
+    literal: *const c_char,
+    min_gram: usize,
+    max_gram: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let literal = cstr_to_str!(literal);
+    unsafe {
+        (*real)
+            .inner_match_ngram(literal, min_gram, max_gram, bitset)
+            .into()
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_lower_bound_range_query_keyword(
     ptr: *mut c_void,
     lower_bound: *const c_char,
