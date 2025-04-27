@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
@@ -189,7 +188,6 @@ func (r *reader) filter(insertData *storage.InsertData) (*storage.InsertData, er
 	if len(r.filters) == 0 {
 		return insertData, nil
 	}
-	start := time.Now()
 	masks := make(map[int]struct{}, 0)
 OUTER:
 	for i := 0; i < insertData.GetRowNum(); i++ {
@@ -218,13 +216,6 @@ OUTER:
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to append row, err=%s", err.Error()))
 		}
 	}
-	log.Ctx(context.TODO()).Info("filter data done",
-		zap.String("collection", r.schema.GetName()),
-		zap.Int("deleteRows", len(r.deleteData)),
-		zap.Int("originRows", insertData.GetRowNum()),
-		zap.Int("resultRows", result.GetRowNum()),
-		zap.Duration("dur", time.Since(start)),
-	)
 	return result, nil
 }
 
