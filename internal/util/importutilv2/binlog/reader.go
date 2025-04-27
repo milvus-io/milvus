@@ -21,12 +21,15 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -37,8 +40,8 @@ type reader struct {
 	schema *schemapb.CollectionSchema
 
 	fileSize   *atomic.Int64
-	deleteData *storage.DeleteData
-	insertLogs map[int64][]string // fieldID -> binlogs
+	deleteData map[any]typeutil.Timestamp // pk2ts
+	insertLogs map[int64][]string         // fieldID -> binlogs
 
 	readIdx int
 	filters []Filter
@@ -101,6 +104,11 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		return err
 	}
 
+	log.Ctx(context.TODO()).Info("read delete done",
+		zap.String("collection", r.schema.GetName()),
+		zap.Int("deleteRows", len(r.deleteData)),
+	)
+
 	deleteFilter, err := FilterWithDelete(r)
 	if err != nil {
 		return err
@@ -109,8 +117,8 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	return nil
 }
 
-func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage.DeleteData, error) {
-	deleteData := storage.NewDeleteData(nil, nil)
+func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]typeutil.Timestamp, error) {
+	deleteData := make(map[any]typeutil.Timestamp)
 	for _, path := range deltaLogs {
 		reader, err := newBinlogReader(r.ctx, r.cm, path)
 		if err != nil {
@@ -129,7 +137,10 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage
 					return nil, err
 				}
 				if dl.Ts >= tsStart && dl.Ts <= tsEnd {
-					deleteData.Append(dl.Pk, dl.Ts)
+					pk := dl.Pk.GetValue()
+					if ts, ok := deleteData[pk]; !ok || ts < dl.Ts {
+						deleteData[pk] = dl.Ts
+					}
 				}
 			}
 		}
@@ -178,6 +189,7 @@ func (r *reader) filter(insertData *storage.InsertData) (*storage.InsertData, er
 	if len(r.filters) == 0 {
 		return insertData, nil
 	}
+	start := time.Now()
 	masks := make(map[int]struct{}, 0)
 OUTER:
 	for i := 0; i < insertData.GetRowNum(); i++ {
@@ -206,6 +218,13 @@ OUTER:
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to append row, err=%s", err.Error()))
 		}
 	}
+	log.Ctx(context.TODO()).Info("filter data done",
+		zap.String("collection", r.schema.GetName()),
+		zap.Int("deleteRows", len(r.deleteData)),
+		zap.Int("originRows", insertData.GetRowNum()),
+		zap.Int("resultRows", result.GetRowNum()),
+		zap.Duration("dur", time.Since(start)),
+	)
 	return result, nil
 }
 
