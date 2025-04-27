@@ -222,9 +222,9 @@ type commonConfig struct {
 	EntityExpirationTTL  ParamItem `refreshable:"true"`
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
-	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"false"`
-	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"false"`
-	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"false"`
+	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
+	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
+	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`

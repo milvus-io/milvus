@@ -14,16 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <memory>
 #include <mutex>
-
 #include "common/init_c.h"
-
-#include <string>
-#include "common/Slice.h"
 #include "common/Common.h"
 #include "common/Tracer.h"
-#include "log/Log.h"
 
 std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7, flag8, flag9,
     flag10;
@@ -36,32 +30,30 @@ InitIndexSliceSize(const int64_t size) {
 }
 
 void
-InitHighPriorityThreadCoreCoefficient(const int64_t value) {
+InitHighPriorityThreadCoreCoefficient(const float value) {
     std::call_once(
         flag2,
-        [](int64_t value) {
+        [](float value) {
             milvus::SetHighPriorityThreadCoreCoefficient(value);
         },
         value);
 }
 
 void
-InitMiddlePriorityThreadCoreCoefficient(const int64_t value) {
+InitMiddlePriorityThreadCoreCoefficient(const float value) {
     std::call_once(
         flag4,
-        [](int64_t value) {
+        [](float value) {
             milvus::SetMiddlePriorityThreadCoreCoefficient(value);
         },
         value);
 }
 
 void
-InitLowPriorityThreadCoreCoefficient(const int64_t value) {
+InitLowPriorityThreadCoreCoefficient(const float value) {
     std::call_once(
         flag5,
-        [](int64_t value) {
-            milvus::SetLowPriorityThreadCoreCoefficient(value);
-        },
+        [](float value) { milvus::SetLowPriorityThreadCoreCoefficient(value); },
         value);
 }
 

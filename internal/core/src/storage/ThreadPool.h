@@ -33,25 +33,24 @@ namespace milvus {
 
 class ThreadPool {
  public:
-    explicit ThreadPool(const int thread_core_coefficient, std::string name)
+    explicit ThreadPool(const float thread_core_coefficient, std::string name)
         : shutdown_(false), name_(std::move(name)) {
         idle_threads_size_ = 0;
         current_threads_size_ = 0;
-        min_threads_size_ = CPU_NUM;
-        max_threads_size_ = CPU_NUM * thread_core_coefficient;
+        min_threads_size_ = 1;
+        max_threads_size_.store(std::max(
+            1,
+            static_cast<int>(std::round(CPU_NUM * thread_core_coefficient))));
 
         // only IO pool will set large limit, but the CPU helps nothing to IO operations,
         // we need to limit the max thread num, each thread will download 16~64 MiB data,
         // according to our benchmark, 16 threads is enough to saturate the network bandwidth.
-        if (min_threads_size_ > 16) {
-            min_threads_size_ = 16;
-        }
-        if (max_threads_size_ > 16) {
-            max_threads_size_ = 16;
+        if (max_threads_size_.load() > 16) {
+            max_threads_size_.store(16);
         }
         LOG_INFO("Init thread pool:{}", name_)
             << " with min worker num:" << min_threads_size_
-            << " and max worker num:" << max_threads_size_;
+            << " and max worker num:" << max_threads_size_.load();
         Init();
     }
 
@@ -80,7 +79,7 @@ class ThreadPool {
 
     size_t
     GetMaxThreadNum() {
-        return max_threads_size_;
+        return max_threads_size_.load();
     }
 
     template <typename F, typename... Args>
@@ -100,7 +99,7 @@ class ThreadPool {
 
         if (idle_threads_size_ > 0) {
             condition_lock_.notify_one();
-        } else if (current_threads_size_ < max_threads_size_) {
+        } else if (current_threads_size_ < max_threads_size_.load()) {
             // Dynamic increase thread number
             std::thread t(&ThreadPool::Worker, this);
             assert(threads_.find(t.get_id()) == threads_.end());
@@ -117,11 +116,18 @@ class ThreadPool {
     void
     FinishThreads();
 
+    void
+    Resize(int new_size) {
+        //no need to hold mutex here as we don't require
+        //max_threads_size to take effect instantly, just guaranteed atomic
+        max_threads_size_.store(new_size);
+    }
+
  public:
     int min_threads_size_;
     int idle_threads_size_;
     int current_threads_size_;
-    int max_threads_size_;
+    std::atomic<int> max_threads_size_;
     bool shutdown_;
     static constexpr size_t WAIT_SECONDS = 2;
     SafeQueue<std::function<void()>> work_queue_;
