@@ -2187,7 +2187,30 @@ void
 ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
-    auto column = std::make_shared<ChunkedColumn>(field_meta);
+    std::shared_ptr<ChunkedColumnBase> column{};
+    if (IsVariableDataType(field_meta.get_data_type())) {
+        switch (field_meta.get_data_type()) {
+            case DataType::VARCHAR:
+            case DataType::TEXT:
+            case DataType::STRING:
+                column = std::make_shared<ChunkedVariableColumn<std::string>>(
+                    field_meta);
+                break;
+            case DataType::JSON:
+                column = std::make_shared<ChunkedVariableColumn<milvus::Json>>(
+                    field_meta);
+                break;
+            case DataType::ARRAY:
+                column = std::make_shared<ChunkedArrayColumn>(field_meta);
+                break;
+            default:
+                PanicInfo(ErrorCode::UnexpectedError,
+                          "unexpected data type for empty field: {}",
+                          field_meta.get_data_type());
+        }
+    } else {
+        column = std::make_shared<ChunkedColumn>(field_meta);
+    }
     auto builder = storage::CreateArrowBuilder(field_meta.get_data_type());
     arrow::Status ast;
     if (field_meta.default_value().has_value()) {
