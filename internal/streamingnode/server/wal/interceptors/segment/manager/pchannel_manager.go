@@ -273,7 +273,7 @@ func (m *PChannelSegmentAllocManager) Close(ctx context.Context) {
 	})
 
 	// Try to seal the dirty segment to avoid generate too large segment.
-	protoSegments := make([]*streamingpb.SegmentAssignmentMeta, 0, len(segments))
+	protoSegments := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(segments))
 	growingCnt := 0
 	for _, segment := range segments {
 		if segment.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
@@ -281,7 +281,7 @@ func (m *PChannelSegmentAllocManager) Close(ctx context.Context) {
 		}
 		if segment.IsDirtyEnough() {
 			// Only persist the dirty segment.
-			protoSegments = append(protoSegments, segment.Snapshot())
+			protoSegments[segment.GetSegmentID()] = segment.Snapshot()
 		}
 	}
 	m.logger.Info("segment assignment manager save all dirty segment assignments info",
