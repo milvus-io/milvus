@@ -51,6 +51,7 @@ const (
 	DataCoord_GetFlushState_FullMethodName               = "/milvus.proto.data.DataCoord/GetFlushState"
 	DataCoord_DropVirtualChannel_FullMethodName          = "/milvus.proto.data.DataCoord/DropVirtualChannel"
 	DataCoord_SetSegmentState_FullMethodName             = "/milvus.proto.data.DataCoord/SetSegmentState"
+	DataCoord_NotifyDropPartition_FullMethodName         = "/milvus.proto.data.DataCoord/NotifyDropPartition"
 	DataCoord_UpdateSegmentStatistics_FullMethodName     = "/milvus.proto.data.DataCoord/UpdateSegmentStatistics"
 	DataCoord_UpdateChannelCheckpoint_FullMethodName     = "/milvus.proto.data.DataCoord/UpdateChannelCheckpoint"
 	DataCoord_MarkSegmentsDropped_FullMethodName         = "/milvus.proto.data.DataCoord/MarkSegmentsDropped"
@@ -109,6 +110,7 @@ type DataCoordClient interface {
 	GetFlushState(ctx context.Context, in *GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error)
 	DropVirtualChannel(ctx context.Context, in *DropVirtualChannelRequest, opts ...grpc.CallOption) (*DropVirtualChannelResponse, error)
 	SetSegmentState(ctx context.Context, in *SetSegmentStateRequest, opts ...grpc.CallOption) (*SetSegmentStateResponse, error)
+	NotifyDropPartition(ctx context.Context, in *NotifyDropPartitionRequest, opts ...grpc.CallOption) (*NotifyDropPartitionResponse, error)
 	// Deprecated
 	UpdateSegmentStatistics(ctx context.Context, in *UpdateSegmentStatisticsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	UpdateChannelCheckpoint(ctx context.Context, in *UpdateChannelCheckpointRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -397,6 +399,15 @@ func (c *dataCoordClient) SetSegmentState(ctx context.Context, in *SetSegmentSta
 	return out, nil
 }
 
+func (c *dataCoordClient) NotifyDropPartition(ctx context.Context, in *NotifyDropPartitionRequest, opts ...grpc.CallOption) (*NotifyDropPartitionResponse, error) {
+	out := new(NotifyDropPartitionResponse)
+	err := c.cc.Invoke(ctx, DataCoord_NotifyDropPartition_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *dataCoordClient) UpdateSegmentStatistics(ctx context.Context, in *UpdateSegmentStatisticsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, DataCoord_UpdateSegmentStatistics_FullMethodName, in, out, opts...)
@@ -621,6 +632,7 @@ type DataCoordServer interface {
 	GetFlushState(context.Context, *GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)
 	DropVirtualChannel(context.Context, *DropVirtualChannelRequest) (*DropVirtualChannelResponse, error)
 	SetSegmentState(context.Context, *SetSegmentStateRequest) (*SetSegmentStateResponse, error)
+	NotifyDropPartition(context.Context, *NotifyDropPartitionRequest) (*NotifyDropPartitionResponse, error)
 	// Deprecated
 	UpdateSegmentStatistics(context.Context, *UpdateSegmentStatisticsRequest) (*commonpb.Status, error)
 	UpdateChannelCheckpoint(context.Context, *UpdateChannelCheckpointRequest) (*commonpb.Status, error)
@@ -735,6 +747,9 @@ func (UnimplementedDataCoordServer) DropVirtualChannel(context.Context, *DropVir
 }
 func (UnimplementedDataCoordServer) SetSegmentState(context.Context, *SetSegmentStateRequest) (*SetSegmentStateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetSegmentState not implemented")
+}
+func (UnimplementedDataCoordServer) NotifyDropPartition(context.Context, *NotifyDropPartitionRequest) (*NotifyDropPartitionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NotifyDropPartition not implemented")
 }
 func (UnimplementedDataCoordServer) UpdateSegmentStatistics(context.Context, *UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateSegmentStatistics not implemented")
@@ -1315,6 +1330,24 @@ func _DataCoord_SetSegmentState_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataCoord_NotifyDropPartition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NotifyDropPartitionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).NotifyDropPartition(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_NotifyDropPartition_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).NotifyDropPartition(ctx, req.(*NotifyDropPartitionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DataCoord_UpdateSegmentStatistics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpdateSegmentStatisticsRequest)
 	if err := dec(in); err != nil {
@@ -1811,6 +1844,10 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetSegmentState",
 			Handler:    _DataCoord_SetSegmentState_Handler,
+		},
+		{
+			MethodName: "NotifyDropPartition",
+			Handler:    _DataCoord_NotifyDropPartition_Handler,
 		},
 		{
 			MethodName: "UpdateSegmentStatistics",

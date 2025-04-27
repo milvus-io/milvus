@@ -71,6 +71,8 @@ service DataCoord {
   rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
 
   rpc SetSegmentState(SetSegmentStateRequest) returns (SetSegmentStateResponse) {}
+
+  rpc NotifyDropPartition(NotifyDropPartitionRequest) returns (NotifyDropPartitionResponse) {}
   // Deprecated
   rpc UpdateSegmentStatistics(UpdateSegmentStatisticsRequest) returns (common.Status) {}
   rpc UpdateChannelCheckpoint(UpdateChannelCheckpointRequest) returns (common.Status) {}
@@ -1011,4 +1013,15 @@ message PartitionStatsInfo {
 
 message DropCompactionPlanRequest {
   int64 planID = 1;
+}
+
+
+message NotifyDropPartitionRequest {
+  string channel = 1;
+  int64 collection_id = 2;
+  repeated int64 partitionIDs = 3;
+}
+
+message NotifyDropPartitionResponse {
+  common.Status status = 1;
 }

@@ -692,6 +692,25 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	return resp, nil
 }
 
+func (s *Server) NotifyDropPartition(ctx context.Context, req *datapb.NotifyDropPartitionRequest) (*datapb.NotifyDropPartitionResponse, error) {
+	if err := s.notifyDropPartition(ctx, req); err != nil {
+		return &datapb.NotifyDropPartitionResponse{Status: merr.Status(err)}, nil
+	}
+	return &datapb.NotifyDropPartitionResponse{Status: merr.Success()}, nil
+}
+
+func (s *Server) notifyDropPartition(ctx context.Context, req *datapb.NotifyDropPartitionRequest) error {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return err
+	}
+	log.Ctx(ctx).Info("receive NotifyDropPartition request",
+		zap.String("channelname", req.GetChannel()),
+		zap.Any("partitionID", req.GetPartitionIDs()))
+	s.segmentManager.DropSegmentsOfPartition(ctx, req.GetChannel(), req.GetPartitionIDs())
+	// release all segments of the partition.
+	return s.meta.DropSegmentsOfPartition(ctx, req.GetPartitionIDs())
+}
+
 // SetSegmentState reset the state of the given segment.
 func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error) {
 	log := log.Ctx(ctx)

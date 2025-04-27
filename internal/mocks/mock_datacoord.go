@@ -2559,6 +2559,65 @@ func (_c *MockDataCoord_MarkSegmentsDropped_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// NotifyDropPartition provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) NotifyDropPartition(_a0 context.Context, _a1 *datapb.NotifyDropPartitionRequest) (*datapb.NotifyDropPartitionResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for NotifyDropPartition")
+	}
+
+	var r0 *datapb.NotifyDropPartitionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.NotifyDropPartitionRequest) (*datapb.NotifyDropPartitionResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.NotifyDropPartitionRequest) *datapb.NotifyDropPartitionResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.NotifyDropPartitionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.NotifyDropPartitionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_NotifyDropPartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NotifyDropPartition'
+type MockDataCoord_NotifyDropPartition_Call struct {
+	*mock.Call
+}
+
+// NotifyDropPartition is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.NotifyDropPartitionRequest
+func (_e *MockDataCoord_Expecter) NotifyDropPartition(_a0 interface{}, _a1 interface{}) *MockDataCoord_NotifyDropPartition_Call {
+	return &MockDataCoord_NotifyDropPartition_Call{Call: _e.mock.On("NotifyDropPartition", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_NotifyDropPartition_Call) Run(run func(_a0 context.Context, _a1 *datapb.NotifyDropPartitionRequest)) *MockDataCoord_NotifyDropPartition_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.NotifyDropPartitionRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_NotifyDropPartition_Call) Return(_a0 *datapb.NotifyDropPartitionResponse, _a1 error) *MockDataCoord_NotifyDropPartition_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_NotifyDropPartition_Call) RunAndReturn(run func(context.Context, *datapb.NotifyDropPartitionRequest) (*datapb.NotifyDropPartitionResponse, error)) *MockDataCoord_NotifyDropPartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Register provides a mock function with no fields
 func (_m *MockDataCoord) Register() error {
 	ret := _m.Called()

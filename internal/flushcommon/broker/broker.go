@@ -37,4 +37,5 @@ type DataCoord interface {
 	UpdateChannelCheckpoint(ctx context.Context, channelCPs []*msgpb.MsgPosition) error
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error
 	DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error)
+	NotifyDropPartition(ctx context.Context, req *datapb.NotifyDropPartitionRequest) (*datapb.NotifyDropPartitionResponse, error)
 }
