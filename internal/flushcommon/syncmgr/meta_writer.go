@@ -21,7 +21,7 @@ import (
 type MetaWriter interface {
 	UpdateSync(context.Context, *SyncTask) error
 	DropChannel(context.Context, string) error
-	NotifyDropPartition(context.Context, string, []int64) error
+	NotifyDropPartition(context.Context, int64, string, []int64) error
 }
 
 type brokerMetaWriter struct {
@@ -175,7 +175,7 @@ func (b *brokerMetaWriter) DropChannel(ctx context.Context, channelName string) 
 	return err
 }
 
-func (b *brokerMetaWriter) NotifyDropPartition(ctx context.Context, channelName string, partitionIDs []int64) error {
+func (b *brokerMetaWriter) NotifyDropPartition(ctx context.Context, collectionID int64, channelName string, partitionIDs []int64) error {
 	if len(partitionIDs) == 0 {
 		return merr.WrapErrParameterInvalid("non-empty partitionIDs", "empty partitionIDs")
 	}
@@ -183,6 +183,7 @@ func (b *brokerMetaWriter) NotifyDropPartition(ctx context.Context, channelName 
 	err := retry.Handle(ctx, func() (bool, error) {
 		status, err := b.broker.NotifyDropPartition(context.Background(), &datapb.NotifyDropPartitionRequest{
 			Channel:      channelName,
+			CollectionId: collectionID,
 			PartitionIDs: partitionIDs,
 		})
 		err = merr.CheckRPCCall(status, err)
@@ -193,12 +194,16 @@ func (b *brokerMetaWriter) NotifyDropPartition(ctx context.Context, channelName 
 	}, b.opts...)
 	if err != nil {
 		log.Warn("failed to notify drop partition",
+			zap.String("channel", channelName),
 			zap.Int64s("partitionIDs", partitionIDs),
+			zap.Int64("collectionID", collectionID),
 			zap.Error(err))
 		return err
 	}
 
 	log.Info("successfully notified drop partition",
+		zap.String("channel", channelName),
+		zap.Int64s("partitionIDs", partitionIDs),
 		zap.Int64s("partitionIDs", partitionIDs))
 
 	return nil
