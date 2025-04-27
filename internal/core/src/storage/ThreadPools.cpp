@@ -19,11 +19,8 @@ namespace milvus {
 
 std::map<ThreadPoolPriority, std::unique_ptr<ThreadPool>>
     ThreadPools::thread_pool_map;
-std::map<ThreadPoolPriority, int64_t> ThreadPools::coefficient_map;
 std::map<ThreadPoolPriority, std::string> ThreadPools::name_map;
 std::shared_mutex ThreadPools::mutex_;
-ThreadPools ThreadPools::threadPools;
-bool ThreadPools::has_setup_coefficients = false;
 
 void
 ThreadPools::ShutDown() {
@@ -38,19 +35,44 @@ ThreadPool&
 ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     auto iter = thread_pool_map.find(priority);
-    if (!ThreadPools::has_setup_coefficients) {
-        ThreadPools::SetUpCoefficients();
-        ThreadPools::has_setup_coefficients = true;
-    }
     if (iter != thread_pool_map.end()) {
         return *(iter->second);
     } else {
-        int64_t coefficient = coefficient_map[priority];
+        float coefficient = 1.0;
+        switch (priority) {
+            case milvus::ThreadPoolPriority::HIGH:
+                coefficient = HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
+                break;
+            case milvus::ThreadPoolPriority::MIDDLE:
+                coefficient = MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
+                break;
+            default:
+                coefficient = LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
+                break;
+        }
         std::string name = name_map[priority];
         auto result = thread_pool_map.emplace(
             priority, std::make_unique<ThreadPool>(coefficient, name));
         return *(result.first->second);
     }
+}
+
+void
+ThreadPools::ResizeThreadPool(milvus::ThreadPoolPriority priority,
+                              float ratio) {
+    int size = static_cast<int>(std::round(milvus::CPU_NUM * ratio));
+    if (size < 1) {
+        LOG_ERROR("Failed to resize threadPool, size:{}", size);
+        return;
+    }
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto iter = thread_pool_map.find(priority);
+    if (iter == thread_pool_map.end()) {
+        LOG_ERROR("Failed to find threadPool, priority:{}", priority);
+        return;
+    }
+    iter->second->Resize(size);
+    LOG_INFO("Resized threadPool priority:{}, size:{}", priority, size);
 }
 
 }  // namespace milvus
