@@ -2162,7 +2162,9 @@ ChunkedSegmentSealedImpl::reopen(SchemaPtr sch) {
 
     auto absent_fields = sch->absent_fields(*schema_);
     for (const auto& field_meta : *absent_fields) {
-        fill_empty_field(field_meta);
+        if (!IsVectorDataType(field_meta.data_type)) {
+            fill_empty_field(field_meta);
+        }
     }
 
     schema_ = sch;
@@ -2178,7 +2180,9 @@ ChunkedSegmentSealedImpl::finish_load() {
         // this shall check the ready bitset here
         if (!get_bit(field_data_ready_bitset_, field_id) &&
             !get_bit(index_ready_bitset_, field_id)) {
-            fill_empty_field(field_meta);
+            if (!IsVectorDataType(field_meta.data_type)) {
+                fill_empty_field(field_meta);
+            }
         }
     }
 }
