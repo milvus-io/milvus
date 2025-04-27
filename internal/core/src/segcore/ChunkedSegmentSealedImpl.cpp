@@ -2189,7 +2189,14 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
     auto column = std::make_shared<ChunkedColumn>(field_meta);
     auto builder = storage::CreateArrowBuilder(field_meta.get_data_type());
-    auto ast = builder->AppendNulls(size);
+    arrow::Status ast;
+    if (field_meta.default_value().has_value()) {
+        builder->Reserve(size);
+        auto scalar = storage::CreateArrowScalarFromDefaultValue(field_meta);
+        ast = builder->AppendScalar(*scalar, size);
+    } else {
+        ast = builder->AppendNulls(size);
+    }
     AssertInfo(
         ast.ok(), "append nulls to arrow builder failed: {}", ast.ToString());
     arrow::ArrayVector array_vec;

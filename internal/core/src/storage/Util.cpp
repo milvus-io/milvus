@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "arrow/array/builder_binary.h"
+#include "arrow/scalar.h"
 #include "arrow/type_fwd.h"
 #include "fmt/format.h"
 #include "log/Log.h"
@@ -323,6 +324,42 @@ CreateArrowBuilder(DataType data_type, int dim) {
             PanicInfo(
                 DataTypeInvalid, "unsupported vector data type {}", data_type);
         }
+    }
+}
+
+std::shared_ptr<arrow::Scalar>
+CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
+    auto default_var = field_meta.default_value();
+    AssertInfo(default_var.has_value(),
+               "cannot create Arrow Scalar from empty default value");
+    auto default_value = default_var.value();
+    switch (field_meta.get_data_type()) {
+        case DataType::BOOL:
+            return std::make_shared<arrow::BooleanScalar>(
+                default_value.bool_data());
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+            return std::make_shared<arrow::Int32Scalar>(
+                default_value.int_data());
+        case DataType::INT64:
+            return std::make_shared<arrow::Int64Scalar>(
+                default_value.long_data());
+        case DataType::FLOAT:
+            return std::make_shared<arrow::FloatScalar>(
+                default_value.float_data());
+        case DataType::DOUBLE:
+            return std::make_shared<arrow::DoubleScalar>(
+                default_value.double_data());
+        case DataType::VARCHAR:
+        case DataType::STRING:
+        case DataType::TEXT:
+            return std::make_shared<arrow::StringScalar>(
+                default_value.string_data());
+        default:
+            PanicInfo(DataTypeInvalid,
+                      "unsupported default value data type {}",
+                      field_meta.get_data_type());
     }
 }
 
