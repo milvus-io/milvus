@@ -220,8 +220,21 @@ func (s *GenericBaseSuite) TestConversion() {
 	_, err = gb.GetAsBool(0)
 	s.Error(err)
 
-	_, err = gb.GetAsBool(0)
+	_, err = gb.GetAsString(0)
 	s.Error(err)
+
+	_, err = gb.GetAsDouble(0)
+	s.Error(err)
+
+	strValues := []string{"1", "2", "3"}
+	strGb := &genericColumnBase[string]{
+		name:      name,
+		fieldType: entity.FieldTypeVarChar,
+		values:    strValues,
+	}
+	sv, err := strGb.GetAsString(0)
+	s.NoError(err)
+	s.Equal("1", sv)
 }
 
 func (s *GenericBaseSuite) TestNullable() {
@@ -246,6 +259,16 @@ func (s *GenericBaseSuite) TestNullable() {
 	gb.SetNullable(false)
 	s.NoError(gb.ValidateNullable())
 	s.EqualValues(0, gb.Len())
+
+	gb = &genericColumnBase[int64]{
+		name:       name,
+		fieldType:  entity.FieldTypeInt64,
+		values:     []int64{0},
+		validData:  []bool{true, false},
+		sparseMode: true,
+		nullable:   true,
+	}
+	s.Error(gb.ValidateNullable())
 }
 
 func TestGenericBase(t *testing.T) {

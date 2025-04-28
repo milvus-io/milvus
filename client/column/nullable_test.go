@@ -161,6 +161,7 @@ func (s *NullableScalarSuite) TestBasic() {
 
 		// compact mode
 		column, err = NewNullableColumnInt32(name, sparseData, validData, WithSparseNullableMode[int32](true))
+		s.NoError(err)
 
 		fd := column.FieldData()
 		s.Equal(validData, fd.GetValidData())
