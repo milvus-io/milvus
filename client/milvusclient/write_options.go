@@ -130,6 +130,8 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 
 	fieldsData := make([]*schemapb.FieldData, 0, len(mNameColumn)+1)
 	for _, fixedColumn := range mNameColumn {
+		// make sure the field data in compact mode
+		fixedColumn.CompactNullableValues()
 		fieldsData = append(fieldsData, fixedColumn.FieldData())
 	}
 	if len(dynamicColumns) > 0 {
