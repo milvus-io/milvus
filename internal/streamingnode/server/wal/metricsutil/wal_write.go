@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/wp"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -27,6 +28,14 @@ func NewWriteMetrics(pchannel types.PChannelInfo, walName string) *WriteMetrics 
 		strconv.FormatInt(pchannel.Term, 10),
 		walName).Set(1)
 
+	slowLogThreshold := paramtable.Get().StreamingCfg.LoggingAppendSlowThreshold.GetAsDurationByParse()
+	if slowLogThreshold <= 0 {
+		slowLogThreshold = time.Second
+	}
+	if walName == wp.WALName && slowLogThreshold < 3*time.Second {
+		// slow log threshold is not set in woodpecker, so we set it to 0.
+		slowLogThreshold = 3 * time.Second
+	}
 	return &WriteMetrics{
 		walName:                      walName,
 		pchannel:                     pchannel,
@@ -37,6 +46,7 @@ func NewWriteMetrics(pchannel types.PChannelInfo, walName string) *WriteMetrics 
 		walimplsDuration:             metrics.WALImplsAppendMessageDurationSeconds.MustCurryWith(constLabel),
 		walBeforeInterceptorDuration: metrics.WALAppendMessageBeforeInterceptorDurationSeconds.MustCurryWith(constLabel),
 		walAfterInterceptorDuration:  metrics.WALAppendMessageAfterInterceptorDurationSeconds.MustCurryWith(constLabel),
+		slowLogThreshold:             time.Second,
 	}
 }
 
@@ -52,30 +62,27 @@ type WriteMetrics struct {
 	walimplsDuration             prometheus.ObserverVec
 	walBeforeInterceptorDuration prometheus.ObserverVec
 	walAfterInterceptorDuration  prometheus.ObserverVec
+	slowLogThreshold             time.Duration
 }
 
 func (m *WriteMetrics) StartAppend(msg message.MutableMessage) *AppendMetrics {
 	return &AppendMetrics{
 		wm:           m,
-		messageType:  msg.MessageType(),
-		bytes:        msg.EstimateSize(),
-		persisted:    true,
+		msg:          msg,
 		interceptors: make(map[string][]*InterceptorMetrics),
 	}
 }
 
 func (m *WriteMetrics) done(appendMetrics *AppendMetrics) {
-	if !appendMetrics.persisted {
-		// ignore all the metrics if the message is not persisted.
+	if !appendMetrics.msg.IsPersisted() {
 		return
 	}
-
 	status := parseError(appendMetrics.err)
 	if appendMetrics.implAppendDuration != 0 {
 		m.walimplsDuration.WithLabelValues(status).Observe(appendMetrics.implAppendDuration.Seconds())
 	}
 	m.bytes.WithLabelValues(status).Observe(float64(appendMetrics.bytes))
-	m.total.WithLabelValues(appendMetrics.messageType.String(), status).Inc()
+	m.total.WithLabelValues(appendMetrics.msg.MessageType().String(), status).Inc()
 	m.walDuration.WithLabelValues(status).Observe(appendMetrics.appendDuration.Seconds())
 	for name, ims := range appendMetrics.interceptors {
 		for _, im := range ims {
@@ -91,7 +98,7 @@ func (m *WriteMetrics) done(appendMetrics *AppendMetrics) {
 		m.Logger().Warn("append message into wal failed", appendMetrics.IntoLogFields()...)
 		return
 	}
-	if appendMetrics.appendDuration >= time.Second {
+	if appendMetrics.appendDuration >= m.slowLogThreshold {
 		// log slow append catch
 		m.Logger().Warn("append message into wal too slow", appendMetrics.IntoLogFields()...)
 		return

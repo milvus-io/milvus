@@ -209,11 +209,11 @@ func (m *sealQueue) sendFlushSegmentsMessageIntoWAL(ctx context.Context, collect
 	}
 	msg, err := message.NewFlushMessageBuilderV2().
 		WithVChannel(vchannel).
-		WithHeader(&message.FlushMessageHeader{}).
-		WithBody(&message.FlushMessageBody{
+		WithHeader(&message.FlushMessageHeader{
 			CollectionId: collectionID,
-			SegmentId:    segmentIDs,
-		}).BuildMutable()
+			SegmentIds:   segmentIDs,
+		}).
+		WithBody(&message.FlushMessageBody{}).BuildMutable()
 	if err != nil {
 		return errors.Wrap(err, "at create new flush segments message")
 	}

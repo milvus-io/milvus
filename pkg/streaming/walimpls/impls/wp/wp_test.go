@@ -17,11 +17,11 @@ func TestMain(m *testing.M) {
 }
 
 func TestRegistry(t *testing.T) {
-	registeredB := registry.MustGetBuilder(walName)
+	registeredB := registry.MustGetBuilder(WALName)
 	assert.NotNil(t, registeredB)
-	assert.Equal(t, walName, registeredB.Name())
+	assert.Equal(t, WALName, registeredB.Name())
 
-	id, err := message.UnmarshalMessageID(walName, newMessageIDOfWoodpecker(1, 2).Marshal())
+	id, err := message.UnmarshalMessageID(WALName, newMessageIDOfWoodpecker(1, 2).Marshal())
 	assert.NoError(t, err)
 	assert.True(t, id.EQ(newMessageIDOfWoodpecker(1, 2)))
 }

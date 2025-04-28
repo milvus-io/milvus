@@ -37,11 +37,11 @@ func TestFlushMsgHandler_HandleFlush(t *testing.T) {
 
 	msg, err := message.NewFlushMessageBuilderV2().
 		WithVChannel(vchannel).
-		WithHeader(&message.FlushMessageHeader{}).
-		WithBody(&message.FlushMessageBody{
+		WithHeader(&message.FlushMessageHeader{
 			CollectionId: 0,
-			SegmentId:    []int64{1, 2, 3},
+			SegmentIds:   []int64{1, 2, 3},
 		}).
+		WithBody(&message.FlushMessageBody{}).
 		BuildMutable()
 	assert.NoError(t, err)
 

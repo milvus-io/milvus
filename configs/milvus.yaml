@@ -1210,6 +1210,10 @@ streaming:
   walWriteAheadBuffer:
     capacity: 64m # The capacity of write ahead buffer of each wal, 64M by default
     keepalive: 30s # The keepalive duration for entries in write ahead buffer of each wal, 30s by default
+  logging:
+    # The threshold of slow log, 1s by default. 
+    # If the wal implementation is woodpecker, the minimum threshold is 3s
+    appendSlowThreshold: 1s
 
 # Any configuration related to the knowhere vector search engine
 knowhere:

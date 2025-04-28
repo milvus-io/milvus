@@ -241,7 +241,10 @@ func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*
 	}
 	msg, err := message.NewCreateSegmentMessageBuilderV2().
 		WithVChannel(pendingSegment.GetVChannel()).
-		WithHeader(&message.CreateSegmentMessageHeader{}).
+		WithHeader(&message.CreateSegmentMessageHeader{
+			CollectionId: pendingSegment.GetCollectionID(),
+			SegmentIds:   []int64{pendingSegment.GetSegmentID()},
+		}).
 		WithBody(&message.CreateSegmentMessageBody{
 			CollectionId: pendingSegment.GetCollectionID(),
 			Segments: []*messagespb.CreateSegmentInfo{{

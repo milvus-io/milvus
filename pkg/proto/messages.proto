@@ -76,11 +76,7 @@ enum MessageType {
 ///
 
 // FlushMessageBody is the body of flush message.
-message FlushMessageBody {
-    // indicate which the collection that segment belong to.
-    int64 collection_id       = 1;
-    repeated int64 segment_id = 2;  // indicate which segment to flush.
-}
+message FlushMessageBody {}
 
 // ManualFlushMessageBody is the body of manual flush message.
 message ManualFlushMessageBody {}
@@ -154,10 +150,16 @@ message DeleteMessageHeader {
 }
 
 // FlushMessageHeader just nothing.
-message FlushMessageHeader {}
+message FlushMessageHeader {
+    int64 collection_id = 1;
+    repeated int64 segment_ids = 2;
+}
 
 // CreateSegmentMessageHeader just nothing.
-message CreateSegmentMessageHeader {}
+message CreateSegmentMessageHeader {
+    int64 collection_id = 1;
+    repeated int64 segment_ids = 2;
+}
 
 message ManualFlushMessageHeader {
     int64 collection_id = 1;

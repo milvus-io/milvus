@@ -195,11 +195,11 @@ func (impl *flusherComponents) buildDataSyncServiceWithRetry(ctx context.Context
 	if len(segmentIDs) > 0 {
 		msg := message.NewFlushMessageBuilderV2().
 			WithVChannel(recoverInfo.GetInfo().GetChannelName()).
-			WithHeader(&message.FlushMessageHeader{}).
-			WithBody(&message.FlushMessageBody{
+			WithHeader(&message.FlushMessageHeader{
 				CollectionId: recoverInfo.GetInfo().GetCollectionID(),
-				SegmentId:    segmentIDs,
-			}).MustBuildMutable()
+				SegmentIds:   segmentIDs,
+			}).
+			WithBody(&message.FlushMessageBody{}).MustBuildMutable()
 		if err := retry.Do(ctx, func() error {
 			appendResult, err := impl.wal.Append(ctx, msg)
 			if err != nil {

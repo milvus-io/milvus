@@ -67,6 +67,26 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&SchemaChangeMessageHeader{}):     MessageTypeSchemaChange,
 }
 
+// messageTypeToCustomHeaderMap maps the message type to the proto message type.
+var messageTypeToCustomHeaderMap = map[MessageType]reflect.Type{
+	MessageTypeTimeTick:         reflect.TypeOf(&TimeTickMessageHeader{}),
+	MessageTypeInsert:           reflect.TypeOf(&InsertMessageHeader{}),
+	MessageTypeDelete:           reflect.TypeOf(&DeleteMessageHeader{}),
+	MessageTypeCreateCollection: reflect.TypeOf(&CreateCollectionMessageHeader{}),
+	MessageTypeDropCollection:   reflect.TypeOf(&DropCollectionMessageHeader{}),
+	MessageTypeCreatePartition:  reflect.TypeOf(&CreatePartitionMessageHeader{}),
+	MessageTypeDropPartition:    reflect.TypeOf(&DropPartitionMessageHeader{}),
+	MessageTypeCreateSegment:    reflect.TypeOf(&CreateSegmentMessageHeader{}),
+	MessageTypeFlush:            reflect.TypeOf(&FlushMessageHeader{}),
+	MessageTypeManualFlush:      reflect.TypeOf(&ManualFlushMessageHeader{}),
+	MessageTypeBeginTxn:         reflect.TypeOf(&BeginTxnMessageHeader{}),
+	MessageTypeCommitTxn:        reflect.TypeOf(&CommitTxnMessageHeader{}),
+	MessageTypeRollbackTxn:      reflect.TypeOf(&RollbackTxnMessageHeader{}),
+	MessageTypeTxn:              reflect.TypeOf(&TxnMessageHeader{}),
+	MessageTypeImport:           reflect.TypeOf(&ImportMessageHeader{}),
+	MessageTypeSchemaChange:     reflect.TypeOf(&SchemaChangeMessageHeader{}),
+}
+
 // A system preserved message, should not allowed to provide outside of the streaming system.
 var systemMessageType = map[MessageType]struct{}{
 	MessageTypeTimeTick:    {},
@@ -259,7 +279,6 @@ func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg Immutab
 	// Decode the specialized header.
 	// Must be pointer type.
 	t := reflect.TypeOf(header)
-	t.Elem()
 	header = reflect.New(t.Elem()).Interface().(H)
 
 	// must be a pointer to a proto message
