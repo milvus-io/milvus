@@ -45,6 +45,7 @@ type Column interface {
 	Nullable() bool
 	SetNullable(bool)
 	ValidateNullable() error
+	CompactNullableValues()
 }
 
 var errFieldDataTypeNotMatch = errors.New("FieldData type not matched")
@@ -90,14 +91,14 @@ func parseScalarData[T any, COL Column, NCOL Column](
 	start, end int,
 	validData []bool,
 	creator func(string, []T) COL,
-	nullableCreator func(string, []T, []bool) (NCOL, error),
+	nullableCreator func(string, []T, []bool, ...ColumnOption[T]) (NCOL, error),
 ) (Column, error) {
 	if end < 0 {
 		end = len(data)
 	}
 	data = data[start:end]
 	if len(validData) > 0 {
-		ncol, err := nullableCreator(name, data, validData)
+		ncol, err := nullableCreator(name, data, validData, WithSparseNullableMode[T](true))
 		return ncol, err
 	}
 
