@@ -9,7 +9,6 @@ import (
 
 const (
 	walTypeDefault = "default"
-	walTypeNatsmq  = "natsmq"
 	walTypeRocksmq = "rocksmq"
 	walTypeKafka   = "kafka"
 	walTypePulsar  = "pulsar"
@@ -59,7 +58,7 @@ func validateWALName(standalone bool, mqType string) error {
 	// we may register more mq type by plugin.
 	// so we should not check all mq type here.
 	// only check standalone type.
-	if !standalone && (mqType == walTypeRocksmq || mqType == walTypeNatsmq) {
+	if !standalone && mqType == walTypeRocksmq {
 		return errors.Newf("mq %s is only valid in standalone mode", mqType)
 	}
 	return nil

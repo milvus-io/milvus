@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	rocksmqimpl "github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/nmq"
 	"github.com/milvus-io/milvus/pkg/v2/tracer"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
@@ -368,10 +367,8 @@ func (mr *MilvusRoles) Run() {
 		params := paramtable.Get()
 		if paramtable.Get().RocksmqEnable() {
 			defer stopRocksmq()
-		} else if paramtable.Get().NatsmqEnable() {
-			defer nmq.CloseNatsMQ()
 		} else {
-			panic("only support Rocksmq and Natsmq in standalone mode")
+			panic("only support Rocksmq in standalone mode")
 		}
 		if params.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 			// Start etcd server.

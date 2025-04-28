@@ -158,14 +158,14 @@ minio:
   # 0 means using oss client by default, decrease these configration if ListObjects timeout
   listObjectsMaxKeys: 0
 
-# Milvus supports four MQ: rocksmq(based on RockDB), natsmq(embedded nats-server), Pulsar and Kafka.
+# Milvus supports four MQ: rocksmq(based on RockDB), Pulsar and Kafka.
 # You can change your mq by setting mq.type field.
 # If you don't set mq.type field as default, there is a note about enabling priority if we config multiple mq in this file.
-# 1. standalone(local) mode: rocksmq(default) > natsmq > Pulsar > Kafka
-# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq and natsmq is unsupported in cluster mode)
+# 1. standalone(local) mode: rocksmq(default) > Pulsar > Kafka
+# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported in cluster mode)
 mq:
   # Default value: "default"
-  # Valid values: [default, pulsar, kafka, rocksmq, natsmq]
+  # Valid values: [default, pulsar, kafka, rocksmq]
   type: default
   enablePursuitMode: true # Default value: "true"
   pursuitLag: 10 # time tick lag threshold to enter pursuit mode, in seconds
@@ -225,27 +225,6 @@ rocksmq:
   retentionSizeInMB: 8192 # The maximum retention size of acked messages of each topic in RocksMQ. Acked messages in each topic are cleared if their size exceed this parameter. Unit: MB.
   compactionInterval: 86400 # Time interval to trigger rocksdb compaction to remove deleted data. Unit: Second
   compressionTypes: 0,0,7,7,7 # compaction compression type, only support use 0,7. 0 means not compress, 7 will use zstd. Length of types means num of rocksdb level.
-
-# natsmq configuration.
-# more detail: https://docs.nats.io/running-a-nats-service/configuration
-natsmq:
-  server:
-    port: 4222 # Listening port of the NATS server.
-    storeDir: /var/lib/milvus/nats # Directory to use for JetStream storage of nats
-    maxFileStore: 17179869184 # Maximum size of the 'file' storage
-    maxPayload: 8388608 # Maximum number of bytes in a message payload
-    maxPending: 67108864 # Maximum number of bytes buffered for a connection Applies to client connections
-    initializeTimeout: 4000 # waiting for initialization of natsmq finished
-    monitor:
-      trace: false # If true enable protocol trace log messages
-      debug: false # If true enable debug log messages
-      logTime: true # If set to false, log without timestamps.
-      logFile: /tmp/milvus/logs/nats.log # Log file path relative to .. of milvus binary if use relative path
-      logSizeLimit: 536870912 # Size in bytes after the log file rolls over to a new one
-    retention:
-      maxAge: 4320 # Maximum age of any message in the P-channel
-      maxBytes:  # How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size
-      maxMsgs:  # How many message the single P-channel may contain. Removing oldest messages if the P-channel exceeds this limit
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:

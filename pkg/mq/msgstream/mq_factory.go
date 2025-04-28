@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
 	kafkawrapper "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/kafka"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/nmq"
 	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -221,19 +220,6 @@ func NewKmsFactory(config *paramtable.ServiceParam) Factory {
 		config:            &config.KafkaCfg,
 	}
 	return f
-}
-
-// NewNatsmqFactory create a new nats-mq factory.
-func NewNatsmqFactory() Factory {
-	paramtable.Init()
-	paramtable := paramtable.Get()
-	nmq.MustInitNatsMQ(nmq.ParseServerOption(paramtable))
-	return &CommonFactory{
-		Newer:             nmq.NewClientWithDefaultOptions,
-		DispatcherFactory: ProtoUDFactory{},
-		ReceiveBufSize:    paramtable.MQCfg.ReceiveBufSize.GetAsInt64(),
-		MQBufSize:         paramtable.MQCfg.MQBufSize.GetAsInt64(),
-	}
 }
 
 // NewRocksmqFactory creates a new message stream factory based on rocksmq.
