@@ -106,12 +106,6 @@ LoadFieldData(CSegmentInterface c_segment,
               CLoadFieldDataInfo load_field_data_info);
 
 CStatus
-LoadFieldRawData(CSegmentInterface c_segment,
-                 int64_t field_id,
-                 const void* data,
-                 int64_t row_count);
-
-CStatus
 LoadDeletedRecord(CSegmentInterface c_segment,
                   CLoadDeletedRecordInfo deleted_record_info);
 
@@ -136,6 +130,8 @@ UpdateFieldRawDataSize(CSegmentInterface c_segment,
                        int64_t num_rows,
                        int64_t field_data_size);
 
+// This function is currently used only in test.
+// Current implement supports only dropping of non-system fields.
 CStatus
 DropFieldData(CSegmentInterface c_segment, int64_t field_id);
 
@@ -160,7 +156,6 @@ ExistPk(CSegmentInterface c_segment,
 
 CStatus
 Delete(CSegmentInterface c_segment,
-       int64_t reserved_offset,
        int64_t size,
        const uint8_t* ids,
        const uint64_t ids_size,

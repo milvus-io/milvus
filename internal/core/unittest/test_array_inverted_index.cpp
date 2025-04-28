@@ -21,6 +21,8 @@
 #include "query/PlanProto.h"
 #include "query/ExecPlanNodeVisitor.h"
 
+#include "test_utils/storage_test_utils.h"
+
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
@@ -61,7 +63,6 @@ class ArrayInvertedIndexTest : public ::testing::Test {
     void
     SetUp() override {
         schema_ = GenTestSchema<T>();
-        seg_ = CreateSealedSegment(schema_);
         N_ = 3000;
         uint64_t seed = 19190504;
         auto raw_data = DataGen(schema_, N_, seed);
@@ -100,7 +101,7 @@ class ArrayInvertedIndexTest : public ::testing::Test {
             }
             vec_of_array_.push_back(array);
         }
-        SealedLoadFieldData(raw_data, *seg_);
+        seg_ = CreateSealedWithFieldDataLoaded(schema_, raw_data);
         LoadInvertedIndex();
     }
 

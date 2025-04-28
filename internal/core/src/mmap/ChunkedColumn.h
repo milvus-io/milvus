@@ -21,82 +21,76 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
 #include <memory>
-#include <queue>
 #include <string>
 #include <vector>
 #include <math.h>
 
+#include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/Manager.h"
+#include "cachinglayer/Translator.h"
+#include "cachinglayer/Utils.h"
 #include "common/Array.h"
 #include "common/Chunk.h"
-#include "common/Common.h"
 #include "common/EasyAssert.h"
-#include "common/File.h"
 #include "common/FieldMeta.h"
-#include "common/FieldData.h"
 #include "common/Span.h"
-#include "fmt/format.h"
-#include "log/Log.h"
-#include "mmap/Utils.h"
-#include "common/FieldData.h"
-#include "common/FieldDataInterface.h"
 #include "common/Array.h"
-#include "knowhere/dataset.h"
-#include "monitor/prometheus_client.h"
-#include "storage/MmapChunkManager.h"
+#include "segcore/storagev1translator/ChunkTranslator.h"
 
-#include "mmap/Column.h"
 namespace milvus {
 
-class ChunkedColumnBase : public ColumnBase {
+using namespace milvus::cachinglayer;
+
+std::pair<size_t, size_t> inline GetChunkIDByOffset(
+    int64_t offset, std::vector<int64_t>& num_rows_until_chunk) {
+    AssertInfo(offset >= 0 && offset < num_rows_until_chunk.back(),
+               "offset is out of range, offset: {}, num rows: {}",
+               offset,
+               num_rows_until_chunk.back());
+    auto iter = std::lower_bound(
+        num_rows_until_chunk.begin(), num_rows_until_chunk.end(), offset + 1);
+    size_t chunk_idx = std::distance(num_rows_until_chunk.begin(), iter) - 1;
+    size_t offset_in_chunk = offset - num_rows_until_chunk[chunk_idx];
+    return {chunk_idx, offset_in_chunk};
+}
+
+class ChunkedColumnBase {
  public:
-    ChunkedColumnBase() = default;
     // memory mode ctor
-    explicit ChunkedColumnBase(const FieldMeta& field_meta) {
-        nullable_ = field_meta.is_nullable();
+    explicit ChunkedColumnBase(std::unique_ptr<Translator<Chunk>> translator,
+                               const FieldMeta& field_meta)
+        : nullable_(field_meta.is_nullable()),
+          num_chunks_(translator->num_cells()),
+          slot_(Manager::GetInstance().CreateCacheSlot(std::move(translator))) {
+        num_rows_ = GetNumRowsUntilChunk().back();
     }
 
     virtual ~ChunkedColumnBase() = default;
 
-    void
-    AppendBatch(const FieldDataPtr data) override {
-        PanicInfo(ErrorCode::Unsupported, "AppendBatch not supported");
-    }
-
-    const char*
-    Data(int chunk_id) const override {
-        return chunks_[chunk_id]->Data();
-    }
-
-    virtual const char*
-    ValueAt(int64_t offset) const {
-        auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(offset);
-        return chunks_[chunk_id]->ValueAt(offset_in_chunk);
-    };
-
-    // MmappedData() returns the mmaped address
-    const char*
-    MmappedData() const override {
-        AssertInfo(chunks_.size() == 1,
-                   "only support one chunk, but got {} chunk(s)",
-                   chunks_.size());
-        return chunks_[0]->RawData();
+    PinWrapper<const char*>
+    DataOfChunk(int chunk_id) const {
+        auto ca = SemiInlineGet(slot_->PinCells({chunk_id}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        return PinWrapper<const char*>(ca, chunk->Data());
     }
 
     bool
     IsValid(size_t offset) const {
-        if (nullable_) {
-            auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(offset);
-            return chunks_[chunk_id]->isValid(offset_in_chunk);
+        if (!nullable_) {
+            return true;
         }
-        return true;
+        auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(offset);
+        return IsValid(chunk_id, offset_in_chunk);
     }
 
     bool
     IsValid(int64_t chunk_id, int64_t offset) const {
         if (nullable_) {
-            return chunks_[chunk_id]->isValid(offset);
+            auto ca =
+                SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
+            auto chunk = ca->get_cell_of(chunk_id);
+            return chunk->isValid(offset);
         }
         return true;
     }
@@ -113,65 +107,53 @@ class ChunkedColumnBase : public ColumnBase {
 
     int64_t
     num_chunks() const {
-        return chunks_.size();
+        return num_chunks_;
     }
 
-    virtual void
-    AddChunk(std::shared_ptr<Chunk> chunk) {
-        num_rows_until_chunk_.push_back(num_rows_);
-        num_rows_ += chunk->RowNums();
-        chunks_.push_back(chunk);
-    }
-
+    // This returns only memory byte size.
     size_t
-    DataByteSize() const override {
+    DataByteSize() const {
         auto size = 0;
-        for (auto& chunk : chunks_) {
-            size += chunk->Size();
+        for (auto i = 0; i < num_chunks_; i++) {
+            size += slot_->size_of_cell(i).memory_bytes;
         }
         return size;
     }
 
     int64_t
     chunk_row_nums(int64_t chunk_id) const {
-        return chunks_[chunk_id]->RowNums();
+        return GetNumRowsUntilChunk(chunk_id + 1) -
+               GetNumRowsUntilChunk(chunk_id);
     }
 
-    virtual SpanBase
-    Span(int64_t chunk_id) const = 0;
-
-    // used for sequential access for search
-    virtual BufferView
-    GetBatchBuffer(int64_t chunk_id, int64_t start_offset, int64_t length) {
+    virtual PinWrapper<SpanBase>
+    Span(int64_t chunk_id) const {
         PanicInfo(ErrorCode::Unsupported,
-                  "GetBatchBuffer only supported for VariableColumn");
+                  "Span only supported for ChunkedColumn");
     }
 
-    virtual std::string_view
-    RawAt(const size_t i) const {
-        PanicInfo(ErrorCode::Unsupported,
-                  "RawAt only supported for VariableColumn");
-    }
-
-    virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    virtual PinWrapper<
+        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     StringViews(int64_t chunk_id,
-                std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+                std::optional<std::pair<int64_t, int64_t>> offset_len =
+                    std::nullopt) const {
         PanicInfo(ErrorCode::Unsupported,
                   "StringViews only supported for VariableColumn");
     }
 
-    virtual std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
     ArrayViews(int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const {
         PanicInfo(ErrorCode::Unsupported,
                   "ArrayViews only supported for ArrayChunkedColumn");
     }
 
-    virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    virtual PinWrapper<
+        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     ViewsByOffsets(int64_t chunk_id,
                    const FixedVector<int32_t>& offsets) const {
         PanicInfo(ErrorCode::Unsupported,
-                  "viewsbyoffsets only supported for VariableColumn");
+                  "ViewsByOffsets only supported for VariableColumn");
     }
 
     std::pair<size_t, size_t>
@@ -180,268 +162,148 @@ class ChunkedColumnBase : public ColumnBase {
                    "offset {} is out of range, num_rows: {}",
                    offset,
                    num_rows_);
-
-        auto iter = std::lower_bound(num_rows_until_chunk_.begin(),
-                                     num_rows_until_chunk_.end(),
-                                     offset + 1);
-        size_t chunk_idx =
-            std::distance(num_rows_until_chunk_.begin(), iter) - 1;
-        size_t offset_in_chunk = offset - num_rows_until_chunk_[chunk_idx];
-        return {chunk_idx, offset_in_chunk};
+        auto num_rows_until_chunk = GetNumRowsUntilChunk();
+        return ::milvus::GetChunkIDByOffset(offset, num_rows_until_chunk);
     }
 
-    std::shared_ptr<Chunk>
+    PinWrapper<Chunk*>
     GetChunk(int64_t chunk_id) const {
-        return chunks_[chunk_id];
+        auto ca = SemiInlineGet(slot_->PinCells({chunk_id}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        return PinWrapper<Chunk*>(ca, chunk);
     }
 
     int64_t
     GetNumRowsUntilChunk(int64_t chunk_id) const {
-        return num_rows_until_chunk_[chunk_id];
+        return GetNumRowsUntilChunk()[chunk_id];
     }
 
     const std::vector<int64_t>&
     GetNumRowsUntilChunk() const {
-        return num_rows_until_chunk_;
+        auto meta = static_cast<milvus::segcore::storagev1translator::CTMeta*>(
+            slot_->meta());
+        return meta->num_rows_until_chunk_;
     }
 
  protected:
     bool nullable_{false};
     size_t num_rows_{0};
-    std::vector<int64_t> num_rows_until_chunk_;
-
- private:
-    // void
-    // UpdateMetricWhenMmap(size_t mmaped_size) {
-    //     UpdateMetricWhenMmap(mapping_type_, mmaped_size);
-    // }
-
-    // void
-    // UpdateMetricWhenMmap(bool is_map_anonymous, size_t mapped_size) {
-    //     if (mapping_type_ == MappingType::MAP_WITH_ANONYMOUS) {
-    //         milvus::monitor::internal_mmap_allocated_space_bytes_anon.Observe(
-    //             mapped_size);
-    //         milvus::monitor::internal_mmap_in_used_space_bytes_anon.Increment(
-    //             mapped_size);
-    //     } else {
-    //         milvus::monitor::internal_mmap_allocated_space_bytes_file.Observe(
-    //             mapped_size);
-    //         milvus::monitor::internal_mmap_in_used_space_bytes_file.Increment(
-    //             mapped_size);
-    //     }
-    // }
-
-    // void
-    // UpdateMetricWhenMunmap(size_t mapped_size) {
-    //     if (mapping_type_ == MappingType::MAP_WITH_ANONYMOUS) {
-    //         milvus::monitor::internal_mmap_in_used_space_bytes_anon.Decrement(
-    //             mapped_size);
-    //     } else {
-    //         milvus::monitor::internal_mmap_in_used_space_bytes_file.Decrement(
-    //             mapped_size);
-    //     }
-    // }
-
- private:
-    storage::MmapChunkManagerPtr mcm_ = nullptr;
-
- protected:
-    std::vector<std::shared_ptr<Chunk>> chunks_;
+    size_t num_chunks_{0};
+    mutable std::shared_ptr<CacheSlot<Chunk>> slot_;
 };
 
 class ChunkedColumn : public ChunkedColumnBase {
  public:
-    ChunkedColumn() = default;
     // memory mode ctor
-    explicit ChunkedColumn(const FieldMeta& field_meta)
-        : ChunkedColumnBase(field_meta) {
+    explicit ChunkedColumn(std::unique_ptr<Translator<Chunk>> translator,
+                           const FieldMeta& field_meta)
+        : ChunkedColumnBase(std::move(translator), field_meta) {
     }
 
-    explicit ChunkedColumn(const FieldMeta& field_meta,
-                           const std::vector<std::shared_ptr<Chunk>>& chunks)
-        : ChunkedColumnBase(field_meta) {
-        for (auto& chunk : chunks) {
-            AddChunk(chunk);
-        }
+    // TODO(tiered storage 1): this method should be replaced with a bulk access method.
+    const char*
+    ValueAt(int64_t offset) {
+        auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(offset);
+        auto ca =
+            SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        return chunk->ValueAt(offset_in_chunk);
     }
 
-    ~ChunkedColumn() override = default;
-
-    SpanBase
+    PinWrapper<SpanBase>
     Span(int64_t chunk_id) const override {
-        return std::static_pointer_cast<FixedWidthChunk>(chunks_[chunk_id])
-            ->Span();
+        auto ca = SemiInlineGet(slot_->PinCells({chunk_id}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        return PinWrapper<SpanBase>(
+            ca, static_cast<FixedWidthChunk*>(chunk)->Span());
     }
-};
-
-// when mmap is used, size_, data_ and num_rows_ of ColumnBase are used.
-class ChunkedSparseFloatColumn : public ChunkedColumnBase {
- public:
-    // memory mode ctor
-    explicit ChunkedSparseFloatColumn(const FieldMeta& field_meta)
-        : ChunkedColumnBase(field_meta) {
-    }
-
-    explicit ChunkedSparseFloatColumn(
-        const FieldMeta& field_meta,
-        const std::vector<std::shared_ptr<Chunk>>& chunks)
-        : ChunkedColumnBase(field_meta) {
-        for (auto& chunk : chunks) {
-            AddChunk(chunk);
-        }
-    }
-
-    ~ChunkedSparseFloatColumn() override = default;
-
-    void
-    AddChunk(std::shared_ptr<Chunk> chunk) override {
-        num_rows_until_chunk_.push_back(num_rows_);
-        num_rows_ += chunk->RowNums();
-        chunks_.push_back(chunk);
-        dim_ = std::max(
-            dim_,
-            std::static_pointer_cast<SparseFloatVectorChunk>(chunk)->Dim());
-    }
-
-    SpanBase
-    Span(int64_t chunk_id) const override {
-        PanicInfo(ErrorCode::Unsupported,
-                  "Span not supported for sparse float column");
-    }
-
-    int64_t
-    Dim() const {
-        return dim_;
-    }
-
- private:
-    int64_t dim_ = 0;
 };
 
 template <typename T>
 class ChunkedVariableColumn : public ChunkedColumnBase {
  public:
-    using ViewType =
-        std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
+    static_assert(
+        std::is_same_v<T, std::string> || std::is_same_v<T, Json>,
+        "ChunkedVariableColumn only supports std::string or Json types");
 
     // memory mode ctor
-    explicit ChunkedVariableColumn(const FieldMeta& field_meta)
-        : ChunkedColumnBase(field_meta) {
-    }
-
     explicit ChunkedVariableColumn(
-        const FieldMeta& field_meta,
-        const std::vector<std::shared_ptr<Chunk>>& chunks)
-        : ChunkedColumnBase(field_meta) {
-        for (auto& chunk : chunks) {
-            AddChunk(chunk);
-        }
+        std::unique_ptr<Translator<Chunk>> translator,
+        const FieldMeta& field_meta)
+        : ChunkedColumnBase(std::move(translator), field_meta) {
     }
 
-    ~ChunkedVariableColumn() override = default;
-
-    SpanBase
-    Span(int64_t chunk_id) const override {
-        PanicInfo(ErrorCode::NotImplemented,
-                  "span() interface is not implemented for variable column");
-    }
-
-    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     StringViews(int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
                     std::nullopt) const override {
-        return std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
-            ->StringViews(offset_len);
+        auto ca = SemiInlineGet(slot_->PinCells({chunk_id}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        return PinWrapper<
+            std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
+            ca, static_cast<StringChunk*>(chunk)->StringViews(offset_len));
     }
 
-    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     ViewsByOffsets(int64_t chunk_id,
                    const FixedVector<int32_t>& offsets) const override {
-        return std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
-            ->ViewsByOffsets(offsets);
+        auto ca = SemiInlineGet(slot_->PinCells({chunk_id}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        return PinWrapper<
+            std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
+            ca, static_cast<StringChunk*>(chunk)->ViewsByOffsets(offsets));
     }
 
-    BufferView
-    GetBatchBuffer(int64_t chunk_id,
-                   int64_t start_offset,
-                   int64_t length) override {
-        BufferView buffer_view;
-        std::vector<BufferView::Element> elements;
-        elements.push_back(
-            {chunks_[chunk_id]->Data(),
-             std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
-                 ->Offsets(),
-             static_cast<int>(start_offset),
-             static_cast<int>(start_offset + length)});
-
-        buffer_view.data_ = elements;
-        return buffer_view;
-    }
-
-    ViewType
-    operator[](const int i) const {
+    // TODO(tiered storage 1): this method should be replaced with a bulk access method.
+    // RawAt is called in three cases:
+    // 1. bulk_subscript, pass in an offset array, access the specified rows.
+    // 2. load, create skip index or text index, access all rows. (SkipIndex.h and CreateTextIndex)
+    // 3. GetJsonData, json related index will use this, see if it can be modified to batch access or batch pin.
+    T
+    RawAt(const size_t i) const {
         if (i < 0 || i > num_rows_) {
             PanicInfo(ErrorCode::OutOfRange, "index out of range");
         }
 
         auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
+        auto ca =
+            SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
+        auto chunk = ca->get_cell_of(chunk_id);
         std::string_view str_view =
-            std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
-                ->
-                operator[](offset_in_chunk);
-        return ViewType(str_view.data(), str_view.size());
-    }
-
-    std::string_view
-    RawAt(const size_t i) const {
-        return std::string_view((*this)[i]);
+            static_cast<StringChunk*>(chunk)->operator[](offset_in_chunk);
+        return T(str_view.data(), str_view.size());
     }
 };
+
 class ChunkedArrayColumn : public ChunkedColumnBase {
  public:
     // memory mode ctor
-    explicit ChunkedArrayColumn(const FieldMeta& field_meta)
-        : ChunkedColumnBase(field_meta) {
+    explicit ChunkedArrayColumn(std::unique_ptr<Translator<Chunk>> translator,
+                                const FieldMeta& field_meta)
+        : ChunkedColumnBase(std::move(translator), field_meta) {
     }
 
-    explicit ChunkedArrayColumn(
-        const FieldMeta& field_meta,
-        const std::vector<std::shared_ptr<Chunk>>& chunks)
-        : ChunkedColumnBase(field_meta) {
-        for (auto& chunk : chunks) {
-            AddChunk(chunk);
-        }
-    }
-
-    ~ChunkedArrayColumn() override = default;
-
-    SpanBase
-    Span(int64_t chunk_id) const override {
-        PanicInfo(ErrorCode::NotImplemented,
-                  "span() interface is not implemented for arr chunk column");
-    }
-
-    ArrayView
-    operator[](const int i) const {
-        auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
-        return std::static_pointer_cast<ArrayChunk>(chunks_[chunk_id])
-            ->View(offset_in_chunk);
-    }
-
+    // TODO(tiered storage 1): this method should be replaced with a bulk access method.
     ScalarArray
     RawAt(const int i) const {
         auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
-        return std::static_pointer_cast<ArrayChunk>(chunks_[chunk_id])
+        auto ca =
+            SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        return static_cast<ArrayChunk*>(chunk)
             ->View(offset_in_chunk)
             .output_data();
     }
 
-    std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
     ArrayViews(int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len =
                    std::nullopt) const override {
-        return std::static_pointer_cast<ArrayChunk>(chunks_[chunk_id])
-            ->Views(offset_len);
+        auto ca =
+            SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
+            ca, static_cast<ArrayChunk*>(chunk)->Views(offset_len));
     }
 };
 }  // namespace milvus

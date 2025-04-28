@@ -11,17 +11,15 @@
 
 #include <gtest/gtest.h>
 
-#include <iostream>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
 #include "common/EasyAssert.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 #include "storage/storage_c.h"
-
-#define private public
-#include "storage/ChunkCache.h"
 
 using namespace std;
 using namespace milvus;
@@ -104,9 +102,93 @@ TEST_F(StorageTest, InitRemoteChunkManagerSingleton) {
     EXPECT_EQ(rcm->GetRootPath(), "/tmp/milvus/remote_data");
 }
 
-TEST_F(StorageTest, InitChunkCacheSingleton) {
-}
-
 TEST_F(StorageTest, CleanRemoteChunkManagerSingleton) {
     CleanRemoteChunkManagerSingleton();
+}
+
+class StorageUtilTest : public testing::Test {
+ public:
+    StorageUtilTest() = default;
+    ~StorageUtilTest() {
+    }
+    void
+    SetUp() override {
+    }
+};
+
+TEST_F(StorageUtilTest, CreateArrowScalarFromDefaultValue) {
+    {
+        FieldMeta field_without_defval(
+            FieldName("f"), FieldId(100), DataType::INT64, false, std::nullopt);
+        ASSERT_ANY_THROW(
+            CreateArrowScalarFromDefaultValue(field_without_defval));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_int_data(10);
+        FieldMeta int_field(FieldName("f"),
+                            FieldId(100),
+                            DataType::INT32,
+                            false,
+                            default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(int_field);
+        ASSERT_TRUE(scalar->Equals(*arrow::MakeScalar(int32_t(10))));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_long_data(10);
+        FieldMeta long_field(FieldName("f"),
+                             FieldId(100),
+                             DataType::INT64,
+                             false,
+                             default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(long_field);
+        ASSERT_TRUE(scalar->Equals(*arrow::MakeScalar(int64_t(10))));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_float_data(1.0f);
+        FieldMeta float_field(FieldName("f"),
+                              FieldId(100),
+                              DataType::FLOAT,
+                              false,
+                              default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(float_field);
+        ASSERT_TRUE(scalar->ApproxEquals(*arrow::MakeScalar(1.0f)));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_double_data(1.0f);
+        FieldMeta double_field(FieldName("f"),
+                               FieldId(100),
+                               DataType::DOUBLE,
+                               false,
+                               default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(double_field);
+        ASSERT_TRUE(scalar->ApproxEquals(arrow::DoubleScalar(1.0f)));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_bool_data(true);
+        FieldMeta bool_field(
+            FieldName("f"), FieldId(100), DataType::BOOL, false, default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(bool_field);
+        ASSERT_TRUE(scalar->Equals(*arrow::MakeScalar(true)));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_string_data("bar");
+        FieldMeta varchar_field(FieldName("f"),
+                                FieldId(100),
+                                DataType::VARCHAR,
+                                false,
+                                default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(varchar_field);
+        ASSERT_TRUE(scalar->Equals(*arrow::MakeScalar("bar")));
+    }
+    {
+        FieldMeta unsupport_field(
+            FieldName("f"), FieldId(100), DataType::JSON, false, std::nullopt);
+        ASSERT_ANY_THROW(CreateArrowScalarFromDefaultValue(unsupport_field));
+    }
 }

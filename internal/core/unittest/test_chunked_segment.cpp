@@ -11,13 +11,20 @@
 
 #include <arrow/util/key_value_metadata.h>
 #include <gtest/gtest.h>
+
+#include <memory>
+#include <numeric>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
 #include <algorithm>
 #include <cstdint>
-#include "arrow/table_builder.h"
+
+#include <gtest/gtest.h>
 #include "arrow/type_fwd.h"
 #include "common/BitsetView.h"
 #include "common/Consts.h"
-#include "common/FieldDataInterface.h"
 #include "common/QueryInfo.h"
 #include "common/Schema.h"
 #include "common/Types.h"
@@ -29,22 +36,18 @@
 #include "knowhere/comp/index_param.h"
 #include "milvus-storage/common/constants.h"
 #include "mmap/ChunkedColumn.h"
-#include "mmap/Types.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentSealed.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
-#include <memory>
-#include <numeric>
-#include <optional>
-#include <string>
-#include <unordered_map>
-#include <vector>
+#include "test_utils/storage_test_utils.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 
 struct DeferRelease {
     using functype = std::function<void()>;
@@ -72,12 +75,16 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     int total_row_count = chunk_num * chunk_size;
     int bitset_size = (total_row_count + 7) / 8;
 
-    auto column = std::make_shared<ChunkedColumn>();
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::COSINE);
 
+    auto field_meta = schema->operator[](fakevec_id);
+
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    std::vector<int64_t> num_rows_per_chunk;
     for (int i = 0; i < chunk_num; i++) {
+        num_rows_per_chunk.push_back(chunk_size);
         auto dataset = segcore::DataGen(schema, chunk_size);
         auto data = dataset.get_col<float>(fakevec_id);
         auto buf_size = 4 * data.size();
@@ -86,10 +93,14 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
         defer.AddDefer([buf]() { delete[] buf; });
         memcpy(buf, data.data(), 4 * data.size());
 
-        auto chunk = std::make_shared<FixedWidthChunk>(
-            chunk_size, dim, buf, buf_size, 4, false);
-        column->AddChunk(chunk);
+        chunks.emplace_back(std::make_unique<FixedWidthChunk>(
+            chunk_size, dim, buf, buf_size, 4, false));
     }
+
+    auto translator = std::make_unique<TestChunkTranslator>(
+        num_rows_per_chunk, "", std::move(chunks));
+    auto column =
+        std::make_shared<ChunkedColumn>(std::move(translator), field_meta);
 
     SearchInfo search_info;
     auto search_conf = knowhere::Json{
@@ -112,15 +123,15 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     auto index_info = std::map<std::string, std::string>{};
     SearchResult search_result;
 
-    query::SearchOnSealed(*schema,
-                          column,
-                          search_info,
-                          index_info,
-                          query_data,
-                          1,
-                          total_row_count,
-                          bv,
-                          search_result);
+    query::SearchOnSealedColumn(*schema,
+                                column.get(),
+                                search_info,
+                                index_info,
+                                query_data,
+                                1,
+                                total_row_count,
+                                bv,
+                                search_result);
 
     std::set<int64_t> offsets;
     for (auto& offset : search_result.seg_offsets_) {
@@ -137,15 +148,15 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
     // test with group by
     search_info.group_by_field_id_ = fakevec_id;
     std::fill(bitset_data, bitset_data + bitset_size, 0);
-    query::SearchOnSealed(*schema,
-                          column,
-                          search_info,
-                          index_info,
-                          query_data,
-                          1,
-                          total_row_count,
-                          bv,
-                          search_result);
+    query::SearchOnSealedColumn(*schema,
+                                column.get(),
+                                search_info,
+                                index_info,
+                                query_data,
+                                1,
+                                total_row_count,
+                                bv,
+                                search_result);
 
     ASSERT_EQ(1, search_result.vector_iterators_->size());
 
@@ -172,7 +183,7 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
         auto int64_fid = schema->AddDebugField("int64", DataType::INT64, true);
 
         auto pk_fid = schema->AddDebugField(
-            "pk", pk_is_string ? DataType::VARCHAR : DataType::INT64, true);
+            "pk", pk_is_string ? DataType::VARCHAR : DataType::INT64, false);
         auto str_fid =
             schema->AddDebugField("string1", DataType::VARCHAR, true);
         auto str2_fid =
@@ -201,7 +212,7 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
         auto arrow_pk_field = arrow::field(
             "pk",
             pk_is_string ? arrow::utf8() : arrow::int64(),
-            true,
+            false,
             arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
                                       {std::to_string(101)}));
         auto arrow_ts_field = arrow::field(
@@ -245,20 +256,16 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
         int start_id = 0;
         chunk_num = 2;
 
-        std::vector<FieldDataInfo> field_infos;
-        for (auto fid : field_ids) {
-            FieldDataInfo field_info;
-            field_info.field_id = fid.get();
-            field_info.row_count = test_data_count * chunk_num;
-            field_infos.push_back(field_info);
-        }
-
         std::vector<std::string> str_data;
         for (int i = 0; i < test_data_count * chunk_num; i++) {
             str_data.push_back("test" + std::to_string(i));
         }
         std::sort(str_data.begin(), str_data.end());
-        std::vector<bool> validity(test_data_count, true);
+
+        auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                      .GetRemoteChunkManager();
+
+        std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
 
         // generate data
         for (int chunk_id = 0; chunk_id < chunk_num;
@@ -266,50 +273,38 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
             std::vector<int64_t> test_data(test_data_count);
             std::iota(test_data.begin(), test_data.end(), start_id);
 
-            auto builder = std::make_shared<arrow::Int64Builder>();
-            auto status = builder->AppendValues(
-                test_data.begin(), test_data.end(), validity.begin());
-            ASSERT_TRUE(status.ok());
-            auto res = builder->Finish();
-            ASSERT_TRUE(res.ok());
-            std::shared_ptr<arrow::Array> arrow_int64;
-            arrow_int64 = res.ValueOrDie();
-
-            auto str_builder = std::make_shared<arrow::StringBuilder>();
-            for (int i = 0; i < test_data_count; i++) {
-                auto status = str_builder->Append(str_data[start_id + i]);
-                ASSERT_TRUE(status.ok());
-            }
-            std::shared_ptr<arrow::Array> arrow_str;
-            status = str_builder->Finish(&arrow_str);
-            ASSERT_TRUE(status.ok());
-
             for (int i = 0; i < arrow_fields.size(); i++) {
-                auto f = arrow_fields[i];
+                // if i < 3, this is system field, thus must be int64.
+                // other fields include a pk field and 2 string fields. pk field is string if pk_is_string is true.
+                auto datatype =
+                    i < 3 && (field_ids[i] != pk_fid || !pk_is_string)
+                        ? DataType::INT64
+                        : DataType::VARCHAR;
+                FieldDataPtr field_data{nullptr};
+
+                if (datatype == DataType::INT64) {
+                    field_data =
+                        std::make_shared<FieldData<int64_t>>(datatype, false);
+                    field_data->FillFieldData(test_data.data(),
+                                              test_data_count);
+                } else {
+                    field_data = std::make_shared<FieldData<std::string>>(
+                        datatype, false);
+                    field_data->FillFieldData(str_data.data() + start_id,
+                                              test_data_count);
+                }
                 auto fid = field_ids[i];
-                auto arrow_schema =
-                    std::make_shared<arrow::Schema>(arrow::FieldVector(1, f));
-
-                auto col = i < 3 && (field_ids[i] != pk_fid || !pk_is_string)
-                               ? arrow_int64
-                               : arrow_str;
-                auto record_batch = arrow::RecordBatch::Make(
-                    arrow_schema, arrow_int64->length(), {col});
-
-                auto res2 = arrow::RecordBatchReader::Make({record_batch});
-                ASSERT_TRUE(res2.ok());
-                auto arrow_reader = res2.ValueOrDie();
-
-                field_infos[i].arrow_reader_channel->push(
-                    std::make_shared<ArrowDataWrapper>(
-                        arrow_reader, nullptr, nullptr));
+                field_data_map[fid].push_back(field_data);
             }
         }
-
-        // load
-        for (int i = 0; i < field_infos.size(); i++) {
-            field_infos[i].arrow_reader_channel->close();
-            segment->LoadFieldData(field_ids[i], field_infos[i]);
+        for (auto& [fid, field_datas] : field_data_map) {
+            auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                            kPartitionID,
+                                                            kSegmentID,
+                                                            fid.get(),
+                                                            field_datas,
+                                                            cm);
+            segment->LoadFieldData(load_info);
         }
     }
 
@@ -422,7 +417,8 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
         create_index_info, file_manager_ctx);
     std::vector<int64_t> data(test_data_count * chunk_num);
     for (int i = 0; i < chunk_num; i++) {
-        auto d = segment->chunk_data<int64_t>(fid, i);
+        auto pw = segment->chunk_data<int64_t>(fid, i);
+        auto d = pw.get();
         std::copy(d.data(),
                   d.data() + test_data_count,
                   data.begin() + i * test_data_count);

@@ -9,9 +9,11 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
+
+#include "mmap/ChunkedColumn.h"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
-#include <algorithm>
 
 namespace milvus::query {
 
@@ -72,9 +74,10 @@ CachedSearchIterator::InitializeChunkedIterators(
     int64_t offset = 0;
     chunked_heaps_.resize(nq_);
     for (int64_t chunk_id = 0; chunk_id < num_chunks_; ++chunk_id) {
+        // TODO(tiered storage 1): this should store PinWrapper. Double check all places.
         auto [chunk_data, chunk_size] = get_chunk_data(chunk_id);
         auto sub_data = query::dataset::RawDataset{
-            offset, query_ds.dim, chunk_size, chunk_data};
+            offset, query_ds.dim, chunk_size, chunk_data.get()};
 
         auto expected_iterators = GetBruteForceSearchIterators(
             query_ds, sub_data, search_info, index_info, bitset, data_type);
@@ -121,17 +124,17 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [&vec_data, vec_size_per_chunk, row_count](
-            int64_t chunk_id) -> std::pair<const void*, int64_t> {
-            const auto chunk_data = vec_data->get_chunk_data(chunk_id);
+        [&vec_data, vec_size_per_chunk, row_count](int64_t chunk_id) {
+            const void* chunk_data = vec_data->get_chunk_data(chunk_id);
+            auto pw = milvus::cachinglayer::PinWrapper<const void*>(chunk_data);
             int64_t chunk_size = std::min(
                 vec_size_per_chunk, row_count - chunk_id * vec_size_per_chunk);
-            return {chunk_data, chunk_size};
+            return std::make_pair(pw, chunk_size);
         });
 }
 
 CachedSearchIterator::CachedSearchIterator(
-    const std::shared_ptr<ChunkedColumnBase>& column,
+    ChunkedColumnBase* column,
     const dataset::SearchDataset& query_ds,
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
@@ -153,11 +156,11 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [&column](int64_t chunk_id) {
-            const char* chunk_data = column->Data(chunk_id);
+        [column](int64_t chunk_id) {
+            auto pw = column->DataOfChunk(chunk_id).transform<const void*>(
+                [](const auto& x) { return static_cast<const void*>(x); });
             int64_t chunk_size = column->chunk_row_nums(chunk_id);
-            return std::make_pair(static_cast<const void*>(chunk_data),
-                                  chunk_size);
+            return std::make_pair(pw, chunk_size);
         });
 }
 

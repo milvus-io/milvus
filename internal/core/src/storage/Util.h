@@ -57,6 +57,19 @@ CreateArrowBuilder(DataType data_type);
 std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type, int dim);
 
+/// \brief Utility function to create arrow:Scalar from FieldMeta.default_value
+///
+/// Construct a arrow::Scalar based on input field meta
+/// The data_type_ is checked to determine which `one_of` member of default value shall be used
+/// Note that:
+/// 1. default_value shall have value
+/// 2. the type check shall be guaranteed(current by go side)
+///
+/// \param[in] field_meta the field meta object to construct arrow::Scalar from.
+/// \return an std::shared_ptr of arrow::Scalar
+std::shared_ptr<arrow::Scalar>
+CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta);
+
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, bool nullable);
 
@@ -131,14 +144,6 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           FieldDataMeta field_meta,
                           std::string object_key);
 
-std::pair<std::string, size_t>
-EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
-                          void* buf,
-                          int64_t element_count,
-                          FieldDataMeta field_data_meta,
-                          const FieldMeta& field_meta,
-                          std::string object_key);
-
 std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files);
@@ -159,9 +164,6 @@ GetNumRowsForLoadInfo(const LoadFieldDataInfo& load_info);
 
 void
 ReleaseArrowUnused();
-
-// size_t
-// getCurrentRSS();
 
 ChunkManagerPtr
 CreateChunkManager(const StorageConfig& storage_config);
@@ -208,6 +210,7 @@ SortByPath(std::vector<std::string>& paths) {
               });
 }
 
+// used only for test
 inline std::shared_ptr<ArrowDataWrapper>
 ConvertFieldDataToArrowDataWrapper(const FieldDataPtr& field_data) {
     BaseEventData event_data;

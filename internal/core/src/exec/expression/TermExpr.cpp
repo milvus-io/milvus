@@ -625,8 +625,7 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 if (type == uint8_t(milvus::index::JSONType::STRING) ||
                     type == uint8_t(milvus::index::JSONType::DOUBLE) ||
                     type == uint8_t(milvus::index::JSONType::INT64)) {
@@ -880,7 +879,6 @@ VectorPtr
 PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {

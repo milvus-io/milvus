@@ -401,8 +401,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
 
                 if (array.error()) {
@@ -586,8 +585,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
                     return false;
@@ -865,8 +863,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
                     return false;
@@ -1114,8 +1111,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 std::set<int> tmp_elements_index(elements_index);
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
@@ -1366,8 +1362,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
                     return false;
@@ -1602,8 +1597,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
                     return false;

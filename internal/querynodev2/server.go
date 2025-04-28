@@ -269,6 +269,12 @@ func (node *QueryNode) InitSegcore() error {
 		return err
 	}
 
+	tieredStorageEnabledGlobally := C.bool(paramtable.Get().QueryNodeCfg.TieredStorageEnableGlobal.GetAsBool())
+	tieredStorageMemoryLimit := C.int64_t(paramtable.Get().QueryNodeCfg.TieredStorageMemoryAllocationRatio.GetAsFloat() * float64(hardware.GetMemoryCount()))
+	diskCapacity := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
+	tieredStorageDiskLimit := C.int64_t(paramtable.Get().QueryNodeCfg.TieredStorageDiskAllocationRatio.GetAsFloat() * float64(diskCapacity))
+	C.ConfigureTieredStorage(tieredStorageEnabledGlobally, tieredStorageMemoryLimit, tieredStorageDiskLimit)
+
 	initcore.InitTraceConfig(paramtable.Get())
 	C.InitExecExpressionFunctionFactory()
 	return nil

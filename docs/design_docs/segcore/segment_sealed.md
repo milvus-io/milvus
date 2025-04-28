@@ -8,7 +8,6 @@ SegmentSealed has an extra interface rather than SegmentInterface:
 2. `LoadFieldData(loadFieldDataInfo)`: load column data, could be either scalar column or vector column
     1. Note: indexes and vector data for the same column may coexist. Indexes are prioritized in the search
 3. `DropIndex(fieldId)`: drop and release an existing index of a specified field
-4. `DropFieldData(fieldId)`: drop and release existing data for a specified field
 
 Search is executable as long as all the columns involved in the search are loaded.
 

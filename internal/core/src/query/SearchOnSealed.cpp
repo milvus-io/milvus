@@ -17,7 +17,6 @@
 #include "common/BitsetView.h"
 #include "common/QueryInfo.h"
 #include "common/Types.h"
-#include "mmap/Column.h"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
@@ -86,15 +85,15 @@ SearchOnSealedIndex(const Schema& schema,
 }
 
 void
-SearchOnSealed(const Schema& schema,
-               std::shared_ptr<ChunkedColumnBase> column,
-               const SearchInfo& search_info,
-               const std::map<std::string, std::string>& index_info,
-               const void* query_data,
-               int64_t num_queries,
-               int64_t row_count,
-               const BitsetView& bitview,
-               SearchResult& result) {
+SearchOnSealedColumn(const Schema& schema,
+                     ChunkedColumnBase* column,
+                     const SearchInfo& search_info,
+                     const std::map<std::string, std::string>& index_info,
+                     const void* query_data,
+                     int64_t num_queries,
+                     int64_t row_count,
+                     const BitsetView& bitview,
+                     SearchResult& result) {
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
 
@@ -129,7 +128,8 @@ SearchOnSealed(const Schema& schema,
 
     auto offset = 0;
     for (int i = 0; i < num_chunk; ++i) {
-        auto vec_data = column->Data(i);
+        auto pw = column->DataOfChunk(i);
+        auto vec_data = pw.get();
         auto chunk_size = column->chunk_row_nums(i);
         auto raw_dataset =
             query::dataset::RawDataset{offset, dim, chunk_size, vec_data};
@@ -167,15 +167,15 @@ SearchOnSealed(const Schema& schema,
 }
 
 void
-SearchOnSealed(const Schema& schema,
-               const void* vec_data,
-               const SearchInfo& search_info,
-               const std::map<std::string, std::string>& index_info,
-               const void* query_data,
-               int64_t num_queries,
-               int64_t row_count,
-               const BitsetView& bitset,
-               SearchResult& result) {
+SearchOnSealedData(const Schema& schema,
+                   const void* vec_data,
+                   const SearchInfo& search_info,
+                   const std::map<std::string, std::string>& index_info,
+                   const void* query_data,
+                   int64_t num_queries,
+                   int64_t row_count,
+                   const BitsetView& bitset,
+                   SearchResult& result) {
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
 

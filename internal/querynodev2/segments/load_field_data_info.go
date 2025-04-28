@@ -101,16 +101,6 @@ func (ld *LoadFieldDataInfo) appendMMapDirPath(dir string) {
 	}).Await()
 }
 
-func (ld *LoadFieldDataInfo) appendURI(uri string) {
-	GetDynamicPool().Submit(func() (any, error) {
-		cURI := C.CString(uri)
-		defer C.free(unsafe.Pointer(cURI))
-		C.SetUri(ld.cLoadFieldDataInfo, cURI)
-
-		return nil, nil
-	}).Await()
-}
-
 func (ld *LoadFieldDataInfo) appendStorageVersion(version int64) {
 	GetDynamicPool().Submit(func() (any, error) {
 		cVersion := C.int64_t(version)

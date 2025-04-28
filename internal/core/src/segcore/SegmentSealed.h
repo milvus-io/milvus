@@ -13,13 +13,13 @@
 
 #include <memory>
 #include <utility>
-#include <tuple>
 
 #include "common/LoadInfo.h"
 #include "common/Types.h"
-#include "index/JsonInvertedIndex.h"
 #include "pb/segcore.pb.h"
+#include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
+#include "cachinglayer/CacheSlot.h"
 #include "segcore/Types.h"
 
 namespace milvus::segcore {
@@ -36,13 +36,7 @@ class SegmentSealed : public SegmentInternalInterface {
     DropFieldData(const FieldId field_id) = 0;
 
     virtual void
-    LoadFieldData(FieldId field_id, FieldDataInfo& data) = 0;
-    virtual void
-    MapFieldData(const FieldId field_id, FieldDataInfo& data) = 0;
-    virtual void
     AddFieldDataInfoForSealed(const LoadFieldDataInfo& field_data_info) = 0;
-    virtual void
-    WarmupChunkCache(const FieldId field_id, bool mmap_enabled) = 0;
     virtual void
     RemoveFieldFile(const FieldId field_id) = 0;
     virtual void
@@ -53,9 +47,6 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual void
     LoadTextIndex(FieldId field_id,
                   std::unique_ptr<index::TextMatchIndex> index) = 0;
-
-    virtual InsertRecord<true>&
-    get_insert_record() = 0;
 
     virtual index::IndexBase*
     GetJsonIndex(FieldId field_id, std::string path) const override {
@@ -73,12 +64,6 @@ class SegmentSealed : public SegmentInternalInterface {
     LoadJsonKeyIndex(
         FieldId field_id,
         std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) = 0;
-
-    virtual index::JsonKeyStatsInvertedIndex*
-    GetJsonKeyIndex(FieldId field_id) const = 0;
-
-    virtual std::pair<std::string_view, bool>
-    GetJsonData(FieldId field_id, size_t offset) const = 0;
 
     SegmentType
     type() const override {
@@ -118,6 +103,9 @@ class SegmentSealed : public SegmentInternalInterface {
                (data_type == DataType::INT64 &&
                 index->second->JsonCastType() == DataType::DOUBLE);
     }
+
+    virtual std::shared_ptr<CacheSlot<InsertRecord<true>>>
+    get_insert_record_slot() const = 0;
 
  protected:
     struct JSONIndexKey {

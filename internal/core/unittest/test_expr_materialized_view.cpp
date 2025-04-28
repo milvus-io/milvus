@@ -21,17 +21,16 @@
 #include "common/FieldDataInterface.h"
 #include "common/Schema.h"
 #include "common/Types.h"
-#include "expr/ITypeExpr.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/comp/materialized_view.h"
 #include "knowhere/config.h"
 #include "query/Plan.h"
 #include "query/PlanImpl.h"
 #include "query/ExecPlanNodeVisitor.h"
-#include "plan/PlanNode.h"
 #include "segcore/SegmentSealed.h"
 
 #include "test_utils/DataGen.h"
+#include "test_utils/storage_test_utils.h"
 
 using DataType = milvus::DataType;
 using Schema = milvus::Schema;
@@ -95,18 +94,17 @@ class ExprMaterializedViewTest : public testing::Test {
             } else {
                 schema->AddDebugField(field_name, data_type);
             }
-            data_field_info[data_type].field_id =
-                schema->get_field_id(FieldName(field_name)).get();
-            std::cout << field_name << " with id "
-                      << data_field_info[data_type].field_id << std::endl;
+            auto field_id = schema->get_field_id(FieldName(field_name));
+            if (data_type == DataType::INT64) {
+                schema->set_primary_field_id(field_id);
+            }
+            data_field_info[data_type].field_id = field_id.get();
         }
 
         // generate data and prepare for search
         gen_data = std::make_unique<milvus::segcore::GeneratedData>(
             milvus::segcore::DataGen(schema, N));
-        segment = milvus::segcore::CreateSealedSegment(schema);
-        auto fields = schema->get_fields();
-        milvus::segcore::SealedLoadFieldData(*gen_data, *segment);
+        segment = CreateSealedWithFieldDataLoaded(schema, *gen_data);
         exec_plan_node_visitor =
             std::make_unique<milvus::query::ExecPlanNodeVisitor>(
                 *segment, milvus::MAX_TIMESTAMP);
@@ -222,13 +220,13 @@ class ExprMaterializedViewTest : public testing::Test {
     }
 
     knowhere::MaterializedViewSearchInfo
-    TranslateThenExecuteWhenMvInolved(const std::string& predicate_str) {
+    TranslateThenExecuteWhenMvInvolved(const std::string& predicate_str) {
         auto plan = CreatePlan(predicate_str, true);
         return ExecutePlan(plan);
     }
 
     knowhere::MaterializedViewSearchInfo
-    TranslateThenExecuteWhenMvNotInolved(const std::string& predicate_str) {
+    TranslateThenExecuteWhenMvNotInvolved(const std::string& predicate_str) {
         auto plan = CreatePlan(predicate_str, false);
         return ExecutePlan(plan);
     }
@@ -384,7 +382,7 @@ TEST_F(ExprMaterializedViewTest, TestJsonContainsExpr) {
         InterpolateSingleExpr(
             R"( elements:<VAL1> op:Contains elements_same_type:true>)",
             DataType::INT64);
-    auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
     TestMvExpectDefault(mv);
 }
 
@@ -401,7 +399,7 @@ TEST_F(ExprMaterializedViewTest, TestInExpr) {
             >
         )";
         predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
         // fmt::print("Predicate: {}\n", predicate);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
@@ -429,7 +427,7 @@ TEST_F(ExprMaterializedViewTest, TestInDuplicatesExpr) {
             >
         )";
         predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
         // fmt::print("Predicate: {}\n", predicate);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
@@ -460,7 +458,7 @@ TEST_F(ExprMaterializedViewTest, TestUnaryLogicalNotInExpr) {
             >
         )";
         predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
@@ -486,7 +484,7 @@ TEST_F(ExprMaterializedViewTest, TestUnaryRangeEqualExpr) {
             >
         )";
         predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
@@ -512,7 +510,7 @@ TEST_F(ExprMaterializedViewTest, TestUnaryRangeNotEqualExpr) {
                 >
             )";
         predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
@@ -542,7 +540,7 @@ TEST_F(ExprMaterializedViewTest, TestUnaryRangeCompareExpr) {
                 >
             )";
             predicate = InterpolateSingleExpr(predicate, data_type);
-            auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+            auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
             ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
             auto field_id = GetFieldID(data_type);
@@ -569,7 +567,7 @@ TEST_F(ExprMaterializedViewTest, TestInMultipleExpr) {
             >
         )";
         predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
@@ -600,7 +598,7 @@ TEST_F(ExprMaterializedViewTest, TestUnaryLogicalNotInMultipleExpr) {
             >
         )";
         predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
@@ -648,7 +646,7 @@ TEST_F(ExprMaterializedViewTest, TestEqualAndEqualExpr) {
             >
         )";
 
-    auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
     ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 2);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
@@ -696,7 +694,7 @@ TEST_F(ExprMaterializedViewTest, TestEqualAndInExpr) {
             >
         )";
 
-    auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
     ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 2);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
@@ -749,7 +747,7 @@ TEST_F(ExprMaterializedViewTest, TestEqualAndNotInExpr) {
             >
         )";
 
-    auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
     ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 2);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
@@ -797,7 +795,7 @@ TEST_F(ExprMaterializedViewTest, TestEqualOrEqualExpr) {
             >
         )";
 
-    auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
     ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 2);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
@@ -867,7 +865,7 @@ TEST_F(ExprMaterializedViewTest, TestEqualAndInOrEqualExpr) {
             >
         )";
 
-    auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
     ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 3);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
@@ -944,7 +942,7 @@ TEST_F(ExprMaterializedViewTest, TestEqualAndNotEqualOrEqualExpr) {
             >
         )";
 
-    auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+    auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
     ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 3);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
@@ -971,7 +969,7 @@ TEST_F(ExprMaterializedViewTest, TestBinaryRangeExpr) {
                 >
             )";
         predicate = InterpolateSingleExpr(predicate, data_type);
-        auto mv = TranslateThenExecuteWhenMvInolved(predicate);
+        auto mv = TranslateThenExecuteWhenMvInvolved(predicate);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);

@@ -14,8 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #pragma once
+
 #include "mmap/ChunkData.h"
 #include "storage/MmapManager.h"
+
 namespace milvus {
 template <typename Type>
 class ChunkVectorBase {

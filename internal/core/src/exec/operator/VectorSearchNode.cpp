@@ -16,6 +16,8 @@
 
 #include "VectorSearchNode.h"
 
+#include "monitor/prometheus_client.h"
+
 namespace milvus {
 namespace exec {
 

@@ -16,7 +16,8 @@
 
 #include "RandomSampleNode.h"
 
-#include <exec/expression/Utils.h>
+#include "exec/expression/Utils.h"
+#include "monitor/prometheus_client.h"
 
 namespace milvus {
 namespace exec {

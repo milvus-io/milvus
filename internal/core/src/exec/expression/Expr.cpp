@@ -33,6 +33,7 @@
 #include "exec/expression/UnaryExpr.h"
 #include "exec/expression/ValueExpr.h"
 #include "expr/ITypeExpr.h"
+#include "monitor/prometheus_client.h"
 
 #include <memory>
 

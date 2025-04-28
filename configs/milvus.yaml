@@ -98,7 +98,7 @@ minio:
   # minio.address and minio.port together generate the valid access to MinIO or S3 service.
   # MinIO preferentially acquires the valid IP address from the environment variable MINIO_ADDRESS when Milvus is started.
   # Default value applies when MinIO or S3 is running on the same network with Milvus.
-  address: localhost
+  address: localhost:9000
   port: 9000 # Port of MinIO or S3 service.
   # Access key ID that MinIO or S3 issues to user for authorized access.
   # Environment variable: MINIO_ACCESS_KEY_ID or minio.accessKeyID
@@ -447,6 +447,10 @@ queryNode:
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
+    tieredStorage:
+      enableGlobally: true # Whether or not to turn on Tiered Storage globally in this cluster.
+      memoryAllocationRatio: 0.8 # The ratio of memory allocation for Tiered Storage.
+      diskAllocationRatio: 0.8 # The ratio of disk allocation for Tiered Storage.
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments

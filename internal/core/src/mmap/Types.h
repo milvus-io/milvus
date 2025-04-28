@@ -19,9 +19,8 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include "arrow/record_batch.h"
+
 #include "common/FieldData.h"
-#include "storage/DataCodec.h"
 
 namespace milvus {
 
@@ -37,18 +36,6 @@ struct FieldDataInfo {
           row_count(row_count),
           mmap_dir_path(std::move(mmap_dir_path)) {
         arrow_reader_channel = std::make_shared<ArrowReaderChannel>();
-    }
-
-    FieldDataInfo(
-        int64_t field_id,
-        size_t row_count,
-        const std::vector<std::shared_ptr<milvus::ArrowDataWrapper>>& batch)
-        : field_id(field_id), row_count(row_count) {
-        arrow_reader_channel = std::make_shared<ArrowReaderChannel>();
-        for (auto& data : batch) {
-            arrow_reader_channel->push(data);
-        }
-        arrow_reader_channel->close();
     }
 
     int64_t field_id;
