@@ -121,7 +121,7 @@ const (
 	enableTeiEnvStr string = "MILVUSAI_ENABLE_TEI"
 )
 
-func parseAKAndURL(credentials *credentials.CredentialsManager, params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string) (string, string, error) {
+func parseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string) (string, string, error) {
 	// function param > yaml > env
 	var err error
 	var apiKey, url string

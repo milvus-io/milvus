@@ -4253,6 +4253,7 @@ func genTestSearchResultData(nq int64, topk int64, dType schemapb.DataType, fiel
 		Topks: tops,
 		FieldsData: []*schemapb.FieldData{
 			testutils.GenerateScalarFieldData(dType, fieldName, int(nq*topk)),
+			testutils.GenerateScalarFieldData(schemapb.DataType_Int64, testInt64Field, int(nq*topk)),
 		},
 	}
 	resultData.FieldsData[0].FieldId = fieldId

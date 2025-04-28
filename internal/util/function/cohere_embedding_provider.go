@@ -54,7 +54,7 @@ func createCohereEmbeddingClient(apiKey string, url string) (*cohere.CohereEmbed
 	return c, nil
 }
 
-func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.CredentialsManager) (*CohereEmbeddingProvider, error) {
+func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials) (*CohereEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err

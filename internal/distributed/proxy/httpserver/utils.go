@@ -1989,3 +1989,43 @@ func generateSearchParams(reqSearchParams map[string]interface{}) ([]*commonpb.K
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 	return searchParams, nil
 }
+
+func genFunctionSchema(ctx context.Context, function *FunctionSchema) (*schemapb.FunctionSchema, error) {
+	functionTypeValue, ok := schemapb.FunctionType_value[function.FunctionType]
+	if !ok {
+		log.Ctx(ctx).Warn("function's data type is invalid(case sensitive).", zap.Any("function.DataType", function.FunctionType), zap.Any("function", function))
+		return nil, merr.WrapErrParameterInvalidMsg("Unsupported function type: %s", function.FunctionType)
+	}
+	functionType := schemapb.FunctionType(functionTypeValue)
+	description := function.Description
+	params := []*commonpb.KeyValuePair{}
+	for key, value := range function.Params {
+		params = append(params, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+	}
+	return &schemapb.FunctionSchema{
+		Name:             function.FunctionName,
+		Description:      description,
+		Type:             functionType,
+		InputFieldNames:  function.InputFieldNames,
+		OutputFieldNames: function.OutputFieldNames,
+		Params:           params,
+	}, nil
+}
+
+func genFunctionScore(ctx context.Context, functionScore *FunctionScore) (*schemapb.FunctionScore, error) {
+	fScore := schemapb.FunctionScore{
+		Functions: []*schemapb.FunctionSchema{},
+		Params:    []*commonpb.KeyValuePair{},
+	}
+	for _, function := range functionScore.Functions {
+		f, err := genFunctionSchema(ctx, &function)
+		if err != nil {
+			return nil, err
+		}
+		fScore.Functions = append(fScore.Functions, f)
+	}
+	for key, value := range functionScore.Params {
+		fScore.Params = append(fScore.Params, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+	}
+	return &fScore, nil
+}

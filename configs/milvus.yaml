@@ -1274,3 +1274,6 @@ function:
       vertexai:
         credential:  # The name in the crendential configuration item
         url:  # Your VertexAI embedding url
+      voyageai:
+        credential:  # The name in the crendential configuration item
+        url:  # Your voyageai embedding url, Default is the official embedding url

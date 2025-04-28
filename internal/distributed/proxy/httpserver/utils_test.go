@@ -17,6 +17,7 @@
 package httpserver
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strconv"
@@ -2524,4 +2525,57 @@ func TestGenerateSearchParams(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestGenFunctionSchem(t *testing.T) {
+	{
+		funcSchema := &FunctionSchema{
+			FunctionName:    "test",
+			Description:     "",
+			FunctionType:    "unknow",
+			InputFieldNames: []string{"test"},
+		}
+		_, err := genFunctionSchema(context.Background(), funcSchema)
+		assert.ErrorContains(t, err, "Unsupported function type:")
+	}
+	{
+		funcSchema := &FunctionSchema{
+			FunctionName:    "test",
+			Description:     "",
+			FunctionType:    "Rerank",
+			InputFieldNames: []string{"test"},
+		}
+		_, err := genFunctionSchema(context.Background(), funcSchema)
+		assert.NoError(t, err)
+	}
+}
+
+func TestGenFunctionScore(t *testing.T) {
+	{
+		fScore := FunctionScore{}
+		funcSchema := FunctionSchema{
+			FunctionName:    "test",
+			Description:     "",
+			FunctionType:    "unknow",
+			InputFieldNames: []string{"test"},
+		}
+
+		fScore.Functions = append(fScore.Functions, funcSchema)
+		_, err := genFunctionScore(context.Background(), &fScore)
+		assert.ErrorContains(t, err, "Unsupported function typ")
+	}
+	{
+		fScore := FunctionScore{}
+		funcSchema := FunctionSchema{
+			FunctionName:    "test",
+			Description:     "",
+			FunctionType:    "Rerank",
+			InputFieldNames: []string{"test"},
+		}
+
+		fScore.Functions = append(fScore.Functions, funcSchema)
+		fScore.Params = map[string]interface{}{"testStr": "test", "testInt": 6, "testBool": true}
+		_, err := genFunctionScore(context.Background(), &fScore)
+		assert.NoError(t, err)
+	}
 }

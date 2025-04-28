@@ -121,7 +121,7 @@ func (s *DecayFunctionSuite) TestNewDecayErrors() {
 	}
 
 	{
-		fs := []string{gaussFunction, linerFunction, expFunction}
+		fs := []string{gaussFunction, linearFunction, expFunction}
 		for i := 0; i < 3; i++ {
 			functionSchema.Params[4].Value = fs[i]
 			_, err := newDecayFunction(schema, functionSchema)
@@ -216,14 +216,14 @@ func (s *DecayFunctionSuite) TestAllTypesInput() {
 	{
 		functionSchema.Params[3].Value = "-1"
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Decay function param: offset must => 0")
+		s.ErrorContains(err, "Decay function param: offset must >= 0")
 		functionSchema.Params[3].Value = "0.5"
 	}
 
 	{
 		functionSchema.Params[4].Value = "10"
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Decay function param: decay must 0 < decay < 1 0")
+		s.ErrorContains(err, "Decay function param: decay must 0 < decay < 1")
 		functionSchema.Params[2].Value = "0.5"
 	}
 }
