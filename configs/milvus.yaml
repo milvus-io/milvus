@@ -335,9 +335,9 @@ proxy:
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
     enablePprof: true # Whether to enable pprof middleware on the metrics port
-    enableHSTS: false # Enables HTTP Strict Transport Security (HSTS) header support
-    hstsMaxAge: 31536000 # Specifies max-age in seconds for the HSTS header (1 year = 31536000)
-    hstsIncludeSubDomains: false # If true, applies HSTS policy to all subdomains as well
+    hstsMaxAge: 31536000 # Strict-Transport-Security max-age in seconds
+    hstsIncludeSubDomains: false # Include subdomains in Strict-Transport-Security
+    enableHSTS: false # Whether to enable setting the Strict-Transport-Security header
   ip:  # TCP/IP address of proxy. If not specified, use the first unicastable address
   port: 19530 # TCP port of proxy
   internalPort: 19529
