@@ -309,6 +309,88 @@ DiskFileManagerImpl::CacheJsonKeyIndexToDisk(
 }
 
 template <typename DataType>
+std::string
+DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
+    auto storage_version =
+        index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
+            .value_or(0);
+    if (storage_version == STORAGE_V2) {
+        return cache_raw_data_to_disk_storage_v2<DataType>(config);
+    }
+    return cache_raw_data_to_disk_internal<DataType>(config);
+}
+
+template <typename DataType>
+std::string
+DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
+    auto insert_files = index::GetValueFromConfig<std::vector<std::string>>(
+        config, INSERT_FILES_KEY);
+    AssertInfo(insert_files.has_value(),
+               "insert file paths is empty when build index");
+    auto remote_files = insert_files.value();
+    SortByPath(remote_files);
+
+    auto segment_id = GetFieldDataMeta().segment_id;
+    auto field_id = GetFieldDataMeta().field_id;
+
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    std::string local_data_path;
+    bool file_created = false;
+
+    // get batch raw data from s3 and write batch data to disk file
+    // TODO: load and write of different batches at the same time
+    std::vector<std::string> batch_files;
+
+    // file format
+    // num_rows(uint32) | dim(uint32) | index_data ([]uint8_t)
+    uint32_t num_rows = 0;
+    uint32_t dim = 0;
+    int64_t write_offset = sizeof(num_rows) + sizeof(dim);
+
+    auto FetchRawData = [&]() {
+        auto object_data = GetObjectData(rcm_.get(), batch_files);
+        int batch_size = batch_files.size();
+        auto field_datas = std::vector<FieldDataPtr>(batch_size);
+        for (int i = 0; i < batch_size; i++) {
+            field_datas.emplace_back(object_data[i].get()->GetFieldData());
+        }
+        cache_raw_data_to_disk_common<DataType>(field_datas,
+                                                local_chunk_manager,
+                                                local_data_path,
+                                                file_created,
+                                                num_rows,
+                                                dim,
+                                                write_offset);
+    };
+
+    auto parallel_degree =
+        uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    for (auto& file : remote_files) {
+        if (batch_files.size() >= parallel_degree) {
+            FetchRawData();
+            batch_files.clear();
+        }
+
+        batch_files.emplace_back(file);
+    }
+
+    if (batch_files.size() > 0) {
+        FetchRawData();
+    }
+
+    // write num_rows and dim value to file header
+    write_offset = 0;
+    local_chunk_manager->Write(
+        local_data_path, write_offset, &num_rows, sizeof(num_rows));
+    write_offset += sizeof(num_rows);
+    local_chunk_manager->Write(
+        local_data_path, write_offset, &dim, sizeof(dim));
+
+    return local_data_path;
+}
+
+template <typename DataType>
 void
 DiskFileManagerImpl::cache_raw_data_to_disk_common(
     const std::vector<FieldDataPtr>& field_datas,
@@ -372,78 +454,6 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
             write_offset += data_size;
         }
     }
-}
-
-template <typename DataType>
-std::string
-DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
-    auto insert_files = index::GetValueFromConfig<std::vector<std::string>>(
-        config, INSERT_FILES_KEY);
-    AssertInfo(insert_files.has_value(),
-               "insert file paths is empty when build index");
-    auto remote_files = insert_files.value();
-    SortByPath(remote_files);
-
-    auto segment_id = GetFieldDataMeta().segment_id;
-    auto field_id = GetFieldDataMeta().field_id;
-
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    std::string local_data_path;
-    bool file_created = false;
-
-    // get batch raw data from s3 and write batch data to disk file
-    // TODO: load and write of different batches at the same time
-    std::vector<std::string> batch_files;
-
-    // file format
-    // num_rows(uint32) | dim(uint32) | index_data ([]uint8_t)
-    uint32_t num_rows = 0;
-    uint32_t dim = 0;
-    int64_t write_offset = sizeof(num_rows) + sizeof(dim);
-
-    // get batch raw data from s3 and write batch data to disk file
-
-    auto FetchRawData = [&]() {
-        auto objectData = GetObjectData(rcm_.get(), batch_files);
-        int batch_size = batch_files.size();
-        auto field_datas = std::vector<FieldDataPtr>(batch_size);
-        for (int i = 0; i < batch_size; i++) {
-            field_datas.emplace_back(objectData[i].get()->GetFieldData());
-        }
-        cache_raw_data_to_disk_common<DataType>(field_datas,
-                                                local_chunk_manager,
-                                                local_data_path,
-                                                file_created,
-                                                num_rows,
-                                                dim,
-                                                write_offset);
-    };
-
-    auto parallel_degree =
-        uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-    for (auto& file : remote_files) {
-        if (batch_files.size() >= parallel_degree) {
-            FetchRawData();
-            batch_files.clear();
-        }
-
-        batch_files.emplace_back(file);
-    }
-
-    if (batch_files.size() > 0) {
-        FetchRawData();
-    }
-
-    // write num_rows and dim value to file header
-    write_offset = 0;
-    local_chunk_manager->Write(
-        local_data_path, write_offset, &num_rows, sizeof(num_rows));
-    write_offset += sizeof(num_rows);
-    local_chunk_manager->Write(
-        local_data_path, write_offset, &dim, sizeof(dim));
-
-    return local_data_path;
 }
 
 template <typename T>
@@ -766,18 +776,6 @@ DiskFileManagerImpl::IsExisted(const std::string& file) noexcept {
         return std::nullopt;
     }
     return isExist;
-}
-
-template <typename DataType>
-std::string
-DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
-    auto storage_version =
-        index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
-            .value_or(0);
-    if (storage_version == STORAGE_V2) {
-        return cache_raw_data_to_disk_storage_v2<DataType>(config);
-    }
-    return cache_raw_data_to_disk_internal<DataType>(config);
 }
 
 template std::string
