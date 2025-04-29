@@ -485,6 +485,7 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(pn))
 	case pb.CollectionState_CollectionDropping:
 		mt.generalCnt -= pn * int(coll.ShardsNum)
+		channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
 		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
 	}
@@ -560,7 +561,6 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		zap.Int64("id", collectionID),
 		zap.Strings("aliases", aliases),
 	)
-	channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
 	return nil
 }
 
