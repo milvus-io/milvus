@@ -31,10 +31,8 @@ func FilterWithDelete(r *reader) (Filter, error) {
 	return func(row map[int64]interface{}) bool {
 		rowPk := row[pkField.GetFieldID()]
 		rowTs := row[common.TimeStampField]
-		for i, pk := range r.deleteData.Pks {
-			if pk.GetValue() == rowPk && int64(r.deleteData.Tss[i]) > rowTs.(int64) {
-				return false
-			}
+		if ts, ok := r.deleteData[rowPk]; ok && int64(ts) > rowTs.(int64) {
+			return false
 		}
 		return true
 	}, nil
