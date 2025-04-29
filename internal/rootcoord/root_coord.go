@@ -1190,6 +1190,8 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.NumPartitions = int64(len(collInfo.Partitions))
 	resp.DbId = collInfo.DBID
 	resp.UpdateTimestamp = collInfo.UpdateTimestamp
+	resp.UpdateTimestampStr = strconv.FormatUint(collInfo.UpdateTimestamp, 10)
+
 	return resp
 }
 
