@@ -59,6 +59,9 @@ GetCurrentIndexVersion();
 int32_t
 GetMinimalIndexVersion();
 
+int32_t
+GetMaximumIndexVersion();
+
 void
 SetThreadName(const char*);
 

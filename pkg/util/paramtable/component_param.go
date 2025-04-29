@@ -3610,6 +3610,8 @@ type dataCoordConfig struct {
 	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
 	GrowingSegmentsMemSizeInMB     ParamItem `refreshable:"true"`
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
+	ForceRebuildSegmentIndex       ParamItem `refreshable:"true"`
+	TargetVecIndexVersion          ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 	BlockingL0EntryNum             ParamItem `refreshable:"true"`
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
@@ -4476,6 +4478,28 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.AutoUpgradeSegmentIndex.Init(base.mgr)
+
+	p.ForceRebuildSegmentIndex = ParamItem{
+		Key:          "dataCoord.forceRebuildSegmentIndex",
+		Version:      "2.5.10",
+		DefaultValue: "false",
+		PanicIfEmpty: true,
+		Doc:          "force rebuild segment index to specify index engine's version",
+		Export:       true,
+	}
+	p.ForceRebuildSegmentIndex.Init(base.mgr)
+
+	p.TargetVecIndexVersion = ParamItem{
+		Key:          "dataCoord.targetVecIndexVersion",
+		Version:      "2.5.10",
+		DefaultValue: "-1",
+		PanicIfEmpty: true,
+		Doc: `if param forceRebuildSegmentIndex is enabled, the vector index will be rebuilt to aligned with targetVecIndexVersion.
+if param forceRebuildSegmentIndex is not enabled, the newly created vector index will be aligned with the newer one of index engine's version and targetVecIndexVersion.
+if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version `,
+		Export: true,
+	}
+	p.TargetVecIndexVersion.Init(base.mgr)
 
 	p.SegmentFlushInterval = ParamItem{
 		Key:          "dataCoord.segmentFlushInterval",
