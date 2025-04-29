@@ -300,3 +300,7 @@ func (bt *BaseTable) Reset(key string) error {
 	bt.mgr.EvictCachedValue(key)
 	return nil
 }
+
+func (bt *BaseTable) Manager() *config.Manager {
+	return bt.mgr
+}

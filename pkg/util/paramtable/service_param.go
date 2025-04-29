@@ -314,6 +314,22 @@ We recommend using version 1.2 and above.`,
 	p.EtcdAuthPassword.Init(base.mgr)
 }
 
+func (p *EtcdConfig) GetAll() map[string]string {
+	return map[string]string{
+		"etcd.endpoints":         p.Endpoints.GetValue(),
+		"etcd.metaRootPath":      p.MetaRootPath.GetValue(),
+		"etcd.ssl.enabled":       p.EtcdUseSSL.GetValue(),
+		"etcd.ssl.tlsCert":       p.EtcdTLSCert.GetValue(),
+		"etcd.ssl.tlsKey":        p.EtcdTLSKey.GetValue(),
+		"etcd.ssl.tlsCACert":     p.EtcdTLSCACert.GetValue(),
+		"etcd.ssl.tlsMinVersion": p.EtcdTLSMinVersion.GetValue(),
+		"etcd.requestTimeout":    p.RequestTimeout.GetValue(),
+		"etcd.auth.enabled":      p.EtcdEnableAuth.GetValue(),
+		"etcd.auth.userName":     p.EtcdAuthUserName.GetValue(),
+		"etcd.auth.password":     p.EtcdAuthPassword.GetValue(),
+	}
+}
+
 // /////////////////////////////////////////////////////////////////////////////
 // --- tikv ---
 type TiKVConfig struct {
