@@ -919,6 +919,7 @@ common:
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
   enabledJSONKeyStats: false # Indicates sealedsegment whether to enable JSON key stats
   enabledGrowingSegmentJSONKeyStats: false # Indicates growingsegment whether to enable JSON key stats
+  allowAddFieldWithDynamicField: false # the flag to allow add field with dynamic field
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
