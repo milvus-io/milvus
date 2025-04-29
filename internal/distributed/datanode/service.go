@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -254,22 +255,24 @@ func (s *Server) init() error {
 		return err
 	}
 
-	// --- MixCoord Client ---
-	if s.mixCoordClient != nil {
-		log.Info("initializing MixCoord client for DataNode")
-		mixCoordClient, err := s.mixCoordClient()
-		if err != nil {
-			log.Error("failed to create new MixCoord client", zap.Error(err))
-			panic(err)
-		}
+	if !streamingutil.IsStreamingServiceEnabled() {
+		// --- MixCoord Client ---
+		if s.mixCoordClient != nil {
+			log.Info("initializing MixCoord client for DataNode")
+			mixCoordClient, err := s.mixCoordClient()
+			if err != nil {
+				log.Error("failed to create new MixCoord client", zap.Error(err))
+				panic(err)
+			}
 
-		if err = componentutil.WaitForComponentHealthy(s.ctx, mixCoordClient, "MixCoord", 1000000, time.Millisecond*200); err != nil {
-			log.Error("failed to wait for MixCoord client to be ready", zap.Error(err))
-			panic(err)
-		}
-		log.Info("MixCoord client is ready for DataNode")
-		if err = s.SetMixCoordInterface(mixCoordClient); err != nil {
-			panic(err)
+			if err = componentutil.WaitForComponentHealthy(s.ctx, mixCoordClient, "MixCoord", 1000000, time.Millisecond*200); err != nil {
+				log.Error("failed to wait for MixCoord client to be ready", zap.Error(err))
+				panic(err)
+			}
+			log.Info("MixCoord client is ready for DataNode")
+			if err = s.SetMixCoordInterface(mixCoordClient); err != nil {
+				panic(err)
+			}
 		}
 	}
 
