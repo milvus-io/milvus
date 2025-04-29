@@ -33,7 +33,7 @@ func (m *messageImpl) Version() Version {
 func (m *messageImpl) Payload() []byte {
 	if ch := m.cipherHeader(); ch != nil {
 		cipher := mustGetCipher()
-		decryptor, err := cipher.GetDecryptor(ch.EzId, ch.SafeKey)
+		decryptor, err := cipher.GetDecryptor(ch.EzId, ch.CollectionId, ch.SafeKey)
 		if err != nil {
 			panic(fmt.Sprintf("can not get decryptor for message: %s", err))
 		}

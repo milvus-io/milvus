@@ -262,7 +262,7 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 		}
 
 		cipher := mustGetCipher()
-		encryptor, safeKey, err := cipher.GetEncryptor(b.cipherConfig.EzID)
+		encryptor, safeKey, err := cipher.GetEncryptor(b.cipherConfig.EzID, b.cipherConfig.CollectionID)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get encryptor")
 		}
@@ -272,6 +272,7 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 		}
 		ch, err := EncodeProto(&messagespb.CipherHeader{
 			EzId:         b.cipherConfig.EzID,
+			CollectionId: b.cipherConfig.CollectionID,
 			SafeKey:      safeKey,
 			PayloadBytes: int64(payloadBytes),
 		})
