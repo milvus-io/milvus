@@ -173,7 +173,7 @@ class DiskFileManagerImpl : public FileManagerImpl {
     template <typename DataType>
     void
     cache_raw_data_to_disk_common(
-        const std::vector<FieldDataPtr>& field_datas,
+        const FieldDataPtr& field_data,
         const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
         std::string& local_data_path,
         bool& file_created,
