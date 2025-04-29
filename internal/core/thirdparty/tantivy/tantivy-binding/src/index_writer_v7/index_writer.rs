@@ -160,7 +160,7 @@ impl IndexWriterWrapperImpl {
 
     pub fn add_json_key_stats(
         &mut self,
-        keys: &[*const i8],
+        keys: &[*const c_char],
         json_offsets: &[*const i64],
         json_offsets_len: &[usize],
     ) -> Result<()> {
