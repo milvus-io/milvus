@@ -342,4 +342,29 @@ mod tests {
             .unwrap();
         assert_eq!(count, total_count);
     }
+
+    #[test]
+    fn test_control_user_specified_doc_id() {
+        let enabled = [true, false];
+        for enable in enabled {
+            let dir = TempDir::new().unwrap();
+            let mut index_wrapper = IndexWriterWrapper::new(
+                "test",
+                TantivyDataType::I64,
+                dir.path().to_str().unwrap().to_string(),
+                1,
+                100_000_000,
+                TantivyIndexVersion::V7,
+                enable,
+            )
+            .unwrap();
+
+            index_wrapper.add(1 as i64, Some(1)).unwrap();
+            index_wrapper.commit().unwrap();
+
+            let reader = index_wrapper.create_reader(set_bitset).unwrap();
+            let count = reader.count().unwrap();
+            assert_eq!(count, 1);
+        }
+    }
 }
