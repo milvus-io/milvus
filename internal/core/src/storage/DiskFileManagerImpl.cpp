@@ -57,6 +57,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(
                       fileManagerContext.indexMeta) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
+    plugin_context_ = fileManagerContext.plugin_context;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
@@ -265,7 +266,8 @@ DiskFileManagerImpl::AddBatchIndexFiles(
                        remote_file_sizes,
                        remote_files,
                        field_meta_,
-                       index_meta_);
+                       index_meta_,
+                       plugin_context_);
     for (auto& re : res) {
         remote_paths_to_size_[re.first] = re.second;
     }
@@ -548,7 +550,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                                   GetFieldDataMeta().field_id,
                                                   data_type.value(),
                                                   dim,
-                                                  fs_);
+                                                  fs_,
+                                                  plugin_context_);
     for (auto& field_data : field_datas) {
         num_rows += uint32_t(field_data->get_num_rows());
         cache_raw_data_to_disk_common<T>(field_data,

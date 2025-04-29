@@ -46,17 +46,27 @@ NewSegment(CCollection collection,
            SegmentType seg_type,
            int64_t segment_id,
            CSegmentInterface* newSegment,
-           bool is_sorted_by_pk) {
+           bool is_sorted_by_pk,
+           CPluginContext* plugin_context) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
         auto col = static_cast<milvus::segcore::Collection*>(collection);
+        
+        std::shared_ptr<CPluginContext> plugin_context_ptr = nullptr;
+        if (plugin_context != nullptr) {
+            plugin_context_ptr = std::make_shared<CPluginContext>(*plugin_context);
+        }
 
         std::unique_ptr<milvus::segcore::SegmentInterface> segment;
         switch (seg_type) {
             case Growing: {
                 auto seg = milvus::segcore::CreateGrowingSegment(
-                    col->get_schema(), col->get_index_meta(), segment_id);
+                    col->get_schema(),
+                    col->get_index_meta(),
+                    segment_id,
+                    milvus::segcore::SegcoreConfig::default_config(),
+                    plugin_context_ptr);
                 segment = std::move(seg);
                 break;
             }
@@ -67,7 +77,8 @@ NewSegment(CCollection collection,
                     col->get_index_meta(),
                     segment_id,
                     milvus::segcore::SegcoreConfig::default_config(),
-                    is_sorted_by_pk);
+                    is_sorted_by_pk,
+                    plugin_context_ptr);
                 break;
 
             default:

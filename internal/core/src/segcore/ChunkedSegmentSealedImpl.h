@@ -49,7 +49,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                       IndexMetaPtr index_meta,
                                       const SegcoreConfig& segcore_config,
                                       int64_t segment_id,
-                                      bool is_sorted_by_pk = false);
+                                      bool is_sorted_by_pk = false,
+                                      std::shared_ptr<CPluginContext> plugin_context = nullptr);
     ~ChunkedSegmentSealedImpl() override;
     void
     LoadIndex(const LoadIndexInfo& info) override;
@@ -528,8 +529,9 @@ CreateSealedSegment(
     IndexMetaPtr index_meta = empty_index_meta,
     int64_t segment_id = 0,
     const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
-    bool is_sorted_by_pk = false) {
+    bool is_sorted_by_pk = false,
+    std::shared_ptr<CPluginContext> plugin_context = nullptr) {
     return std::make_unique<ChunkedSegmentSealedImpl>(
-        schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
+        schema, index_meta, segcore_config, segment_id, is_sorted_by_pk, plugin_context);
 }
 }  // namespace milvus::segcore

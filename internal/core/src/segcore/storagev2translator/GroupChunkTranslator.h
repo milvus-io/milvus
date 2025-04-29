@@ -42,7 +42,8 @@ class GroupChunkTranslator
         std::vector<std::string> insert_files,
         bool use_mmap,
         int64_t num_fields,
-        milvus::proto::common::LoadPriority load_priority);
+        milvus::proto::common::LoadPriority load_priority,
+        std::shared_ptr<CPluginContext> context = nullptr);
 
     ~GroupChunkTranslator() override;
 
@@ -95,6 +96,7 @@ class GroupChunkTranslator
     bool use_mmap_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
+    std::shared_ptr<CPluginContext> plugin_context_ = nullptr;
 };
 
 }  // namespace milvus::segcore::storagev2translator

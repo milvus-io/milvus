@@ -280,12 +280,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     friend std::unique_ptr<SegmentGrowing>
     CreateGrowingSegment(SchemaPtr schema,
                          const SegcoreConfig& segcore_config,
-                         int64_t segment_id);
+                         int64_t segment_id,
+                         CPluginContext plugin_context);
 
     explicit SegmentGrowingImpl(SchemaPtr schema,
                                 IndexMetaPtr indexMeta,
                                 const SegcoreConfig& segcore_config,
-                                int64_t segment_id)
+                                int64_t segment_id,
+                                std::shared_ptr<CPluginContext> plugin_context)
         : mmap_descriptor_(storage::MmapManager::GetInstance()
                                .GetMmapChunkManager()
                                ->Register()),
@@ -306,6 +308,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   this->search_batch_pks(pks, timestamps, false, callback);
               },
               segment_id) {
+        plugin_context_ = plugin_context;
         this->CreateTextIndexes();
         this->CreateJSONIndexes();
     }
@@ -513,9 +516,10 @@ CreateGrowingSegment(
     SchemaPtr schema,
     IndexMetaPtr indexMeta,
     int64_t segment_id = 0,
-    const SegcoreConfig& conf = SegcoreConfig::default_config()) {
+    const SegcoreConfig& conf = SegcoreConfig::default_config(),
+    std::shared_ptr<CPluginContext> plugin_context = nullptr) {
     return std::make_unique<SegmentGrowingImpl>(
-        schema, indexMeta, conf, segment_id);
+        schema, indexMeta, conf, segment_id, plugin_context);
 }
 
 }  // namespace milvus::segcore

@@ -154,7 +154,8 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           int64_t batch_size,
                           IndexMeta index_meta,
                           FieldDataMeta field_meta,
-                          std::string object_key);
+                          std::string object_key,
+                          std::shared_ptr<CPluginContext> plugin_context);
 
 std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(
@@ -168,7 +169,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
                            int64_t dim,
-                           milvus_storage::ArrowFileSystemPtr fs);
+                           milvus_storage::ArrowFileSystemPtr fs,
+                           std::shared_ptr<CPluginContext> plugin_context);
 
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,
@@ -176,7 +178,8 @@ PutIndexData(ChunkManager* remote_chunk_manager,
              const std::vector<int64_t>& slice_sizes,
              const std::vector<std::string>& slice_names,
              FieldDataMeta& field_meta,
-             IndexMeta& index_meta);
+             IndexMeta& index_meta,
+             std::shared_ptr<CPluginContext> plugin_context);
 
 int64_t
 GetTotalNumRowsForFieldDatas(const std::vector<FieldDataPtr>& field_datas);
@@ -293,6 +296,7 @@ milvus_storage::FieldIDList
 GetFieldIDList(FieldId column_group_id,
                const std::string& filepath,
                const std::shared_ptr<arrow::Schema>& arrow_schema,
-               milvus_storage::ArrowFileSystemPtr fs);
+               milvus_storage::ArrowFileSystemPtr fs,
+               std::shared_ptr<CPluginContext> plugin_context = nullptr);
 
 }  // namespace milvus::storage

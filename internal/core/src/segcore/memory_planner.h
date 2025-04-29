@@ -77,6 +77,7 @@ class ParallelDegreeSplitStrategy : public RowGroupSplitStrategy {
  * @param strategy: strategy to split row groups
  * @param row_group_lists: list of row group lists
  * @param schema: schema of the data, if not provided, storage v2 will read all columns of the files.
+ * @param context: plugin context, if not provided means the data is not encrypted.
  */
 void
 LoadWithStrategy(const std::vector<std::string>& remote_files,
@@ -86,6 +87,7 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                  const std::vector<std::vector<int64_t>>& row_group_lists,
                  const std::shared_ptr<arrow::Schema> schema = nullptr,
                  milvus::proto::common::LoadPriority priority =
-                     milvus::proto::common::LoadPriority::HIGH);
+                     milvus::proto::common::LoadPriority::HIGH,
+                 std::shared_ptr<CPluginContext> context = nullptr);
 
 }  // namespace milvus::segcore

@@ -34,6 +34,7 @@ MemFileManagerImpl::MemFileManagerImpl(
                       fileManagerContext.indexMeta) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
+    plugin_context_ = fileManagerContext.plugin_context;
 }
 
 bool
@@ -54,7 +55,8 @@ MemFileManagerImpl::AddBinarySet(const BinarySet& binary_set,
                                 slice_sizes,
                                 slice_names,
                                 field_meta_,
-                                index_meta_);
+                                index_meta_,
+                                plugin_context_);
         for (auto& [file, size] : res) {
             remote_paths_to_size_[file] = size;
         }
@@ -215,7 +217,7 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
         SortByPath(files);
     }
     auto field_datas = GetFieldDatasFromStorageV2(
-        remote_files, field_meta_.field_id, data_type.value(), dim, fs_);
+        remote_files, field_meta_.field_id, data_type.value(), dim, fs_, plugin_context_);
     // field data list could differ for storage v2 group list
     return field_datas;
 }
@@ -353,7 +355,7 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
         const auto& field_type = std::get<1>(tup);
 
         auto field_datas = GetFieldDatasFromStorageV2(
-            remote_files, field_id, field_type, 1, fs_);
+            remote_files, field_id, field_type, 1, fs_, plugin_context_);
 
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);
     }

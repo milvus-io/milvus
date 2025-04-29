@@ -39,8 +39,10 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -485,4 +487,19 @@ func serializeHeaders(headerstr string) string {
 		return headerstr
 	}
 	return string(decodeheaders)
+}
+
+func InitPluginLoader() error {
+	if hookutil.IsClusterEncyptionEnabled() {
+		cSoPath := C.CString(paramtable.GetCipherParams().SoPathCpp.GetValue())
+		log.Info("Init PluginLoader", zap.String("soPath", paramtable.GetCipherParams().SoPathCpp.GetValue()))
+		defer C.free(unsafe.Pointer(cSoPath))
+		status := C.InitPluginLoader(cSoPath)
+		return HandleCStatus(&status, "InitPluginLoader failed")
+	}
+	return nil
+}
+
+func CleanPluginLoader() {
+	C.CleanPluginLoader()
 }
