@@ -359,7 +359,7 @@ mod tests {
             )
             .unwrap();
 
-            index_wrapper.add(1 as i64, Some(1)).unwrap();
+            index_wrapper.add(1 as i64, Some(0)).unwrap();
             index_wrapper.commit().unwrap();
 
             let reader = index_wrapper.create_reader(set_bitset).unwrap();
