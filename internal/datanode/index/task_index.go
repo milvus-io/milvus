@@ -18,6 +18,7 @@ package index
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -297,6 +299,30 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		StorageVersion:            it.req.GetStorageVersion(),
 	}
 
+	if hookutil.IsClusterEncyptionEnabled() {
+		// TODO GOOSE: get collection properties
+		// if ez := hookutil.GetEzByCollProperties(nil, it.req.GetCollectionID()); ez != nil {
+		ez := hookutil.GetEzByCollProperties(nil, it.req.GetCollectionID())
+		if ez == nil {
+			ez = &hookutil.EZ{
+				EzID:         1,
+				CollectionID: it.req.GetCollectionID(),
+			}
+		}
+		// TODO: GOOSE: remove the above
+
+		ezk := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+		if len(ezk) == 0 {
+			return errors.New("failed to get encryption key")
+		}
+		storageCtx := &indexcgopb.StoragePluginContext{
+			EncryptionZoneId: ez.EzID,
+			CollectionId:     ez.CollectionID,
+			EncryptionKey:    string(ezk),
+		}
+		buildIndexParams.StoragePluginContext = storageCtx
+	}
+
 	if buildIndexParams.StorageVersion == storage.StorageV2 {
 		buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(
 			it.req.GetInsertLogs(),
@@ -305,7 +331,6 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 			it.req.GetPartitionID(),
 			it.req.GetSegmentID())
 	}
-
 	log.Info("create index", zap.Any("buildIndexParams", buildIndexParams))
 
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
