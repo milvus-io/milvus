@@ -22,7 +22,9 @@
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/Types.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
+#include "test_utils/storage_test_utils.h"
 
 #include <gtest/gtest.h>
 #include <cstdint>
@@ -141,13 +143,12 @@ TEST(JsonIndexTest, TestJsonContains) {
     load_index_info.index = std::move(json_index);
     load_index_info.index_params = {{JSON_PATH, json_path}};
     segment->LoadIndex(load_index_info);
-    auto arrow_data_wrapper =
-        storage::ConvertFieldDataToArrowDataWrapper(json_field);
-    FieldDataInfo field_data_info(
-        json_fid.get(),
-        json_raw_data.size(),
-        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper});
-    segment->LoadFieldData(json_fid, field_data_info);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {json_field}, cm);
+    segment->LoadFieldData(load_info);
 
     std::vector<std::tuple<proto::plan::GenericValue, std::vector<int64_t>>>
         test_cases;
