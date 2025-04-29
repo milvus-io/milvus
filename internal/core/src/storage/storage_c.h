@@ -39,6 +39,25 @@ CleanRemoteChunkManagerSingleton();
 void
 ResizeTheadPool(int64_t priority, float ratio);
 
+// Plugin related APIs
+typedef struct CPluginContext {
+    int64_t ez_id;
+    int64_t collection_id;
+    char* key;
+} CPluginContext;
+
+CStatus
+InitPluginLoader(const char* plugin_path);
+
+void
+CleanPluginLoader();
+
+CStatus
+PutOrRefPluginContext(CPluginContext c_plugin_context);
+
+CStatus
+UnRefPluginContext(CPluginContext c_plugin_context);
+
 #ifdef __cplusplus
 };
 #endif

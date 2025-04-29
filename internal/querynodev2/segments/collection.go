@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -91,19 +92,30 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	m.mut.Lock()
 	defer m.mut.Unlock()
 
-	if collection, ok := m.collections[collectionID]; ok {
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		var err error
+		log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
+		collection, err = NewCollection(collectionID, schema, meta, loadMeta)
+		if err != nil {
+			return err
+		}
+	} else {
 		// the schema may be changed even the collection is loaded
 		collection.schema.Store(schema)
-		collection.Ref(1)
-		return nil
 	}
 
-	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
-	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
-	if err != nil {
-		return err
-	}
 	collection.Ref(1)
+	if hookutil.IsClusterEncyptionEnabled() {
+		ez := hookutil.GetEzByCollProperties(collection.Schema().GetProperties(), collectionID)
+		if ez != nil {
+			key := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+			err := segcore.PutOrRefPluginContext(ez, string(key))
+			if err != nil {
+				return err
+			}
+		}
+	}
 	m.collections[collectionID] = collection
 	m.updateMetric()
 	return nil
@@ -135,6 +147,16 @@ func (m *collectionManager) Ref(collectionID int64, count uint32) bool {
 
 	if collection, ok := m.collections[collectionID]; ok {
 		collection.Ref(count)
+		if hookutil.IsClusterEncyptionEnabled() {
+			ez := hookutil.GetEzByCollProperties(collection.Schema().GetProperties(), collectionID)
+			if ez != nil {
+				key := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+				if err := segcore.PutOrRefPluginContext(ez, string(key)); err != nil {
+					log.Error("failed to put or ref plugin context", zap.Error(err))
+					return false
+				}
+			}
+		}
 		return true
 	}
 
@@ -151,6 +173,14 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 				zap.Int64("nodeID", paramtable.GetNodeID()), zap.Int64("collectionID", collectionID))
 			delete(m.collections, collectionID)
 			DeleteCollection(collection)
+			if hookutil.IsClusterEncyptionEnabled() {
+				ez := hookutil.GetEzByCollProperties(collection.Schema().GetProperties(), collectionID)
+				if ez != nil {
+					if err := segcore.UnRefPluginContext(ez); err != nil {
+						log.Error("failed to unref plugin context", zap.Error(err))
+					}
+				}
+			}
 
 			metrics.CleanupQueryNodeCollectionMetrics(paramtable.GetNodeID(), collectionID)
 			m.updateMetric()
