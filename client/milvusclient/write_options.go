@@ -91,6 +91,10 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 			dynamicColumns = append(dynamicColumns, col)
 			continue
 		}
+		// make non-nullable created column fit nullable field definition
+		if field.Nullable {
+			col.SetNullable(true)
+		}
 
 		mNameColumn[col.Name()] = col
 		if col.Type() != field.DataType {
