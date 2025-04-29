@@ -2190,8 +2190,8 @@ func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
 }
 
 func (m *meta) DropSegmentsOfPartition(ctx context.Context, partitionIDs []int64) error {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
 
 	// Filter out the segments of the partition to be dropped.
 	metricMutation := &segMetricMutation{
