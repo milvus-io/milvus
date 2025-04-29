@@ -1171,14 +1171,14 @@ SegmentGrowingImpl::GetJsonData(FieldId field_id, size_t offset) const {
 }
 
 void
-SegmentGrowingImpl::lazy_check_schema(const query::Plan* plan) {
-    if (plan->schema_.get_schema_version() > schema_->get_schema_version()) {
-        reopen(std::make_shared<Schema>(plan->schema_));
+SegmentGrowingImpl::LazyCheckSchema(const Schema& sch) {
+    if (sch.get_schema_version() > schema_->get_schema_version()) {
+        Reopen(std::make_shared<Schema>(sch));
     }
 }
 
 void
-SegmentGrowingImpl::reopen(SchemaPtr sch) {
+SegmentGrowingImpl::Reopen(SchemaPtr sch) {
     std::unique_lock lck(mutex_);
 
     auto absent_fields = sch->absent_fields(*schema_);
@@ -1191,7 +1191,7 @@ SegmentGrowingImpl::reopen(SchemaPtr sch) {
 }
 
 void
-SegmentGrowingImpl::finish_load() {
+SegmentGrowingImpl::FinishLoad() {
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;

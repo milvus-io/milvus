@@ -1650,14 +1650,14 @@ ChunkedSegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
 }
 
 void
-ChunkedSegmentSealedImpl::lazy_check_schema(const query::Plan* plan) {
-    if (plan->schema_.get_schema_version() > schema_->get_schema_version()) {
-        reopen(std::make_shared<Schema>(plan->schema_));
+ChunkedSegmentSealedImpl::LazyCheckSchema(const Schema& sch) {
+    if (sch.get_schema_version() > schema_->get_schema_version()) {
+        Reopen(std::make_shared<Schema>(sch));
     }
 }
 
 void
-ChunkedSegmentSealedImpl::reopen(SchemaPtr sch) {
+ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
     std::unique_lock lck(mutex_);
 
     field_data_ready_bitset_.resize(sch->size());
@@ -1678,7 +1678,7 @@ ChunkedSegmentSealedImpl::reopen(SchemaPtr sch) {
 }
 
 void
-ChunkedSegmentSealedImpl::finish_load() {
+ChunkedSegmentSealedImpl::FinishLoad() {
     std::unique_lock lck(mutex_);
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
