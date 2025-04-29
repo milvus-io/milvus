@@ -31,6 +31,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/json"
@@ -324,14 +325,32 @@ func newDeltalogOneFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog
 	}), nil
 }
 
+type HeaderExtraWriterOption func(header *descriptorEvent)
+
+func WithEncryptionKey(edek []byte) HeaderExtraWriterOption {
+	return func(header *descriptorEvent) {
+		header.AddExtra(edekKey, edek)
+	}
+}
+
+type StreamWriterOption func(*BinlogStreamWriter)
+
+func WithEncryptionContext(encryptor hook.Encryptor) StreamWriterOption {
+	return func(w *BinlogStreamWriter) {
+		w.encrytor = encryptor
+	}
+}
+
 type BinlogStreamWriter struct {
 	collectionID UniqueID
 	partitionID  UniqueID
 	segmentID    UniqueID
 	fieldSchema  *schemapb.FieldSchema
 
-	buf bytes.Buffer
-	rw  *singleFieldRecordWriter
+	buf        bytes.Buffer
+	rw         *singleFieldRecordWriter
+	headerOpts HeaderExtraWriterOption
+	encrytor   hook.Encryptor
 }
 
 func (bsw *BinlogStreamWriter) GetRecordWriter() (RecordWriter, error) {
@@ -379,6 +398,9 @@ func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
 	de.FieldID = bsw.fieldSchema.FieldID
 	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(bsw.rw.writtenUncompressed)))
 	de.descriptorEventData.AddExtra(nullableKey, bsw.fieldSchema.Nullable)
+	if bsw.headerOpts != nil {
+		bsw.headerOpts(de)
+	}
 	if err := de.Write(w); err != nil {
 		return err
 	}
@@ -401,15 +423,21 @@ func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
 
 func NewBinlogStreamWriters(collectionID, partitionID, segmentID UniqueID,
 	schema []*schemapb.FieldSchema,
+	writerOptions ...StreamWriterOption,
 ) map[FieldID]*BinlogStreamWriter {
 	bws := make(map[FieldID]*BinlogStreamWriter, len(schema))
 	for _, f := range schema {
-		bws[f.FieldID] = &BinlogStreamWriter{
+		writer := BinlogStreamWriter{
 			collectionID: collectionID,
 			partitionID:  partitionID,
 			segmentID:    segmentID,
 			fieldSchema:  f,
+			// headerOpts:   opts,
 		}
+		for _, writerOption := range writerOptions {
+			writerOption(&writer)
+		}
+		bws[f.FieldID] = &writer
 	}
 	return bws
 }
