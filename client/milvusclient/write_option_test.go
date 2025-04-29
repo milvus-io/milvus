@@ -21,7 +21,34 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/client/v2/column"
+	"github.com/milvus-io/milvus/client/v2/entity"
 )
+
+type ColumnBasedDataOptionSuite struct {
+	MockSuiteBase
+}
+
+func (s *ColumnBasedDataOptionSuite) NullableCompatible() {
+	intCol := column.NewColumnInt64("rbdo_field", []int64{1, 2, 3})
+	rbdo := NewColumnBasedInsertOption("rbdo_nullable", intCol)
+
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithField(entity.NewField().WithName("rbdo_field").WithDataType(entity.FieldTypeInt64).WithNullable(true)),
+	}
+	req, err := rbdo.InsertRequest(coll)
+	s.NoError(err)
+
+	s.Require().Len(req.GetFieldsData(), 1)
+	fd := req.GetFieldsData()[0]
+	s.ElementsMatch([]int64{1, 2, 3}, fd.GetScalars().GetLongData())
+	s.ElementsMatch([]bool{true, true, true}, fd.GetValidData())
+}
+
+func TestRowBasedDataOption(t *testing.T) {
+	suite.Run(t, new(ColumnBasedDataOptionSuite))
+}
 
 type DeleteOptionSuite struct {
 	MockSuiteBase
