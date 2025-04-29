@@ -100,13 +100,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
                            size_t num_rows);
 
     void
-    reopen(SchemaPtr sch) override;
+    Reopen(SchemaPtr sch) override;
 
     void
-    lazy_check_schema(const query::Plan* plan) override;
+    LazyCheckSchema(const Schema& sch) override;
 
     void
-    finish_load() override;
+    FinishLoad() override;
 
  public:
     const InsertRecord<false>&

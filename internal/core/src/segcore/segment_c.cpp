@@ -124,7 +124,7 @@ AsyncSearch(CTraceContext c_trace,
             auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
             milvus::tracer::SetRootSpan(span);
 
-            segment->lazy_check_schema(plan);
+            segment->LazyCheckSchema(plan->schema_);
 
             auto search_result =
                 segment->Search(plan, phg_ptr, timestamp, consistency_level);
@@ -193,6 +193,8 @@ AsyncRetrieve(CTraceContext c_trace,
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
+
+            segment->LazyCheckSchema(plan->schema_);
 
             auto retrieve_result = segment->Retrieve(&trace_ctx,
                                                      plan,
@@ -590,7 +592,7 @@ FinishLoad(CSegmentInterface c_segment) {
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        segment_interface->finish_load();
+        segment_interface->FinishLoad();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
