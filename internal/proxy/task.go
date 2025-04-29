@@ -476,7 +476,7 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if t.oldSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("empty old schema in add field task")
 	}
-	if t.oldSchema.EnableDynamicField {
+	if t.oldSchema.EnableDynamicField && !paramtable.Get().CommonCfg.AllowAddFieldWithDynamicField.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg("not support to add field in an enable dynamic field collection")
 	}
 	t.fieldSchema = &schemapb.FieldSchema{}
