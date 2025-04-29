@@ -31,4 +31,7 @@ func mustGetCipher() hook.Cipher {
 type CipherConfig struct {
 	// EzID is the encryption zone ID.
 	EzID int64
+
+	// Collection ID
+	CollectionID int64
 }

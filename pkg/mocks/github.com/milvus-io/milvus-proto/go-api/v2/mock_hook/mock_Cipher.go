@@ -20,9 +20,9 @@ func (_m *MockCipher) EXPECT() *MockCipher_Expecter {
 	return &MockCipher_Expecter{mock: &_m.Mock}
 }
 
-// GetDecryptor provides a mock function with given fields: ezID, safeKey
-func (_m *MockCipher) GetDecryptor(ezID int64, safeKey []byte) (hook.Decryptor, error) {
-	ret := _m.Called(ezID, safeKey)
+// GetDecryptor provides a mock function with given fields: ezID, collectionID, safeKey
+func (_m *MockCipher) GetDecryptor(ezID int64, collectionID int64, safeKey []byte) (hook.Decryptor, error) {
+	ret := _m.Called(ezID, collectionID, safeKey)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetDecryptor")
@@ -30,19 +30,19 @@ func (_m *MockCipher) GetDecryptor(ezID int64, safeKey []byte) (hook.Decryptor, 
 
 	var r0 hook.Decryptor
 	var r1 error
-	if rf, ok := ret.Get(0).(func(int64, []byte) (hook.Decryptor, error)); ok {
-		return rf(ezID, safeKey)
+	if rf, ok := ret.Get(0).(func(int64, int64, []byte) (hook.Decryptor, error)); ok {
+		return rf(ezID, collectionID, safeKey)
 	}
-	if rf, ok := ret.Get(0).(func(int64, []byte) hook.Decryptor); ok {
-		r0 = rf(ezID, safeKey)
+	if rf, ok := ret.Get(0).(func(int64, int64, []byte) hook.Decryptor); ok {
+		r0 = rf(ezID, collectionID, safeKey)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(hook.Decryptor)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(int64, []byte) error); ok {
-		r1 = rf(ezID, safeKey)
+	if rf, ok := ret.Get(1).(func(int64, int64, []byte) error); ok {
+		r1 = rf(ezID, collectionID, safeKey)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -57,14 +57,15 @@ type MockCipher_GetDecryptor_Call struct {
 
 // GetDecryptor is a helper method to define mock.On call
 //   - ezID int64
+//   - collectionID int64
 //   - safeKey []byte
-func (_e *MockCipher_Expecter) GetDecryptor(ezID interface{}, safeKey interface{}) *MockCipher_GetDecryptor_Call {
-	return &MockCipher_GetDecryptor_Call{Call: _e.mock.On("GetDecryptor", ezID, safeKey)}
+func (_e *MockCipher_Expecter) GetDecryptor(ezID interface{}, collectionID interface{}, safeKey interface{}) *MockCipher_GetDecryptor_Call {
+	return &MockCipher_GetDecryptor_Call{Call: _e.mock.On("GetDecryptor", ezID, collectionID, safeKey)}
 }
 
-func (_c *MockCipher_GetDecryptor_Call) Run(run func(ezID int64, safeKey []byte)) *MockCipher_GetDecryptor_Call {
+func (_c *MockCipher_GetDecryptor_Call) Run(run func(ezID int64, collectionID int64, safeKey []byte)) *MockCipher_GetDecryptor_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].([]byte))
+		run(args[0].(int64), args[1].(int64), args[2].([]byte))
 	})
 	return _c
 }
@@ -74,14 +75,14 @@ func (_c *MockCipher_GetDecryptor_Call) Return(_a0 hook.Decryptor, _a1 error) *M
 	return _c
 }
 
-func (_c *MockCipher_GetDecryptor_Call) RunAndReturn(run func(int64, []byte) (hook.Decryptor, error)) *MockCipher_GetDecryptor_Call {
+func (_c *MockCipher_GetDecryptor_Call) RunAndReturn(run func(int64, int64, []byte) (hook.Decryptor, error)) *MockCipher_GetDecryptor_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetEncryptor provides a mock function with given fields: ezID
-func (_m *MockCipher) GetEncryptor(ezID int64) (hook.Encryptor, []byte, error) {
-	ret := _m.Called(ezID)
+// GetEncryptor provides a mock function with given fields: ezID, collectionID
+func (_m *MockCipher) GetEncryptor(ezID int64, collectionID int64) (hook.Encryptor, []byte, error) {
+	ret := _m.Called(ezID, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetEncryptor")
@@ -90,27 +91,27 @@ func (_m *MockCipher) GetEncryptor(ezID int64) (hook.Encryptor, []byte, error) {
 	var r0 hook.Encryptor
 	var r1 []byte
 	var r2 error
-	if rf, ok := ret.Get(0).(func(int64) (hook.Encryptor, []byte, error)); ok {
-		return rf(ezID)
+	if rf, ok := ret.Get(0).(func(int64, int64) (hook.Encryptor, []byte, error)); ok {
+		return rf(ezID, collectionID)
 	}
-	if rf, ok := ret.Get(0).(func(int64) hook.Encryptor); ok {
-		r0 = rf(ezID)
+	if rf, ok := ret.Get(0).(func(int64, int64) hook.Encryptor); ok {
+		r0 = rf(ezID, collectionID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(hook.Encryptor)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(int64) []byte); ok {
-		r1 = rf(ezID)
+	if rf, ok := ret.Get(1).(func(int64, int64) []byte); ok {
+		r1 = rf(ezID, collectionID)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]byte)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func(int64) error); ok {
-		r2 = rf(ezID)
+	if rf, ok := ret.Get(2).(func(int64, int64) error); ok {
+		r2 = rf(ezID, collectionID)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -125,13 +126,14 @@ type MockCipher_GetEncryptor_Call struct {
 
 // GetEncryptor is a helper method to define mock.On call
 //   - ezID int64
-func (_e *MockCipher_Expecter) GetEncryptor(ezID interface{}) *MockCipher_GetEncryptor_Call {
-	return &MockCipher_GetEncryptor_Call{Call: _e.mock.On("GetEncryptor", ezID)}
+//   - collectionID int64
+func (_e *MockCipher_Expecter) GetEncryptor(ezID interface{}, collectionID interface{}) *MockCipher_GetEncryptor_Call {
+	return &MockCipher_GetEncryptor_Call{Call: _e.mock.On("GetEncryptor", ezID, collectionID)}
 }
 
-func (_c *MockCipher_GetEncryptor_Call) Run(run func(ezID int64)) *MockCipher_GetEncryptor_Call {
+func (_c *MockCipher_GetEncryptor_Call) Run(run func(ezID int64, collectionID int64)) *MockCipher_GetEncryptor_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(int64), args[1].(int64))
 	})
 	return _c
 }
@@ -141,22 +143,22 @@ func (_c *MockCipher_GetEncryptor_Call) Return(encryptor hook.Encryptor, safeKey
 	return _c
 }
 
-func (_c *MockCipher_GetEncryptor_Call) RunAndReturn(run func(int64) (hook.Encryptor, []byte, error)) *MockCipher_GetEncryptor_Call {
+func (_c *MockCipher_GetEncryptor_Call) RunAndReturn(run func(int64, int64) (hook.Encryptor, []byte, error)) *MockCipher_GetEncryptor_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetUnsafeKey provides a mock function with given fields: ezID
-func (_m *MockCipher) GetUnsafeKey(ezID int64) []byte {
-	ret := _m.Called(ezID)
+// GetUnsafeKey provides a mock function with given fields: ezID, collectionID
+func (_m *MockCipher) GetUnsafeKey(ezID int64, collectionID int64) []byte {
+	ret := _m.Called(ezID, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetUnsafeKey")
 	}
 
 	var r0 []byte
-	if rf, ok := ret.Get(0).(func(int64) []byte); ok {
-		r0 = rf(ezID)
+	if rf, ok := ret.Get(0).(func(int64, int64) []byte); ok {
+		r0 = rf(ezID, collectionID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]byte)
@@ -173,13 +175,14 @@ type MockCipher_GetUnsafeKey_Call struct {
 
 // GetUnsafeKey is a helper method to define mock.On call
 //   - ezID int64
-func (_e *MockCipher_Expecter) GetUnsafeKey(ezID interface{}) *MockCipher_GetUnsafeKey_Call {
-	return &MockCipher_GetUnsafeKey_Call{Call: _e.mock.On("GetUnsafeKey", ezID)}
+//   - collectionID int64
+func (_e *MockCipher_Expecter) GetUnsafeKey(ezID interface{}, collectionID interface{}) *MockCipher_GetUnsafeKey_Call {
+	return &MockCipher_GetUnsafeKey_Call{Call: _e.mock.On("GetUnsafeKey", ezID, collectionID)}
 }
 
-func (_c *MockCipher_GetUnsafeKey_Call) Run(run func(ezID int64)) *MockCipher_GetUnsafeKey_Call {
+func (_c *MockCipher_GetUnsafeKey_Call) Run(run func(ezID int64, collectionID int64)) *MockCipher_GetUnsafeKey_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(int64), args[1].(int64))
 	})
 	return _c
 }
@@ -189,7 +192,7 @@ func (_c *MockCipher_GetUnsafeKey_Call) Return(_a0 []byte) *MockCipher_GetUnsafe
 	return _c
 }
 
-func (_c *MockCipher_GetUnsafeKey_Call) RunAndReturn(run func(int64) []byte) *MockCipher_GetUnsafeKey_Call {
+func (_c *MockCipher_GetUnsafeKey_Call) RunAndReturn(run func(int64, int64) []byte) *MockCipher_GetUnsafeKey_Call {
 	_c.Call.Return(run)
 	return _c
 }
