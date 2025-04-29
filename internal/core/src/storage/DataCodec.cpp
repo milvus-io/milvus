@@ -17,20 +17,23 @@
 #include "storage/DataCodec.h"
 #include <memory>
 #include "storage/Event.h"
+#include "log/Log.h"
 #include "storage/Util.h"
 #include "storage/InsertData.h"
 #include "storage/IndexData.h"
 #include "storage/BinlogReader.h"
+#include "storage/PluginLoader.h"
 #include "common/EasyAssert.h"
 #include "common/Consts.h"
 
 namespace milvus::storage {
 
 std::unique_ptr<DataCodec>
-DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
+DeserializeFileData(const std::shared_ptr<uint8_t[]>& input_data,
                     int64_t length,
                     bool is_field_data) {
-    auto reader = std::make_shared<BinlogReader>(input_data, length);
+    auto buff_to_keep = input_data; // ref += 1
+    auto reader = std::make_shared<BinlogReader>(buff_to_keep, length); //ref += 1
     ReadMediumType(reader);
 
     DescriptorEvent descriptor_event(reader);
@@ -45,11 +48,43 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                             descriptor_fix_part.partition_id,
                             descriptor_fix_part.segment_id,
                             descriptor_fix_part.field_id};
+
+
+    auto edek = descriptor_event.GetEdekFromExtra();
+    if (edek.length() > 0) {
+        auto cipherPlugin = PluginLoader::GetInstance().getCipherPlugin();
+        AssertInfo(cipherPlugin != nullptr, "cipher plugin missing for an encrypted file");
+
+        int64_t ez_id = descriptor_event.GetEZFromExtra();
+        AssertInfo(ez_id != -1, "ez_id meta not exist for a encrypted file");
+        auto decryptor = cipherPlugin->GetDecryptor(ez_id, descriptor_fix_part.collection_id, edek);
+
+        auto left_size = length - descriptor_event.event_header.next_position_;
+        LOG_INFO("start decrypting data, ez_id: {}, collection_id: {}, cipher text length: {}",
+                 ez_id, descriptor_fix_part.collection_id, left_size);
+
+        std::string cipher_str;
+        cipher_str.resize(left_size);  // allocate enough space for size bytes
+
+        auto err = reader->Read(left_size, reinterpret_cast<void*>(cipher_str.data()));
+        AssertInfo(err.ok(), "Read binlog failed, err = {}", err.what());
+
+        auto decrypted_str = decryptor->Decrypt(cipher_str);
+        LOG_INFO("cipher plugin decrypted data: cipher text length: {}, plain text length: {}", left_size, decrypted_str.size());
+
+        auto decrypted_ptr = std::shared_ptr<uint8_t[]>(
+            new uint8_t[decrypted_str.size()],
+            [](uint8_t* ptr) { delete[] ptr; });
+        memcpy(decrypted_ptr.get(), decrypted_str.data(), decrypted_str.size());
+        buff_to_keep = decrypted_ptr;
+
+        reader = std::make_shared<BinlogReader>(buff_to_keep, decrypted_str.size());
+    }
+
     EventHeader header(reader);
+    auto event_data_length = header.event_length_ - GetEventHeaderSize(header);
     switch (header.event_type_) {
         case EventType::InsertEvent: {
-            auto event_data_length =
-                header.event_length_ - GetEventHeaderSize(header);
             auto insert_event_data = InsertEventData(
                 reader, event_data_length, data_type, nullable, is_field_data);
 
@@ -61,12 +96,10 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                                        insert_event_data.end_timestamp);
             // DataCodec must keep the input_data alive for zero-copy usage,
             // otherwise segmentation violation will occur
-            insert_data->SetData(input_data);
+            insert_data->SetData(buff_to_keep);
             return insert_data;
         }
         case EventType::IndexFileEvent: {
-            auto event_data_length =
-                header.event_length_ - GetEventHeaderSize(header);
             auto index_event_data =
                 IndexEventData(reader, event_data_length, data_type, nullable);
 
@@ -105,7 +138,7 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                                       index_event_data.end_timestamp);
             // DataCodec must keep the input_data alive for zero-copy usage,
             // otherwise segmentation violation will occur
-            index_data->SetData(input_data);
+            index_data->SetData(buff_to_keep);
             return index_data;
         }
         default:

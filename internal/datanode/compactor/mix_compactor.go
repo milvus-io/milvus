@@ -219,10 +219,10 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 
 	// TODO bucketName shall be passed via StorageConfig like index/stats task
 	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
-
 	reader, err := storage.NewBinlogRecordReader(ctx,
 		seg.GetFieldBinlogs(),
 		t.plan.GetSchema(),
+		storage.WithCollectionID(t.collectionID),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithVersion(seg.GetStorageVersion()),
 		storage.WithBucketName(bucketName),
