@@ -70,9 +70,9 @@ class GroupChunk {
         return chunks_;
     }
 
-    uint64_t
+    size_t
     CellByteSize() const {
-        uint64_t total_size = 0;
+        size_t total_size = 0;
         for (const auto& chunk : chunks_) {
             total_size += chunk.second->CellByteSize();
         }
