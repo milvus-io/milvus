@@ -28,7 +28,7 @@ func newSealQueue(
 	w := &sealQueue{
 		backgroundTask: syncutil.NewAsyncTaskNotifier[struct{}](),
 		gracefulClose:  make(chan struct{}),
-		reqCh:          make(chan *asyncSealRequest),
+		reqCh:          make(chan *asyncSealRequest, 1000),
 		logger:         logger,
 		wal:            wal,
 		txnManager:     txnManager,

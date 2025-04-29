@@ -12,7 +12,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // TODO: !!! all recovery persist operation should be a compare-and-swap operation to
@@ -68,6 +73,10 @@ func (rs *RecoveryStorage) persistDirtySnapshot(ctx context.Context, snapshot *R
 		logger.Log(lvl, "persist dirty snapshot")
 	}()
 
+	if err := rs.dropAllVirtualChannel(ctx, snapshot.VChannels); err != nil {
+		return err
+	}
+
 	futures := make([]*conc.Future[struct{}], 0, 2)
 	if len(snapshot.SegmentAssignments) > 0 {
 		future := conc.Go(func() (struct{}, error) {
@@ -100,6 +109,38 @@ func (rs *RecoveryStorage) persistDirtySnapshot(ctx context.Context, snapshot *R
 		return resource.Resource().StreamingNodeCatalog().
 			SaveConsumeCheckpoint(ctx, rs.channel.Name, snapshot.Checkpoint.IntoProto())
 	})
+}
+
+func (rs *RecoveryStorage) dropAllVirtualChannel(ctx context.Context, vcs map[string]*streamingpb.VChannelMeta) error {
+	channels := make([]string, 0, len(vcs))
+	for channelName, vc := range vcs {
+		if vc.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+			channels = append(channels, channelName)
+		}
+	}
+	if len(channels) == 0 {
+		return nil
+	}
+
+	mixCoordClient, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, channelName := range channels {
+		if err := rs.retryOperationWithBackoff(ctx, rs.Logger().With(zap.String("op", "dropAllVirtualChannel")), func(ctx context.Context) error {
+			resp, err := mixCoordClient.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				),
+				ChannelName: channelName,
+			})
+			return merr.CheckRPCCall(resp, err)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // retryOperationWithBackoff retries the operation with exponential backoff.
