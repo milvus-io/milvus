@@ -32,6 +32,7 @@
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
 #include "folly/SharedMutex.h"
+#include "common/type_c.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "index/Index.h"
 #include "index/JsonFlatIndex.h"
@@ -605,6 +606,8 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId,
                        std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
         json_indexes_;
+
+    std::shared_ptr<CPluginContext> plugin_context_;
 };
 
 }  // namespace milvus::segcore

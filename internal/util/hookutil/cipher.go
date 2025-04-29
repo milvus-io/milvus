@@ -61,6 +61,7 @@ const (
 	CipherConfigRemoveEZ       = "cipher.ez.remove"
 	CipherConfigMilvusRoleName = "cipher.milvusRoleName"
 	CipherConfigKeyKmsKeyArn   = "cipher.kmsKeyArn"
+	CipherConfigUnsafeEZK      = "cipher.ezk"
 )
 
 type EZ struct {
@@ -86,6 +87,7 @@ func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID
 			zap.Any("insertCodec collID", collectionID),
 			zap.Any("properties", collProperties),
 		)
+		return nil
 	}
 	for _, property := range collProperties {
 		if property.Key == EncryptionEzIDKey {

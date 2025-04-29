@@ -680,6 +680,7 @@ message CompactionPlan {
   IDRange pre_allocated_logIDs = 21;
   string json_params = 22;
   int32 current_scalar_index_version = 23;
+  repeated common.KeyValuePair plugin_context = 29;
 }
 
 message CompactionSegment {
@@ -859,6 +860,7 @@ message PreImportRequest {
   repeated common.KeyValuePair options = 9;
   index.StorageConfig storage_config = 10;
   int64 task_slot = 11;
+  repeated common.KeyValuePair plugin_context = 12;
 }
 
 message IDRange {
@@ -888,6 +890,7 @@ message ImportRequest {
   index.StorageConfig storage_config = 13;
   int64 task_slot = 14;
   int64 storage_version = 15;
+  repeated common.KeyValuePair plugin_context = 16;
 }
 
 message QueryPreImportRequest {

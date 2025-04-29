@@ -17,9 +17,15 @@
 package datacoord
 
 import (
+	"strconv"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"google.golang.org/protobuf/proto"
 )
 
 // PreAllocateBinlogIDs pre-allocates binlog IDs based on the total number of binlogs from
@@ -43,4 +49,48 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 	n := binlogNum * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt()
 	begin, end, err := allocator.AllocN(int64(n))
 	return &datapb.IDRange{Begin: begin, End: end}, err
+}
+
+func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) {
+	pluginContext := GetStoragePluginContext(properties, collectionID)
+	if pluginContext == nil {
+		return
+	}
+
+	switch msg.(type) {
+	case *datapb.CompactionPlan:
+		plan := msg.(*datapb.CompactionPlan)
+		plan.PluginContext = append(plan.PluginContext, pluginContext...)
+	case *workerpb.CreateJobRequest:
+		job := msg.(*workerpb.CreateJobRequest)
+		job.PluginContext = append(job.PluginContext, pluginContext...)
+	case *workerpb.AnalyzeRequest:
+		job := msg.(*workerpb.AnalyzeRequest)
+		job.PluginContext = append(job.PluginContext, pluginContext...)
+	case *workerpb.CreateStatsRequest:
+		job := msg.(*workerpb.CreateStatsRequest)
+		job.PluginContext = append(job.PluginContext, pluginContext...)
+	default:
+		return
+	}
+}
+
+func GetStoragePluginContext(properties []*commonpb.KeyValuePair, collectionID int64) []*commonpb.KeyValuePair {
+	if hookutil.IsClusterEncyptionEnabled() {
+		if ez := hookutil.GetEzByCollProperties(properties, collectionID); ez != nil {
+			key := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+			pluginContext := []*commonpb.KeyValuePair{
+				{
+					Key:   hookutil.CipherConfigCreateEZ,
+					Value: strconv.FormatInt(ez.EzID, 10),
+				},
+				{
+					Key:   hookutil.CipherConfigUnsafeEZK,
+					Value: string(key),
+				},
+			}
+			return pluginContext
+		}
+	}
+	return nil
 }
