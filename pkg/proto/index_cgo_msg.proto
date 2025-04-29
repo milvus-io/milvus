@@ -95,6 +95,13 @@ message BuildIndexInfo {
   int64 lack_binlog_rows = 23;
   int64 storage_version = 24;
   SegmentInsertFiles segment_insert_files = 25;
+  StoragePluginContext storage_plugin_context = 26;
+}
+
+message StoragePluginContext {
+  int64 encryption_zone_id = 1;
+  int64 collection_id = 2;
+  string encryption_key = 3; 
 }
 
 message LoadTextIndexInfo {

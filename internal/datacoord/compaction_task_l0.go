@@ -356,6 +356,8 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		zap.Any("target position", taskProto.GetPos()),
 		zap.Any("target segments count", len(sealedSegBinlogs)),
 		zap.Any("PreAllocatedLogIDs", logIDRange))
+
+	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
 	return plan, nil
 }
 

@@ -412,6 +412,11 @@ func (node *QueryNode) InitSegcore() error {
 
 	initcore.InitTraceConfig(paramtable.Get())
 	C.InitExecExpressionFunctionFactory()
+
+	err = initcore.InitPluginLoader()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

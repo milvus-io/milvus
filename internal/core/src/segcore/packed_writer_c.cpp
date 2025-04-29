@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "parquet/encryption/encryption.h"
+#include "parquet/properties.h"
+#include "parquet/types.h"
 #include "segcore/column_groups_c.h"
 #include "segcore/packed_writer_c.h"
 #include "milvus-storage/packed/writer.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "storage/PluginLoader.h"
 
 #include <arrow/c/bridge.h>
 #include <arrow/filesystem/filesystem.h>
@@ -74,7 +78,8 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                                  int64_t part_upload_size,
                                  CColumnGroups column_groups,
                                  CStorageConfig c_storage_config,
-                                 CPackedWriter* c_packed_writer) {
+                                 CPackedWriter* c_packed_writer,
+                                 CPluginContext c_plugin_context) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -116,17 +121,46 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
         auto columnGroups =
             *static_cast<std::vector<std::vector<int>>*>(column_groups);
 
-        auto writer = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
-            trueFs,
-            truePaths,
-            trueSchema,
-            storage_config,
-            columnGroups,
-            buffer_size);
-        AssertInfo(writer, "[StorageV2] writer pointer is null");
+        if (c_plugin_context.key != nullptr) {
+            auto cipherPluginPtr = milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+            if (!cipherPluginPtr) {
+                return milvus::FailureCStatus(milvus::PluginLoadFailed, "cipher plugin not loaded");
+            }
+            cipherPluginPtr->Update(c_plugin_context.ez_id, c_plugin_context.collection_id, std::string(c_plugin_context.key));
 
-        *c_packed_writer = writer.release();
-        return milvus::SuccessCStatus();
+            auto got = cipherPluginPtr->GetEncryptor(c_plugin_context.ez_id, c_plugin_context.collection_id);
+            auto encryptor = got.first;
+            auto edek = got.second;
+            parquet::FileEncryptionProperties::Builder file_encryption_builder(encryptor->GetKey());
+            file_encryption_builder.footer_key_metadata(edek);
+            file_encryption_builder.algorithm(parquet::ParquetCipher::AES_GCM_V1);
+
+            parquet::WriterProperties::Builder builder;
+            builder.encryption(file_encryption_builder.build());
+            std::shared_ptr<parquet::WriterProperties> props = builder.build();
+            auto writer = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
+                trueFs,
+                truePaths,
+                trueSchema,
+                storage_config,
+                columnGroups,
+                buffer_size,
+                props);
+            AssertInfo(writer, "[StorageV2] writer pointer is null");
+            *c_packed_writer = writer.release();
+            return milvus::SuccessCStatus();
+        } else {
+            auto writer = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
+                trueFs,
+                truePaths,
+                trueSchema,
+                storage_config,
+                columnGroups,
+                buffer_size);
+            AssertInfo(writer, "[StorageV2] writer pointer is null");
+            *c_packed_writer = writer.release();
+            return milvus::SuccessCStatus();
+        }
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
@@ -139,7 +173,8 @@ NewPackedWriter(struct ArrowSchema* schema,
                 int64_t num_paths,
                 int64_t part_upload_size,
                 CColumnGroups column_groups,
-                CPackedWriter* c_packed_writer) {
+                CPackedWriter* c_packed_writer,
+                CPluginContext c_plugin_context) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -161,12 +196,35 @@ NewPackedWriter(struct ArrowSchema* schema,
         auto columnGroups =
             *static_cast<std::vector<std::vector<int>>*>(column_groups);
 
-        auto writer = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
-            trueFs, truePaths, trueSchema, conf, columnGroups, buffer_size);
-        AssertInfo(writer, "[StorageV2] writer pointer is null");
+        if (c_plugin_context.key != nullptr) {
+            auto cipherPluginPtr = milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+            if (!cipherPluginPtr) {
+                return milvus::FailureCStatus(milvus::PluginLoadFailed, "cipher plugin not loaded");
+            }
+            cipherPluginPtr->Update(c_plugin_context.ez_id, c_plugin_context.collection_id, std::string(c_plugin_context.key));
 
-        *c_packed_writer = writer.release();
-        return milvus::SuccessCStatus();
+            auto got = cipherPluginPtr->GetEncryptor(c_plugin_context.ez_id, c_plugin_context.collection_id);
+            auto encryptor = got.first;
+            auto edek = got.second;
+            parquet::FileEncryptionProperties::Builder file_encryption_builder(encryptor->GetKey());
+            file_encryption_builder.footer_key_metadata(edek);
+            file_encryption_builder.algorithm(parquet::ParquetCipher::AES_GCM_V1);
+
+            parquet::WriterProperties::Builder builder;
+            builder.encryption(file_encryption_builder.build());
+            std::shared_ptr<parquet::WriterProperties> props = builder.build();
+            auto writer = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
+                trueFs, truePaths, trueSchema, conf, columnGroups, buffer_size, props);
+            AssertInfo(writer, "[StorageV2] writer pointer is null");
+            *c_packed_writer = writer.release();
+            return milvus::SuccessCStatus();
+        } else {
+            auto writer = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
+                trueFs, truePaths, trueSchema, conf, columnGroups, buffer_size);
+            AssertInfo(writer, "[StorageV2] writer pointer is null");
+            *c_packed_writer = writer.release();
+            return milvus::SuccessCStatus();
+        }
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
