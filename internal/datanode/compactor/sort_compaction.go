@@ -170,6 +170,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return t.binlogIO.Upload(ctx, kvs)
 		}),
+		storage.WithCollectionID(t.collectionID),
 		storage.WithVersion(t.storageVersion),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
@@ -208,6 +209,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithVersion(t.segmentStorageVersion),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithCollectionID(t.collectionID),
 	)
 	if err != nil {
 		log.Warn("error creating insert binlog reader", zap.Error(err))

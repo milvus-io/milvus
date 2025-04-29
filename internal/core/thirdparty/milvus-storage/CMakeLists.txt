@@ -31,8 +31,10 @@ endif ()
 set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
 FetchContent_Declare(
         milvus-storage
-        GIT_REPOSITORY  ${GIT_REPOSITORY}
-        GIT_TAG         ${milvus-storage_VERSION}
+        # GIT_REPOSITORY  ${GIT_REPOSITORY}
+        # GIT_TAG         ${milvus-storage_VERSION}
+        GIT_REPOSITORY  https://github.com/tedxu/milvus-storage.git
+        GIT_TAG         fix/copy_properties
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/milvus-storage-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/milvus-storage-build
         SOURCE_SUBDIR   cpp

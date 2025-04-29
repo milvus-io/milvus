@@ -36,6 +36,8 @@ const milvus::FieldId TimestampFieldID = milvus::FieldId(1);
 const char ORIGIN_SIZE_KEY[] = "original_size";
 const char INDEX_BUILD_ID_KEY[] = "indexBuildID";
 const char NULLABLE[] = "nullable";
+const char EDEK[] = "edek";
+const char EZID[] = "encryption_zone";
 
 const char INDEX_ROOT_PATH[] = "index_files";
 const char RAWDATA_ROOT_PATH[] = "raw_datas";
