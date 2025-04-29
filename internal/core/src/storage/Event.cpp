@@ -16,6 +16,7 @@
 
 #include <glog/logging.h>
 #include <any>
+#include <cstdint>
 #include <string>
 #include "common/Array.h"
 #include "common/Consts.h"
@@ -173,6 +174,14 @@ DescriptorEventData::DescriptorEventData(BinlogReaderPtr reader) {
     if (json.contains(NULLABLE)) {
         extras[NULLABLE] = static_cast<bool>(json[NULLABLE]);
     }
+
+    if (json.contains(EDEK)) {
+        extras[EDEK] = static_cast<std::string>(json[EDEK]);
+    }
+
+    if (json.contains(EZID)) {
+        extras[EZID] = static_cast<int64_t>(json[EZID]);
+    }
 }
 
 std::vector<uint8_t>
@@ -182,6 +191,8 @@ DescriptorEventData::Serialize() {
     for (auto v : extras) {
         if (v.first == NULLABLE) {
             extras_json.emplace(v.first, std::any_cast<bool>(v.second));
+        } else if (v.first == EZID) {
+            extras_json.emplace(v.first, std::any_cast<int64_t>(v.second));
         } else {
             extras_json.emplace(v.first, std::any_cast<std::string>(v.second));
         }
@@ -390,6 +401,25 @@ DescriptorEvent::DescriptorEvent(BinlogReaderPtr reader) {
     event_header = EventHeader(reader);
     event_data = DescriptorEventData(reader);
 }
+
+std::string
+DescriptorEvent::GetEdekFromExtra(){
+    auto it = event_data.extras.find(EDEK);
+    if (it != event_data.extras.end()) {
+        return std::any_cast<std::string>(it->second);
+    }
+    return "";
+}
+
+int64_t
+DescriptorEvent::GetEZFromExtra(){
+    auto it = event_data.extras.find(EZID);
+    if (it != event_data.extras.end()) {
+        return std::any_cast<int64_t>(it->second);
+    }
+    return -1;
+}
+
 
 std::vector<uint8_t>
 DescriptorEvent::Serialize() {

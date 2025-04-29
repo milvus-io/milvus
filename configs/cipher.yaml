@@ -1,0 +1,6 @@
+cipherPlugin:
+  soPathCpp: /home/yangxuan/Github/milvus-cloud-plugin/cipher_c/build/libCipherPlugin.so
+  soPathGO: /home/yangxuan/Github/milvus-cloud-plugin/so/libGoCipherPlugin.so
+  rotationPeriodInHours: 8764
+  defaultKmsKeyArn: fake-kms://CM2b3_MDElQKSAowdHlwZS5nb29nbGVhcGlzLmNvbS9nb29nbGUuY3J5cHRvLnRpbmsuQWVzR2NtS2V5EhIaEIK75t5L-adlUwVhWvRuWUwYARABGM2b3_MDIAE
+  kmsProvider: unsafe

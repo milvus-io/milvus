@@ -20,7 +20,7 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
   LIBJEMALLOC=$PWD/internal/core/output/lib/libjemalloc.so
   if test -f "$LIBJEMALLOC"; then
     #echo "Found $LIBJEMALLOC"
-    export LD_PRELOAD="$LIBJEMALLOC"
+    export LD_PRELOAD=/lib/x86_64-linux-gnu/libasan.so.8:"$LIBJEMALLOC"
     export MALLOC_CONF=background_thread:true
   else
     echo "WARN: Cannot find $LIBJEMALLOC"

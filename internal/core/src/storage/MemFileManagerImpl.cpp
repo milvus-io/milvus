@@ -34,6 +34,8 @@ MemFileManagerImpl::MemFileManagerImpl(
                       fileManagerContext.indexMeta) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
+    plugin_context_ = fileManagerContext.plugin_context;
+    LOG_INFO("YX Create MemFileManagerImpl, plugin_context: ");
 }
 
 bool
@@ -54,7 +56,8 @@ MemFileManagerImpl::AddBinarySet(const BinarySet& binary_set,
                                 slice_sizes,
                                 slice_names,
                                 field_meta_,
-                                index_meta_);
+                                index_meta_,
+                                plugin_context_);
         for (auto& [file, size] : res) {
             remote_paths_to_size_[file] = size;
         }

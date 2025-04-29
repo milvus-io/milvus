@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -27,11 +28,13 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/tso"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -42,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -299,6 +303,20 @@ func (mt *MetaTable) createDefaultDb() error {
 		return err
 	}
 
+	if hookutil.IsClusterEncyptionEnabled() {
+		cipherProps := []*commonpb.KeyValuePair{
+			{
+				Key:   hookutil.EncryptionEnabledKey,
+				Value: "true",
+			},
+			{
+				Key:   hookutil.EncryptionRootKeyKey,
+				Value: paramtable.GetCipherParams().DefaultRootKey.GetValue(),
+			},
+		}
+		defaultProperties = append(defaultProperties, cipherProps...)
+	}
+
 	return mt.createDatabasePrivate(mt.ctx, model.NewDefaultDatabase(defaultProperties), ts)
 }
 
@@ -321,6 +339,17 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 
 	if err := mt.catalog.CreateDatabase(ctx, db, ts); err != nil {
 		return err
+	}
+
+	// Call back cipher plugin when creating database succeeded
+	if hookutil.IsDBEncyptionEnabled(db.Properties) {
+		createConfig := map[string]string{
+			hookutil.CipherConfigCreateEZ:     strconv.FormatInt(db.ID, 10),
+			hookutil.CipherConfigKeyKmsKeyArn: hookutil.GetEZRootKeyByDBProperties(db.Properties),
+		}
+		if err := hookutil.GetCipher().Init(createConfig); err != nil {
+			return err
+		}
 	}
 
 	mt.names.createDbIfNotExist(dbName)
@@ -372,6 +401,17 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 
 	if err := mt.catalog.DropDatabase(ctx, db.ID, ts); err != nil {
 		return err
+	}
+
+	// Call back cipher plugin when dropping database succeeded
+	if hookutil.IsDBEncyptionEnabled(db.Properties) {
+		dropConfig := map[string]string{
+			hookutil.CipherConfigRemoveEZ: strconv.FormatInt(db.ID, 10),
+		}
+		if err := hookutil.GetCipher().Init(dropConfig); err != nil {
+			log.Ctx(ctx).Warn("drop database ez failed", zap.String("db", dbName), zap.Int64("dbID", db.ID), zap.Uint64("ts", ts), zap.Error(err))
+			// ignore the err
+		}
 	}
 
 	mt.names.dropDb(dbName)

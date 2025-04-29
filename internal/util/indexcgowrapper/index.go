@@ -325,6 +325,7 @@ func (index *CgoIndex) buildStringIndex(dataset *Dataset) error {
 	return HandleCStatus(&status, "failed to build scalar index")
 }
 
+// test only
 func (index *CgoIndex) Serialize() ([]*Blob, error) {
 	var cBinarySet C.CBinarySet
 
@@ -363,6 +364,7 @@ func (index *CgoIndex) Serialize() ([]*Blob, error) {
 	return ret, nil
 }
 
+// Not inuse
 func (index *CgoIndex) GetIndexFileInfo() ([]*IndexFileInfo, error) {
 	var cBinarySet C.CBinarySet
 
