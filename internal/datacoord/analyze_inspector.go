@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	taskcommon "github.com/milvus-io/milvus/pkg/v2/taskcommon"
 )
 
 type analyzeInspector struct {
@@ -56,11 +55,9 @@ func (ai *analyzeInspector) reloadFromMeta() {
 			t.GetState() == indexpb.JobState_JobStateFailed {
 			continue
 		}
-		analyzeTask := &analyzeTask{
-			AnalyzeTask: proto.Clone(t).(*indexpb.AnalyzeTask),
-			times:       taskcommon.NewTimes(),
-			meta:        ai.mt,
-		}
-		ai.scheduler.Enqueue(analyzeTask)
+		ai.scheduler.Enqueue(newAnalyzeTask(
+			proto.Clone(t).(*indexpb.AnalyzeTask),
+			ai.mt,
+		))
 	}
 }

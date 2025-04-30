@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
@@ -121,17 +121,20 @@ func (st *statsTask) UpdateTaskVersion(nodeID int64) error {
 	return nil
 }
 
-func (st *statsTask) resetTask(ctx context.Context) {
+func (st *statsTask) resetTask(ctx context.Context, reason string) {
 	// reset isCompacting
 	st.meta.SetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}, false)
 	st.meta.SetSegmentStating(st.GetSegmentID(), false)
 
 	// reset state to init
-	if err := st.meta.statsTaskMeta.UpdateTaskState(st.GetTaskID(), indexpb.JobState_JobStateInit, "reset task"); err != nil {
-		log.Ctx(ctx).Warn("update stats task state failed", zap.Error(err))
+	st.UpdateStateWithMeta(indexpb.JobState_JobStateInit, reason)
+}
+
+func (st *statsTask) dropAndResetTaskOnWorker(ctx context.Context, cluster session.Cluster, reason string) {
+	if err := st.tryDropTaskOnWorker(cluster); err != nil {
 		return
 	}
-	st.SetState(indexpb.JobState_JobStateInit, "reset task")
+	st.resetTask(ctx, reason)
 }
 
 func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
@@ -166,6 +169,14 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		return
 	}
 
+	var err error
+	defer func() {
+		if err != nil {
+			// reset compaction flag and stating flag
+			st.resetTask(ctx, err.Error())
+		}
+	}()
+
 	// Handle empty segment case
 	segment := st.meta.GetHealthySegment(ctx, st.GetSegmentID())
 	if segment == nil {
@@ -185,13 +196,6 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		return
 	}
 
-	var err error
-	defer func() {
-		if err != nil {
-			st.resetTask(ctx)
-		}
-	}()
-
 	// Update task version
 	if err := st.UpdateTaskVersion(nodeID); err != nil {
 		log.Warn("failed to update stats task version", zap.Error(err))
@@ -208,7 +212,7 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	// Use defer for cleanup on error
 	defer func() {
 		if err != nil {
-			st.DropTaskOnWorker(cluster)
+			st.tryDropTaskOnWorker(cluster)
 		}
 	}()
 	// Execute task creation
@@ -241,10 +245,7 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 	})
 	if err != nil {
 		log.Warn("query stats task result failed", zap.Error(err))
-		if errors.Is(err, merr.ErrNodeNotFound) {
-			// try to set task to init
-			st.resetTask(ctx)
-		}
+		st.dropAndResetTaskOnWorker(ctx, cluster, err.Error())
 		return
 	}
 
@@ -262,25 +263,19 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 				return
 			}
 			st.UpdateStateWithMeta(state, result.GetFailReason())
-		case indexpb.JobState_JobStateRetry:
-			log.Warn("retry task")
-			st.DropTaskOnWorker(cluster)
-			st.resetTask(ctx)
+		case indexpb.JobState_JobStateRetry, indexpb.JobState_JobStateNone:
+			st.dropAndResetTaskOnWorker(ctx, cluster, result.GetFailReason())
 		case indexpb.JobState_JobStateFailed:
 			st.UpdateStateWithMeta(state, result.GetFailReason())
-		case indexpb.JobState_JobStateNone:
-			st.resetTask(ctx)
 		}
 		// Otherwise (inProgress or unissued/init), keep InProgress state
 		return
 	}
 
-	// Task not found in results
-	log.Warn("task not found in results")
-	st.resetTask(ctx)
+	// Task not found in results will be return error
 }
 
-func (st *statsTask) DropTaskOnWorker(cluster session.Cluster) {
+func (st *statsTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 	log := log.Ctx(context.TODO()).With(
 		zap.Int64("taskID", st.GetTaskID()),
 		zap.Int64("segmentID", st.GetSegmentID()),
@@ -291,12 +286,17 @@ func (st *statsTask) DropTaskOnWorker(cluster session.Cluster) {
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskIDs:   []int64{st.GetTaskID()},
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
 		log.Warn("failed to drop stats task on worker", zap.Error(err))
-		return
+		return err
 	}
 
 	log.Info("stats task dropped successfully")
+	return nil
+}
+
+func (st *statsTask) DropTaskOnWorker(cluster session.Cluster) {
+	st.tryDropTaskOnWorker(cluster)
 }
 
 // Helper for empty segment handling

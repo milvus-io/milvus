@@ -241,7 +241,7 @@ func (s *statsTaskSuite) TestResetTask() {
 
 	s.Run("reset success", func() {
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
-		st.resetTask(context.Background())
+		st.resetTask(context.Background(), "reset task")
 		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
 		s.Equal("reset task", st.GetFailReason())
 		s.False(s.mt.segments.segments[s.segID].isCompacting)
@@ -250,7 +250,7 @@ func (s *statsTaskSuite) TestResetTask() {
 	s.Run("reset with update failure", func() {
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).
 			Return(errors.New("mock error"))
-		st.resetTask(context.Background())
+		st.resetTask(context.Background(), "reset task")
 		// State remains unchanged on error
 		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
 	})
@@ -495,6 +495,7 @@ func (s *statsTaskSuite) TestQueryTaskOnWorker() {
 	s.Run("node not found", func() {
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryStats(mock.Anything, mock.Anything).Return(nil, merr.ErrNodeNotFound)
+		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(nil)
 
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
@@ -509,9 +510,10 @@ func (s *statsTaskSuite) TestQueryTaskOnWorker() {
 		st.SetState(indexpb.JobState_JobStateInProgress, "")
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryStats(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(nil)
 
 		st.QueryTaskOnWorker(cluster)
-		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState()) // No change
+		s.Equal(indexpb.JobState_JobStateInit, st.GetState()) // No change
 	})
 }
 

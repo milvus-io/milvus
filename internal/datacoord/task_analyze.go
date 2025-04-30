@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -29,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type analyzeTask struct {
@@ -92,6 +90,25 @@ func (at *analyzeTask) UpdateVersion(nodeID int64) error {
 	return nil
 }
 
+func (at *analyzeTask) setJobInfo(result *workerpb.AnalyzeResult) error {
+	if err := at.meta.analyzeMeta.FinishTask(at.GetTaskID(), result); err != nil {
+		return err
+	}
+	at.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
+	return nil
+}
+
+func (at *analyzeTask) resetTask(reason string) {
+	at.UpdateStateWithMeta(indexpb.JobState_JobStateInit, reason)
+}
+
+func (at *analyzeTask) dropAndResetTaskOnWorker(cluster session.Cluster, reason string) {
+	if err := at.tryDropTaskOnWorker(cluster); err != nil {
+		return
+	}
+	at.resetTask(reason)
+}
+
 func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log := log.Ctx(context.TODO()).With(zap.Int64("taskID", at.GetTaskID()))
 
@@ -126,7 +143,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	defer func() {
 		if err != nil {
 			log.Warn("assign analyze task to worker failed, try drop task on worker", zap.Error(err))
-			at.DropTaskOnWorker(cluster)
+			at.tryDropTaskOnWorker(cluster)
 		}
 	}()
 
@@ -149,58 +166,44 @@ func (at *analyzeTask) QueryTaskOnWorker(cluster session.Cluster) {
 		zap.Int64("nodeID", at.NodeID),
 	)
 
-	result, err := cluster.QueryAnalyze(at.NodeID, &workerpb.QueryJobsRequest{
+	resp, err := cluster.QueryAnalyze(at.NodeID, &workerpb.QueryJobsRequest{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskIDs:   []int64{at.GetTaskID()},
 	})
 	if err != nil {
 		log.Warn("query analyze task result from worker failed", zap.Error(err))
-		if errors.Is(err, merr.ErrNodeNotFound) {
-			// try to set task to init
-			at.UpdateStateWithMeta(indexpb.JobState_JobStateInit, err.Error())
-		}
+		at.dropAndResetTaskOnWorker(cluster, err.Error())
 		return
 	}
 
 	// Process query results
-	at.processQueryResults(result.GetResults())
-}
-
-// Process query results helper
-func (at *analyzeTask) processQueryResults(results []*workerpb.AnalyzeResult) {
-	log := log.Ctx(context.TODO()).With(zap.Int64("taskID", at.GetTaskID()))
-	for _, result := range results {
+	for _, result := range resp.GetResults() {
 		if result.GetTaskID() != at.GetTaskID() {
 			continue
 		}
 
 		state := result.GetState()
-		log.Debug("query analyze task result success",
-			zap.String("state", state.String()),
-			zap.String("failReason", result.GetFailReason()))
-
 		// Handle different task states
 		switch state {
-		case indexpb.JobState_JobStateFinished, indexpb.JobState_JobStateFailed, indexpb.JobState_JobStateRetry:
-			// Save the result
-			if err := at.meta.analyzeMeta.FinishTask(at.GetTaskID(), result); err != nil {
-				log.Warn("failed to finish analyze task", zap.Error(err))
-			} else {
-				at.SetState(state, result.GetFailReason())
-			}
-		case indexpb.JobState_JobStateNone:
-			at.UpdateStateWithMeta(indexpb.JobState_JobStateRetry, "analyze task state is none in info response")
+		case indexpb.JobState_JobStateFinished, indexpb.JobState_JobStateFailed:
+			log.Info("query analyze task result success",
+				zap.String("state", state.String()),
+				zap.String("failReason", result.GetFailReason()))
+			at.setJobInfo(result)
+		case indexpb.JobState_JobStateRetry, indexpb.JobState_JobStateNone:
+			log.Info("query analyze task result success",
+				zap.String("state", state.String()),
+				zap.String("failReason", result.GetFailReason()))
+			at.dropAndResetTaskOnWorker(cluster, result.GetFailReason())
 		}
 		// Otherwise (inProgress or unissued/init), keep current state
 		return
 	}
 
-	// Task not found in results, try to set task to init
-	log.Warn("query analyze task info failed, worker does not have task info")
-	at.UpdateStateWithMeta(indexpb.JobState_JobStateInit, "analyze result is not in info response")
+	// Task not found in results will be return error
 }
 
-func (at *analyzeTask) DropTaskOnWorker(cluster session.Cluster) {
+func (at *analyzeTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 	log := log.Ctx(context.TODO()).With(
 		zap.Int64("taskID", at.GetTaskID()),
 		zap.Int64("nodeID", at.NodeID),
@@ -211,8 +214,13 @@ func (at *analyzeTask) DropTaskOnWorker(cluster session.Cluster) {
 		TaskIDs:   []int64{at.GetTaskID()},
 	}); err != nil {
 		log.Warn("failed to drop analyze task on worker", zap.Error(err))
-		return
+		return err
 	}
 
 	log.Info("dropped analyze task on worker successfully")
+	return nil
+}
+
+func (at *analyzeTask) DropTaskOnWorker(cluster session.Cluster) {
+	at.tryDropTaskOnWorker(cluster)
 }

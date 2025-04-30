@@ -157,14 +157,16 @@ func (s *analyzeTaskSuite) TestQueryTaskOnWorker() {
 	s.Run("query failed", func() {
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryAnalyze(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
 
 		at.QueryTaskOnWorker(cluster)
-		s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
+		s.Equal(indexpb.JobState_JobStateInit, at.GetState())
 	})
 
 	s.Run("node not found", func() {
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryAnalyze(mock.Anything, mock.Anything).Return(nil, merr.ErrNodeNotFound)
+		cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
 
 		at.QueryTaskOnWorker(cluster)
 		s.Equal(indexpb.JobState_JobStateInit, at.GetState())

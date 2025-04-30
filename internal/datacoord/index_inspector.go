@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	taskcommon "github.com/milvus-io/milvus/pkg/v2/taskcommon"
 )
 
 type indexInspector struct {
@@ -210,15 +209,14 @@ func (i *indexInspector) reloadFromMeta() {
 				continue
 			}
 
-			i.scheduler.Enqueue(&indexBuildTask{
-				SegmentIndex:              model.CloneSegmentIndex(segIndex),
-				taskSlot:                  calculateIndexTaskSlot(segment.getSegmentSize()),
-				times:                     taskcommon.NewTimes(),
-				meta:                      i.meta,
-				handler:                   i.handler,
-				chunkManager:              i.storageCli,
-				indexEngineVersionManager: i.indexEngineVersionManager,
-			})
+			i.scheduler.Enqueue(newIndexBuildTask(
+				model.CloneSegmentIndex(segIndex),
+				calculateIndexTaskSlot(segment.getSegmentSize()),
+				i.meta,
+				i.handler,
+				i.storageCli,
+				i.indexEngineVersionManager,
+			))
 		}
 	}
 }

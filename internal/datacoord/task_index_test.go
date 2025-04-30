@@ -257,6 +257,7 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryIndex(mock.Anything, mock.Anything).Return(nil, merr.ErrNodeNotFound)
+		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 		it.QueryTaskOnWorker(cluster)
 		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))
 	})
@@ -265,8 +266,9 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 		it.SetState(indexpb.JobState_JobStateInProgress, "")
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryIndex(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 		it.QueryTaskOnWorker(cluster)
-		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
+		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))
 	})
 
 	s.Run("task finished", func() {
@@ -321,6 +323,7 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 				State:   commonpb.IndexState_IndexStateNone,
 			}},
 		}, nil)
+		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 
 		it.QueryTaskOnWorker(cluster)
 		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))

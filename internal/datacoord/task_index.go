@@ -22,11 +22,9 @@ import (
 	"path"
 	"time"
 
-	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-
 	"go.uber.org/zap"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -40,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -131,6 +130,17 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 	return nil
 }
 
+func (it *indexBuildTask) resetTask(reason string) {
+	it.UpdateStateWithMeta(indexpb.JobState_JobStateInit, reason)
+}
+
+func (it *indexBuildTask) dropAndResetTaskOnWorker(cluster session.Cluster, reason string) {
+	if err := it.tryDropTaskOnWorker(cluster); err != nil {
+		return
+	}
+	it.resetTask(reason)
+}
+
 func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	ctx := context.TODO()
 	log := log.Ctx(ctx).With(zap.Int64("taskID", it.BuildID), zap.Int64("segmentID", it.SegmentID))
@@ -178,7 +188,7 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 
 	defer func() {
 		if err != nil {
-			it.DropTaskOnWorker(cluster)
+			it.tryDropTaskOnWorker(cluster)
 		}
 	}()
 
@@ -353,10 +363,7 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 	})
 	if err != nil {
 		log.Warn("query index task result from worker failed", zap.Error(err))
-		if errors.Is(err, merr.ErrNodeNotFound) {
-			// try to set task to init
-			it.UpdateStateWithMeta(indexpb.JobState_JobStateInit, err.Error())
-		}
+		it.dropAndResetTaskOnWorker(cluster, err.Error())
 		return
 	}
 
@@ -369,38 +376,34 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 					zap.Int64("taskID", it.BuildID), zap.String("result state", info.GetState().String()),
 					zap.String("failReason", info.GetFailReason()))
 				it.setJobInfo(info)
-			case commonpb.IndexState_Retry:
+			case commonpb.IndexState_Retry, commonpb.IndexState_IndexStateNone:
 				log.Info("query task index info successfully",
 					zap.Int64("taskID", it.BuildID), zap.String("result state", info.GetState().String()),
 					zap.String("failReason", info.GetFailReason()))
-				// try to drop task on worker
-				it.DropTaskOnWorker(cluster)
-				// reset task state to init
-				it.UpdateStateWithMeta(indexpb.JobState_JobStateInit, info.GetFailReason())
-			case commonpb.IndexState_IndexStateNone:
-				log.Info("query task index info successfully",
-					zap.Int64("taskID", it.BuildID), zap.String("result state", info.GetState().String()),
-					zap.String("failReason", info.GetFailReason()))
-				// reset task state to init
-				it.UpdateStateWithMeta(indexpb.JobState_JobStateInit, info.GetFailReason())
+				it.dropAndResetTaskOnWorker(cluster, info.GetFailReason())
 			}
 			// inProgress or unissued, keep InProgress state
 			return
 		}
 	}
-	it.UpdateStateWithMeta(indexpb.JobState_JobStateInit, "index is not in info response")
+	// Task not found in results will be return error
 }
 
-func (it *indexBuildTask) DropTaskOnWorker(cluster session.Cluster) {
+func (it *indexBuildTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 	log := log.Ctx(context.TODO()).With(zap.Int64("taskID", it.BuildID), zap.Int64("segmentID", it.SegmentID), zap.Int64("nodeID", it.NodeID))
 
 	if err := cluster.DropIndex(it.NodeID, &workerpb.DropJobsRequest{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskIDs:   []UniqueID{it.BuildID},
-	}); err != nil {
+	}); err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
 		log.Warn("notify worker drop the index task failed", zap.Error(err))
-		return
+		return err
 	}
 
 	log.Info("index task dropped successfully")
+	return nil
+}
+
+func (it *indexBuildTask) DropTaskOnWorker(cluster session.Cluster) {
+	it.tryDropTaskOnWorker(cluster)
 }
