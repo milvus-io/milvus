@@ -1463,6 +1463,9 @@ gen_all_data_types_schema() {
                                      128,
                                      knowhere::metric::L2);
     schema->set_primary_field_id(int64_field);
+    return schema;
+}
+
 inline SchemaPtr
 GenChunkedSegmentTestSchema(bool pk_is_string) {
     auto schema = std::make_shared<Schema>();

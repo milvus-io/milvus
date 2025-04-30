@@ -220,7 +220,6 @@ TEST_F(ChunkedColumnGroupTest, ChunkedColumnGroup) {
     // basic properties
     EXPECT_EQ(column_group->num_chunks(), 1);
     EXPECT_EQ(column_group->NumRows(), 5);
-    EXPECT_EQ(column_group->NumRows(), 5);
 
     // Get group chunk
     auto retrieved_group_chunk = column_group->GetGroupChunk(0);
@@ -238,8 +237,7 @@ TEST_F(ChunkedColumnGroupTest, ChunkedColumnGroup) {
     EXPECT_EQ(rows_until_chunk[1], 5);
 
     // boundary conditions
-    EXPECT_EQ(column_group->GetNumRowsUntilChunk(100),
-              0);  // Out of range
+    EXPECT_THROW(column_group->GetNumRowsUntilChunk(100), std::exception);  // Out of range
 }
 
 TEST_F(ChunkedColumnGroupTest, ProxyChunkColumn) {
