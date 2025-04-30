@@ -193,6 +193,10 @@ func (b *brokerMetaWriter) NotifyDropPartition(ctx context.Context, collectionID
 		return false, nil
 	}, b.opts...)
 	if err != nil {
+		if errors.Is(err, merr.ErrServiceUnimplemented) {
+			log.Info("NotifyDropPartition is not supported, skip")
+			return nil
+		}
 		log.Warn("failed to notify drop partition",
 			zap.String("channel", channelName),
 			zap.Int64("collectionID", collectionID),
