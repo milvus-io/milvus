@@ -18,5 +18,5 @@ package common
 
 const (
 	// SDKVersion const value for current version
-	SDKVersion = `2.5.2`
+	SDKVersion = `2.5.3`
 )
