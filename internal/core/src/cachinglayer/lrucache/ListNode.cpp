@@ -50,7 +50,7 @@ ListNode::NodePin::operator=(NodePin&& other) {
 
 ListNode::ListNode(DList* dlist, ResourceUsage size)
     : last_touch_(dlist ? (std::chrono::high_resolution_clock::now() -
-                           2 * dlist->touch_config().refresh_window)
+                           2 * dlist->eviction_config().cache_touch_window)
                         : std::chrono::high_resolution_clock::now()),
       dlist_(dlist),
       size_(size),
@@ -181,7 +181,8 @@ ListNode::unpin() {
 void
 ListNode::touch(bool update_used_memory) {
     auto now = std::chrono::high_resolution_clock::now();
-    if (dlist_ && now - last_touch_ > dlist_->touch_config().refresh_window) {
+    if (dlist_ &&
+        now - last_touch_ > dlist_->eviction_config().cache_touch_window) {
         std::optional<ResourceUsage> size = std::nullopt;
         if (update_used_memory) {
             size = size_;
@@ -197,7 +198,7 @@ ListNode::clear_data() {
     // the cell should be inserted into the cache again.
     if (dlist_) {
         last_touch_ = std::chrono::high_resolution_clock::now() -
-                      2 * dlist_->touch_config().refresh_window;
+                      2 * dlist_->eviction_config().cache_touch_window;
     }
     unload();
     state_ = State::NOT_LOADED;

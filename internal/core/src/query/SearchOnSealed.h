@@ -38,15 +38,4 @@ SearchOnSealedColumn(const Schema& schema,
                      const BitsetView& bitset,
                      SearchResult& result);
 
-void
-SearchOnSealedData(const Schema& schema,
-                   const void* vec_data,
-                   const SearchInfo& search_info,
-                   const std::map<std::string, std::string>& index_info,
-                   const void* query_data,
-                   int64_t num_queries,
-                   int64_t row_count,
-                   const BitsetView& bitset,
-                   SearchResult& result);
-
 }  // namespace milvus::query

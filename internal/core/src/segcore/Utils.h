@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "common/FieldData.h"
+#include "common/type_c.h"
 #include "common/Types.h"
 #include "index/Index.h"
 #include "segcore/ConcurrentVector.h"
@@ -128,4 +129,8 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
             int64_t first,
             int64_t last,
             Timestamp value);
+
+CacheWarmupPolicy
+getCacheWarmupPolicy(bool is_vector, bool is_index);
+
 }  // namespace milvus::segcore

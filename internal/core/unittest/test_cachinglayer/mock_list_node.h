@@ -27,7 +27,6 @@ class MockListNode : public ListNode {
                  cid_t cid = 0)
         : ListNode(dlist, size), mock_key_(fmt::format("{}:{}", key, cid)) {
         ON_CALL(*this, clear_data).WillByDefault([this]() {
-            // Default clear_data calls unload() by default in base, mimic if needed
             unload();
             state_ = State::NOT_LOADED;
         });

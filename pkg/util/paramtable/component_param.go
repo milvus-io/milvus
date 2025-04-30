@@ -827,8 +827,8 @@ like the old password verification when updating the credential`,
 		Key:          "common.ttMsgEnabled",
 		Version:      "2.3.2",
 		DefaultValue: "true",
-		Doc: `Whether to disable the internal time messaging mechanism for the system. 
-If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches. 
+		Doc: `Whether to disable the internal time messaging mechanism for the system.
+If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
 This helps Milvus-CDC synchronize incremental data`,
 		Export: true,
 	}
@@ -1255,7 +1255,7 @@ func (l *logConfig) init(base *BaseTable) {
 		Key:          "log.level",
 		DefaultValue: "info",
 		Version:      "2.0.0",
-		Doc: `Milvus log level. Option: debug, info, warn, error, panic, and fatal. 
+		Doc: `Milvus log level. Option: debug, info, warn, error, panic, and fatal.
 It is recommended to use debug level under test and development environments, and info level in production environment.`,
 		Export: true,
 	}
@@ -1854,7 +1854,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.workloadToleranceFactor",
 		Version:      "2.4.12",
 		DefaultValue: "0.1",
-		Doc: `tolerance factor for query node workload difference, default to 10%, which means if query node's workload diff is higher than this factor, 
+		Doc: `tolerance factor for query node workload difference, default to 10%, which means if query node's workload diff is higher than this factor,
 		proxy will compute each querynode's workload score, and assign request to the lowest workload node; otherwise, it will assign request to the node by round robin`,
 	}
 	p.WorkloadToleranceFactor.Init(base.mgr)
@@ -2202,7 +2202,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Version:      "2.4.18",
 		DefaultValue: "10",
 		PanicIfEmpty: true,
-		Doc: `the channel count weight used when balancing channels among queryNodes, 
+		Doc: `the channel count weight used when balancing channels among queryNodes,
 		A higher value reduces the likelihood of assigning channels from the same collection to the same QueryNode. Set to 1 to disable this feature.`,
 		Export: true,
 	}
@@ -2686,10 +2686,21 @@ type queryNodeConfig struct {
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
-	// TODO this should be refreshable?
-	TieredStorageEnableGlobal          ParamItem `refreshable:"false"`
-	TieredStorageMemoryAllocationRatio ParamItem `refreshable:"false"`
-	TieredStorageDiskAllocationRatio   ParamItem `refreshable:"false"`
+
+	// TODO(tiered storage 2) this should be refreshable?
+	TieredWarmupScalarField        ParamItem `refreshable:"false"`
+	TieredWarmupScalarIndex        ParamItem `refreshable:"false"`
+	TieredWarmupVectorField        ParamItem `refreshable:"false"`
+	TieredWarmupVectorIndex        ParamItem `refreshable:"false"`
+	TieredMemoryLowWatermarkRatio  ParamItem `refreshable:"false"`
+	TieredMemoryHighWatermarkRatio ParamItem `refreshable:"false"`
+	TieredMemoryMaxRatio           ParamItem `refreshable:"false"`
+	TieredDiskLowWatermarkRatio    ParamItem `refreshable:"false"`
+	TieredDiskHighWatermarkRatio   ParamItem `refreshable:"false"`
+	TieredDiskMaxRatio             ParamItem `refreshable:"false"`
+	TieredEvictionEnabled          ParamItem `refreshable:"false"`
+	TieredCacheTouchWindowMs       ParamItem `refreshable:"false"`
+	TieredEvictionIntervalMs       ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -2713,7 +2724,6 @@ type queryNodeConfig struct {
 	MmapVectorIndex                     ParamItem `refreshable:"false"`
 	MmapScalarField                     ParamItem `refreshable:"false"`
 	MmapScalarIndex                     ParamItem `refreshable:"false"`
-	MmapChunkCache                      ParamItem `refreshable:"false"`
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
@@ -2727,9 +2737,7 @@ type queryNodeConfig struct {
 
 	IndexOffsetCacheEnabled ParamItem `refreshable:"true"`
 
-	// chunk cache
-	ReadAheadPolicy     ParamItem `refreshable:"false"`
-	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
+	ReadAheadPolicy ParamItem `refreshable:"false"`
 
 	MaxReceiveChanSize    ParamItem `refreshable:"false"`
 	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
@@ -2827,46 +2835,181 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.StatsPublishInterval.Init(base.mgr)
 
-	p.TieredStorageEnableGlobal = ParamItem{
-		Key:          "queryNode.segcore.tieredStorage.enableGlobally",
+	p.TieredWarmupScalarField = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.warmup.scalarField",
 		Version:      "2.6.0",
-		DefaultValue: "false",
-		Doc:          "Whether or not to turn on Tiered Storage globally in this cluster.",
+		DefaultValue: "sync",
+		Doc: `options: sync, async, disable.
+Specifies the timing for warming up the Tiered Storage cache.
+- "sync": data will be loaded into the cache before a segment is considered loaded.
+- "async": data will be loaded asynchronously into the cache after a segment is loaded.
+- "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
+Defaults to "sync", except for vector field which defaults to "disable".`,
+		Export: true,
+	}
+	p.TieredWarmupScalarField.Init(base.mgr)
+
+	p.TieredWarmupScalarIndex = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.warmup.scalarIndex",
+		Version:      "2.6.0",
+		DefaultValue: "sync",
 		Export:       true,
 	}
-	p.TieredStorageEnableGlobal.Init(base.mgr)
+	p.TieredWarmupScalarIndex.Init(base.mgr)
 
-	p.TieredStorageMemoryAllocationRatio = ParamItem{
-		Key:          "queryNode.segcore.tieredStorage.memoryAllocationRatio",
+	p.TieredWarmupVectorField = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.warmup.vectorField",
 		Version:      "2.6.0",
-		DefaultValue: "0.5",
+		DefaultValue: "disable",
+		Doc:          `cache warmup for vector field raw data is by default disabled.`,
+		Export:       true,
+	}
+	p.TieredWarmupVectorField.Init(base.mgr)
+
+	p.TieredWarmupVectorIndex = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.warmup.vectorIndex",
+		Version:      "2.6.0",
+		DefaultValue: "sync",
+		Export:       true,
+	}
+	p.TieredWarmupVectorIndex.Init(base.mgr)
+
+	p.TieredEvictionEnabled = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.evictionEnabled",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc: `Enable eviction for Tiered Storage. Defaults to false.
+Note that if eviction is enabled, cache data loaded during sync/async warmup is also subject to eviction.`,
+		Export: true,
+	}
+	p.TieredEvictionEnabled.Init(base.mgr)
+
+	p.TieredMemoryLowWatermarkRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.memoryLowWatermarkRatio",
+		Version:      "2.6.0",
+		DefaultValue: "0.6",
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
-				return "0.5"
+				return "0.6"
 			}
 			return fmt.Sprintf("%f", ratio)
 		},
-		Doc:    "The ratio of memory allocation for Tiered Storage.",
+		Doc: `If evictionEnabled is true, a background thread will run every evictionIntervalMs to determine if an
+eviction is necessary and the amount of data to evict from memory/disk.
+- The max ratio is the max amount of memory/disk that can be used for cache.
+- If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
+  until the memory/disk usage is below the low watermark.`,
 		Export: true,
 	}
-	p.TieredStorageMemoryAllocationRatio.Init(base.mgr)
+	p.TieredMemoryLowWatermarkRatio.Init(base.mgr)
 
-	p.TieredStorageDiskAllocationRatio = ParamItem{
-		Key:          "queryNode.segcore.tieredStorage.diskAllocationRatio",
+	p.TieredMemoryHighWatermarkRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.memoryHighWatermarkRatio",
 		Version:      "2.6.0",
-		DefaultValue: "0.5",
+		DefaultValue: "0.8",
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
-				return "0.5"
+				return "0.8"
 			}
 			return fmt.Sprintf("%f", ratio)
 		},
-		Doc:    "The ratio of disk allocation for Tiered Storage.",
 		Export: true,
 	}
-	p.TieredStorageDiskAllocationRatio.Init(base.mgr)
+	p.TieredMemoryHighWatermarkRatio.Init(base.mgr)
+
+	p.TieredMemoryMaxRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.memoryMaxRatio",
+		Version:      "2.6.0",
+		DefaultValue: "0.9",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio < 0 || ratio > 1 {
+				return "0.9"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Export: true,
+	}
+	p.TieredMemoryMaxRatio.Init(base.mgr)
+
+	p.TieredDiskLowWatermarkRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.diskLowWatermarkRatio",
+		Version:      "2.6.0",
+		DefaultValue: "0.6",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio < 0 || ratio > 1 {
+				return "0.6"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Export: true,
+	}
+	p.TieredDiskLowWatermarkRatio.Init(base.mgr)
+
+	p.TieredDiskHighWatermarkRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.diskHighWatermarkRatio",
+		Version:      "2.6.0",
+		DefaultValue: "0.8",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio < 0 || ratio > 1 {
+				return "0.8"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Export: true,
+	}
+	p.TieredDiskHighWatermarkRatio.Init(base.mgr)
+
+	p.TieredDiskMaxRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.diskMaxRatio",
+		Version:      "2.6.0",
+		DefaultValue: "0.9",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio < 0 || ratio > 1 {
+				return "0.9"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Export: true,
+	}
+	p.TieredDiskMaxRatio.Init(base.mgr)
+
+	p.TieredCacheTouchWindowMs = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.cacheTouchWindowMs",
+		Version:      "2.6.0",
+		DefaultValue: "3000",
+		Formatter: func(v string) string {
+			window := getAsInt64(v)
+			if window < 0 {
+				return "3000"
+			}
+			return fmt.Sprintf("%d", window)
+		},
+		Doc:    "Min interval in milliseconds for update a cache entry's hotness. If a cache entry is frequently accessed, it will be moved to the head of the cache at most once every cacheTouchWindowMs.",
+		Export: false,
+	}
+	p.TieredCacheTouchWindowMs.Init(base.mgr)
+
+	p.TieredEvictionIntervalMs = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.evictionIntervalMs",
+		Version:      "2.6.0",
+		DefaultValue: "10000",
+		Formatter: func(v string) string {
+			window := getAsInt64(v)
+			if window < 0 {
+				return "10000"
+			}
+			return fmt.Sprintf("%d", window)
+		},
+		Doc:    "Interval in milliseconds to run periodic eviction.",
+		Export: false,
+	}
+	p.TieredEvictionIntervalMs.Init(base.mgr)
 
 	p.KnowhereThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereThreadPoolNumRatio",
@@ -3094,22 +3237,13 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	}
 	p.MmapScalarIndex.Init(base.mgr)
 
-	p.MmapChunkCache = ParamItem{
-		Key:          "queryNode.mmap.chunkCache",
-		Version:      "2.4.12",
-		DefaultValue: "true",
-		Doc:          "Enable mmap for chunk cache (raw vector retrieving).",
-		Export:       true,
-	}
-	p.MmapChunkCache.Init(base.mgr)
-
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
 		Version:      "2.4.6",
 		DefaultValue: "false",
 		FallbackKeys: []string{"queryNode.growingMmapEnabled"},
-		Doc: `Enable memory mapping (mmap) to optimize the handling of growing raw data. 
-By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
+		Doc: `Enable memory mapping (mmap) to optimize the handling of growing raw data.
+By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
 However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.`,
 		Export: true,
 	}
@@ -3192,20 +3326,6 @@ However, this optimization may come at the cost of a slight decrease in query la
 		Export:       true,
 	}
 	p.ReadAheadPolicy.Init(base.mgr)
-
-	p.ChunkCacheWarmingUp = ParamItem{
-		Key:          "queryNode.cache.warmup",
-		Version:      "2.3.6",
-		DefaultValue: "disable",
-		Doc: `options: async, sync, disable. 
-Specifies the necessity for warming up the chunk cache. 
-1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the 
-chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
-for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
-2. If set to "disable" original vector data will only be loaded into the chunk cache during search/query.`,
-		Export: true,
-	}
-	p.ChunkCacheWarmingUp.Init(base.mgr)
 
 	p.MaxReceiveChanSize = ParamItem{
 		Key:          "queryNode.scheduler.receiveChanSize",
@@ -3870,7 +3990,7 @@ The max idle time of segment in seconds, 10*60.`,
 		Key:          "dataCoord.segment.maxBinlogFileNumber",
 		Version:      "2.2.0",
 		DefaultValue: "32",
-		Doc: `The max number of binlog (which is equal to the binlog file num of primary key) for one segment, 
+		Doc: `The max number of binlog (which is equal to the binlog file num of primary key) for one segment,
 the segment will be sealed if the number of binlog file reaches to max value.`,
 		Export: true,
 	}
@@ -3880,7 +4000,7 @@ the segment will be sealed if the number of binlog file reaches to max value.`,
 		Key:          "dataCoord.sealPolicy.channel.growingSegmentsMemSize",
 		Version:      "2.4.6",
 		DefaultValue: "4096",
-		Doc: `The size threshold in MB, if the total size of growing segments of each shard 
+		Doc: `The size threshold in MB, if the total size of growing segments of each shard
 exceeds this threshold, the largest growing segment will be sealed.`,
 		Export: true,
 	}
@@ -3890,7 +4010,7 @@ exceeds this threshold, the largest growing segment will be sealed.`,
 		Key:          "dataCoord.sealPolicy.channel.blockingL0EntryNum",
 		Version:      "2.5.7",
 		DefaultValue: "5000000",
-		Doc: `If the total entry number of l0 logs of each shard 
+		Doc: `If the total entry number of l0 logs of each shard
 exceeds this threshold, the earliest growing segments will be sealed.`,
 		Export: true,
 	}
@@ -3900,7 +4020,7 @@ exceeds this threshold, the earliest growing segments will be sealed.`,
 		Key:          "dataCoord.sealPolicy.channel.blockingL0SizeInMB",
 		Version:      "2.5.7",
 		DefaultValue: "64",
-		Doc: `The size threshold in MB, if the total entry number of l0 logs of each shard 
+		Doc: `The size threshold in MB, if the total entry number of l0 logs of each shard
 exceeds this threshold, the earliest growing segments will be sealed.`,
 		Export: true,
 	}
@@ -3910,7 +4030,7 @@ exceeds this threshold, the earliest growing segments will be sealed.`,
 		Key:          "dataCoord.enableCompaction",
 		Version:      "2.0.0",
 		DefaultValue: "true",
-		Doc: `Switch value to control if to enable segment compaction. 
+		Doc: `Switch value to control if to enable segment compaction.
 Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.`,
 		Export: true,
 	}
@@ -3938,7 +4058,7 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 		Key:          "dataCoord.compaction.taskPrioritizer",
 		Version:      "2.5.0",
 		DefaultValue: "default",
-		Doc: `compaction task prioritizer, options: [default, level, mix]. 
+		Doc: `compaction task prioritizer, options: [default, level, mix].
 default is FIFO.
 level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
 mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.`,
@@ -5279,7 +5399,7 @@ func (p *streamingConfig) init(base *BaseTable) {
 	p.WALBalancerTriggerInterval = ParamItem{
 		Key:     "streaming.walBalancer.triggerInterval",
 		Version: "2.6.0",
-		Doc: `The interval of balance task trigger at background, 1 min by default. 
+		Doc: `The interval of balance task trigger at background, 1 min by default.
 It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
 		DefaultValue: "1m",
 		Export:       true,
@@ -5288,7 +5408,7 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	p.WALBalancerBackoffInitialInterval = ParamItem{
 		Key:     "streaming.walBalancer.backoffInitialInterval",
 		Version: "2.6.0",
-		Doc: `The initial interval of balance task trigger backoff, 50 ms by default. 
+		Doc: `The initial interval of balance task trigger backoff, 50 ms by default.
 It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
 		DefaultValue: "50ms",
 		Export:       true,
@@ -5315,7 +5435,7 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	p.WALBalancerPolicyVChannelFairPChannelWeight = ParamItem{
 		Key:     "streaming.walBalancer.balancePolicy.vchannelFair.pchannelWeight",
 		Version: "2.6.0",
-		Doc: `The weight of pchannel count in vchannelFair balance policy, 
+		Doc: `The weight of pchannel count in vchannelFair balance policy,
 the pchannel count will more evenly distributed if the weight is greater, 0.4 by default`,
 		DefaultValue: "0.4",
 		Export:       true,
@@ -5325,7 +5445,7 @@ the pchannel count will more evenly distributed if the weight is greater, 0.4 by
 	p.WALBalancerPolicyVChannelFairVChannelWeight = ParamItem{
 		Key:     "streaming.walBalancer.balancePolicy.vchannelFair.vchannelWeight",
 		Version: "2.6.0",
-		Doc: `The weight of vchannel count in vchannelFair balance policy, 
+		Doc: `The weight of vchannel count in vchannelFair balance policy,
 the vchannel count will more evenly distributed if the weight is greater, 0.3 by default`,
 		DefaultValue: "0.3",
 		Export:       true,
@@ -5335,7 +5455,7 @@ the vchannel count will more evenly distributed if the weight is greater, 0.3 by
 	p.WALBalancerPolicyVChannelFairAntiAffinityWeight = ParamItem{
 		Key:     "streaming.walBalancer.balancePolicy.vchannelFair.antiAffinityWeight",
 		Version: "2.6.0",
-		Doc: `The weight of affinity in vchannelFair balance policy, 
+		Doc: `The weight of affinity in vchannelFair balance policy,
 the fewer VChannels belonging to the same Collection between two PChannels, the higher the affinity,
 the vchannel of one collection will more evenly distributed if the weight is greater, 0.01 by default`,
 		DefaultValue: "0.01",
@@ -5357,7 +5477,7 @@ the balance result will be ignored, the lower tolerance, the sensitive rebalance
 		Key:     "streaming.walBalancer.balancePolicy.vchannelFair.rebalanceMaxStep",
 		Version: "2.6.0",
 		Doc: `Indicates how many pchannels will be considered as a batch for rebalancing,
-the larger step, more aggressive and accurate rebalance, 
+the larger step, more aggressive and accurate rebalance,
 it also determine the depth of depth first search method that is used to find the best balance result, 3 by default`,
 		DefaultValue: "3",
 		Export:       true,

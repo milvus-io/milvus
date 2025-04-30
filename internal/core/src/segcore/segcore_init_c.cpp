@@ -16,7 +16,7 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/segcore_init_c.h"
 #include "cachinglayer/Manager.h"
-
+#include "cachinglayer/Utils.h"
 namespace milvus::segcore {
 
 std::once_flag close_glog_once;
@@ -122,11 +122,32 @@ SetThreadName(const char* name) {
 }
 
 extern "C" void
-ConfigureTieredStorage(const bool enabled_globally,
-                       const int64_t memory_limit_bytes,
-                       const int64_t disk_limit_bytes) {
+ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
+                       const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
+                       const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
+                       const CacheWarmupPolicy vectorIndexCacheWarmupPolicy,
+                       const int64_t memory_low_watermark_bytes,
+                       const int64_t memory_high_watermark_bytes,
+                       const int64_t memory_max_bytes,
+                       const int64_t disk_low_watermark_bytes,
+                       const int64_t disk_high_watermark_bytes,
+                       const int64_t disk_max_bytes,
+                       const bool evictionEnabled,
+                       const int64_t cache_touch_window_ms,
+                       const int64_t eviction_interval_ms) {
     milvus::cachinglayer::Manager::ConfigureTieredStorage(
-        enabled_globally, memory_limit_bytes, disk_limit_bytes);
+        {scalarFieldCacheWarmupPolicy,
+         vectorFieldCacheWarmupPolicy,
+         scalarIndexCacheWarmupPolicy,
+         vectorIndexCacheWarmupPolicy},
+        {memory_low_watermark_bytes,
+         memory_high_watermark_bytes,
+         memory_max_bytes,
+         disk_low_watermark_bytes,
+         disk_high_watermark_bytes,
+         disk_max_bytes},
+        evictionEnabled,
+        {cache_touch_window_ms, eviction_interval_ms});
 }
 
 }  // namespace milvus::segcore

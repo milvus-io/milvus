@@ -1556,8 +1556,8 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 						fieldIndexInfo.GetBuildID())
 				}
 				if metricType != metric.BM25 {
-					mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
-					if mmapChunkCache {
+					mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
+					if mmapVectorField {
 						segmentDiskSize += binlogSize
 					} else {
 						segmentMemorySize += binlogSize

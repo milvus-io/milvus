@@ -29,7 +29,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -1090,15 +1089,10 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 				return nil
 			}
 
-			// 4.
-			mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
-			s.WarmupChunkCache(ctx, indexInfo.GetFieldID(), mmapChunkCache)
-			warmupChunkCacheSpan := tr.RecordSpan()
 			log.Info("Finish loading index",
 				zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
 				zap.Duration("appendLoadIndexInfoSpan", appendLoadIndexInfoSpan),
 				zap.Duration("updateIndexInfoSpan", updateIndexInfoSpan),
-				zap.Duration("warmupChunkCacheSpan", warmupChunkCacheSpan),
 			)
 			return nil
 		})
@@ -1222,62 +1216,6 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 	})
 	log.Info("updateSegmentIndex done")
 	return nil
-}
-
-func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64, mmapEnabled bool) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.Int64("fieldID", fieldID),
-		zap.Bool("mmapEnabled", mmapEnabled),
-	)
-	if !s.ptrLock.PinIf(state.IsNotReleased) {
-		return
-	}
-	defer s.ptrLock.Unpin()
-
-	var status C.CStatus
-
-	warmingUp := strings.ToLower(paramtable.Get().QueryNodeCfg.ChunkCacheWarmingUp.GetValue())
-	switch warmingUp {
-	case "sync":
-		GetWarmupPool().Submit(func() (any, error) {
-			cFieldID := C.int64_t(fieldID)
-			cMmapEnabled := C.bool(mmapEnabled)
-			status = C.WarmupChunkCache(s.ptr, cFieldID, cMmapEnabled)
-			if err := HandleCStatus(ctx, &status, "warming up chunk cache failed"); err != nil {
-				log.Warn("warming up chunk cache synchronously failed", zap.Error(err))
-				return nil, err
-			}
-			log.Info("warming up chunk cache synchronously done")
-			return nil, nil
-		}).Await()
-	case "async":
-		task := func() (any, error) {
-			// failed to wait for state update, return directly
-			if !s.ptrLock.BlockUntilDataLoadedOrReleased() {
-				return nil, nil
-			}
-			if s.PinIfNotReleased() != nil {
-				return nil, nil
-			}
-			defer s.Unpin()
-
-			cFieldID := C.int64_t(fieldID)
-			cMmapEnabled := C.bool(mmapEnabled)
-			status = C.WarmupChunkCache(s.ptr, cFieldID, cMmapEnabled)
-			if err := HandleCStatus(ctx, &status, ""); err != nil {
-				log.Warn("warming up chunk cache asynchronously failed", zap.Error(err))
-				return nil, err
-			}
-			log.Info("warming up chunk cache asynchronously done")
-			return nil, nil
-		}
-		s.warmupDispatcher.AddTask(task)
-	default:
-		// no warming up
-	}
 }
 
 func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64, fieldBinlog *datapb.FieldBinlog) error {

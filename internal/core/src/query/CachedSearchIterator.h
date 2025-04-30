@@ -20,7 +20,7 @@
 #include "query/helper.h"
 #include "segcore/ConcurrentVector.h"
 #include "index/VectorIndex.h"
-#include "mmap/ChunkedColumn.h"
+#include "mmap/ChunkedColumnInterface.h"
 
 namespace milvus::query {
 
@@ -28,7 +28,7 @@ namespace milvus::query {
 // search iterators and filter the results based on the last_bound,
 // radius and range_filter.
 // It provides a number of constructors to support different scenarios,
-// including growing/sealed, chunked/non-chunked.
+// including growing/sealed, with/without index.
 //
 // It does not care about TopK in search_info
 // The topk in SearchResult will be set to the batch_size for compatibility
@@ -42,14 +42,6 @@ class CachedSearchIterator {
                          const knowhere::DataSetPtr& dataset,
                          const SearchInfo& search_info,
                          const BitsetView& bitset);
-
-    // For sealed segment, BF
-    CachedSearchIterator(const dataset::SearchDataset& dataset,
-                         const dataset::RawDataset& raw_ds,
-                         const SearchInfo& search_info,
-                         const std::map<std::string, std::string>& index_info,
-                         const BitsetView& bitset,
-                         const milvus::DataType& data_type);
 
     // For growing segment with chunked data, BF
     CachedSearchIterator(const dataset::SearchDataset& dataset,
@@ -86,9 +78,10 @@ class CachedSearchIterator {
     using IterIdx = size_t;
     using IterIdDisIdPair = std::pair<IterIdx, DisIdPair>;
     using GetChunkDataFunc =
-        std::function<std::pair<milvus::cachinglayer::PinWrapper<const void*>,
-                                int64_t>(int64_t)>;
+        std::function<std::pair<const void*, int64_t>(int64_t)>;
 
+    // used only for sealed segment with chunked data
+    std::vector<milvus::cachinglayer::PinWrapper<const void*>> pin_wrappers_;
     int64_t batch_size_ = 0;
     std::vector<knowhere::IndexNode::IteratorPtr> iterators_;
     int8_t sign_ = 1;
@@ -174,6 +167,7 @@ class CachedSearchIterator {
     void
     Init(const SearchInfo& search_info);
 
+    // must call get_chunk_data from chunk 0 to chunk num_chunks_ - 1 in order.
     void
     InitializeChunkedIterators(
         const dataset::SearchDataset& dataset,

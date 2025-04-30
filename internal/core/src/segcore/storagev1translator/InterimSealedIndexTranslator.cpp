@@ -1,5 +1,6 @@
 #include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
 #include "index/VectorMemIndex.h"
+#include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -19,7 +20,11 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
       dim_(dim),
       is_sparse_(is_sparse),
       index_key_(fmt::format("seg_{}_ii_{}", segment_id, field_id)),
-      meta_(milvus::cachinglayer::StorageType::MEMORY) {
+      meta_(milvus::cachinglayer::StorageType::MEMORY,
+            milvus::segcore::getCacheWarmupPolicy(
+                /* is_vector */ true,
+                /* is_index */ true),
+            /* support_eviction */ false) {
 }
 
 size_t

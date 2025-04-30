@@ -628,64 +628,6 @@ func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
 	suite.NoError(err)
 }
 
-func (suite *SegmentLoaderSuite) TestPatchEntryNum() {
-	ctx := context.Background()
-
-	msgLength := 100
-	segmentID := suite.segmentID
-	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
-		suite.collectionID,
-		suite.partitionID,
-		segmentID,
-		msgLength,
-		suite.schema,
-		suite.chunkManager,
-	)
-	suite.NoError(err)
-
-	vecFields := funcutil.GetVecFieldIDs(suite.schema)
-	indexInfo, err := mock_segcore.GenAndSaveIndex(
-		suite.collectionID,
-		suite.partitionID,
-		segmentID,
-		vecFields[0],
-		msgLength,
-		mock_segcore.IndexFaissIVFFlat,
-		metric.L2,
-		suite.chunkManager,
-	)
-	suite.NoError(err)
-	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:     segmentID,
-		PartitionID:   suite.partitionID,
-		CollectionID:  suite.collectionID,
-		BinlogPaths:   binlogs,
-		Statslogs:     statsLogs,
-		IndexInfos:    []*querypb.FieldIndexInfo{indexInfo},
-		NumOfRows:     int64(msgLength),
-		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-	}
-
-	// mock legacy binlog entry num is zero case
-	for _, fieldLog := range binlogs {
-		for _, binlog := range fieldLog.GetBinlogs() {
-			binlog.EntriesNum = 0
-		}
-	}
-
-	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfo)
-	suite.Require().NoError(err)
-	suite.Require().Equal(1, len(segments))
-
-	segment := segments[0]
-	info := segment.GetIndex(vecFields[0])
-	suite.Require().NotNil(info)
-
-	for _, binlog := range info[0].FieldBinlog.GetBinlogs() {
-		suite.Greater(binlog.EntriesNum, int64(0))
-	}
-}
-
 func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 	ctx := context.Background()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key, "0")
