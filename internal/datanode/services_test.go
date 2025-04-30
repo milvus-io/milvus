@@ -1222,7 +1222,8 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 	s.Run("create pre-import task", func() {
 		req := &workerpb.CreateTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey: taskcommon.PreImport,
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.PreImport,
 			},
 			Payload: []byte{},
 		}
@@ -1238,7 +1239,8 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		s.NoError(err)
 		req := &workerpb.CreateTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey: taskcommon.Import,
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Import,
 			},
 			Payload: payload,
 		}
@@ -1249,7 +1251,8 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 	s.Run("create compaction task", func() {
 		req := &workerpb.CreateTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey: taskcommon.Compaction,
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Compaction,
 			},
 			Payload: []byte{},
 		}
@@ -1265,7 +1268,8 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		s.NoError(err)
 		req := &workerpb.CreateTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey: taskcommon.Index,
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Index,
 			},
 			Payload: payload,
 		}
@@ -1281,7 +1285,8 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		s.NoError(err)
 		req := &workerpb.CreateTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey: taskcommon.Stats,
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Stats,
 			},
 			Payload: payload,
 		}
@@ -1292,7 +1297,8 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 	s.Run("create analyze task", func() {
 		req := &workerpb.CreateTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey: taskcommon.Analyze,
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Analyze,
 			},
 			Payload: []byte{},
 		}
@@ -1303,7 +1309,8 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 	s.Run("invalid task type", func() {
 		req := &workerpb.CreateTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey: "invalid",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      "invalid",
 			},
 			Payload: []byte{},
 		}
@@ -1317,8 +1324,9 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 	s.Run("query pre-import task", func() {
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.PreImport,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.PreImport,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
@@ -1329,8 +1337,9 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 	s.Run("query import task", func() {
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.Import,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Import,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
@@ -1341,8 +1350,9 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 	s.Run("query compaction task", func() {
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.Compaction,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Compaction,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
@@ -1352,8 +1362,9 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 	s.Run("query index task", func() {
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.Index,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Index,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
@@ -1363,8 +1374,9 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 	s.Run("query stats task", func() {
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.Stats,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Stats,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
@@ -1374,8 +1386,9 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 	s.Run("query analyze task", func() {
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.Analyze,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Analyze,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
@@ -1385,8 +1398,9 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 	s.Run("query slot task", func() {
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.QuerySlot,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.QuerySlot,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
@@ -1396,7 +1410,8 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 	s.Run("invalid task type", func() {
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey: "invalid",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      "invalid",
 			},
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
@@ -1409,8 +1424,9 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 	s.Run("drop pre-import task", func() {
 		req := &workerpb.DropTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.PreImport,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.PreImport,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		status, err := s.node.DropTask(s.ctx, req)
@@ -1420,8 +1436,9 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 	s.Run("drop import task", func() {
 		req := &workerpb.DropTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.Import,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Import,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		status, err := s.node.DropTask(s.ctx, req)
@@ -1431,8 +1448,9 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 	s.Run("drop compaction task", func() {
 		req := &workerpb.DropTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.Compaction,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Compaction,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		status, err := s.node.DropTask(s.ctx, req)
@@ -1442,8 +1460,9 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 	s.Run("drop index task", func() {
 		req := &workerpb.DropTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.Index,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Index,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		status, err := s.node.DropTask(s.ctx, req)
@@ -1453,8 +1472,9 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 	s.Run("drop stats task", func() {
 		req := &workerpb.DropTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.Stats,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Stats,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		status, err := s.node.DropTask(s.ctx, req)
@@ -1464,8 +1484,9 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 	s.Run("drop analyze task", func() {
 		req := &workerpb.DropTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey:   taskcommon.Analyze,
-				taskcommon.TaskIDKey: "1",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Analyze,
+				taskcommon.TaskIDKey:    "1",
 			},
 		}
 		status, err := s.node.DropTask(s.ctx, req)
@@ -1475,7 +1496,8 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 	s.Run("invalid task type", func() {
 		req := &workerpb.DropTaskRequest{
 			Properties: map[string]string{
-				taskcommon.TypeKey: "invalid",
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      "invalid",
 			},
 		}
 		status, err := s.node.DropTask(s.ctx, req)

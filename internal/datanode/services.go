@@ -729,7 +729,9 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			return nil, err
 		}
 		resProperties := taskcommon.NewProperties(nil)
-		resProperties.AppendTaskState(taskcommon.FromCompactionState(resp.GetResults()[0].GetState()))
+		if len(resp.GetResults()) > 0 {
+			resProperties.AppendTaskState(taskcommon.FromCompactionState(resp.GetResults()[0].GetState()))
+		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.Index:
 		resp, err := node.queryIndexTask(ctx, &workerpb.QueryJobsRequest{ClusterID: clusterID, TaskIDs: []int64{taskID}})
@@ -737,8 +739,11 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			return nil, err
 		}
 		resProperties := taskcommon.NewProperties(nil)
-		resProperties.AppendTaskState(taskcommon.State(resp.GetIndexJobResults().GetResults()[0].GetState()))
-		resProperties.AppendReason(resp.GetIndexJobResults().GetResults()[0].GetFailReason())
+		results := resp.GetIndexJobResults().GetResults()
+		if len(results) > 0 {
+			resProperties.AppendTaskState(taskcommon.State(results[0].GetState()))
+			resProperties.AppendReason(results[0].GetFailReason())
+		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.Stats:
 		resp, err := node.queryStatsTask(ctx, &workerpb.QueryJobsRequest{ClusterID: clusterID, TaskIDs: []int64{taskID}})
@@ -746,8 +751,11 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			return nil, err
 		}
 		resProperties := taskcommon.NewProperties(nil)
-		resProperties.AppendTaskState(resp.GetStatsJobResults().GetResults()[0].GetState())
-		resProperties.AppendReason(resp.GetStatsJobResults().GetResults()[0].GetFailReason())
+		results := resp.GetStatsJobResults().GetResults()
+		if len(results) > 0 {
+			resProperties.AppendTaskState(results[0].GetState())
+			resProperties.AppendReason(results[0].GetFailReason())
+		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.Analyze:
 		resp, err := node.queryAnalyzeTask(ctx, &workerpb.QueryJobsRequest{ClusterID: clusterID, TaskIDs: []int64{taskID}})
@@ -755,8 +763,11 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			return nil, err
 		}
 		resProperties := taskcommon.NewProperties(nil)
-		resProperties.AppendTaskState(resp.GetAnalyzeJobResults().GetResults()[0].GetState())
-		resProperties.AppendReason(resp.GetAnalyzeJobResults().GetResults()[0].GetFailReason())
+		results := resp.GetAnalyzeJobResults().GetResults()
+		if len(results) > 0 {
+			resProperties.AppendTaskState(results[0].GetState())
+			resProperties.AppendReason(results[0].GetFailReason())
+		}
 		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.QuerySlot:
 		resp, err := node.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
