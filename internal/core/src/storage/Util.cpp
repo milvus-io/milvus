@@ -47,6 +47,10 @@
 #include "storage/ThreadPools.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "segcore/memory_planner.h"
+#include "mmap/Types.h"
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::storage {
 
@@ -838,6 +842,40 @@ CreateChunkManager(const StorageConfig& storage_config) {
     }
 }
 
+milvus_storage::ArrowFileSystemPtr
+InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
+    if (storage_config.storage_type == "local") {
+        std::string path(storage_config.root_path);
+        milvus_storage::ArrowFileSystemConfig conf;
+        conf.root_path = path;
+        conf.storage_type = "local";
+        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+    } else {
+        milvus_storage::ArrowFileSystemConfig conf;
+        conf.address = std::string(storage_config.address);
+        conf.bucket_name = std::string(storage_config.bucket_name);
+        conf.access_key_id = std::string(storage_config.access_key_id);
+        conf.access_key_value = std::string(storage_config.access_key_value);
+        conf.root_path = std::string(storage_config.root_path);
+        conf.storage_type = std::string(storage_config.storage_type);
+        conf.cloud_provider = std::string(storage_config.cloud_provider);
+        conf.iam_endpoint = std::string(storage_config.iam_endpoint);
+        conf.log_level = std::string(storage_config.log_level);
+        conf.region = std::string(storage_config.region);
+        conf.useSSL = storage_config.useSSL;
+        conf.sslCACert = std::string(storage_config.sslCACert);
+        conf.useIAM = storage_config.useIAM;
+        conf.useVirtualHost = storage_config.useVirtualHost;
+        conf.requestTimeoutMs = storage_config.requestTimeoutMs;
+        conf.gcp_credential_json =
+            std::string(storage_config.gcp_credential_json);
+        conf.use_custom_part_upload = true;
+        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+    }
+    return milvus_storage::ArrowFileSystemSingleton::GetInstance()
+        .GetArrowFileSystem();
+}
+
 FieldDataPtr
 CreateFieldData(const DataType& type,
                 bool nullable,
@@ -975,6 +1013,92 @@ FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
         FetchRawData();
     }
     return field_datas;
+}
+
+std::vector<FieldDataPtr>
+GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
+                           int64_t field_id,
+                           DataType data_type,
+                           int64_t dim) {
+    AssertInfo(remote_files.size() > 0, "remote files size is 0");
+    std::vector<FieldDataPtr> field_data_list;
+    for (auto& remote_chunk_files : remote_files) {
+        AssertInfo(remote_chunk_files.size() > 0, "remote files size is 0");
+
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        // read first file to get path and column offset of the field id
+        auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+            fs, remote_chunk_files[0]);
+        std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
+            file_reader->file_metadata();
+
+        auto field_id_mapping = metadata->GetFieldIDMapping();
+
+        auto it = field_id_mapping.find(field_id);
+        AssertInfo(it != field_id_mapping.end(),
+                   "field id {} not found in field id mapping",
+                   field_id);
+        auto column_offset = it->second;
+        AssertInfo(column_offset.path_index < remote_files.size(),
+                   "column offset path index {} is out of range",
+                   column_offset.path_index);
+        auto column_group_file = remote_chunk_files[column_offset.path_index];
+
+        // set up channel for arrow reader
+        auto field_data_info = FieldDataInfo();
+        auto parallel_degree = static_cast<uint64_t>(
+            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+        field_data_info.arrow_reader_channel->set_capacity(parallel_degree);
+
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+
+        // get all row groups for each file
+        std::vector<std::vector<int64_t>> row_group_lists;
+        auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+            fs, column_group_file);
+        auto row_group_num =
+            reader->file_metadata()->GetRowGroupMetadataVector().size();
+        std::vector<int64_t> all_row_groups(row_group_num);
+        std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
+        row_group_lists.push_back(all_row_groups);
+
+        // create a schema with only the field id
+        auto field_schema =
+            file_reader->schema()->field(column_offset.col_index)->Copy();
+        auto arrow_schema = arrow::schema({field_schema});
+
+        // split row groups for parallel reading
+        auto strategy = std::make_unique<segcore::ParallelDegreeSplitStrategy>(
+            parallel_degree);
+        auto load_future = pool.Submit([&]() {
+            return LoadWithStrategy(std::vector<std::string>{column_group_file},
+                                    field_data_info.arrow_reader_channel,
+                                    DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                                    std::move(strategy),
+                                    row_group_lists,
+                                    nullptr);
+        });
+        // read field data from channel
+        std::shared_ptr<milvus::ArrowDataWrapper> r;
+        while (field_data_info.arrow_reader_channel->pop(r)) {
+            size_t num_rows = 0;
+            std::vector<std::shared_ptr<arrow::ChunkedArray>> chunked_arrays;
+            for (const auto& table : r->arrow_tables) {
+                num_rows += table->num_rows();
+                chunked_arrays.push_back(
+                    table->column(column_offset.col_index));
+            }
+            auto field_data = storage::CreateFieldData(
+                data_type, field_schema->nullable(), dim, num_rows);
+            for (const auto& chunked_array : chunked_arrays) {
+                field_data->FillFieldData(chunked_array);
+            }
+            field_data_list.push_back(field_data);
+        }
+    }
+    return field_data_list;
 }
 
 }  // namespace milvus::storage

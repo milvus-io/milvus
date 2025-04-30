@@ -33,7 +33,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -89,4 +92,22 @@ func CalculateNodeSlots() int64 {
 		slot = memorySlot
 	}
 	return max(slot, 1) * paramtable.Get().DataNodeCfg.WorkerSlotUnit.GetAsInt64() * paramtable.Get().DataNodeCfg.BuildParallel.GetAsInt64()
+}
+
+func GetSegmentInsertFiles(fieldBinlogs []*datapb.FieldBinlog, rootPath string, collectionID int64, partitionID int64, segmentID int64) *indexcgopb.SegmentInsertFiles {
+	insertLogs := make([]*indexcgopb.FieldInsertFiles, 0)
+	for _, insertLog := range fieldBinlogs {
+		filePaths := make([]string, 0)
+		columnGroupID := insertLog.GetFieldID()
+		for _, binlog := range insertLog.GetBinlogs() {
+			filePaths = append(filePaths,
+				metautil.BuildInsertLogPath(rootPath, collectionID, partitionID, segmentID, columnGroupID, binlog.GetLogID()))
+		}
+		insertLogs = append(insertLogs, &indexcgopb.FieldInsertFiles{
+			FilePaths: filePaths,
+		})
+	}
+	return &indexcgopb.SegmentInsertFiles{
+		FieldInsertFiles: insertLogs,
+	}
 }

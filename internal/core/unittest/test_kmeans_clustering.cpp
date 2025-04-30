@@ -65,10 +65,10 @@ transforConfigToPB(const Config& config) {
         num_rows[k] = v;
     }
     auto& insert_files = *analyze_info.mutable_insert_files();
-    auto insert_files_map =
-        milvus::index::GetValueFromConfig<
-            std::map<int64_t, std::vector<std::string>>>(config, "insert_files")
-            .value();
+    auto insert_files_map = milvus::index::GetValueFromConfig<
+                                std::map<int64_t, std::vector<std::string>>>(
+                                config, INSERT_FILES_KEY)
+                                .value();
     for (const auto& [k, v] : insert_files_map) {
         for (auto i = 0; i < v.size(); i++)
             insert_files[k].add_insert_files(v[i]);
@@ -231,7 +231,7 @@ test_run() {
     // no need to sample train data
     {
         config["min_cluster_ratio"] = 0.01;
-        config["insert_files"] = remote_files;
+        config[INSERT_FILES_KEY] = remote_files;
         config["num_clusters"] = 8;
         config["train_size"] = 25L * 1024 * 1024 * 1024;  // 25GB
         config["dim"] = dim;
@@ -248,7 +248,7 @@ test_run() {
     }
     {
         config["min_cluster_ratio"] = 0.01;
-        config["insert_files"] = remote_files;
+        config[INSERT_FILES_KEY] = remote_files;
         config["num_clusters"] = 200;
         config["train_size"] = 25L * 1024 * 1024 * 1024;  // 25GB
         config["dim"] = dim;
@@ -268,7 +268,7 @@ test_run() {
         EXPECT_THROW(
             try {
                 config["min_cluster_ratio"] = 0.01;
-                config["insert_files"] = remote_files;
+                config[INSERT_FILES_KEY] = remote_files;
                 config["num_clusters"] = 100000;
                 config["train_size"] = 25L * 1024 * 1024 * 1024;  // 25GB
                 config["dim"] = dim;
@@ -287,7 +287,7 @@ test_run() {
         EXPECT_THROW(
             try {
                 config["min_cluster_ratio"] = 0.98;
-                config["insert_files"] = remote_files;
+                config[INSERT_FILES_KEY] = remote_files;
                 config["num_clusters"] = 8;
                 config["train_size"] = 25L * 1024 * 1024 * 1024;  // 25GB
                 config["dim"] = dim;
@@ -304,7 +304,7 @@ test_run() {
     // need to sample train data case1
     {
         config["min_cluster_ratio"] = 0.01;
-        config["insert_files"] = remote_files;
+        config[INSERT_FILES_KEY] = remote_files;
         config["num_clusters"] = 8;
         config["train_size"] = 1536L * 1024;  // 1.5MB
         config["dim"] = dim;
@@ -322,7 +322,7 @@ test_run() {
     // need to sample train data case2
     {
         config["min_cluster_ratio"] = 0.01;
-        config["insert_files"] = remote_files;
+        config[INSERT_FILES_KEY] = remote_files;
         config["num_clusters"] = 8;
         config["train_size"] = 6L * 1024 * 1024;  // 6MB
         config["dim"] = dim;

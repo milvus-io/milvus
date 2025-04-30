@@ -24,8 +24,9 @@
 
 #include "storage/IndexData.h"
 #include "storage/FileManager.h"
-#include "storage/ChunkManager.h"
+#include "storage/LocalChunkManager.h"
 #include "common/Consts.h"
+#include "storage/Types.h"
 
 namespace milvus::storage {
 
@@ -118,7 +119,7 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     template <typename DataType>
     std::string
-    CacheRawDataToDisk(std::vector<std::string> remote_files);
+    CacheRawDataToDisk(const Config& config);
 
     std::string
     CacheOptFieldToDisk(OptFieldT& fields_map);
@@ -160,6 +161,25 @@ class DiskFileManagerImpl : public FileManagerImpl {
     CacheIndexToDiskInternal(
         const std::vector<std::string>& remote_files,
         const std::function<std::string()>& get_local_index_prefix) noexcept;
+
+    template <typename DataType>
+    std::string
+    cache_raw_data_to_disk_internal(const Config& config);
+
+    template <typename T>
+    std::string
+    cache_raw_data_to_disk_storage_v2(const Config& config);
+
+    template <typename DataType>
+    void
+    cache_raw_data_to_disk_common(
+        const FieldDataPtr& field_data,
+        const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
+        std::string& local_data_path,
+        bool& file_created,
+        uint32_t& num_rows,
+        uint32_t& dim,
+        int64_t& write_offset);
 
  private:
     // local file path (abs path)

@@ -22,53 +22,13 @@
 #include "index/IndexFactory.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "index/Meta.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
+using namespace milvus::segcore;
 
 namespace milvus::test {
-auto
-gen_field_data_meta(int64_t collection_id = 1,
-                    int64_t partition_id = 2,
-                    int64_t segment_id = 3,
-                    int64_t field_id = 101,
-                    DataType data_type = DataType::NONE,
-                    DataType element_type = DataType::NONE,
-                    bool nullable = false) -> storage::FieldDataMeta {
-    auto meta = storage::FieldDataMeta{
-        .collection_id = collection_id,
-        .partition_id = partition_id,
-        .segment_id = segment_id,
-        .field_id = field_id,
-    };
-    meta.field_schema.set_data_type(
-        static_cast<proto::schema::DataType>(data_type));
-    meta.field_schema.set_element_type(
-        static_cast<proto::schema::DataType>(element_type));
-    meta.field_schema.set_nullable(nullable);
-    return meta;
-}
-
-auto
-gen_index_meta(int64_t segment_id = 3,
-               int64_t field_id = 101,
-               int64_t index_build_id = 1000,
-               int64_t index_version = 10000) -> storage::IndexMeta {
-    return storage::IndexMeta{
-        .segment_id = segment_id,
-        .field_id = field_id,
-        .build_id = index_build_id,
-        .index_version = index_version,
-    };
-}
-
-auto
-gen_local_storage_config(const std::string& root_path)
-    -> storage::StorageConfig {
-    auto ret = storage::StorageConfig{};
-    ret.storage_type = "local";
-    ret.root_path = root_path;
-    return ret;
-}
 
 struct ChunkManagerWrapper {
     ChunkManagerWrapper(storage::ChunkManagerPtr cm) : cm_(cm) {
@@ -109,15 +69,15 @@ test_run() {
     int64_t index_version = 4000;
     int64_t lack_binlog_row = 100;
 
-    auto field_meta = test::gen_field_data_meta(collection_id,
-                                                partition_id,
-                                                segment_id,
-                                                field_id,
-                                                dtype,
-                                                element_type,
-                                                nullable);
-    auto index_meta = test::gen_index_meta(
-        segment_id, field_id, index_build_id, index_version);
+    auto field_meta = gen_field_meta(collection_id,
+                                     partition_id,
+                                     segment_id,
+                                     field_id,
+                                     dtype,
+                                     element_type,
+                                     nullable);
+    auto index_meta =
+        gen_index_meta(segment_id, field_id, index_build_id, index_version);
 
     if (has_default_value_) {
         auto default_value = field_meta.field_schema.mutable_default_value();
@@ -134,7 +94,7 @@ test_run() {
     }
 
     std::string root_path = "/tmp/test-inverted-index/";
-    auto storage_config = test::gen_local_storage_config(root_path);
+    auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
 
     size_t nb = 10000;
@@ -206,7 +166,7 @@ test_run() {
     {
         Config config;
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
-        config["insert_files"] = std::vector<std::string>{log_path};
+        config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         if (has_lack_binlog_row_) {
             config["lack_binlog_rows"] = lack_binlog_row;
         }
@@ -518,15 +478,15 @@ test_string() {
     int64_t index_version = 4001;
     int64_t lack_binlog_row = 100;
 
-    auto field_meta = test::gen_field_data_meta(collection_id,
-                                                partition_id,
-                                                segment_id,
-                                                field_id,
-                                                dtype,
-                                                DataType::NONE,
-                                                nullable);
-    auto index_meta = test::gen_index_meta(
-        segment_id, field_id, index_build_id, index_version);
+    auto field_meta = gen_field_meta(collection_id,
+                                     partition_id,
+                                     segment_id,
+                                     field_id,
+                                     dtype,
+                                     DataType::NONE,
+                                     nullable);
+    auto index_meta =
+        gen_index_meta(segment_id, field_id, index_build_id, index_version);
 
     if (has_default_value_) {
         auto default_value = field_meta.field_schema.mutable_default_value();
@@ -534,7 +494,7 @@ test_string() {
     }
 
     std::string root_path = "/tmp/test-inverted-index/";
-    auto storage_config = test::gen_local_storage_config(root_path);
+    auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
 
     size_t nb = 10000;
@@ -597,7 +557,7 @@ test_string() {
     {
         Config config;
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
-        config["insert_files"] = std::vector<std::string>{log_path};
+        config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         if (has_lack_binlog_row_) {
             config["lack_binlog_rows"] = lack_binlog_row;
         }

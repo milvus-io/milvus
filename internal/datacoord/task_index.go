@@ -288,8 +288,9 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		OptionalScalarFields:      optionalFields,
 		Field:                     field,
 		PartitionKeyIsolation:     partitionKeyIsolation,
-		StorageVersion:            segment.StorageVersion,
+		StorageVersion:            segment.GetStorageVersion(),
 		TaskSlot:                  it.taskSlot,
+		InsertLogs:                segment.GetBinlogs(),
 	}
 
 	it.req.LackBinlogRows = it.req.NumRows - totalRows

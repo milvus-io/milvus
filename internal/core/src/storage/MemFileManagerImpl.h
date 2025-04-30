@@ -55,7 +55,7 @@ class MemFileManagerImpl : public FileManagerImpl {
     LoadIndexToMemory(const std::vector<std::string>& remote_files);
 
     std::vector<FieldDataPtr>
-    CacheRawDataToMemory(std::vector<std::string> remote_files);
+    CacheRawDataToMemory(const Config& config);
 
     bool
     AddFile(const BinarySet& binary_set);
@@ -79,6 +79,12 @@ class MemFileManagerImpl : public FileManagerImpl {
  private:
     bool
     AddBinarySet(const BinarySet& binary_set, const std::string& prefix);
+
+    std::vector<FieldDataPtr>
+    cache_row_data_to_memory_internal(const Config& config);
+
+    std::vector<FieldDataPtr>
+    cache_row_data_to_memory_storage_v2(const Config& config);
 
  private:
     // remote file path

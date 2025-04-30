@@ -273,13 +273,7 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 template <typename T>
 void
 VectorMemIndex<T>::Build(const Config& config) {
-    auto insert_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
-    AssertInfo(insert_files.has_value(),
-               "insert file paths is empty when building in memory index");
-    auto field_datas =
-        file_manager_->CacheRawDataToMemory(insert_files.value());
-
+    auto field_datas = file_manager_->CacheRawDataToMemory(config);
     auto opt_fields = GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> scalar_info;
     auto is_partition_key_isolation =
@@ -292,7 +286,7 @@ VectorMemIndex<T>::Build(const Config& config) {
 
     Config build_config;
     build_config.update(config);
-    build_config.erase("insert_files");
+    build_config.erase(INSERT_FILES_KEY);
     build_config.erase(VEC_OPT_FIELDS);
     if (!IndexIsSparse(GetIndexType())) {
         int64_t total_size = 0;
