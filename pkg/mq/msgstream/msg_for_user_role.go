@@ -394,3 +394,56 @@ func (c *OperatePrivilegeMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 func (c *OperatePrivilegeMsg) Size() int {
 	return proto.Size(c.OperatePrivilegeRequest)
 }
+
+type OperatePrivilegeV2Msg struct {
+	BaseMsg
+	*milvuspb.OperatePrivilegeV2Request
+}
+
+var _ TsMsg = &OperatePrivilegeV2Msg{}
+
+func (c *OperatePrivilegeV2Msg) ID() UniqueID {
+	return c.Base.MsgID
+}
+
+func (c *OperatePrivilegeV2Msg) SetID(id UniqueID) {
+	c.Base.MsgID = id
+}
+
+func (c *OperatePrivilegeV2Msg) Type() MsgType {
+	return c.Base.MsgType
+}
+
+func (c *OperatePrivilegeV2Msg) SourceID() int64 {
+	return c.Base.SourceID
+}
+
+func (c *OperatePrivilegeV2Msg) Marshal(input TsMsg) (MarshalType, error) {
+	operatePrivilegeV2Msg := input.(*OperatePrivilegeV2Msg)
+	operatePrivilegeV2Request := operatePrivilegeV2Msg.OperatePrivilegeV2Request
+	mb, err := proto.Marshal(operatePrivilegeV2Request)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (c *OperatePrivilegeV2Msg) Unmarshal(input MarshalType) (TsMsg, error) {
+	operatePrivilegeV2Request := &milvuspb.OperatePrivilegeV2Request{}
+	in, err := convertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, operatePrivilegeV2Request)
+	if err != nil {
+		return nil, err
+	}
+	operatePrivilegeV2Msg := &OperatePrivilegeV2Msg{OperatePrivilegeV2Request: operatePrivilegeV2Request}
+	operatePrivilegeV2Msg.BeginTimestamp = operatePrivilegeV2Msg.GetBase().GetTimestamp()
+	operatePrivilegeV2Msg.EndTimestamp = operatePrivilegeV2Msg.GetBase().GetTimestamp()
+	return operatePrivilegeV2Msg, nil
+}
+
+func (c *OperatePrivilegeV2Msg) Size() int {
+	return proto.Size(c.OperatePrivilegeV2Request)
+}

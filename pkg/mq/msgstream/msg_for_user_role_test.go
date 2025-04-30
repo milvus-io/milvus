@@ -312,3 +312,45 @@ func TestOperatePrivilege(t *testing.T) {
 
 	assert.True(t, msg.Size() > 0)
 }
+
+func TestOperatePrivilegeV2(t *testing.T) {
+	var msg TsMsg = &OperatePrivilegeV2Msg{
+		OperatePrivilegeV2Request: &milvuspb.OperatePrivilegeV2Request{
+			Base: &commonpb.MsgBase{
+				MsgType:       commonpb.MsgType_OperatePrivilegeV2,
+				MsgID:         100,
+				Timestamp:     1000,
+				SourceID:      10000,
+				TargetID:      100000,
+				ReplicateInfo: nil,
+			},
+			Grantor: &milvuspb.GrantorEntity{
+				User: &milvuspb.UserEntity{Name: "unit_user"},
+				Privilege: &milvuspb.PrivilegeEntity{
+					Name: "unit_privilege",
+				},
+			},
+			Type: milvuspb.OperatePrivilegeType_Grant,
+		},
+	}
+	assert.EqualValues(t, 100, msg.ID())
+	msg.SetID(200)
+	assert.EqualValues(t, 200, msg.ID())
+	assert.Equal(t, commonpb.MsgType_OperatePrivilegeV2, msg.Type())
+	assert.EqualValues(t, 10000, msg.SourceID())
+
+	msgBytes, err := msg.Marshal(msg)
+	assert.NoError(t, err)
+
+	var newMsg TsMsg = &OperatePrivilegeV2Msg{}
+	_, err = newMsg.Unmarshal("1")
+	assert.Error(t, err)
+
+	newMsg, err = newMsg.Unmarshal(msgBytes)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 200, newMsg.ID())
+	assert.EqualValues(t, 1000, newMsg.BeginTs())
+	assert.EqualValues(t, 1000, newMsg.EndTs())
+	assert.EqualValues(t, "unit_user", newMsg.(*OperatePrivilegeV2Msg).GetGrantor().GetUser().GetName())
+	assert.EqualValues(t, "unit_privilege", newMsg.(*OperatePrivilegeV2Msg).GetGrantor().GetPrivilege().GetName())
+}
