@@ -26,7 +26,7 @@ import jieba
 import re
 import inspect
 
-from pymilvus import CollectionSchema, DataType, FunctionType, Function, MilvusException
+from pymilvus import CollectionSchema, DataType, FunctionType, Function, MilvusException, MilvusClient
 
 from bm25s.tokenization import Tokenizer
 
@@ -264,6 +264,24 @@ def analyze_documents(texts, language="en"):
         word_freq = Counter({word: count for word, count in word_freq.items() if 1< len(word) <= 3})
     log.info(f"word freq {word_freq.most_common(10)}")
     return word_freq
+
+
+def analyze_documents_with_analyzer_params(texts, analyzer_params):
+    if param_info.param_uri:
+        uri = param_info.param_uri
+    else:
+        uri = "http://" + param_info.param_host + ":" + str(param_info.param_port)
+
+    client = MilvusClient(
+        uri = uri,
+        token = param_info.param_token
+    )
+    freq = Counter()
+    res = client.run_analyzer(texts, analyzer_params, with_detail=True, with_hash=True)
+    for r in res:
+        freq.update(t['token'] for t in r.tokens)
+    log.info(f"word freq {freq.most_common(10)}")
+    return freq
 
 
 def check_token_overlap(text_a, text_b, language="en"):
@@ -2446,7 +2464,7 @@ def gen_json_field_expressions_all_single_operator():
                    "json_field is null", "json_field IS NULL", "json_field is not null", "json_field IS NOT NULL",
                    "json_field['a'] is null", "json_field['a'] IS NULL", "json_field['a'] is not null", "json_field['a'] IS NOT NULL"
                    ]
-    
+
     return expressions
 
 
