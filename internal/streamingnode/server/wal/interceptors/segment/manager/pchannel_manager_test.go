@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -112,8 +113,16 @@ func TestSegmentAllocManager(t *testing.T) {
 	assert.True(t, m.IsNoWaitSeal()) // result2 is acked, so new seal segment will be sealed right away.
 
 	// interactive with txn
-	txnManager := txn.NewTxnManager(types.PChannelInfo{Name: "test"})
-	txn, err := txnManager.BeginNewTxn(context.Background(), tsoutil.GetCurrentTime(), time.Second)
+	txnManager := txn.NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+	msg := message.NewBeginTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: 1000}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(tsoutil.GetCurrentTime())
+
+	beginTxnMsg, _ := message.AsMutableBeginTxnMessageV2(msg)
+	txn, err := txnManager.BeginNewTxn(ctx, beginTxnMsg)
 	assert.NoError(t, err)
 	txn.BeginDone()
 

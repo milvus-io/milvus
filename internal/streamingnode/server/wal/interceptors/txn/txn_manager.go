@@ -18,31 +18,69 @@ import (
 )
 
 // NewTxnManager creates a new transaction manager.
-func NewTxnManager(pchannel types.PChannelInfo) *TxnManager {
-	return &TxnManager{
-		mu:       sync.Mutex{},
-		sessions: make(map[message.TxnID]*TxnSession),
-		closed:   nil,
-		metrics:  metricsutil.NewTxnMetrics(pchannel.Name),
-		logger:   resource.Resource().Logger().With(log.FieldComponent("txn-manager")),
+// incoming buffer is used to recover the uncommitted messages for txn manager.
+func NewTxnManager(pchannel types.PChannelInfo, uncommittedTxnBuilders map[message.TxnID]*message.ImmutableTxnMessageBuilder) *TxnManager {
+	m := metricsutil.NewTxnMetrics(pchannel.Name)
+	sessions := make(map[message.TxnID]*TxnSession, len(uncommittedTxnBuilders))
+	recoveredSessions := make(map[message.TxnID]struct{}, len(uncommittedTxnBuilders))
+	sessionIDs := make([]int64, 0, len(uncommittedTxnBuilders))
+	for _, builder := range uncommittedTxnBuilders {
+		beginMessages, body := builder.Messages()
+		session := newTxnSession(
+			beginMessages.VChannel(),
+			*beginMessages.TxnContext(), // must be the txn message.
+			beginMessages.TimeTick(),
+			m.BeginTxn(),
+		)
+		for _, msg := range body {
+			session.AddNewMessage(context.Background(), msg.TimeTick())
+			session.AddNewMessageDoneAndKeepalive(msg.TimeTick())
+		}
+		sessions[session.TxnContext().TxnID] = session
+		recoveredSessions[session.TxnContext().TxnID] = struct{}{}
+		sessionIDs = append(sessionIDs, int64(session.TxnContext().TxnID))
 	}
+	txnManager := &TxnManager{
+		mu:                        sync.Mutex{},
+		recoveredSessions:         recoveredSessions,
+		recoveredSessionsDoneChan: make(chan struct{}),
+		sessions:                  sessions,
+		closed:                    nil,
+		metrics:                   m,
+	}
+	txnManager.notifyRecoverDone()
+	txnManager.SetLogger(resource.Resource().Logger().With(log.FieldComponent("txn-manager")))
+	txnManager.Logger().Info("txn manager recovered with txn", zap.Int64s("txnIDs", sessionIDs))
+	return txnManager
 }
 
 // TxnManager is the manager of transactions.
 // We don't support cross wal transaction by now and
 // We don't support the transaction lives after the wal transferred to another streaming node.
 type TxnManager struct {
-	mu       sync.Mutex
-	sessions map[message.TxnID]*TxnSession
-	closed   lifetime.SafeChan
-	metrics  *metricsutil.TxnMetrics
-	logger   *log.MLogger
+	log.Binder
+
+	mu                        sync.Mutex
+	recoveredSessions         map[message.TxnID]struct{}
+	recoveredSessionsDoneChan chan struct{}
+	sessions                  map[message.TxnID]*TxnSession
+	closed                    lifetime.SafeChan
+	metrics                   *metricsutil.TxnMetrics
+}
+
+// RecoverDone returns a channel that is closed when all transactions are cleaned up.
+func (m *TxnManager) RecoverDone() <-chan struct{} {
+	return m.recoveredSessionsDoneChan
 }
 
 // BeginNewTxn starts a new transaction with a session.
 // We only support a transaction work on a streaming node, once the wal is transferred to another node,
 // the transaction is treated as expired (rollback), and user will got a expired error, then perform a retry.
-func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive time.Duration) (*TxnSession, error) {
+func (m *TxnManager) BeginNewTxn(ctx context.Context, msg message.MutableBeginTxnMessageV2) (*TxnSession, error) {
+	timetick := msg.TimeTick()
+	vchannel := msg.VChannel()
+	keepalive := time.Duration(msg.Header().KeepaliveMilliseconds) * time.Millisecond
+
 	if keepalive == 0 {
 		// If keepalive is 0, the txn set the keepalive with default keepalive.
 		keepalive = paramtable.Get().StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse()
@@ -62,22 +100,33 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, timetick uint64, keepalive
 	if m.closed != nil {
 		return nil, status.NewTransactionExpired("manager closed")
 	}
-	metricsGuard := m.metrics.BeginTxn()
-	session := &TxnSession{
-		mu:           sync.Mutex{},
-		lastTimetick: timetick,
-		txnContext: message.TxnContext{
-			TxnID:     message.TxnID(id),
-			Keepalive: keepalive,
-		},
-		inFlightCount: 0,
-		state:         message.TxnStateBegin,
-		doneWait:      nil,
-		rollback:      false,
-		metricsGuard:  metricsGuard,
+	txnCtx := message.TxnContext{
+		TxnID:     message.TxnID(id),
+		Keepalive: keepalive,
 	}
+	session := newTxnSession(vchannel, txnCtx, timetick, m.metrics.BeginTxn())
 	m.sessions[session.TxnContext().TxnID] = session
 	return session, nil
+}
+
+// FailTxnAtVChannel fails all transactions at the specified vchannel.
+func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
+	// avoid the txn to be committed.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ids := make([]int64, 0, len(m.sessions))
+	for id, session := range m.sessions {
+		if session.VChannel() == vchannel {
+			session.Cleanup()
+			delete(m.sessions, id)
+			delete(m.recoveredSessions, id)
+			ids = append(ids, int64(id))
+		}
+	}
+	if len(ids) > 0 {
+		m.Logger().Info("transaction interrupted", zap.String("vchannel", vchannel), zap.Int64s("txnIDs", ids))
+	}
+	m.notifyRecoverDone()
 }
 
 // CleanupTxnUntil cleans up the transactions until the specified timestamp.
@@ -89,12 +138,23 @@ func (m *TxnManager) CleanupTxnUntil(ts uint64) {
 		if session.IsExpiredOrDone(ts) {
 			session.Cleanup()
 			delete(m.sessions, id)
+			delete(m.recoveredSessions, id)
 		}
 	}
 
 	// If the manager is on graceful shutdown and all transactions are cleaned up.
 	if len(m.sessions) == 0 && m.closed != nil {
 		m.closed.Close()
+	}
+
+	m.notifyRecoverDone()
+}
+
+// notifyRecoverDone notifies the recover done channel if all transactions from recover info is done.
+func (m *TxnManager) notifyRecoverDone() {
+	if len(m.recoveredSessions) == 0 && m.recoveredSessions != nil {
+		close(m.recoveredSessionsDoneChan)
+		m.recoveredSessions = nil
 	}
 }
 
@@ -121,7 +181,7 @@ func (m *TxnManager) GracefulClose(ctx context.Context) error {
 			m.closed.Close()
 		}
 	}
-	m.logger.Info("there's still txn session in txn manager, waiting for them to be consumed", zap.Int("session count", len(m.sessions)))
+	m.Logger().Info("graceful close txn manager", zap.Int("activeTxnCount", len(m.sessions)))
 	m.mu.Unlock()
 
 	select {

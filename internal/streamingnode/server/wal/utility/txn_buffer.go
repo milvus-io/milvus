@@ -29,6 +29,11 @@ func (b *TxnBuffer) Bytes() int {
 	return b.bytes
 }
 
+// GetUncommittedMessageBuilder returns the uncommitted message builders.
+func (b *TxnBuffer) GetUncommittedMessageBuilder() map[message.TxnID]*message.ImmutableTxnMessageBuilder {
+	return b.builders
+}
+
 // HandleImmutableMessages handles immutable messages.
 // The timetick of msgs should be in ascending order, and the timetick of all messages is less than or equal to ts.
 // Hold the uncommitted txn messages until the commit or rollback message comes and pop the committed txn messages.

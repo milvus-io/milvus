@@ -23,8 +23,10 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	operator := newTimeTickSyncOperator(param)
 	// initialize operation can be async to avoid block the build operation.
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
+
 	return &timeTickAppendInterceptor{
-		operator:   operator,
-		txnManager: txn.NewTxnManager(param.ChannelInfo),
+		operator: operator,
+		// TODO: it's just a placeholder, should be replaced after recovery storage is merged.
+		txnManager: txn.NewTxnManager(param.ChannelInfo, nil),
 	}
 }
