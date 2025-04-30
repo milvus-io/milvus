@@ -1227,6 +1227,20 @@ func requeryImpl(t *searchTask, span trace.Span, ids *schemapb.IDs, outputFields
 	return queryResult, err
 }
 
+func isEmpty(ids *schemapb.IDs) bool {
+	if ids == nil {
+		return true
+	}
+	if ids.GetIntId() != nil && len(ids.GetIntId().Data) != 0 {
+		return false
+	}
+
+	if ids.GetStrId() != nil && len(ids.GetStrId().Data) != 0 {
+		return false
+	}
+	return true
+}
+
 func (t *searchTask) reorganizeRequeryResults(ctx context.Context, fields []*schemapb.FieldData, idsList []*schemapb.IDs) ([][]*schemapb.FieldData, error) {
 	_, sp := otel.Tracer(typeutil.ProxyRole).Start(t.ctx, "reorganizeRequeryResults")
 	defer sp.End()
@@ -1247,8 +1261,17 @@ func (t *searchTask) reorganizeRequeryResults(ctx context.Context, fields []*sch
 
 	allFieldData := make([][]*schemapb.FieldData, len(idsList))
 	for idx, ids := range idsList {
-		if ids == nil {
-			allFieldData[idx] = []*schemapb.FieldData{}
+		if isEmpty(ids) {
+			emptyFields := []*schemapb.FieldData{}
+			for _, field := range fields {
+				emptyFields = append(emptyFields, &schemapb.FieldData{
+					Type:      field.Type,
+					FieldName: field.FieldName,
+					FieldId:   field.FieldId,
+					IsDynamic: field.IsDynamic,
+				})
+			}
+			allFieldData[idx] = emptyFields
 			continue
 		}
 		if fieldData, err := t.pickFieldData(ids, offsets, fields); err != nil {
@@ -1335,7 +1358,6 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 		if err != nil {
 			return nil, err
 		}
-
 		results = append(results, &partialResultData)
 	}
 	tr.CtxElapse(ctx, "decodeSearchResults done")
