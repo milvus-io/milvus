@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -438,7 +439,12 @@ func (opt *hybridSearchOption) WithConsistencyLevel(cl entity.ConsistencyLevel) 
 	return opt
 }
 
+// Deprecated: typo, use WithPartitions instead
 func (opt *hybridSearchOption) WithPartitons(partitions ...string) *hybridSearchOption {
+	return opt.WithPartitions(partitions...)
+}
+
+func (opt *hybridSearchOption) WithPartitions(partitions ...string) *hybridSearchOption {
 	opt.partitionNames = partitions
 	return opt
 }
@@ -490,8 +496,7 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 
 func NewHybridSearchOption(collectionName string, limit int, annRequests ...*annRequest) *hybridSearchOption {
 	return &hybridSearchOption{
-		collectionName: collectionName,
-
+		collectionName:        collectionName,
 		reqs:                  annRequests,
 		useDefaultConsistency: true,
 		limit:                 limit,
@@ -606,5 +611,44 @@ func NewQueryOption(collectionName string) *queryOption {
 		useDefaultConsistencyLevel: true,
 		consistencyLevel:           entity.ClBounded,
 		templateParams:             make(map[string]any),
+	}
+}
+
+type RunAnalyzerOption interface {
+	Request() (*milvuspb.RunAnalyzerRequest, error)
+}
+
+type runAnalyzerOption struct {
+	text           []string
+	analyzerParams string
+	withDetail     bool
+	withHash       bool
+}
+
+func (opt *runAnalyzerOption) Request() (*milvuspb.RunAnalyzerRequest, error) {
+	return &milvuspb.RunAnalyzerRequest{
+		Placeholder:    lo.Map(opt.text, func(str string, _ int) []byte { return []byte(str) }),
+		AnalyzerParams: opt.analyzerParams,
+	}, nil
+}
+
+func (opt *runAnalyzerOption) WithAnalyzerParams(params string) *runAnalyzerOption {
+	opt.analyzerParams = params
+	return opt
+}
+
+func (opt *runAnalyzerOption) WithDetail() *runAnalyzerOption {
+	opt.withDetail = true
+	return opt
+}
+
+func (opt *runAnalyzerOption) WithHash() *runAnalyzerOption {
+	opt.withHash = true
+	return opt
+}
+
+func NewRunAnalyzerOption(text []string) *runAnalyzerOption {
+	return &runAnalyzerOption{
+		text: text,
 	}
 }
