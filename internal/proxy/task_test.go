@@ -864,10 +864,10 @@ func TestAddFieldTask(t *testing.T) {
 
 		// not support add partition key
 		fSchema = &schemapb.FieldSchema{
-			IsPrimaryKey: true,
-			DataType:     schemapb.DataType_Bool,
-			Nullable:     true,
-			Name:         "new field",
+			IsPartitionKey: true,
+			DataType:       schemapb.DataType_Bool,
+			Nullable:       true,
+			Name:           "new field",
 		}
 		bytes, err = proto.Marshal(fSchema)
 		assert.NoError(t, err)
