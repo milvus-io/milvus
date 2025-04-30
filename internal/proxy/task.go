@@ -513,6 +513,9 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if t.fieldSchema.AutoID {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("only primary field can speficy AutoID with true, field name = %s", t.fieldSchema.Name))
 	}
+	if t.fieldSchema.IsPartitionKey {
+		return merr.WrapErrParameterInvalidMsg("not support to add partition key field, field name  = %s", t.fieldSchema.Name)
+	}
 	if t.fieldSchema.GetIsClusteringKey() {
 		for _, f := range t.oldSchema.Fields {
 			if f.GetIsClusteringKey() {
