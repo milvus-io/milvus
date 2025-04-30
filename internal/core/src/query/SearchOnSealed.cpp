@@ -86,7 +86,7 @@ SearchOnSealedIndex(const Schema& schema,
 
 void
 SearchOnSealedColumn(const Schema& schema,
-                     ChunkedColumnBase* column,
+                     ChunkedColumnInterface* column,
                      const SearchInfo& search_info,
                      const std::map<std::string, std::string>& index_info,
                      const void* query_data,

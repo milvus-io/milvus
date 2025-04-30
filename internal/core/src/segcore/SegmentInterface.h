@@ -32,6 +32,7 @@
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "pb/schema.pb.h"
