@@ -55,7 +55,7 @@ ScalarIndexSort<T>::Build(const Config& config) {
 
     auto lack_binlog_rows =
         GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
-    if (lack_binlog_rows.has_value()) {
+    if (lack_binlog_rows.has_value() && lack_binlog_rows.value() > 0) {
         auto field_schema = file_manager_->GetFieldDataMeta().field_schema;
         auto default_value = [&]() -> std::optional<DefaultValueType> {
             if (!field_schema.has_default_value()) {
