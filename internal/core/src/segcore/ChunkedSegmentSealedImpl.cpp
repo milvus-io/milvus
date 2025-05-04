@@ -40,7 +40,10 @@
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
+#include "common/resource_c.h"
 #include "google/protobuf/message_lite.h"
+#include "index/Index.h"
+#include "index/IndexFactory.h"
 #include "index/VectorMemIndex.h"
 #include "mmap/ChunkedColumn.h"
 #include "mmap/Types.h"
@@ -53,14 +56,15 @@
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "mmap/ChunkedColumnGroup.h"
+#include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/MmapManager.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "cachinglayer/CacheSlot.h"
 
 namespace milvus::segcore {
-
 using namespace milvus::cachinglayer;
 
 static inline void
@@ -100,21 +104,11 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     AssertInfo(info.index_params.count("metric_type"),
                "Can't get metric_type in index_params");
     auto metric_type = info.index_params.at("metric_type");
-    auto row_count = info.index->Count();
-    AssertInfo(row_count > 0, "Index count is 0");
 
     std::unique_lock lck(mutex_);
     AssertInfo(
         !get_bit(index_ready_bitset_, field_id),
         "vector index has been exist at " + std::to_string(field_id.get()));
-    if (num_rows_.has_value()) {
-        AssertInfo(num_rows_.value() == row_count,
-                   "field (" + std::to_string(field_id.get()) +
-                       ") data has different row count (" +
-                       std::to_string(row_count) +
-                       ") than other column's row count (" +
-                       std::to_string(num_rows_.value()) + ")");
-    }
     LOG_INFO(
         "Before setting field_bit for field index, fieldID:{}. segmentID:{}, ",
         info.field_id,
@@ -129,7 +123,7 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     vector_indexings_.append_field_indexing(
         field_id,
         metric_type,
-        std::move(const_cast<LoadIndexInfo&>(info).index));
+        std::move(const_cast<LoadIndexInfo&>(info).cache_index));
     set_bit(index_ready_bitset_, field_id, true);
     LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, ",
              info.field_id,
@@ -165,25 +159,23 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
             std::move(const_cast<LoadIndexInfo&>(info).index);
         return;
     }
-    auto row_count = info.index->Count();
-    AssertInfo(row_count > 0, "Index count is 0");
-    if (num_rows_.has_value()) {
-        AssertInfo(num_rows_.value() == row_count,
-                   "field (" + std::to_string(field_id.get()) +
-                       ") data has different row count (" +
-                       std::to_string(row_count) +
-                       ") than other column's row count (" +
-                       std::to_string(num_rows_.value()) + ")");
-    }
 
     scalar_indexings_[field_id] =
-        std::move(const_cast<LoadIndexInfo&>(info).index);
+        std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+
+    LoadResourceRequest request =
+        milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+            field_meta.get_data_type(),
+            info.index_engine_version,
+            info.index_size,
+            info.index_params,
+            info.enable_mmap);
 
     set_bit(index_ready_bitset_, field_id, true);
     // release field column if the index contains raw data
     // only release non-primary field when in pk sorted mode
-    if (scalar_indexings_[field_id]->HasRawData() &&
-        get_bit(field_data_ready_bitset_, field_id) && !is_pk) {
+    if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id) &&
+        !is_pk) {
         // We do not erase the primary key field: if insert record is evicted from memory, when reloading it'll
         // need the pk field again.
         fields_.erase(field_id);
@@ -548,13 +540,16 @@ ChunkedSegmentSealedImpl::chunk_view_by_offsets(
               "chunk_view_by_offsets only used for variable column field ");
 }
 
-const index::IndexBase*
+PinWrapper<const index::IndexBase*>
 ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
                                            int64_t chunk_id) const {
     AssertInfo(scalar_indexings_.find(field_id) != scalar_indexings_.end(),
                "Cannot find scalar_indexing with field_id: " +
                    std::to_string(field_id.get()));
-    return scalar_indexings_.at(field_id).get();
+    auto slot = scalar_indexings_.at(field_id);
+    auto ca = SemiInlineGet(slot->PinCells({0}));
+    auto index = ca->get_cell_of(0);
+    return PinWrapper<const index::IndexBase*>(ca, index);
 }
 
 int64_t
@@ -594,6 +589,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
 
     AssertInfo(field_meta.is_vector(),
                "The meta type of vector field is not vector type");
+
     if (get_bit(binlog_index_bitset_, field_id)) {
         AssertInfo(
             vec_binlog_config_.find(field_id) != vec_binlog_config_.end(),
@@ -668,8 +664,12 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
     AssertInfo(vector_indexings_.is_ready(field_id),
                "vector index is not ready");
     auto field_indexing = vector_indexings_.get_field_indexing(field_id);
-    auto vec_index =
-        dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+    auto cache_index = field_indexing->indexing_;
+    auto vec_index = dynamic_cast<index::VectorIndex*>(
+        cache_index->PinCells({0})
+            .via(&folly::InlineExecutor::instance())
+            .get()
+            ->get_cell_of(0));
     AssertInfo(vec_index, "invalid vector indexing");
 
     auto index_type = vec_index->GetIndexType();
@@ -1094,7 +1094,9 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
             AssertInfo(field_index_iter != scalar_indexings_.end(),
                        "failed to create text index, neither raw data nor "
                        "index are found");
-            auto ptr = field_index_iter->second.get();
+            auto accessor =
+                SemiInlineGet(field_index_iter->second->PinCells({0}));
+            auto ptr = accessor->get_cell_of(0);
             AssertInfo(ptr->HasRawData(),
                        "text raw data not found, trying to create text index "
                        "from index, but this index don't contain raw data");
@@ -1346,7 +1348,8 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
         // if field has load scalar index, reverse raw data from index
         if (index_has_raw) {
             auto index = chunk_index_impl(field_id, 0);
-            return ReverseDataFromIndex(index, seg_offsets, count, field_meta);
+            return ReverseDataFromIndex(
+                index.get(), seg_offsets, count, field_meta);
         }
         return get_raw_data(field_id, field_meta, seg_offsets, count);
     }
@@ -1428,9 +1431,10 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
             get_bit(binlog_index_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
                        "vector index is not ready");
-            auto field_indexing = vector_indexings_.get_field_indexing(fieldID);
-            auto vec_index = dynamic_cast<index::VectorIndex*>(
-                field_indexing->indexing_.get());
+            auto accessor =
+                SemiInlineGet(vector_indexings_.get_field_indexing(fieldID)
+                                  ->indexing_->PinCells({0}));
+            auto vec_index = accessor->get_cell_of(0);
             return vec_index->HasRawData();
         }
     } else if (IsJsonDataType(field_meta.get_data_type())) {
@@ -1438,7 +1442,8 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
     } else {
         auto scalar_index = scalar_indexings_.find(fieldID);
         if (scalar_index != scalar_indexings_.end()) {
-            return scalar_index->second->HasRawData();
+            auto accessor = SemiInlineGet(scalar_index->second->PinCells({0}));
+            return accessor->get_cell_of(0)->HasRawData();
         }
     }
     return true;
@@ -1673,30 +1678,29 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         build_config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
         auto index_metric = field_binlog_config->GetMetricType();
 
-        auto vec_index = std::make_unique<index::VectorMemIndex<float>>(
-            field_binlog_config->GetIndexType(),
-            index_metric,
-            knowhere::Version::GetCurrentVersion().VersionNumber());
-        auto num_chunk = vec_data->num_chunks();
-        for (int i = 0; i < num_chunk; ++i) {
-            auto pw = vec_data->GetChunk(i);
-            auto chunk = pw.get();
-            auto dataset = knowhere::GenDataSet(
-                vec_data->chunk_row_nums(i), dim, chunk->Data());
-            dataset->SetIsOwner(false);
-            dataset->SetIsSparse(is_sparse);
-
-            if (i == 0) {
-                vec_index->BuildWithDataset(dataset, build_config);
-            } else {
-                vec_index->AddWithDataset(dataset, build_config);
-            }
-        }
-
         if (enable_binlog_index()) {
             std::unique_lock lck(mutex_);
+
+            std::unique_ptr<
+                milvus::cachinglayer::Translator<milvus::index::IndexBase>>
+                translator =
+                    std::make_unique<milvus::segcore::storagev1translator::
+                                         InterimSealedIndexTranslator>(
+                        vec_data,
+                        std::to_string(id_),
+                        std::to_string(field_id.get()),
+                        field_binlog_config->GetIndexType(),
+                        index_metric,
+                        build_config,
+                        dim,
+                        is_sparse);
+
+            auto interim_index_cache_slot =
+                milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
+                    std::move(translator));
+            // TODO: how to handle the binlog index?
             vector_indexings_.append_field_indexing(
-                field_id, index_metric, std::move(vec_index));
+                field_id, index_metric, std::move(interim_index_cache_slot));
 
             vec_binlog_config_[field_id] = std::move(field_binlog_config);
             set_bit(binlog_index_bitset_, field_id, true);

@@ -103,7 +103,7 @@ IndexFactory::IndexLoadResource(
     DataType field_type,
     IndexVersion index_version,
     float index_size,
-    std::map<std::string, std::string>& index_params,
+    const std::map<std::string, std::string>& index_params,
     bool mmap_enable) {
     if (milvus::IsVectorDataType(field_type)) {
         return VecIndexLoadResource(
@@ -119,7 +119,7 @@ IndexFactory::VecIndexLoadResource(
     DataType field_type,
     IndexVersion index_version,
     float index_size,
-    std::map<std::string, std::string>& index_params,
+    const std::map<std::string, std::string>& index_params,
     bool mmap_enable) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
@@ -228,7 +228,7 @@ IndexFactory::ScalarIndexLoadResource(
     DataType field_type,
     IndexVersion index_version,
     float index_size,
-    std::map<std::string, std::string>& index_params,
+    const std::map<std::string, std::string>& index_params,
     bool mmap_enable) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
@@ -263,17 +263,10 @@ IndexFactory::ScalarIndexLoadResource(
         }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::INVERTED_INDEX_TYPE) {
-        if (mmap_enable) {
-            request.final_memory_cost = 0;
-            request.final_disk_cost = index_size_gb;
-            request.max_memory_cost = index_size_gb;
-            request.max_disk_cost = index_size_gb;
-        } else {
-            request.final_memory_cost = index_size_gb;
-            request.final_disk_cost = 0;
-            request.max_memory_cost = 2 * index_size_gb;
-            request.max_disk_cost = 0;
-        }
+        request.final_memory_cost = 0;
+        request.final_disk_cost = index_size_gb;
+        request.max_memory_cost = index_size_gb;
+        request.max_disk_cost = index_size_gb;
 
         request.has_raw_data = false;
     } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
@@ -289,11 +282,7 @@ IndexFactory::ScalarIndexLoadResource(
             request.max_disk_cost = 0;
         }
 
-        if (field_type == milvus::DataType::ARRAY) {
-            request.has_raw_data = false;
-        } else {
-            request.has_raw_data = true;
-        }
+        request.has_raw_data = false;
     } else if (index_type == milvus::index::HYBRID_INDEX_TYPE) {
         request.final_memory_cost = index_size_gb;
         request.final_disk_cost = index_size_gb;
@@ -304,7 +293,7 @@ IndexFactory::ScalarIndexLoadResource(
         LOG_ERROR(
             "invalid index type to estimate scalar index load resource: {}",
             index_type);
-        return LoadResourceRequest{0, 0, 0, 0, true};
+        return LoadResourceRequest{0, 0, 0, 0, false};
     }
     return request;
 }

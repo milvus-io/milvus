@@ -356,6 +356,11 @@ class PinWrapper {
         return content_;
     }
 
+    const T&
+    get() const {
+        return content_;
+    }
+
     template <typename T2, typename Fn>
     PinWrapper<T2>
     transform(Fn&& transformer) && {

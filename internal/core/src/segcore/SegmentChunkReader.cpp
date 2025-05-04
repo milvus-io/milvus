@@ -23,15 +23,14 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
                                          int64_t& current_chunk_id,
                                          int64_t& current_chunk_pos) const {
     if (index) {
-        auto& indexing = const_cast<index::ScalarIndex<T>&>(
-            segment_->chunk_scalar_index<T>(field_id, current_chunk_id));
-
-        if (indexing.HasRawData()) {
-            return [&]() -> const data_access_type {
+        auto pw = segment_->chunk_scalar_index<T>(field_id, current_chunk_id);
+        if (pw.get()->HasRawData()) {
+            return [&, pw = std::move(pw)]() -> const data_access_type {
+                auto index = pw.get();
                 if (current_chunk_pos >= active_count_) {
                     return std::nullopt;
                 }
-                auto raw = indexing.Reverse_Lookup(current_chunk_pos++);
+                auto raw = index->Reverse_Lookup(current_chunk_pos++);
                 if (!raw.has_value()) {
                     return std::nullopt;
                 }
@@ -76,15 +75,15 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
     int64_t& current_chunk_id,
     int64_t& current_chunk_pos) const {
     if (index) {
-        auto& indexing = const_cast<index::ScalarIndex<std::string>&>(
-            segment_->chunk_scalar_index<std::string>(field_id,
-                                                      current_chunk_id));
-        if (indexing.HasRawData()) {
-            return [&]() mutable -> const data_access_type {
+        auto pw = segment_->chunk_scalar_index<std::string>(field_id,
+                                                            current_chunk_id);
+        if (pw.get()->HasRawData()) {
+            return [&, pw = std::move(pw)]() mutable -> const data_access_type {
+                auto index = pw.get();
                 if (current_chunk_pos >= active_count_) {
                     return std::nullopt;
                 }
-                auto raw = indexing.Reverse_Lookup(current_chunk_pos++);
+                auto raw = index->Reverse_Lookup(current_chunk_pos++);
                 if (!raw.has_value()) {
                     return std::nullopt;
                 }
@@ -199,15 +198,17 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
                                          int chunk_id,
                                          int data_barrier) const {
     if (chunk_id >= data_barrier) {
-        auto& indexing = segment_->chunk_scalar_index<T>(field_id, chunk_id);
-        if (indexing.HasRawData()) {
-            return [&indexing](int i) -> const data_access_type {
-                auto raw = indexing.Reverse_Lookup(i);
-                if (!raw.has_value()) {
-                    return std::nullopt;
-                }
-                return raw.value();
-            };
+        auto pw = segment_->chunk_scalar_index<T>(field_id, chunk_id);
+        if (pw.get()->HasRawData()) {
+            return
+                [pw = std::move(pw)](int i) mutable -> const data_access_type {
+                    auto index = pw.get();
+                    auto raw = index->Reverse_Lookup(i);
+                    if (!raw.has_value()) {
+                        return std::nullopt;
+                    }
+                    return raw.value();
+                };
         }
     }
     auto pw = segment_->chunk_data<T>(field_id, chunk_id);
@@ -228,16 +229,18 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(FieldId field_id,
                                                       int chunk_id,
                                                       int data_barrier) const {
     if (chunk_id >= data_barrier) {
-        auto& indexing =
-            segment_->chunk_scalar_index<std::string>(field_id, chunk_id);
-        if (indexing.HasRawData()) {
-            return [&indexing](int i) -> const data_access_type {
-                auto raw = indexing.Reverse_Lookup(i);
-                if (!raw.has_value()) {
-                    return std::nullopt;
-                }
-                return raw.value();
-            };
+        auto pw = segment_->chunk_scalar_index<std::string>(field_id, chunk_id);
+        auto indexing = pw.get();
+        if (indexing->HasRawData()) {
+            return
+                [pw = std::move(pw)](int i) mutable -> const data_access_type {
+                    auto index = pw.get();
+                    auto raw = index->Reverse_Lookup(i);
+                    if (!raw.has_value()) {
+                        return std::nullopt;
+                    }
+                    return raw.value();
+                };
         }
     }
     if (segment_->type() == SegmentType::Growing &&
