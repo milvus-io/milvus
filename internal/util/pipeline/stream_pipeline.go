@@ -27,14 +27,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
@@ -96,31 +92,6 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 	if position == nil {
 		log.Error("seek stream to nil position")
 		return ErrNilPosition
-	}
-
-	if streamingutil.IsStreamingServiceEnabled() {
-		startFrom := adaptor.MustGetMessageIDFromMQWrapperIDBytes(streaming.WAL().WALName(), position.GetMsgID())
-		log.Info(
-			"stream pipeline seeks from position with scanner",
-			zap.String("channel", position.GetChannelName()),
-			zap.Any("startFromMessageID", startFrom),
-			zap.Uint64("timestamp", position.GetTimestamp()),
-		)
-		handler := adaptor.NewMsgPackAdaptorHandler()
-		p.scanner = streaming.WAL().Read(ctx, streaming.ReadOption{
-			VChannel:      position.GetChannelName(),
-			DeliverPolicy: options.DeliverPolicyStartFrom(startFrom),
-			DeliverFilters: []options.DeliverFilter{
-				// only consume messages with timestamp >= position timestamp
-				options.DeliverFilterTimeTickGTE(position.GetTimestamp()),
-				// only consume insert and delete messages
-				// also schema change message to notify schema change events
-				options.DeliverFilterMessageType(message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeSchemaChange),
-			},
-			MessageHandler: handler,
-		})
-		p.input = handler.Chan()
-		return nil
 	}
 
 	start := time.Now()
