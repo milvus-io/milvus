@@ -21,7 +21,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -30,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	"github.com/milvus-io/milvus/internal/datacoord/task"
+	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -78,7 +77,7 @@ func (s *ImportInspectorSuite) SetupTest() {
 	})
 	s.imeta, err = NewImportMeta(context.TODO(), s.catalog, s.alloc, s.meta)
 	s.NoError(err)
-	scheduler := task.NewMockGlobalScheduler(s.T())
+	scheduler := task2.NewMockGlobalScheduler(s.T())
 	s.inspector = NewImportInspector(s.meta, s.imeta, scheduler).(*importInspector)
 }
 
@@ -115,7 +114,10 @@ func (s *ImportInspectorSuite) TestProcessPreImport() {
 	// pending -> inProgress
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	task.CreateTaskOnWorker(1, cluster)
+	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
+		task.CreateTaskOnWorker(1, cluster)
+	})
+	s.inspector.inspect()
 	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_InProgress, task.GetState())
 
@@ -185,14 +187,14 @@ func (s *ImportInspectorSuite) TestProcessImport() {
 	cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
 		Slots: 1,
 	}, nil)
-	task.CreateTaskOnWorker(1, cluster)
+	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
+		task.CreateTaskOnWorker(nodeID, cluster)
+	})
+	s.inspector.inspect()
 	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_InProgress, task.GetState())
 
 	// inProgress -> completed
-	cluster.ExpectedCalls = lo.Filter(cluster.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "QueryImport"
-	})
 	cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
 		State: datapb.ImportTaskStateV2_Completed,
 	}, nil)
