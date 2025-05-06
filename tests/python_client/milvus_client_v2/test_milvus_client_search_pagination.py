@@ -210,9 +210,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
                              "limit": limit,
-                             "metric": "COSINE",
-                             "vector_nq": vectors_to_search[:default_nq],
-                             "original_vectors": [self.datas[i][self.float_vector_field_name] for i in range(len(self.datas))]
+                             "metric": "COSINE"
                              }
             )
             all_pages_results.append(search_res_with_offset)
@@ -805,6 +803,7 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize('vector_dtype', ct.all_dense_vector_types)
     @pytest.mark.parametrize('index', ct.all_index_types[:7])
     @pytest.mark.parametrize('metric_type', ct.dense_metrics)

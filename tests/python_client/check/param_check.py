@@ -158,7 +158,7 @@ def entity_in(entity, entities, primary_field):
     :param primary_field: collection primary field
     :return: True or False
     """
-    primary_default = ct.default_int64_field_name
+    primary_default = ct.default_primary_field_name
     primary_field = primary_default if primary_field is None else primary_field
     primary_key = entity.get(primary_field, None)
     primary_keys = []
@@ -180,7 +180,7 @@ def remove_entity(entity, entities, primary_field):
     :param primary_field: collection primary field
     :return: entities of removed entity
     """
-    primary_default = ct.default_int64_field_name
+    primary_default = ct.default_primary_field_name
     primary_field = primary_default if primary_field is None else primary_field
     primary_key = entity.get(primary_field, None)
     primary_keys = []
@@ -226,16 +226,18 @@ def equal_entities_list(exp, actual, primary_field, with_vec=False):
     return True if len(exp) == 0 else False
 
 
-def output_field_value_check(search_res, original):
+def output_field_value_check(search_res, original, pk_name):
     """
     check if the value of output fields is correct, it only works on auto_id = False
     :param search_res: the search result of specific output fields
     :param original: the data in the collection
     :return: True or False
     """
+    pk_name = ct.default_primary_field_name if pk_name is None else pk_name
     limit = len(search_res[0])
     for i in range(limit):
-        entity = eval(str(search_res[0][i]).split('entity: ', 1)[1])
+        # entity = eval(str(search_res[0][i]).split('entity: ', 1)[1])
+        entity = search_res[0][i].fields
         _id = search_res[0][i].id
         for field in entity.keys():
             if isinstance(entity[field], list):
@@ -246,7 +248,7 @@ def output_field_value_check(search_res, original):
                 # but sparse only supports list data type insertion for now
                 assert entity[field].keys() == original[-1][_id].keys()
             else:
-                num = original[original[ct.default_int64_field_name] == _id].index.to_list()[0]
+                num = original[original[pk_name] == _id].index.to_list()[0]
                 assert original[field][num] == entity[field]
 
     return True

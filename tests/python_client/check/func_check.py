@@ -1,3 +1,4 @@
+import pandas.core.frame
 from pymilvus.client.types import CompactionPlans
 from pymilvus import Role
 
@@ -394,6 +395,9 @@ class ResponseChecker:
         expected: check the search is ok
         """
         log.info("search_results_check: checking the searching results")
+        enable_milvus_client_api = check_items.get("enable_milvus_client_api", False)
+        pk_name = check_items.get("pk_name", ct.default_primary_field_name)
+
         if func_name != 'search' and func_name != 'hybrid_search':
             log.warning("The function name is {} rather than {} or {}".format(func_name, "search", "hybrid_search"))
         if len(check_items) == 0:
@@ -403,11 +407,12 @@ class ResponseChecker:
                 search_res.done()
                 search_res = search_res.result()
         if check_items.get("output_fields", None):
-            assert set(search_res[0][0].entity.fields) == set(check_items["output_fields"])
-            log.info('search_results_check: Output fields of query searched is correct')
+            assert set(search_res[0][0].entity.fields.keys()) == set(check_items["output_fields"])
             if check_items.get("original_entities", None):
-                original_entities = check_items["original_entities"][0]
-                pc.output_field_value_check(search_res, original_entities)
+                original_entities = check_items["original_entities"]
+                if not isinstance(original_entities, pandas.core.frame.DataFrame):
+                    original_entities = pandas.DataFrame(original_entities)
+                pc.output_field_value_check(search_res, original_entities, pk_name=pk_name)
         if len(search_res) != check_items["nq"]:
             log.error("search_results_check: Numbers of query searched (%d) "
                       "is not equal with expected (%d)"
@@ -415,16 +420,14 @@ class ResponseChecker:
             assert len(search_res) == check_items["nq"]
         else:
             log.info("search_results_check: Numbers of query searched is correct")
-        enable_milvus_client_api = check_items.get("enable_milvus_client_api", False)
         # log.debug(search_res)
         nq_i = 0
         for hits in search_res:
-            searched_original_vectors = []
             ids = []
             distances = []
             if enable_milvus_client_api:
                 for hit in hits:
-                    ids.append(hit['id'])
+                    ids.append(hit[pk_name])
                     distances.append(hit['distance'])
             else:
                 ids = list(hits.ids)
@@ -544,10 +547,10 @@ class ResponseChecker:
             raise Exception("No expect values found in the check task")
         exp_res = check_items.get("exp_res", None)
         with_vec = check_items.get("with_vec", False)
-        primary_field = check_items.get("primary_field", None)
+        pk_name = check_items.get("pk_name", ct.default_primary_field_name)
         if exp_res is not None:
             if isinstance(query_res, list):
-                assert pc.equal_entities_list(exp=exp_res, actual=query_res, primary_field=primary_field,
+                assert pc.equal_entities_list(exp=exp_res, actual=query_res, primary_field=pk_name,
                                               with_vec=with_vec)
                 return True
             else:
@@ -575,8 +578,7 @@ class ResponseChecker:
                 log.info("search iteration finished, close")
                 query_iterator.close()
                 break
-            pk_name = ct.default_int64_field_name if res[0].get(ct.default_int64_field_name, None) is not None \
-                else ct.default_string_field_name
+            pk_name = check_items.get("pk_name", ct.default_primary_field_name)
             for i in range(len(res)):
                 pk_list.append(res[i][pk_name])
             if check_items.get("limit", None):

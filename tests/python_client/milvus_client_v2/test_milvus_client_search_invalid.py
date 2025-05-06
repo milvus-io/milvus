@@ -737,7 +737,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                  % collection_w.name)
         # err_msg = "collection" + collection_w.name + "was not loaded into memory"
         err_msg = "collection not loaded"
-        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim, vector_data_type)
+        vectors = cf.gen_vectors(default_nq, default_dim, vector_data_type)
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp, timeout=1,
                             check_task=CheckTasks.err_res,

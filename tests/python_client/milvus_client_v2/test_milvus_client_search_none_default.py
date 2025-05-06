@@ -165,7 +165,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          vector_data_type=vector_data_type,
                                          nullable_fields={ct.default_float_field_name: null_data_percent})[0:5]
         # 2. generate search data
-        vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
+        vectors = cf.gen_vectors(nq, dim, vector_data_type)
         # 3. search after insert
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, default_limit,
@@ -251,7 +251,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          vector_data_type=vector_data_type,
                                          default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:5]
         # 2. generate search data
-        vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
+        vectors = cf.gen_vectors(nq, dim, vector_data_type)
         # 3. search after insert
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, default_limit,
@@ -365,7 +365,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          nullable_fields={ct.default_float_field_name: 1},
                                          default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:5]
         # 2. generate search data
-        vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
+        vectors = cf.gen_vectors(nq, dim, vector_data_type)
         # 3. search after insert
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, default_limit,
@@ -503,7 +503,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
             loaded_fields.append(default_float_field_name)
         collection_w.load(load_fields=loaded_fields)
         # 3. generate search data
-        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim)
+        vectors = cf.gen_vectors(default_nq, default_dim)
         # 4. search after partial load field with None data
         output_fields = [default_int64_field_name, default_float_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -536,7 +536,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          nullable_fields={ct.default_float_field_name: 0.5})[0:5]
         collection_name = collection_w.name
         # 2. generate search data
-        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim)
+        vectors = cf.gen_vectors(default_nq, default_dim)
         # 3. search with expr "nullableFid == 0"
         search_exp = f"{ct.default_float_field_name} == 0"
         output_fields = [default_int64_field_name, default_float_field_name]

@@ -169,7 +169,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         metrics = []
         search_res_dict_array = []
         search_res_dict_array_nq = []
-        vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
+        vectors = cf.gen_vectors(nq, dim, vector_data_type)
 
         # get hybrid search req list
         for i in range(len(vector_name_list)):
@@ -1515,7 +1515,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         metrics = []
         search_res_dict_array = []
         search_res_dict_array_nq = []
-        vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
+        vectors = cf.gen_vectors(nq, dim, vector_data_type)
 
         # get hybrid search req list
         for i in range(len(vector_name_list)):
@@ -1596,7 +1596,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         metrics = []
         search_res_dict_array = []
         search_res_dict_array_nq = []
-        vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
+        vectors = cf.gen_vectors(nq, dim, vector_data_type)
 
         # get hybrid search req list
         for i in range(len(vector_name_list)):
@@ -1679,7 +1679,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         metrics = []
         search_res_dict_array = []
         search_res_dict_array_nq = []
-        vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
+        vectors = cf.gen_vectors(nq, dim, vector_data_type)
 
         # get hybrid search req list
         for i in range(len(vector_name_list)):
@@ -1880,7 +1880,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         metrics = []
         search_res_dict_array = []
         search_res_dict_array_nq = []
-        vectors = cf.gen_vectors_based_on_vector_type(nq, default_dim, vector_data_type)
+        vectors = cf.gen_vectors(nq, default_dim, vector_data_type)
 
         # get hybrid search req list
         for i in range(len(vector_name_list)):
