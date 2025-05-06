@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -1368,7 +1369,8 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 			},
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
-		s.NoError(merr.CheckRPCCall(resp, err))
+		s.Error(merr.CheckRPCCall(resp, err))
+		s.True(strings.Contains(resp.GetStatus().GetReason(), "not found"))
 	})
 
 	s.Run("query stats task", func() {
@@ -1380,7 +1382,8 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 			},
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
-		s.NoError(merr.CheckRPCCall(resp, err))
+		s.Error(merr.CheckRPCCall(resp, err))
+		s.True(strings.Contains(resp.GetStatus().GetReason(), "not found"))
 	})
 
 	s.Run("query analyze task", func() {
@@ -1392,7 +1395,8 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 			},
 		}
 		resp, err := s.node.QueryTask(s.ctx, req)
-		s.NoError(merr.CheckRPCCall(resp, err))
+		s.Error(merr.CheckRPCCall(resp, err))
+		s.True(strings.Contains(resp.GetStatus().GetReason(), "not found"))
 	})
 
 	s.Run("query slot task", func() {

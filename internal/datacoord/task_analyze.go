@@ -200,7 +200,8 @@ func (at *analyzeTask) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 
-	// Task not found in results will be return error
+	log.Warn("query analyze task info failed, worker does not have task info")
+	at.UpdateStateWithMeta(indexpb.JobState_JobStateInit, "analyze result is not in info response")
 }
 
 func (at *analyzeTask) tryDropTaskOnWorker(cluster session.Cluster) error {

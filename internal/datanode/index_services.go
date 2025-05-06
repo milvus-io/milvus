@@ -520,13 +520,13 @@ func (node *DataNode) queryIndexTask(ctx context.Context, req *workerpb.QueryJob
 	})
 	results := make([]*workerpb.IndexTaskInfo, 0, len(req.GetTaskIDs()))
 	for i, buildID := range req.GetTaskIDs() {
-		results = append(results, &workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_IndexStateNone,
-			IndexFileKeys:  nil,
-			SerializedSize: 0,
-		})
 		if info, ok := infos[buildID]; ok {
+			results = append(results, &workerpb.IndexTaskInfo{
+				BuildID:        buildID,
+				State:          commonpb.IndexState_IndexStateNone,
+				IndexFileKeys:  nil,
+				SerializedSize: 0,
+			})
 			results[i].State = info.State
 			results[i].IndexFileKeys = info.FileKeys
 			results[i].SerializedSize = info.SerializedSize
@@ -538,6 +538,11 @@ func (node *DataNode) queryIndexTask(ctx context.Context, req *workerpb.QueryJob
 		}
 	}
 	log.Debug("query index jobs result success", zap.Any("results", results))
+	if len(results) == 0 {
+		return &workerpb.QueryJobsV2Response{
+			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
+		}, nil
+	}
 	return &workerpb.QueryJobsV2Response{
 		Status:    merr.Success(),
 		ClusterID: req.GetClusterID(),
@@ -576,6 +581,11 @@ func (node *DataNode) queryStatsTask(ctx context.Context, req *workerpb.QueryJob
 		}
 	}
 	log.Debug("query stats job result success", zap.Any("results", results))
+	if len(results) == 0 {
+		return &workerpb.QueryJobsV2Response{
+			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
+		}, nil
+	}
 	return &workerpb.QueryJobsV2Response{
 		Status:    merr.Success(),
 		ClusterID: req.GetClusterID(),
@@ -605,6 +615,11 @@ func (node *DataNode) queryAnalyzeTask(ctx context.Context, req *workerpb.QueryJ
 		}
 	}
 	log.Debug("query analyze jobs result success", zap.Any("results", results))
+	if len(results) == 0 {
+		return &workerpb.QueryJobsV2Response{
+			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
+		}, nil
+	}
 	return &workerpb.QueryJobsV2Response{
 		Status:    merr.Success(),
 		ClusterID: req.GetClusterID(),

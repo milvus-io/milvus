@@ -386,6 +386,7 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 	}
+	it.UpdateStateWithMeta(indexpb.JobState_JobStateInit, "index is not in info response")
 	// Task not found in results will be return error
 }
 

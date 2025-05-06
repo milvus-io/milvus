@@ -272,7 +272,8 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 
-	// Task not found in results will be return error
+	log.Warn("task not found in results")
+	st.resetTask(ctx, "task not found in results")
 }
 
 func (st *statsTask) tryDropTaskOnWorker(cluster session.Cluster) error {
