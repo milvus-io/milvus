@@ -1487,6 +1487,7 @@ class TestCollectionSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
+                                         "pk_name":ct.default_int64_field_name,
                                          "limit": default_limit,
                                          "_async": _async,
                                          "output_fields": output_fields})
@@ -1541,6 +1542,7 @@ class TestCollectionSearch(TestcaseBase):
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": nq,
                                              "ids": insert_ids,
+                                             "pk_name": ct.default_int64_field_name,
                                              "limit": default_limit,
                                              "_async": _async})
 

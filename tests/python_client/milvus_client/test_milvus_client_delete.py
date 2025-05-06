@@ -144,7 +144,7 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -167,6 +167,7 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
                                  "ids": insert_ids,
                                  "limit": limit})
         # 5. query
@@ -174,7 +175,7 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows[delete_num:],
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -185,7 +186,7 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -209,13 +210,14 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
         # 5. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows[delete_num:],
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -226,7 +228,7 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -252,13 +254,14 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
         # 6. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows[delete_num:],
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -282,7 +285,7 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
         expected: Delete and search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -341,11 +344,12 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
         # 5. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows[delete_num:],
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)

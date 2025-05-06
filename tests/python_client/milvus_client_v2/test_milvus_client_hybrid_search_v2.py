@@ -197,6 +197,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                  check_task=CheckTasks.check_search_results,
                                                  check_items={"nq": 1,
                                                               "ids": insert_ids,
+                                                              "pk_name": ct.default_int64_field_name,
                                                               "limit": default_limit})[0]
                 ids = search_res[0].ids
                 distance_array = search_res[0].distances
@@ -216,7 +217,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": nq,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit})[0]
+                                                             "limit": default_limit,
+                                                             "pk_name": ct.default_int64_field_name})[0]
         # 8. compare results through the re-calculated distances
         for k in range(len(score_answer_nq)):
             for i in range(len(score_answer_nq[k][:default_limit])):
@@ -258,7 +260,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": nq,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit})[0]
+                                                             "limit": default_limit,
+                                                             "pk_name": ct.default_int64_field_name})[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_search_normal_expr(self):
@@ -292,7 +295,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 5. hybrid search
         collection_w.hybrid_search(req_list, WeightedRanker(*weights), default_limit,
                                    check_task=CheckTasks.check_search_results,
-                                   check_items={"nq": nq, "ids": insert_ids, "limit": default_limit})
+                                   check_items={"nq": nq, "ids": insert_ids, "limit": default_limit,
+                                                "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="issue 32288")
@@ -410,14 +414,16 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                     check_task=CheckTasks.check_search_results,
                                                     check_items={"nq": nq,
                                                                  "ids": insert_ids,
-                                                                 "limit": default_limit})[0]
+                                                                 "limit": default_limit,
+                                                                 "pk_name": ct.default_int64_field_name})[0]
             search_res = collection_w.search(vectors[:nq], search_field,
                                              default_search_params, default_limit,
                                              default_search_exp,
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": nq,
                                                           "ids": insert_ids,
-                                                          "limit": default_limit})[0]
+                                                          "limit": default_limit,
+                                                          "pk_name": ct.default_int64_field_name})[0]
             # 4. the effect of hybrid search to one field should equal to search
             log.info("The distance list is:\n")
             for i in range(nq):
@@ -462,7 +468,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                    check_task=CheckTasks.check_search_results,
                                    check_items={"nq": nq,
                                                 "ids": insert_ids,
-                                                "limit": default_limit})
+                                                "limit": default_limit,
+                                                "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -519,7 +526,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                    check_task=CheckTasks.check_search_results,
                                                    check_items={"nq": nq,
                                                                 "ids": insert_ids,
-                                                                "limit": default_limit})[0]
+                                                                "limit": default_limit,
+                                                                "pk_name": ct.default_int64_field_name})[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -560,12 +568,14 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                      check_task=CheckTasks.check_search_results,
                                                      check_items={"nq": nq,
                                                                   "ids": insert_ids,
-                                                                  "limit": default_limit})[0]
+                                                                  "limit": default_limit,
+                                                                  "pk_name": ct.default_int64_field_name})[0]
         hybrid_search_1 = collection_w.hybrid_search(req_list, WeightedRanker(0.1, 0.9), default_limit,
                                                      check_task=CheckTasks.check_search_results,
                                                      check_items={"nq": nq,
                                                                   "ids": insert_ids,
-                                                                  "limit": default_limit})[0]
+                                                                  "limit": default_limit,
+                                                                  "pk_name": ct.default_int64_field_name})[0]
         for i in range(nq):
             assert hybrid_search_0[i].ids == hybrid_search_1[i].ids
             assert hybrid_search_0[i].distances == hybrid_search_1[i].distances
@@ -614,7 +624,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": nq,
                                                           "ids": insert_ids,
-                                                          "limit": default_limit})[0]
+                                                          "limit": default_limit,
+                                                          "pk_name": ct.default_int64_field_name})[0]
             for k in range(nq):
                 id_list_nq[k].extend(search_res[k].ids)
         # 5. prepare hybrid search params
@@ -672,7 +683,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                    check_task=CheckTasks.check_search_results,
                                    check_items={"nq": nq,
                                                 "ids": insert_ids,
-                                                "limit": default_limit})
+                                                "limit": default_limit,
+                                                "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -716,7 +728,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
                                                           "ids": insert_ids,
-                                                          "limit": min_dim})[0]
+                                                          "limit": min_dim,
+                                                          "pk_name": ct.default_int64_field_name})[0]
             id_list.extend(search_res[0].ids)
         # 4. hybrid search
         hybrid_search = collection_w.hybrid_search(req_list, WeightedRanker(0.1, 0.9), default_limit)[0]
@@ -760,7 +773,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                    check_task=CheckTasks.check_search_results,
                                    check_items={"nq": nq,
                                                 "ids": insert_ids,
-                                                "limit": default_limit})
+                                                "limit": default_limit,
+                                                "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -802,7 +816,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                    check_task=CheckTasks.check_search_results,
                                    check_items={"nq": nq,
                                                 "ids": insert_ids,
-                                                "limit": default_limit})
+                                                "limit": default_limit,
+                                                "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -841,7 +856,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                    check_task=CheckTasks.check_search_results,
                                    check_items={"nq": nq,
                                                 "ids": insert_ids,
-                                                "limit": default_limit})
+                                                "limit": default_limit,
+                                                "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -880,7 +896,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                    check_task=CheckTasks.check_search_results,
                                    check_items={"nq": nq,
                                                 "ids": insert_ids,
-                                                "limit": default_limit})
+                                                "limit": default_limit,
+                                                "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -922,7 +939,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                    check_task=CheckTasks.check_search_results,
                                    check_items={"nq": 1,
                                                 "ids": insert_ids,
-                                                "limit": default_limit})
+                                                "limit": default_limit,
+                                                "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -961,7 +979,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                    check_task=CheckTasks.check_search_results,
                                    check_items={"nq": 1,
                                                 "ids": insert_ids,
-                                                "limit": default_limit})
+                                                "limit": default_limit,
+                                                "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("issue: #29840")
@@ -1000,7 +1019,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                    check_task=CheckTasks.check_search_results,
                                    check_items={"nq": 1,
                                                 "ids": insert_ids,
-                                                "limit": default_limit})
+                                                "limit": default_limit,
+                                                "pk_name": ct.default_int64_field_name})
         # 5. hybrid search with two-dim list in WeightedRanker
         weights = [[random.random() for _ in range(1)] for _ in range(len(req_list))]
         # 4. hybrid search
@@ -1008,7 +1028,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                    check_task=CheckTasks.check_search_results,
                                    check_items={"nq": 1,
                                                 "ids": insert_ids,
-                                                "limit": default_limit})
+                                                "limit": default_limit,
+                                                "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_hybrid_search_over_maximum_reqs_num(self):
@@ -1089,7 +1110,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                    check_task=CheckTasks.check_search_results,
                                    check_items={"nq": 1,
                                                 "ids": insert_ids,
-                                                "limit": default_limit})
+                                                "limit": default_limit,
+                                                "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -1130,7 +1152,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
                                                           "ids": insert_ids,
-                                                          "limit": default_limit})[0]
+                                                          "limit": default_limit,
+                                                          "pk_name": ct.default_int64_field_name})[0]
             ids = search_res[0].ids
             for j in range(len(ids)):
                 search_res_dict[ids[j]] = 1 / (j + 60 + 1)
@@ -1142,7 +1165,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                      check_task=CheckTasks.check_search_results,
                                                      check_items={"nq": 1,
                                                                   "ids": insert_ids,
-                                                                  "limit": default_limit})[0]
+                                                                  "limit": default_limit,
+                                                                  "pk_name": ct.default_int64_field_name})[0]
         # 6. compare results through the re-calculated distances
         for i in range(len(score_answer[:default_limit])):
             assert score_answer[i] - hybrid_search_0[0].distances[i] < hybrid_search_epsilon
@@ -1151,7 +1175,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                      check_task=CheckTasks.check_search_results,
                                                      check_items={"nq": 1,
                                                                   "ids": insert_ids,
-                                                                  "limit": default_limit})[0]
+                                                                  "limit": default_limit,
+                                                                  "pk_name": ct.default_int64_field_name})[0]
 
         assert hybrid_search_0[0].ids == hybrid_search_1[0].ids
         assert hybrid_search_0[0].distances == hybrid_search_1[0].distances
@@ -1198,7 +1223,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
                                                           "ids": insert_ids,
-                                                          "limit": default_limit})[0]
+                                                          "limit": default_limit,
+                                                          "pk_name": ct.default_int64_field_name})[0]
             ids = search_res[0].ids
             for j in range(len(ids)):
                 search_res_dict[ids[j]] = 1 / (j + k + 1)
@@ -1211,7 +1237,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": 1,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit})[0]
+                                                             "limit": default_limit,
+                                                             "pk_name": ct.default_int64_field_name})[0]
         # 6. compare results through the re-calculated distances
         for i in range(len(score_answer[:default_limit])):
             assert score_answer[i] - hybrid_res[0].distances[i] < hybrid_search_epsilon
@@ -1257,7 +1284,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                        check_task=CheckTasks.check_search_results,
                                                        check_items={"nq": 1,
                                                                     "ids": insert_ids,
-                                                                    "limit": default_limit})[0]
+                                                                    "limit": default_limit,
+                                                                    "pk_name": ct.default_int64_field_name})[0]
         # 5. hybrid search with offset parameter
         req_list = []
         for i in range(len(vector_name_list)):
@@ -1274,7 +1302,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": 1,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit - offset})[0]
+                                                             "limit": default_limit - offset,
+                                                             "pk_name": ct.default_int64_field_name})[0]
 
         assert hybrid_res_inside[0].distances[offset:] == hybrid_res[0].distances
 
@@ -1336,7 +1365,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
                                                           "ids": insert_ids,
-                                                          "limit": default_limit})[0]
+                                                          "limit": default_limit,
+                                                          "pk_name": ct.default_int64_field_name})[0]
             ids = search_res[0].ids
             for j in range(len(ids)):
                 search_res_dict[ids[j]] = 1 / (j + k + 1)
@@ -1348,7 +1378,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": 1,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit})[0]
+                                                             "limit": default_limit,
+                                                             "pk_name": ct.default_int64_field_name})[0]
         # 6. compare results through the re-calculated distances
         for i in range(len(score_answer[:default_limit])):
             delta = math.fabs(score_answer[i] - hybrid_res[0].distances[i])
@@ -1396,7 +1427,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
                                                           "ids": insert_ids,
-                                                          "limit": limit})[0]
+                                                          "limit": limit,
+                                                          "pk_name": ct.default_int64_field_name})[0]
             ids = search_res[0].ids
             distance_array = search_res[0].distances
             for j in range(len(ids)):
@@ -1410,7 +1442,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": 1,
                                                              "ids": insert_ids,
-                                                             "limit": limit})[0]
+                                                             "limit": limit,
+                                                             "pk_name": ct.default_int64_field_name})[0]
         # 6. compare results through the re-calculated distances
         for i in range(len(score_answer[:limit])):
             delta = math.fabs(score_answer[i] - hybrid_res[0].distances[i])
@@ -1543,7 +1576,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                  check_task=CheckTasks.check_search_results,
                                                  check_items={"nq": 1,
                                                               "ids": insert_ids,
-                                                              "limit": default_limit})[0]
+                                                              "limit": default_limit,
+                                                              "pk_name": ct.default_int64_field_name})[0]
                 ids = search_res[0].ids
                 distance_array = search_res[0].distances
                 for j in range(len(ids)):
@@ -1563,7 +1597,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": nq,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit})[0]
+                                                             "limit": default_limit,
+                                                             "pk_name": ct.default_int64_field_name})[0]
         # 8. compare results through the re-calculated distances
         for k in range(len(score_answer_nq)):
             for i in range(len(score_answer_nq[k][:default_limit])):
@@ -1624,7 +1659,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                  check_task=CheckTasks.check_search_results,
                                                  check_items={"nq": 1,
                                                               "ids": insert_ids,
-                                                              "limit": default_limit})[0]
+                                                              "limit": default_limit,
+                                                              "pk_name": ct.default_int64_field_name})[0]
                 ids = search_res[0].ids
                 distance_array = search_res[0].distances
                 for j in range(len(ids)):
@@ -1646,7 +1682,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": nq,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit})[0]
+                                                             "limit": default_limit,
+                                                             "pk_name": ct.default_int64_field_name})[0]
         # 8. compare results through the re-calculated distances
         for k in range(len(score_answer_nq)):
             for i in range(len(score_answer_nq[k][:default_limit])):
@@ -1707,7 +1744,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                  check_task=CheckTasks.check_search_results,
                                                  check_items={"nq": 1,
                                                               "ids": insert_ids,
-                                                              "limit": default_limit})[0]
+                                                              "limit": default_limit,
+                                                              "pk_name": ct.default_int64_field_name})[0]
                 ids = search_res[0].ids
                 distance_array = search_res[0].distances
                 for j in range(len(ids)):
@@ -1726,7 +1764,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": nq,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit})[0]
+                                                             "limit": default_limit,
+                                                             "pk_name": ct.default_int64_field_name})[0]
         # 8. compare results through the re-calculated distances
         for k in range(len(score_answer_nq)):
             for i in range(len(score_answer_nq[k][:default_limit])):
@@ -1786,6 +1825,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                  check_items={"nq": 1,
                                                               "ids": insert_ids,
                                                               "limit": default_limit,
+                                                              "pk_name": ct.default_int64_field_name,
                                                               "_async": _async})[0]
                 if _async:
                     search_res.done()
@@ -1809,7 +1849,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_items={"nq": nq,
                                                              "ids": insert_ids,
                                                              "limit": default_limit,
-                                                             "_async": _async})[0]
+                                                             "_async": _async,
+                                                             "pk_name": ct.default_int64_field_name})[0]
         if _async:
             hybrid_res.done()
             hybrid_res = hybrid_res.result()
@@ -1908,7 +1949,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                  check_task=CheckTasks.check_search_results,
                                                  check_items={"nq": 1,
                                                               "ids": insert_ids,
-                                                              "limit": default_limit})[0]
+                                                              "limit": default_limit,
+                                                              "pk_name": ct.default_int64_field_name})[0]
                 ids = search_res[0].ids
                 distance_array = search_res[0].distances
                 for j in range(len(ids)):
@@ -1926,7 +1968,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": nq,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit})[0]
+                                                             "limit": default_limit,
+                                                             "pk_name": ct.default_int64_field_name})[0]
         # 8. compare results through the re-calculated distances
         for k in range(len(score_answer_nq)):
             for i in range(len(score_answer_nq[k][:default_limit])):
@@ -2050,7 +2093,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": 1,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit})[0]
+                                                             "limit": default_limit,
+                                                             "pk_name": ct.default_int64_field_name})[0]
         # 6. compare results through the re-calculated distances
         for i in range(len(score_answer[:default_limit])):
             delta = math.fabs(score_answer[i] - hybrid_res[0].distances[i])

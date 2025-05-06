@@ -61,7 +61,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -83,7 +83,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -104,7 +104,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -125,7 +125,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -146,7 +146,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -167,7 +167,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -189,7 +189,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -211,7 +211,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -232,7 +232,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -254,7 +254,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -276,7 +276,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -299,7 +299,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         error = {ct.err_code: 1, ct.err_msg: f"Param id_type must be int or string"}
         self.create_collection(client, collection_name, default_dim, id_type="invalid",
@@ -313,7 +313,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for the "
                                                  f"field({default_primary_key_field_name}) of collection {collection_name}"}
@@ -329,7 +329,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
                   2. Report errors for creating collection with same name and different params
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. create collection with same params
@@ -349,7 +349,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         error = {ct.err_code: 1100,
                  ct.err_msg: "float vector index does not support metric type: invalid: "
@@ -366,7 +366,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -389,7 +389,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -424,7 +424,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -462,7 +462,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -500,7 +500,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -557,7 +557,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         self.using_database(client, "default")
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
@@ -583,13 +583,14 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 4. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -603,7 +604,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 128
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -634,7 +635,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
@@ -662,13 +663,14 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 4. query
         self.query(client, new_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.release_collection(client, new_name)
         self.drop_collection(client, new_name)
 
@@ -680,7 +682,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         collections = self.list_collections(client)[0]
@@ -714,7 +716,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, id_type="string", max_length=ct.default_length)
         self.describe_collection(client, collection_name,
@@ -741,7 +743,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -752,7 +754,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search successfully with limit(topK)
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, metric_type=metric_type, auto_id=auto_id,
                                consistency_level="Strong")
@@ -772,6 +774,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         self.drop_collection(client, collection_name)
 
@@ -784,7 +787,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search successfully with limit(topK)
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, metric_type=metric_type, auto_id=auto_id,
                                consistency_level="Strong")
@@ -805,6 +808,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         self.drop_collection(client, collection_name)
 
@@ -816,7 +820,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -840,13 +844,14 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
         # 5. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows[delete_num:],
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -857,7 +862,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -881,13 +886,14 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
         # 5. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows[delete_num:],
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -898,7 +904,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         dim = 32
@@ -951,7 +957,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: raise error
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         dim = 5
@@ -1023,7 +1029,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1070,6 +1076,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1082,7 +1089,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1131,6 +1138,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1143,7 +1151,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1192,6 +1200,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1204,7 +1213,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1253,6 +1262,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1265,7 +1275,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1312,6 +1322,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1324,7 +1335,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1371,6 +1382,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1383,7 +1395,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1430,6 +1442,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1442,7 +1455,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1489,6 +1502,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1501,7 +1515,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1556,6 +1570,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1568,7 +1583,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1631,6 +1646,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1643,7 +1659,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1692,6 +1708,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
 
@@ -1732,7 +1749,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         expected: Search successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -1812,6 +1829,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 6. search with filter on json without output_fields
         expr = f"{json_field_name}['a']['b'] == {default_nb / 2}"
@@ -1823,6 +1841,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 1})[0]
         expr = f"{json_field_name} == {default_nb + 5}"
         insert_ids = [default_nb+5]
@@ -1833,6 +1852,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 1})
         expr = f"{json_field_name}['a'][0] == 1"
         insert_ids = [i for i in range(default_nb + 20, default_nb + 30)]
@@ -1843,6 +1863,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         expr = f"{json_field_name}['a'][0]['b'] == 1"
         insert_ids = [i for i in range(default_nb + 30, default_nb + 40)]
@@ -1853,6 +1874,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         expr = f"{json_field_name}['a'] == 1"
         insert_ids = [i for i in range(default_nb + 50, default_nb + 60)]
@@ -1863,6 +1885,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1875,7 +1898,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         expected: successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -1913,6 +1936,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 1})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1925,7 +1949,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         expected: successfully with original inverted index
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
@@ -1969,6 +1993,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1984,7 +2009,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         if enable_dynamic_field:
             pytest.skip('need to fix the field name when enabling dynamic field')
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -2034,6 +2059,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2048,7 +2074,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         expected: Search successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -2102,6 +2128,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         expr = f"{json_field_name}1['a']['b'] >= 0"
         vectors_to_search = [vectors[0]]
@@ -2114,6 +2141,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2137,7 +2165,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         expected: Search successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -2217,6 +2245,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name, 
                                  "limit": 1})
         expr = f"{json_field_name} == {default_nb + 5}"
         insert_ids = [default_nb + 5]
@@ -2227,6 +2256,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 1})
         expr = f"{json_field_name}['a'][0] == 1"
         insert_ids = [i for i in range(default_nb + 20, default_nb + 30)]
@@ -2237,6 +2267,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         expr = f"{json_field_name}['a'][0]['b'] == 1"
         insert_ids = [i for i in range(default_nb + 30, default_nb + 40)]
@@ -2247,6 +2278,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2271,7 +2303,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         expected: Search successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -2353,6 +2385,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 1})
         expr = f"{json_field_name} == {default_nb + 5}"
         insert_ids = [default_nb + 5]
@@ -2363,6 +2396,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 1})
         expr = f"{json_field_name}['a'][0] == 1"
         insert_ids = [i for i in range(default_nb + 20, default_nb + 30)]
@@ -2373,6 +2407,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         expr = f"{json_field_name}['a'][0]['b'] == 1"
         insert_ids = [i for i in range(default_nb + 30, default_nb + 40)]
@@ -2383,4 +2418,5 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})

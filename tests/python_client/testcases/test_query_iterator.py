@@ -45,7 +45,7 @@ class TestQueryIterator(TestcaseBase):
         collection_w.query_iterator(batch_size, expr=expr,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": nb,
-                                                 "primary_field": collection_w.primary_field.name,
+                                                 "pk_name": collection_w.primary_field.name,
                                                  "batch_size": batch_size})
         # 3. query iterator with checkpoint file
         iterator_cp_file = f"/tmp/it_{collection_w.name}_cp"
@@ -104,7 +104,7 @@ class TestQueryIterator(TestcaseBase):
         # 2. query iterator
         collection_w.query_iterator(check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb,
-                                                 "primary_field": collection_w.primary_field.name,
+                                                 "pk_name": collection_w.primary_field.name,
                                                  "batch_size": ct.default_batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -126,7 +126,7 @@ class TestQueryIterator(TestcaseBase):
         collection_w.query_iterator(batch_size, expr=expr, offset=offset,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb - offset,
-                                                 "primary_field": collection_w.primary_field.name,
+                                                 "pk_name": collection_w.primary_field.name,
                                                  "batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -148,7 +148,7 @@ class TestQueryIterator(TestcaseBase):
                                     output_fields=[ct.default_float_vec_field_name],
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb,
-                                                 "primary_field": collection_w.primary_field.name,
+                                                 "pk_name": collection_w.primary_field.name,
                                                  "batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -170,7 +170,7 @@ class TestQueryIterator(TestcaseBase):
         collection_w.query_iterator(batch_size=batch_size, expr=expr, offset=offset,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb - offset,
-                                                 "primary_field": collection_w.primary_field.name,
+                                                 "pk_name": collection_w.primary_field.name,
                                                  "batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -190,7 +190,7 @@ class TestQueryIterator(TestcaseBase):
         collection_w.query_iterator(limit=limit, expr="", offset=offset,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": max(Count, 0),
-                                                 "primary_field": collection_w.primary_field.name,
+                                                 "pk_name": collection_w.primary_field.name,
                                                  "batch_size": ct.default_batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -241,7 +241,7 @@ class TestQueryIterator(TestcaseBase):
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"batch_size": batch_size,
                                                  "count": ct.default_nb,
-                                                 "primary_field": collection_w.primary_field.name,
+                                                 "pk_name": collection_w.primary_field.name,
                                                  "exp_ids": insert_ids})
         file_exist = os.path.isfile(iterator_cp_file)
         assert file_exist is True, "The checkpoint exists if not iterator.close()"
@@ -266,7 +266,7 @@ class TestQueryIterator(TestcaseBase):
         collection_w.query_iterator(batch_size, output_fields=[ct.default_string_field_name],
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"batch_size": batch_size,
-                                                 "primary_field": collection_w.primary_field.name,
+                                                 "pk_name": collection_w.primary_field.name,
                                                  "count": ct.default_nb, "exp_ids": exp_ids})
 
         # 3. query with pagination
@@ -274,7 +274,7 @@ class TestQueryIterator(TestcaseBase):
         collection_w.query_iterator(batch_size, offset=offset, output_fields=[ct.default_string_field_name],
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"batch_size": batch_size,
-                                                 "primary_field": collection_w.primary_field.name,
+                                                 "pk_name": collection_w.primary_field.name,
                                                  "count": ct.default_nb - offset, "exp_ids": exp_ids})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -305,7 +305,7 @@ class TestQueryIterator(TestcaseBase):
         # 2. query iterator
         collection_w.query_iterator(check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": nb,
-                                                 "primary_field": collection_w.primary_field.name,
+                                                 "pk_name": collection_w.primary_field.name,
                                                  "batch_size": ct.default_batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)

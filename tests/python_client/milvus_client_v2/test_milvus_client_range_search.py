@@ -254,6 +254,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": nq,
                                                           "ids": insert_ids,
+                                                          "pk_name": ct.default_int64_field_name,
                                                           "limit": default_limit})[0]
             log.info("test_range_search_normal: checking the distance of top 1")
             for hits in search_res:
@@ -308,6 +309,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": default_limit})
         # 4. range search with IP
         range_search_params = {"metric_type": "IP",
@@ -376,6 +378,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": default_limit})
         # 4. range search with IP
         range_search_params = {"metric_type": "IP",
@@ -417,6 +420,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": default_nq,
                                                       "ids": insert_ids,
+                                                      "pk_name": ct.default_int64_field_name,
                                                       "limit": default_limit,
                                                       "_async": _async})[0]
         if _async:
@@ -477,7 +481,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_items={
                                 "nq": 1,
                                 "limit": limit,
-                                "ids": list(distances_index_max)
+                                "ids": list(distances_index_max),
+                                "pk_name": ct.default_int64_field_name,
                             })
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -533,6 +538,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": limit,
                                          "_async": _async})
         # 3. delete partitions
@@ -559,7 +565,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids[:entity_num],
                                          "limit": limit - deleted_entity_num,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_collection_after_release_load(self, _async):
@@ -599,7 +606,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": default_limit,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_load_flush_load(self, _async):
@@ -637,7 +645,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": default_limit,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_new_data(self, nq):
@@ -668,7 +677,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
-                                         "limit": nb_old})
+                                         "limit": nb_old,
+                                         "pk_name": ct.default_int64_field_name})
         # 3. insert new data
         nb_new = 300
         _, _, _, insert_ids_new, time_stamp = cf.insert_data(collection_w, nb_new, dim=dim,
@@ -685,7 +695,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
-                                         "limit": nb_old + nb_new})
+                                         "limit": nb_old + nb_new,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_different_data_distribution_with_index(self, _async):
@@ -723,7 +734,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "limit": default_limit,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("not fixed yet")
@@ -763,7 +775,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "limit": default_limit,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", range_search_supported_indexes)
@@ -802,7 +815,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
                                              "ids": insert_ids,
-                                             "limit": default_limit})
+                                             "limit": default_limit,
+                                             "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", range_search_supported_indexes)
@@ -841,7 +855,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
                                              "ids": insert_ids,
-                                             "limit": default_limit})
+                                             "limit": default_limit,
+                                             "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_index_one_partition(self, _async):
@@ -881,7 +896,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids[par[0].num_entities:],
                                          "limit": limit_check,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
@@ -917,7 +933,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                   check_items={"nq": nq,
                                                "ids": insert_ids,
                                                "limit": 2,
-                                               "_async": _async})[0]
+                                               "_async": _async,
+                                               "pk_name": ct.default_int64_field_name})[0]
         if _async:
             res.done()
             res = res.result()
@@ -952,7 +969,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": [],
-                                         "limit": 0})
+                                         "limit": 0,
+                                         "pk_name": ct.default_int64_field_name})
         # 5. range search
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10, "radius": 10,
                                                               "range_filter": 2}}
@@ -961,7 +979,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": [],
-                                         "limit": 0})
+                                         "limit": 0,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
@@ -996,7 +1015,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                   check_items={"nq": nq,
                                                "ids": insert_ids,
                                                "limit": 2,
-                                               "_async": _async})[0]
+                                               "_async": _async,
+                                               "pk_name": ct.default_int64_field_name})[0]
         if _async:
             res.done()
             res = res.result()
@@ -1031,7 +1051,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": [],
-                                         "limit": 0})
+                                         "limit": 0,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("tanimoto obsolete")
@@ -1086,7 +1107,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                   check_items={"nq": 1,
                                                "ids": insert_ids,
                                                "limit": limit,
-                                               "_async": _async})[0]
+                                               "_async": _async,
+                                               "pk_name": ct.default_int64_field_name})[0]
         if _async:
             res.done()
             res = res.result()
@@ -1122,7 +1144,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": [],
-                                         "limit": 0})
+                                         "limit": 0,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_binary_without_flush(self, metrics):
@@ -1155,7 +1178,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit})
+                                         "limit": default_limit,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_range_search_with_expression(self, enable_dynamic_field):
@@ -1202,7 +1226,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                     check_items={"nq": default_nq,
                                                                  "ids": insert_ids,
                                                                  "limit": min(nb, len(filter_ids)),
-                                                                 "_async": _async})
+                                                                 "_async": _async,
+                                                                 "pk_name": ct.default_int64_field_name})
                 if _async:
                     search_res.done()
                     search_res = search_res.result()
@@ -1221,7 +1246,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                     check_items={"nq": default_nq,
                                                                  "ids": insert_ids,
                                                                  "limit": min(nb, len(filter_ids)),
-                                                                 "_async": _async})
+                                                                 "_async": _async,
+                                                                 "pk_name": ct.default_int64_field_name})
                 if _async:
                     search_res.done()
                     search_res = search_res.result()
@@ -1255,7 +1281,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                   check_items={"nq": default_nq,
                                                "ids": insert_ids,
                                                "limit": default_limit,
-                                               "_async": _async})[0]
+                                               "_async": _async,
+                                               "pk_name": ct.default_int64_field_name})[0]
         if _async:
             res.done()
             res = res.result()
@@ -1290,7 +1317,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                 check_items={"nq": nq,
                                              "ids": insert_ids,
                                              "limit": default_limit,
-                                             "_async": _async})
+                                             "_async": _async,
+                                             "pk_name": ct.default_int64_field_name})
 
         # 2. search with multi-processes
         log.info("test_range_search_concurrent_multi_threads: searching with %s processes" % threads_num)
@@ -1408,7 +1436,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": nb_old,
                                          "_async": _async,
-                                         })
+                                         "pk_name": ct.default_int64_field_name})
 
         kwargs = {}
         consistency_level = kwargs.get(
@@ -1454,7 +1482,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids,
                                          "limit": nb_old,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
 
         nb_new = 400
         _, _, _, insert_ids_new, _ = cf.insert_data(collection_w, nb_new,
@@ -1472,7 +1501,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids,
                                          "limit": nb_old + nb_new,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_with_consistency_eventually(self, nq, _async):
@@ -1501,7 +1531,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids,
                                          "limit": nb_old,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
         nb_new = 400
         _, _, _, insert_ids_new, _ = cf.insert_data(collection_w, nb_new,
                                                     auto_id=auto_id, dim=dim,
@@ -1542,7 +1573,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids,
                                          "limit": nb_old,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
 
         kwargs = {}
         consistency_level = kwargs.get(
@@ -1562,7 +1594,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids,
                                          "limit": nb_old + nb_new,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_sparse(self):

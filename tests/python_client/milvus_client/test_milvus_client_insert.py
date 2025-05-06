@@ -370,13 +370,14 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
-                                 "limit": default_limit})
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
         # 4. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -417,7 +418,8 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
-                                 "limit": default_limit})
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -479,7 +481,8 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
-                                 "limit": default_limit})
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
         # partition_number = self.get_partition_stats(client, collection_name, "_default")[0]
         # assert partition_number == default_nb
         # partition_number = self.get_partition_stats(client, collection_name, partition_name)[0]
@@ -876,13 +879,14 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
-                                 "limit": default_limit})
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
         # 4. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -948,7 +952,8 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
-                                 "limit": default_limit})
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
         # partition_number = self.get_partition_stats(client, collection_name, "_default")[0]
         # assert partition_number == default_nb
         # partition_number = self.get_partition_stats(client, collection_name, partition_name)[0]
@@ -996,7 +1001,8 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
-                                 "limit": default_limit})
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
         if self.has_partition(client, collection_name, partition_name)[0]:
             self.release_partitions(client, collection_name, partition_name)
             self.drop_partition(client, collection_name, partition_name)

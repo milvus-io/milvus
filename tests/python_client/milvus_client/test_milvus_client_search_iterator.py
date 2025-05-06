@@ -706,7 +706,9 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         res = self.search(client, collection_name, vectors_to_search,
                           search_params=search_params, limit=200,
                           check_task=CheckTasks.check_search_results,
-                          check_items={"nq": 1, "limit": limit, "enable_milvus_client_api": True})[0]
+                          check_items={"nq": 1, "limit": limit, 
+                                       "enable_milvus_client_api": True,
+                                       "pk_name": default_primary_key_field_name})[0]
         for limit in [batch_size - 3, batch_size, batch_size * 2, -1]:
             if metric_type != "L2":
                 radius = res[0][limit // 2].get('distance', 0) - 0.1  # pick a radius to make sure there exists results
@@ -967,7 +969,8 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         res = self.search(client, collection_name, vectors_to_search,
                           search_params=search_params, limit=limit,
                           check_task=CheckTasks.check_search_results,
-                          check_items={"nq": 1, "limit": limit, "enable_milvus_client_api": True})[0]
+                          check_items={"nq": 1, "limit": limit, "pk_name": default_primary_key_field_name, 
+                                       "enable_milvus_client_api": True})[0]
         for limit in [batch_size - 3, batch_size, batch_size * 2, -1]:
             if metric_type != "L2":
                 radius = res[0][limit // 2].get('distance', 0) - 0.1  # pick a radius to make sure there exists results

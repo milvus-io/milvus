@@ -176,6 +176,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": default_limit,
                                          "output_fields": [default_int64_field_name,
                                                            default_float_field_name]})
@@ -233,6 +234,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": limit,
+                                         "pk_name": ct.default_int64_field_name,
                                          "_async": _async,
                                          "output_fields": [ct.default_string_field_name,
                                                            ct.default_float_field_name]})
@@ -262,6 +264,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": default_limit,
                                          "output_fields": [default_int64_field_name,
                                                            default_float_field_name]})
@@ -345,6 +348,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": limit,
                                          "_async": _async,
                                          "output_fields": output_fields})
@@ -376,6 +380,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": default_limit,
                                          "output_fields": [default_int64_field_name,
                                                            default_float_field_name]})
@@ -410,6 +415,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": default_limit,
                                          "_async": _async,
                                          "output_fields": [ct.default_float_field_name,
@@ -458,6 +464,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": limit,
+                                         "pk_name": ct.default_int64_field_name,
                                          "_async": _async,
                                          "output_fields": [ct.default_string_field_name,
                                                            ct.default_float_field_name]})
@@ -513,6 +520,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": default_limit,
                                          "output_fields": output_fields})
 
@@ -548,6 +556,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": 1,
+                                         "pk_name": ct.default_int64_field_name,
                                          "output_fields": output_fields})
         # 4. drop collection
         collection_w.drop()
