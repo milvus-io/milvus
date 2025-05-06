@@ -734,6 +734,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 4. query
         self.query(client, collection_name, filter=default_search_exp,

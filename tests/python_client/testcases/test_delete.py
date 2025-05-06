@@ -214,7 +214,8 @@ class TestDeleteParams(TestcaseBase):
         expr = f'{ct.default_int64_field_name} in {[tmp_nb]}'
         collection_w.delete(expr=expr)
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: query_res_tmp_expr})
+                           check_items={'exp_res': query_res_tmp_expr,
+                                        "pk_name": collection_w.primary_field.name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_part_not_existed_values(self):
@@ -284,7 +285,9 @@ class TestDeleteParams(TestcaseBase):
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty, partition_names=[partition_w.name])
         res = df.iloc[1:2, :1].to_dict('records')
         collection_w.query(f'{ct.default_int64_field_name} in [1]',
-                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+                           check_task=CheckTasks.check_query_results, 
+                           check_items={'exp_res': res,
+                                        "pk_name": collection_w.primary_field.name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_default_partition(self):
@@ -651,8 +654,9 @@ class TestDeleteOperation(TestcaseBase):
         # delete entities from another partition
         expr = f'{ct.default_int64_field_name} in {[0]}'
         collection_w.delete(expr, partition_name=ct.default_partition_name)
-        collection_w.query(expr, check_task=CheckTasks.check_query_results, check_items={
-                           exp_res: query_res_tmp_expr})
+        collection_w.query(expr, check_task=CheckTasks.check_query_results, 
+                           check_items={'exp_res': query_res_tmp_expr,
+                                        "pk_name": collection_w.primary_field.name})
 
         # delete entities from own partition
         collection_w.delete(expr, partition_name=partition_w.name)
@@ -685,7 +689,9 @@ class TestDeleteOperation(TestcaseBase):
 
         # query on partition_w with id 0 and get an result
         collection_w.query(tmp_expr, partition_names=[partition_w.name],
-                           check_task=CheckTasks.check_query_results, check_items={exp_res: query_res_tmp_expr})
+                           check_task=CheckTasks.check_query_results, 
+                           check_items={'exp_res': query_res_tmp_expr,
+                                        "pk_name": collection_w.primary_field.name})
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_delete_auto_id_collection(self):
@@ -931,7 +937,9 @@ class TestDeleteOperation(TestcaseBase):
         # query entity
         res = df_new.iloc[:, [0, 1, -1]].to_dict('records')
         collection_w.query(del_expr, output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'with_vec': True})
+                           check_task=CheckTasks.check_query_results, 
+                           check_items={'exp_res': res, 'with_vec': True,
+                                        "pk_name": collection_w.primary_field.name})
         search_res, _ = collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]],
                                             anns_field=ct.default_float_vec_field_name,
                                             param=default_search_params, limit=1)
@@ -964,7 +972,9 @@ class TestDeleteOperation(TestcaseBase):
         res = df.iloc[:1, :1].to_dict('records')
         collection_w.search(data=[df[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
                             param=default_search_params, limit=1)
-        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results, check_items={'exp_res': res})
+        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results, 
+                           check_items={'exp_res': res,
+                                        "pk_name": collection_w.primary_field.name})
 
         # delete
         collection_w.delete(tmp_expr)
@@ -980,7 +990,9 @@ class TestDeleteOperation(TestcaseBase):
         # re-query
         res = df_new.iloc[[0], [0, 1, -1]].to_dict('records')
         collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'with_vec': True})
+                           check_task=CheckTasks.check_query_results, 
+                           check_items={'exp_res': res, 'with_vec': True,
+                                        "pk_name": collection_w.primary_field.name})
         search_res, _ = collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]],
                                             anns_field=ct.default_float_vec_field_name,
                                             param=default_search_params, limit=1)
@@ -1061,7 +1073,9 @@ class TestDeleteOperation(TestcaseBase):
             log.debug(collection_w.num_entities)
         collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': df_new.iloc[[0], [0, 4]].to_dict('records'), 'with_vec': True})
+                           check_items={'exp_res': df_new.iloc[[0], [0, 4]].to_dict('records'), 
+                                        'with_vec': True,
+                                        "pk_name": collection_w.primary_field.name})
 
         collection_w.delete(tmp_expr)
         if to_flush_delete:
@@ -1482,7 +1496,9 @@ class TestDeleteString(TestcaseBase):
 
         # query on partition_w with id 0 and get an result
         collection_w.query(default_string_expr, partition_names=[partition_w.name],
-                           check_task=CheckTasks.check_query_results, check_items={exp_res: query_tmp_expr_str})
+                           check_task=CheckTasks.check_query_results, 
+                           check_items={'exp_res': query_tmp_expr_str,
+                                        "pk_name": collection_w.primary_field.name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_sealed_segment_without_flush_with_string(self):
@@ -1871,7 +1887,9 @@ class TestDeleteString(TestcaseBase):
         res = df.iloc[:1, 2:3].to_dict('records')
         collection_w.search(data=[df[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
                             param=default_search_params, limit=1)
-        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_results, check_items={'exp_res': res})
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_results, 
+                           check_items={'exp_res': res,
+                                        "pk_name": collection_w.primary_field.name})
 
         # delete
         collection_w.delete(default_string_expr)

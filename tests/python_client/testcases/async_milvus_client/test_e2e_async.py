@@ -95,7 +95,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                 output_fields=[default_pk_name],
                                                                 check_task=CheckTasks.check_query_results,
                                                                 check_items={"exp_res": exp_query_res,
-                                                                            "pk_name": default_pk_name})
+                                                                             "pk_name": default_pk_name})
         tasks.append(filter_query_task)
         # query with ids and output all fields
         ids_query_task = self.async_milvus_client_wrap.query(c_name,

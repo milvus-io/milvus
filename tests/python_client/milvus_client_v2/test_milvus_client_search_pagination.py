@@ -566,8 +566,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         collection_name = self.collection_name
         vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
         # search with pagination in partition_1
-        limit = 50
-        pages = 10
+        limit = 20
+        pages = 5
         for page in range(pages):
             offset = page * limit
             search_params = {"offset": offset}

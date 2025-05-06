@@ -204,6 +204,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
             check_items={"enable_milvus_client_api": True,
                          "nq": default_nq,
                          "limit": default_limit,
+                         "pk_name": self.pk_field_name,
                          "metric": self.float_vector_metric
                          }
         ) 
@@ -239,6 +240,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
             check_items={"enable_milvus_client_api": True,
                          "nq": default_nq,
                          "limit": default_limit,
+                         "pk_name": self.pk_field_name,
                          "metric": self.bf16_vector_metric
                          }
         )
@@ -270,6 +272,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
             check_items={"enable_milvus_client_api": True,
                          "nq": default_nq,
                          "limit": default_limit,
+                         "pk_name": self.pk_field_name,
                          "metric": self.sparse_vector_metric
                          }
         )
@@ -285,6 +288,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
             check_items={"enable_milvus_client_api": True,
                          "nq": default_nq,
                          "limit": default_limit,
+                         "pk_name": self.pk_field_name,
                          "metric": self.sparse_vector_metric
                          }
         )
@@ -311,6 +315,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
             check_task=CheckTasks.check_search_results,
             check_items={"enable_milvus_client_api": True,
                          "nq": 0, "limit": 0,
+                         "pk_name": self.pk_field_name,
                          }
         )
 
@@ -341,6 +346,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
             check_items={"enable_milvus_client_api": True,
                          "nq": default_nq,
                          "limit": default_limit,
+                         "pk_name": self.pk_field_name,
                          "metric": self.binary_vector_metric
                          }
         )
@@ -374,6 +380,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
             check_items={"enable_milvus_client_api": True,
                          "nq": nq,
                          "limit": limit,
+                         "pk_name": self.pk_field_name,
                          "metric": self.float_vector_metric
                          }
             ) 

@@ -2173,9 +2173,10 @@ class TestUpsertValid(TestcaseBase):
         collection_w.load()
         for i in range(5):
             collection_w.upsert(data=data)
-            collection_w.query(expr=f'{ct.default_int64_field_name} >= 0', output_fields=[ct.default_count_output]
-                                        , check_task=CheckTasks.check_query_results,
-                                         check_items={"exp_res": [{"count(*)": ct.default_nb}]})
+            collection_w.query(expr=f'{ct.default_int64_field_name} >= 0',
+                               output_fields=[ct.default_count_output],
+                               check_task=CheckTasks.check_query_results,
+                               check_items={"exp_res": [{"count(*)": ct.default_nb}]})
 
 
 class TestUpsertInvalid(TestcaseBase):

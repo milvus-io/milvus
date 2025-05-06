@@ -79,6 +79,8 @@ class TestPartitionKeyIsolation(TestcaseBase):
             all_data.append(df)
             log.info(f"generate test data {batch_size} cost time {time.time() - t0}")
             collection.insert(df)
+        num = collection.num_entities
+        log.info(f"collection {collection_name} loaded, num_entities: {num}")
         all_df = pd.concat(all_data)
         collection.compact()
         collection.wait_for_compaction_completed()
@@ -99,8 +101,6 @@ class TestPartitionKeyIsolation(TestcaseBase):
         t0 = time.time()
         collection.load()
         log.info(f"load collection cost time {time.time() - t0}")
-        num = collection.num_entities
-        log.info(f"collection {collection_name} loaded, num_entities: {num}")
 
         valid_expressions = [
             "scalar_6 == '1' and scalar_12 == '1'",

@@ -445,6 +445,7 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": [],
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 0})
         self.drop_collection(client, collection_name)
 
@@ -913,6 +914,7 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": [],
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 0})
         self.drop_collection(client, collection_name)
 
