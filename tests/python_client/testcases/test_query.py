@@ -4127,7 +4127,8 @@ class TestQueryCount(TestcaseBase):
         collection_w.query_iterator(batch_size=batch_size, expr=default_expr,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb,
-                                                 "batch_size": batch_size})
+                                                 "batch_size": batch_size,
+                                                 "pk_name": collection_w.primary_field.name})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.repeat(3)
@@ -4528,6 +4529,7 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         collection_w.query_iterator(batch_size, expr=expr,
                                     check_task=CheckTasks.check_query_iterator,
                                     check_items={"count": ct.default_nb,
+                                                 "pk_name": collection_w.primary_field.name,
                                                  "batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L1)

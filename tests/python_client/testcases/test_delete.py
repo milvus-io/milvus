@@ -414,10 +414,8 @@ class TestDeleteOperation(TestcaseBase):
         search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][0]],
                                             ct.default_float_vec_field_name,
                                             ct.default_search_params, ct.default_limit)
-        log.debug(search_res[0].ids)
         # assert search results not contains deleted ids
         inter = set(insert_res.primary_keys[:ct.default_nb // 2]).intersection(set(search_res[0].ids))
-        log.debug(inter)
         assert len(inter) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -461,7 +459,9 @@ class TestDeleteOperation(TestcaseBase):
         res = df_same.iloc[-2:, [0, 1, -1]].to_dict('records')
         collection_w.query(expr=f'{ct.default_int64_field_name} >= {tmp_nb-1}',
                            output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'with_vec': True})
+                           check_task=CheckTasks.check_query_results, 
+                           check_items={'exp_res': res, 'with_vec': True,
+                                        "pk_name": collection_w.primary_field.name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_query_delta_logs(self):
@@ -497,7 +497,9 @@ class TestDeleteOperation(TestcaseBase):
         res = df_same.iloc[:, [0, 1, -1]].to_dict('records')
         collection_w.query(expr=f'{ct.default_int64_field_name} < {L0_binlog_num_compaction+2}',
                            output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'with_vec': True})
+                           check_task=CheckTasks.check_query_results, 
+                           check_items={'exp_res': res, 'with_vec': True,
+                                        "pk_name": collection_w.primary_field.name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_search(self):
@@ -521,7 +523,6 @@ class TestDeleteOperation(TestcaseBase):
                                               ct.default_float_vec_field_name,
                                               ct.default_search_params, ct.default_limit)
         # assert search result is not equal to entity
-        log.debug(f"Second search result ids: {search_res_2[0].ids}")
         inter = set(ids[:ct.default_nb // 2]
                     ).intersection(set(search_res_2[0].ids))
         # Using bounded staleness, we could still search the "deleted" entities,
@@ -555,7 +556,6 @@ class TestDeleteOperation(TestcaseBase):
                                               ct.default_float_vec_field_name,
                                               ct.default_search_params, ct.default_limit)
         # assert search result is not equal to entity
-        log.debug(f"Second search result ids: {search_res_2[0].ids}")
         inter = set(ids[:ct.default_nb // 2]
                     ).intersection(set(search_res_2[0].ids))
         # Using bounded staleness, we could still search the "deleted" entities,
@@ -759,7 +759,9 @@ class TestDeleteOperation(TestcaseBase):
         res = df_same.iloc[:, [0, 1, -1]].to_dict('records')
         collection_w.query(expr=tmp_expr,
                            output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
-                           check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'with_vec': True})
+                           check_task=CheckTasks.check_query_results, 
+                           check_items={'exp_res': res, 'with_vec': True,
+                                        "pk_name": collection_w.primary_field.name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_growing_data_channel_delete(self):
@@ -923,7 +925,6 @@ class TestDeleteOperation(TestcaseBase):
         df_new = cf.gen_default_dataframe_data(4, start=tmp_nb)
         df_new[ct.default_int64_field_name] = [0, 1, 3, 5]
         collection_w.insert(df_new)
-        log.debug(f'to_flush:{to_flush}')
         if to_flush:
             log.debug(collection_w.num_entities)
 
@@ -1324,11 +1325,9 @@ class TestDeleteString(TestcaseBase):
         search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][0]],
                                             ct.default_float_vec_field_name,
                                             ct.default_search_params, ct.default_limit)
-        log.debug(search_res[0].ids)
         # assert search results not contains deleted ids
         inter = set(insert_res.primary_keys[:ct.default_nb // 2]).intersection(set(search_res[0].ids))
-        log.debug(inter)
-        assert len(inter) == 0
+        assert len(inter) == 0,  "assert no deleted ids in search results"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_query_ids_both_L0_segment_and_WAL_with_string(self):
@@ -1374,7 +1373,8 @@ class TestDeleteString(TestcaseBase):
         collection_w.query(expr=default_string_expr,
                            output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': res, 'with_vec': True, "primary_field": ct.default_string_field_name})
+                           check_items={'exp_res': res, 'with_vec': True, 
+                                        "pk_name": collection_w.primary_field.name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_search_with_string(self):
@@ -1400,7 +1400,6 @@ class TestDeleteString(TestcaseBase):
                                               ct.default_float_vec_field_name,
                                               ct.default_search_params, ct.default_limit)
         # assert search result is not equal to entity
-        log.debug(f"Second search result ids: {search_res_2[0].ids}")
         inter = set(ids[:ct.default_nb // 2]
                     ).intersection(set(search_res_2[0].ids))
         # Using bounded staleness, we could still search the "deleted" entities,
@@ -1519,7 +1518,8 @@ class TestDeleteString(TestcaseBase):
         collection_w.query(expr=default_string_expr,
                            output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': res, 'with_vec': True, "primary_field": ct.default_string_field_name})
+                           check_items={'exp_res': res, 'with_vec': True, 
+                                        "pk_name": collection_w.primary_field.name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_growing_data_channel_delete_with_string(self):
@@ -1713,7 +1713,7 @@ class TestDeleteString(TestcaseBase):
         collection_w.query(default_string_expr, output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': df_new.iloc[[0], [2, 4]].to_dict('records'),
-                                        'primary_field': ct.default_string_field_name, 'with_vec': True})
+                                        'pk_name': collection_w.primary_field.name, 'with_vec': True})
 
         collection_w.delete(default_string_expr)
         if to_flush_delete:
@@ -1886,11 +1886,10 @@ class TestDeleteString(TestcaseBase):
 
         # re-query
         res = df_new.iloc[[0], [2, 4]].to_dict('records')
-        log.info(res)
         collection_w.query(default_string_expr, output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': res,
-                                        'primary_field': ct.default_string_field_name,
+                                        'pk_name': collection_w.primary_field.name,
                                         'with_vec': True})
         collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]],
                             anns_field=ct.default_float_vec_field_name,
@@ -2495,7 +2494,6 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                               ct.default_float_vec_field_name,
                                               ct.default_search_params, ct.default_limit)
         # assert search result is not equal to entity
-        log.debug(f"Second search result ids: {search_res_2[0].ids}")
         inter = set(ids[:ct.default_nb // 2]
                     ).intersection(set(search_res_2[0].ids))
         # Using bounded staleness, we could still search the "deleted" entities,

@@ -2133,7 +2133,8 @@ class TestMixScenes(TestcaseBase):
         # query before upsert
         expected_res = [{k: v[10] for k, v in insert_data.items() if k != DataType.FLOAT_VECTOR.name}]
         self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": expected_res, "primary_field": primary_field})
+                                   check_items={"exp_res": expected_res, 
+                                                "pk_name": primary_field})
 
         # upsert int64_pk = 10
         upsert_data = cf.gen_field_values(self.collection_wrap.schema, nb=1,
@@ -2142,7 +2143,8 @@ class TestMixScenes(TestcaseBase):
         # re-query
         expected_upsert_res = [{k: v[0] for k, v in upsert_data.items() if k != DataType.FLOAT_VECTOR.name}]
         self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": expected_upsert_res, "primary_field": primary_field})
+                                   check_items={"exp_res": expected_upsert_res, 
+                                                "pk_name": primary_field})
 
         # delete int64_pk = 10
         self.collection_wrap.delete(expr=expr)
@@ -2217,7 +2219,8 @@ class TestMixScenes(TestcaseBase):
         # re-query
         expected_upsert_res = [{k: v[0] for k, v in upsert_data.items() if k != DataType.FLOAT_VECTOR.name}]
         self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": expected_upsert_res, "primary_field": primary_field})
+                                   check_items={"exp_res": expected_upsert_res, 
+                                                "pk_name": primary_field})
 
         # delete int64_pk = 33333
         self.collection_wrap.delete(expr=expr)

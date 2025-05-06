@@ -210,7 +210,6 @@ class ResponseChecker:
             collection = res
         elif isinstance(res, tuple):
             collection = res[0]
-            log.debug(collection.schema)
         else:
             raise Exception("The result to check isn't collection type object")
         if len(check_items) == 0:
@@ -441,8 +440,7 @@ class ResponseChecker:
                 assert len(ids) == check_items["limit"]
             else:
                 if check_items.get("ids", None) is not None:
-                    ids_match = pc.list_contain_check(ids,
-                                                      list(check_items["ids"]))
+                    ids_match = pc.list_contain_check(ids, list(check_items["ids"]))
                     if not ids_match:
                         log.error("search_results_check: ids searched not match")
                         assert ids_match

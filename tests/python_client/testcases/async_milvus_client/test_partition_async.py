@@ -669,7 +669,8 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
                                           check_task=CheckTasks.check_search_results,
                                           check_items={"enable_milvus_client_api": True,
                                                        "nq": len(vectors_to_search),
-                                                       "limit": default_limit})
+                                                       "limit": default_limit,
+                                                       "pk_name": default_primary_key_field_name})
         tasks.append(search_task)
         # 5. query
         query_task = async_client.query(collection_name, filter=default_search_exp,
@@ -677,7 +678,7 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
                                         check_task=CheckTasks.check_query_results,
                                         check_items={"exp_res": rows,
                                                      "with_vec": True,
-                                                     "primary_field": default_primary_key_field_name})
+                                                     "pk_name": default_primary_key_field_name})
         tasks.append(query_task)
         res = await asyncio.gather(*tasks)
         
@@ -744,7 +745,8 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"enable_milvus_client_api": True,
                                                              "nq": len(vectors_to_search),
-                                                             "limit": default_limit})
+                                                             "limit": default_limit,
+                                                             "pk_name": default_primary_key_field_name})
         tasks.append(search_task)
         # search multi partition
         search_task_multi = async_client.search(collection_name, vectors_to_search,
@@ -752,7 +754,8 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
                                                           check_task=CheckTasks.check_search_results,
                                                           check_items={"enable_milvus_client_api": True,
                                                                        "nq": len(vectors_to_search),
-                                                                       "limit": default_limit})
+                                                                       "limit": default_limit,
+                                                                       "pk_name": default_primary_key_field_name})
         tasks.append(search_task_multi)
         # query single partition
         query_task = async_client.query(collection_name, filter=default_search_exp,
@@ -760,7 +763,7 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
                                         check_task=CheckTasks.check_query_results,
                                         check_items={"exp_res": rows_1,
                                                      "with_vec": True,
-                                                     "primary_field": default_primary_key_field_name})
+                                                     "pk_name": default_primary_key_field_name})
         tasks.append(query_task)
         # query multi partition
         query_task_multi = async_client.query(collection_name, filter=default_search_exp,
@@ -768,7 +771,7 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
                                         check_task=CheckTasks.check_query_results,
                                         check_items={"exp_res": rows_1 + rows_2,
                                                      "with_vec": True,
-                                                     "primary_field": default_primary_key_field_name})
+                                                     "pk_name": default_primary_key_field_name})
         tasks.append(query_task_multi)
         res = await asyncio.gather(*tasks)
         # 5. release partitions, search and query
@@ -789,13 +792,14 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"enable_milvus_client_api": True,
                                                "nq": len(vectors_to_search),
-                                               "limit": default_limit})
+                                               "limit": default_limit,
+                                               "pk_name": default_primary_key_field_name})
         await async_client.query(collection_name, filter=default_search_exp,
                                  partition_names=[partition_name_2],
                                  check_task=CheckTasks.check_query_results,
                                  check_items={"exp_res": rows_2,
                                               "with_vec": True,
-                                              "primary_field": default_primary_key_field_name})
+                                              "pk_name": default_primary_key_field_name})
 
         # 6. load partitions, search and query
         tasks_after_load = []
@@ -804,13 +808,14 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
                                           check_task=CheckTasks.check_search_results,
                                           check_items={"enable_milvus_client_api": True,
                                                        "nq": len(vectors_to_search),
-                                                       "limit": default_limit})
+                                                       "limit": default_limit,
+                                                       "pk_name": default_primary_key_field_name})
         tasks_after_load.append(search_task)
         query_task = async_client.query(collection_name, filter=default_search_exp,
                                         check_task=CheckTasks.check_query_results,
                                         check_items={"exp_res": rows_default + rows_1 + rows_2,
                                                      "with_vec": True,
-                                                     "primary_field": default_primary_key_field_name})
+                                                     "pk_name": default_primary_key_field_name})
         tasks_after_load.append(query_task)
         res = await asyncio.gather(*tasks_after_load)
         
