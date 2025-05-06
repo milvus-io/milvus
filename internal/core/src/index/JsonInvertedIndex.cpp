@@ -17,6 +17,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/Types.h"
+#include "folly/FBVector.h"
 #include "log/Log.h"
 #include "simdjson/error.h"
 
@@ -95,12 +96,14 @@ template <typename T>
 void
 JsonInvertedIndex<T>::build_index_for_json(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
-    using GetType =
-        std::conditional_t<std::is_same_v<std::string, T>, std::string_view, T>;
     int64_t offset = 0;
     LOG_INFO("Start to build json inverted index for field: {}", nested_path_);
+    using SIMDJSON_T =
+        std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
 
     auto tokens = parse_json_pointer(nested_path_);
+
+    bool is_array = cast_type_.data_type() == JsonCastType::DataType::ARRAY;
 
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
@@ -124,25 +127,47 @@ JsonInvertedIndex<T>::build_index_for_json(
                     nullptr, 0, offset++);
                 continue;
             }
-            value_result<GetType> res = json_column->at<GetType>(nested_path_);
-            auto err = res.error();
-            if (err != simdjson::SUCCESS) {
-                error_recorder_.Record(*json_column, nested_path_, err);
-                this->wrapper_->template add_multi_data<T>(
-                    nullptr, 0, offset++);
-                continue;
-            }
-            if constexpr (std::is_same_v<GetType, std::string_view>) {
-                auto value = std::string(res.value());
-                this->wrapper_->template add_data(&value, 1, offset++);
+            folly::fbvector<T> values;
+            if (is_array) {
+                auto doc = json_column->dom_doc();
+                auto array_res = doc.at_pointer(nested_path_).get_array();
+                if (array_res.error() != simdjson::SUCCESS) {
+                    error_recorder_.Record(
+                        *json_column, nested_path_, array_res.error());
+                } else {
+                    auto array_values = array_res.value();
+                    for (auto value : array_values) {
+                        auto val = value.get<SIMDJSON_T>();
+
+                        if (val.error() == simdjson::SUCCESS) {
+                            values.push_back(static_cast<T>(val.value()));
+                        }
+                    }
+                }
             } else {
-                auto value = res.value();
-                this->wrapper_->template add_data(&value, 1, offset++);
+                value_result<SIMDJSON_T> res =
+                    json_column->at<SIMDJSON_T>(nested_path_);
+                if (res.error() != simdjson::SUCCESS) {
+                    error_recorder_.Record(
+                        *json_column, nested_path_, res.error());
+                } else {
+                    values.push_back(static_cast<T>(res.value()));
+                }
             }
+            this->wrapper_->template add_multi_data<T>(
+                values.data(), values.size(), offset++);
         }
     }
 
     error_recorder_.PrintErrStats();
+}
+
+template <typename T>
+bool
+JsonInvertedIndex<T>::IsDataTypeSupported(DataType data_type) const {
+    auto type = cast_type_.ToMilvusDataType();
+    return type == data_type ||
+           (data_type == DataType::INT64 && type == DataType::DOUBLE);
 }
 
 template class JsonInvertedIndex<bool>;
