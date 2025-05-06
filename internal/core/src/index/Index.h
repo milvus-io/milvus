@@ -20,6 +20,7 @@
 #include <boost/dynamic_bitset.hpp>
 #include "common/FieldData.h"
 #include "common/EasyAssert.h"
+#include "common/JsonCastType.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "knowhere/index/index_factory.h"
@@ -72,9 +73,14 @@ class IndexBase {
         return index_type_;
     }
 
-    virtual enum DataType
-    JsonCastType() const {
-        return DataType::NONE;
+    virtual bool
+    IsDataTypeSupported(DataType data_type) const {
+        return true;
+    };
+
+    virtual JsonCastType
+    GetCastType() const {
+        return JsonCastType::UNKNOWN;
     }
 
  protected:

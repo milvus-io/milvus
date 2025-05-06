@@ -21,6 +21,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/JsonCastType.h"
 #include "common/Types.h"
+#include "index/Index.h"
 #include "index/VectorMemIndex.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
@@ -395,22 +396,17 @@ IndexFactory::CreateJsonIndex(
     const storage::FileManagerContext& file_manager_context) {
     AssertInfo(index_type == INVERTED_INDEX_TYPE,
                "Invalid index type for json index");
-    switch (cast_dtype) {
-        case JsonCastType::BOOL:
+
+    switch (cast_dtype.element_type()) {
+        case JsonCastType::DataType::BOOL:
             return std::make_unique<index::JsonInvertedIndex<bool>>(
-                proto::schema::DataType::Bool,
-                nested_path,
-                file_manager_context);
-        case JsonCastType::DOUBLE:
+                cast_dtype, nested_path, file_manager_context);
+        case JsonCastType::DataType::DOUBLE:
             return std::make_unique<index::JsonInvertedIndex<double>>(
-                proto::schema::DataType::Double,
-                nested_path,
-                file_manager_context);
-        case JsonCastType::VARCHAR:
+                cast_dtype, nested_path, file_manager_context);
+        case JsonCastType::DataType::VARCHAR:
             return std::make_unique<index::JsonInvertedIndex<std::string>>(
-                proto::schema::DataType::VarChar,
-                nested_path,
-                file_manager_context);
+                cast_dtype, nested_path, file_manager_context);
         default:
             PanicInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
     }
