@@ -13,27 +13,77 @@
 
 #include <string>
 #include "common/EasyAssert.h"
+#include "common/FieldDataInterface.h"
+#include "tantivy-binding.h"
+#include "fmt/core.h"
+
 namespace milvus {
 
-enum class JsonCastType { BOOL, DOUBLE, VARCHAR };
+using MilvusDataType = milvus::DataType;
+class JsonCastType {
+ public:
+    enum class DataType { UNKNOWN, BOOL, DOUBLE, VARCHAR, ARRAY };
 
-inline auto
-format_as(JsonCastType f) {
-    return fmt::underlying(f);
-}
+    static const JsonCastType UNKNOWN;
 
-inline const std::unordered_map<std::string, JsonCastType> JsonCastTypeMap = {
-    {"BOOL", JsonCastType::BOOL},
-    {"DOUBLE", JsonCastType::DOUBLE},
-    {"VARCHAR", JsonCastType::VARCHAR}};
+    static JsonCastType
+    FromString(const std::string& str);
 
-inline JsonCastType
-ConvertToJsonCastType(const std::string& str) {
-    auto it = JsonCastTypeMap.find(str);
-    if (it != JsonCastTypeMap.end()) {
-        return it->second;
-    }
-    PanicInfo(Unsupported, "Invalid json cast type: " + str);
-}
+    DataType
+    data_type() const;
+
+    // Returns the element type if it's an array, otherwise the data type itself.
+    DataType
+    element_type() const;
+
+    TantivyDataType
+    ToTantivyType() const;
+
+    MilvusDataType
+    ToMilvusDataType() const;
+
+ private:
+    JsonCastType(DataType data_type, DataType element_type);
+
+    static const std::unordered_map<std::string, const JsonCastType>
+        json_cast_type_map_;
+
+    DataType data_type_;
+    DataType element_type_;
+};
 
 }  // namespace milvus
+
+template <>
+struct fmt::formatter<milvus::JsonCastType::DataType> : formatter<string_view> {
+    auto
+    format(milvus::JsonCastType::DataType c, format_context& ctx) const {
+        string_view name = "unknown";
+        switch (c) {
+            case milvus::JsonCastType::DataType::BOOL:
+                name = "BOOL";
+                break;
+            case milvus::JsonCastType::DataType::DOUBLE:
+                name = "DOUBLE";
+                break;
+            case milvus::JsonCastType::DataType::VARCHAR:
+                name = "VARCHAR";
+                break;
+            case milvus::JsonCastType::DataType::ARRAY:
+                name = "ARRAY";
+                break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<milvus::JsonCastType> : fmt::formatter<string_view> {
+    auto
+    format(const milvus::JsonCastType& c, format_context& ctx) const {
+        if (c.data_type() == milvus::JsonCastType::DataType::ARRAY) {
+            return format_to(ctx.out(), "ARRAY_{}", c.element_type());
+        }
+        return format_to(ctx.out(), "{}", c.data_type());
+    }
+};
