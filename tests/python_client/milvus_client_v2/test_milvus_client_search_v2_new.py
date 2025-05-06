@@ -13,6 +13,7 @@ import pytest
 import pandas as pd
 from faker import Faker
 from pymilvus import ConsistencyLevel
+
 Faker.seed(19530)
 fake_en = Faker("en_US")
 fake_zh = Faker("zh_CN")

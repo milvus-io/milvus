@@ -210,6 +210,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
                              "limit": limit,
+                             "pk_name": default_primary_key_field_name,
                              "metric": "COSINE"
                              }
             )
@@ -266,7 +267,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
-                             "limit": limit
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name
                              }
             )
             all_pages_results.append(search_res_with_offset)
@@ -323,7 +325,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
-                             "limit": limit
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name
                              }
             )
             all_pages_results.append(search_res_with_offset)
@@ -379,7 +382,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
-                             "limit": limit
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name
                              }
             )
             all_pages_results.append(search_res_with_offset)
@@ -433,7 +437,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                       search_params=search_param, limit=limit, check_task=CheckTasks.check_search_results,
                       check_items={"enable_milvus_client_api": True,
                                    "nq": default_nq,
-                                   "limit": limit}) 
+                                   "limit": limit,
+                                   "pk_name": default_primary_key_field_name}) 
     
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", [0, 100])
@@ -480,7 +485,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
-                             "limit": limit}
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name}
             )
 
             # 4. search with offset+limit
@@ -521,7 +527,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
-                             "limit": limit}
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name}
             )
 
             # 7. search with offset+limit
@@ -574,7 +581,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 limit=limit,
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
-                             "nq": default_nq, "limit": limit})
+                             "nq": default_nq,
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name})
             
             # assert every id in search_res_with_offset %3 ==1
             for hits in search_res_with_offset:
@@ -595,7 +604,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 limit=limit,
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
-                             "nq": default_nq, "limit": limit})
+                             "nq": default_nq,
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name})
 
             # assert every id in search_res_with_offset %3 ==1 or ==2
             for hits in search_res_with_offset:
@@ -621,7 +632,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                     search_params=search_params, limit=default_limit,
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq, "limit": default_limit})
+                                 "nq": default_nq,
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
         # search with offset = 0
         offset = 0
         search_params = {"offset": offset}
@@ -630,7 +643,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                     search_params=search_params, limit=default_limit,
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq, "limit": default_limit})
+                                 "nq": default_nq,
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", [0, 20, 100, 200])
@@ -653,7 +668,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                               limit=limit,
                               check_task=CheckTasks.check_search_results,
                               check_items={"enable_milvus_client_api": True,
-                                           "nq": default_nq, "limit": limit})
+                                           "nq": default_nq,
+                                           "limit": limit,
+                                           "pk_name": default_primary_key_field_name})
 
         # 2. search with offset in search 
         search_params = {}
@@ -664,7 +681,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                               limit=limit,
                               check_task=CheckTasks.check_search_results,
                               check_items={"enable_milvus_client_api": True,
-                                           "nq": default_nq, "limit": limit})
+                                           "nq": default_nq,
+                                           "limit": limit,
+                                           "pk_name": default_primary_key_field_name})
         # 3. compare results
         assert res1 == res2
 
@@ -767,7 +786,7 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
                              "nq": default_nq,
                              "limit": limit,
                              "metric": metric_type,
-                             }
+                             "pk_name": default_primary_key_field_name}
             )
             all_pages_results.append(search_res_with_offset)
 

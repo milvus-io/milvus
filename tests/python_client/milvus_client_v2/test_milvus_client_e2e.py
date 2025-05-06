@@ -173,6 +173,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_search_results,
             check_items={"enable_milvus_client_api": True,
                 "nq": len(vectors_to_search),
+                "pk_name": "id",
                 "limit": default_limit
             }
         )

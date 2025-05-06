@@ -408,7 +408,6 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         # 3. search
         vectors_to_search = rng.random((1, dim))
         null_expr = default_vector_field_name + " " + null_expr_op
-        log.info(null_expr)
         error = {ct.err_code: 65535,
                  ct.err_msg: f"unsupported data type: VECTOR_FLOAT"}
         self.search(client, collection_name, vectors_to_search,
@@ -444,7 +443,6 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         not_exist_field_name = "not_exist_field"
         null_expr = not_exist_field_name + " " + null_expr_op
-        log.info(null_expr)
         error = {ct.err_code: 1100,
                  ct.err_msg: f"failed to create query plan: cannot parse expression: "
                              f"{null_expr}, error: field {not_exist_field_name} not exist: invalid parameter"}
@@ -486,7 +484,6 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
             null_expr = nullable_field_name + "['b']" + " " + null_expr_op
         self.insert(client, collection_name, rows)
         # 3. search
-        log.info(null_expr)
         self.search(client, collection_name, [vectors[0]],
                     filter=null_expr)
 
@@ -524,7 +521,6 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. search
         null_expr = nullable_field_name + "[0]" + " " + null_expr_op
-        log.info(null_expr)
         error = {ct.err_code: 65535,
                  ct.err_msg: f"unsupported data type: ARRAY"}
         self.search(client, collection_name, [vectors[0]],
@@ -705,6 +701,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1055,7 +1052,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1117,7 +1113,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1179,7 +1174,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1241,7 +1235,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1301,7 +1294,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1361,7 +1353,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1421,7 +1412,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1481,7 +1471,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1548,7 +1537,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1624,7 +1612,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1686,7 +1673,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []

@@ -408,8 +408,8 @@ class ResponseChecker:
                 search_res = search_res.result()
         if check_items.get("output_fields", None):
             assert set(search_res[0][0].entity.fields.keys()) == set(check_items["output_fields"])
-            if check_items.get("original_entities", None):
-                original_entities = check_items["original_entities"]
+            original_entities = check_items.get("original_entities", None)
+            if original_entities is not None:
                 if not isinstance(original_entities, pandas.core.frame.DataFrame):
                     original_entities = pandas.DataFrame(original_entities)
                 pc.output_field_value_check(search_res, original_entities, pk_name=pk_name)
