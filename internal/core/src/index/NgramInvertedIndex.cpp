@@ -65,9 +65,45 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
 }
 
 TargetBitmap
-NgramInvertedIndex::InnerMatchQuery(const std::string& literal) {
+NgramInvertedIndex::InnerMatchQuery(const std::string& literal,
+                                    exec::SegmentExpr* segment) {
     TargetBitmap bitset{static_cast<size_t>(Count())};
     wrapper_->inner_match_ngram(literal, min_gram_, max_gram_, &bitset);
+
+    // Post filtering: if the literal length is larger than the max_gram
+    // we need to filter out the bitset
+    if (literal.length() > max_gram_) {
+        auto bitset_off = 0;
+        TargetBitmapView res(bitset);
+        TargetBitmap valid(res.size(), true);
+        TargetBitmapView valid_res(valid.data(), valid.size());
+
+        auto execute_sub_batch = [&bitset, &bitset_off, &literal](
+                                     const std::string_view* data,
+                                     const bool* valid_data,
+                                     const int32_t* offsets,
+                                     const int size,
+                                     TargetBitmapView res,
+                                     TargetBitmapView valid_res) {
+            auto next_off_option = res.find_next(bitset_off);
+            while (next_off_option.has_value()) {
+                auto next_off = next_off_option.value();
+                if (next_off >= bitset_off + size) {
+                    break;
+                }
+                auto data_pos = next_off - bitset_off;
+                if (data[data_pos].find(literal) == std::string::npos) {
+                    res[next_off] = false;
+                }
+                next_off_option = res.find_next(next_off);
+            }
+            bitset_off += size;
+        };
+
+        segment->ProcessDataChunks<std::string_view>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+    }
+
     return bitset;
 }
 

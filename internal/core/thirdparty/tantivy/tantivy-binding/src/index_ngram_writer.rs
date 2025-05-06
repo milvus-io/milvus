@@ -8,11 +8,13 @@ use crate::error::Result;
 use crate::index_writer::IndexWriterWrapper;
 use crate::index_writer_v7::IndexWriterWrapperImpl;
 
+const NGRAM_TOKENIZER: &str = "ngram";
+
 fn build_ngram_schema(field_name: &str) -> (Schema, Field) {
     let mut schema_builder = Schema::builder();
 
     let text_field_indexing = TextFieldIndexing::default()
-        .set_tokenizer("raw")
+        .set_tokenizer(NGRAM_TOKENIZER)
         .set_fieldnorms(false)
         .set_index_option(IndexRecordOption::Basic);
     let text_options = TextOptions::default().set_indexing_options(text_field_indexing);
@@ -44,7 +46,7 @@ impl IndexWriterWrapper {
         let (schema, field) = build_ngram_schema(field_name);
 
         let index = Index::create_in_dir(path, schema).unwrap();
-        index.tokenizers().register("ngram", tokenizer);
+        index.tokenizers().register(NGRAM_TOKENIZER, tokenizer);
         let index_writer = index
             .writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)
             .unwrap();
@@ -59,9 +61,11 @@ impl IndexWriterWrapper {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::c_void;
+
     use tempfile::TempDir;
 
-    use crate::index_writer::IndexWriterWrapper;
+    use crate::{index_writer::IndexWriterWrapper, util::set_bitset};
 
     #[test]
     fn test_create_ngram_writer() {
@@ -75,5 +79,35 @@ mod tests {
             15000000,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn test_ngram_writer() {
+        let dir = TempDir::new().unwrap();
+        let mut writer = IndexWriterWrapper::create_ngram_writer(
+            "test",
+            dir.path().to_str().unwrap(),
+            2,
+            3,
+            1,
+            15000000,
+        )
+        .unwrap();
+
+        writer.add("university", Some(0)).unwrap();
+        writer.add("anthropology", Some(1)).unwrap();
+        writer.add("economics", Some(2)).unwrap();
+        writer.add("history", Some(3)).unwrap();
+        writer.add("victoria", Some(4)).unwrap();
+        writer.add("basics", Some(5)).unwrap();
+
+        writer.commit().unwrap();
+
+        let reader = writer.create_reader(set_bitset).unwrap();
+        let mut res: Vec<u32> = vec![];
+        reader
+            .inner_match_ngram("ic", 2, 3, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res, vec![2, 4, 5]);
     }
 }

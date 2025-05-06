@@ -192,23 +192,25 @@ GetNotMatchExpr(SchemaPtr schema,
 };
 }  // namespace
 
-TEST(NgramIndex, TestPerf) {
+TEST(NgramIndex, TestPerfNgram) {
     int64_t collection_id = 1;
     int64_t partition_id = 2;
     int64_t segment_id = 3;
-    int64_t field_id = 101;
     int64_t index_build_id = 4000;
     int64_t index_version = 4000;
+
+    auto schema = std::make_shared<Schema>();
+    auto field_id = schema->AddDebugField("ngram", DataType::VARCHAR);
 
     auto field_meta = gen_field_meta2(collection_id,
                                       partition_id,
                                       segment_id,
-                                      field_id,
-                                      DataType::STRING,
+                                      field_id.get(),
+                                      DataType::VARCHAR,
                                       DataType::NONE,
                                       false);
-    auto index_meta =
-        gen_index_meta2(segment_id, field_id, index_build_id, index_version);
+    auto index_meta = gen_index_meta2(
+        segment_id, field_id.get(), index_build_id, index_version);
 
     std::string root_path = "/tmp/test-inverted-index/";
     auto storage_config = gen_local_storage_config2(root_path);
@@ -234,8 +236,17 @@ TEST(NgramIndex, TestPerf) {
 
     std::cout << "nb: " << nb << std::endl;
 
-    auto field_data = storage::CreateFieldData(DataType::STRING, false);
+    auto field_data = storage::CreateFieldData(DataType::VARCHAR, false);
     field_data->FillFieldData(data.data(), data.size());
+
+    auto segment = CreateSealedSegment(schema);
+    auto arrow_data_wrapper =
+        storage::ConvertFieldDataToArrowDataWrapper(field_data);
+    auto field_data_info = FieldDataInfo{
+        field_id.get(),
+        nb,
+        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
+    segment->LoadFieldData(field_id, field_data_info);
 
     // std::cout << "length:" << field_data->get_num_rows() << std::endl;
     auto payload_reader =
@@ -251,7 +262,7 @@ TEST(NgramIndex, TestPerf) {
                            collection_id,
                            partition_id,
                            segment_id,
-                           field_id,
+                           field_id.get(),
                            log_id);
     };
 
@@ -282,7 +293,7 @@ TEST(NgramIndex, TestPerf) {
     {
         index::CreateIndexInfo index_info{};
         index_info.index_type = milvus::index::INVERTED_INDEX_TYPE;
-        index_info.field_type = DataType::STRING;
+        index_info.field_type = DataType::VARCHAR;
 
         Config config;
         config["index_files"] = index_files;
@@ -296,23 +307,39 @@ TEST(NgramIndex, TestPerf) {
         auto cnt = index->Count();
         ASSERT_EQ(cnt, nb);
 
+        // case 1: match without further filter
+        // boost::container::vector<std::string> test_data{
+        //     "wa",
+        //     "un",
+        //     "cou",
+        //     "the",
+        //     "roc",
+        //     "ras",
+        //     "cou",
+        //     "mig",
+        //     "ough",
+        // };
+
+        // case 2: match with further filter
         boost::container::vector<std::string> test_data{
-            "wa",
-            "un",
-            "cou",
-            "the",
-            "roc",
-            "ras",
-            "cou",
-            "mig",
-            "ough",
-        };
+            "story", "ctivi", "atche", "itera"};
 
         auto now = std::chrono::high_resolution_clock::now();
         for (auto& literal : test_data) {
-            auto bitset2 = index->InnerMatchQuery(literal);
+            exec::SegmentExpr segment_expr(
+                std::move(std::vector<exec::ExprPtr>{}),
+                "SegmentExpr",
+                segment.get(),
+                field_id,
+                {},
+                DataType::VARCHAR,
+                nb,
+                8192,
+                0);
+
+            auto bitset2 = index->InnerMatchQuery(literal, &segment_expr);
             std::cout << "literal: " << literal
-                      << " bitset2: " << bitset2.count() << std::endl;
+                      << " matched count: " << bitset2.count() << std::endl;
         }
         auto end = std::chrono::high_resolution_clock::now();
         auto duration =
@@ -322,7 +349,7 @@ TEST(NgramIndex, TestPerf) {
     }
 }
 
-TEST(NgramIndex, TestPerf) {
+TEST(NgramIndex, TestPerfNormal) {
     int64_t collection_id = 1;
     int64_t partition_id = 2;
     int64_t segment_id = 3;
@@ -417,37 +444,39 @@ TEST(NgramIndex, TestPerf) {
 
         Config config;
         config["index_files"] = index_files;
-        config["min_gram"] = 2;
-        config["max_gram"] = 4;
 
         ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
         index->Load(milvus::tracer::TraceContext{}, config);
 
-        using IndexType = index::ScalarIndex<int64_t>;
+        using IndexType = index::ScalarIndex<std::string>;
         auto real_index = dynamic_cast<IndexType*>(index.get());
 
         auto cnt = index->Count();
         ASSERT_EQ(cnt, nb);
 
+        // boost::container::vector<std::string> test_data{
+        //     "%wa%",
+        //     "%un%",
+        //     "%cou%",
+        //     "%the%",
+        //     "%roc%",
+        //     "%ras%",
+        //     "%cou%",
+        //     "%mig%",
+        //     "%ough%",
+        // };
+
+        // case 2: match with further filter
         boost::container::vector<std::string> test_data{
-            "wa",
-            "un",
-            "cou",
-            "the",
-            "roc",
-            "ras",
-            "cou",
-            "mig",
-            "ough",
-        };
+            "%story%", "%ctivi%", "%atche%", "%itera%"};
 
         auto now = std::chrono::high_resolution_clock::now();
         for (auto& literal : test_data) {
-            auto bitset2 = index->InnerMatchQuery(literal);
+            auto bitset2 = real_index->PatternMatch(literal);
             std::cout << "literal: " << literal
-                      << " bitset2: " << bitset2.count() << std::endl;
+                      << " matched count: " << bitset2.count() << std::endl;
         }
         auto end = std::chrono::high_resolution_clock::now();
         auto duration =

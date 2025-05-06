@@ -2,7 +2,9 @@
 #include <string>
 #include <boost/filesystem.hpp>
 
+#include "exec/expression/Expr.h"
 #include "index/InvertedIndexTantivy.h"
+#include "segcore/SegmentInterface.h"
 
 namespace milvus::index {
 class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
@@ -24,7 +26,7 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
     TargetBitmap
-    InnerMatchQuery(const std::string& literal);
+    InnerMatchQuery(const std::string& literal, exec::SegmentExpr* segment);
 
  private:
     uintptr_t min_gram_{0};
