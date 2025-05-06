@@ -669,6 +669,7 @@ func TestTranslateOutputFields(t *testing.T) {
 }
 
 func TestAddFieldTask(t *testing.T) {
+	paramtable.Init()
 	rc := NewMixCoordMock()
 	ctx := context.Background()
 	prefix := "TestAddFieldTask"
@@ -788,11 +789,13 @@ func TestAddFieldTask(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 		// not support dynamic field
+		paramtable.Get().Save(paramtable.Get().CommonCfg.AllowAddFieldWithDynamicField.Key, "false")
 		task.oldSchema.EnableDynamicField = true
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 		task.oldSchema.EnableDynamicField = false
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.AllowAddFieldWithDynamicField.Key)
 
 		// too many fields
 		Params.Save(Params.ProxyCfg.MaxFieldNum.Key, fmt.Sprint(task.oldSchema.Fields))

@@ -302,6 +302,8 @@ type commonConfig struct {
 	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
 	EnabledJSONKeyStats               ParamItem `refreshable:"true"`
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"true"`
+
+	AllowAddFieldWithDynamicField ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1030,6 +1032,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnabledGrowingSegmentJSONKeyStats.Init(base.mgr)
+
+	p.AllowAddFieldWithDynamicField = ParamItem{
+		Key:          "common.allowAddFieldWithDynamicField",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "the flag to allow add field with dynamic field",
+		Export:       true,
+	}
+	p.AllowAddFieldWithDynamicField.Init(base.mgr)
 }
 
 type gpuConfig struct {
