@@ -42,10 +42,12 @@ func (ds *dataSyncServiceWrapper) Start() {
 func (ds *dataSyncServiceWrapper) HandleMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	ds.handler.GenerateMsgPack(msg)
 	for ds.handler.PendingMsgPack.Len() > 0 {
+		next := ds.handler.PendingMsgPack.Next()
+		nextTsMsg := msgstream.MustBuildMsgPackFromConsumeMsgPack(next, adaptor.UnmashalerDispatcher)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case ds.input <- ds.handler.PendingMsgPack.Next():
+		case ds.input <- nextTsMsg:
 			// The input channel will never get stuck because the data sync service will consume the message continuously.
 			ds.handler.PendingMsgPack.UnsafeAdvance()
 		}
