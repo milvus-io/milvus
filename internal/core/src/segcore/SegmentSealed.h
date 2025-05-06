@@ -63,7 +63,8 @@ class SegmentSealed : public SegmentInternalInterface {
                 if (index.field_id != field_id) {
                     return false;
                 }
-                if (index.cast_type == DataType::JSON) {
+                if (index.cast_type.data_type() ==
+                    JsonCastType::DataType::JSON) {
                     return path.substr(0, index.nested_path.length()) ==
                            index.nested_path;
                 }

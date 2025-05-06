@@ -80,7 +80,7 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                 break;
             }
 
-            case DataType::JSON: {
+            case JsonCastType::DataType::JSON: {
                 auto* json_flat_index =
                     dynamic_cast<index::JsonFlatIndex*>(index);
                 auto executor =
