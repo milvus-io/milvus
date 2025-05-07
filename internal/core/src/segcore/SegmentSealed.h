@@ -114,9 +114,7 @@ class SegmentSealed : public SegmentInternalInterface {
         if (any_type) {
             return true;
         }
-        return data_type == index->second->JsonCastType() ||
-               (data_type == DataType::INT64 &&
-                index->second->JsonCastType() == DataType::DOUBLE);
+        return index->second->IsDataTypeSupported(data_type);
     }
 
  protected:

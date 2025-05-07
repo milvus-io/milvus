@@ -308,7 +308,7 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
         if (load_index_info->field_type == milvus::DataType::JSON) {
-            index_info.json_cast_type = milvus::ConvertToJsonCastType(
+            index_info.json_cast_type = milvus::JsonCastType::FromString(
                 config.at(JSON_CAST_TYPE).get<std::string>());
             index_info.json_path = config.at(JSON_PATH).get<std::string>();
         }

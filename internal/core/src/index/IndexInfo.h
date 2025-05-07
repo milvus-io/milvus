@@ -28,7 +28,7 @@ struct CreateIndexInfo {
     std::string field_name;
     int64_t dim;
     int32_t scalar_index_engine_version;
-    JsonCastType json_cast_type;
+    JsonCastType json_cast_type{JsonCastType::UNKNOWN};
     std::string json_path;
 };
 
