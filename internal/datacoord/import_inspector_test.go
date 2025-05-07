@@ -184,9 +184,6 @@ func (s *ImportInspectorSuite) TestProcessImport() {
 	s.alloc.EXPECT().AllocTimestamp(mock.Anything).Return(300, nil)
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
-		Slots: 1,
-	}, nil)
 	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
 		task.CreateTaskOnWorker(nodeID, cluster)
 	})
