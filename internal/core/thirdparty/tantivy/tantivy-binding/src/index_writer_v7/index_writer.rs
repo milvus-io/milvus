@@ -6,7 +6,8 @@ use libc::c_char;
 use log::info;
 use tantivy::indexer::UserOperation;
 use tantivy::schema::{
-    Field, IndexRecordOption, NumericOptions, Schema, SchemaBuilder, TextFieldIndexing, TextOptions,
+    Field, IndexRecordOption, NumericOptions, Schema, SchemaBuilder, TextFieldIndexing,
+    TextOptions, FAST,
 };
 use tantivy::{doc, Index, IndexWriter, TantivyDocument};
 
@@ -87,6 +88,8 @@ pub struct IndexWriterWrapperImpl {
     pub(crate) field: Field,
     pub(crate) index_writer: IndexWriter,
     pub(crate) index: Arc<Index>,
+    pub(crate) id_field: Option<Field>,
+    pub(crate) enable_user_specified_doc_id: bool,
 }
 
 impl IndexWriterWrapperImpl {
@@ -96,6 +99,7 @@ impl IndexWriterWrapperImpl {
         path: String,
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
+        enable_user_specified_doc_id: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!(
             "create index writer, field_name: {}, data_type: {:?}, tantivy_index_version 7",
@@ -103,7 +107,12 @@ impl IndexWriterWrapperImpl {
         );
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, field_name, data_type);
-        schema_builder.enable_user_specified_doc_id();
+        let id_field = if enable_user_specified_doc_id {
+            schema_builder.enable_user_specified_doc_id();
+            None
+        } else {
+            Some(schema_builder.add_i64_field("doc_id", FAST))
+        };
         let schema = schema_builder.build();
         let index = Index::create_in_dir(path.clone(), schema)?;
         let index_writer =
@@ -112,6 +121,8 @@ impl IndexWriterWrapperImpl {
             field,
             index_writer,
             index: Arc::new(index),
+            id_field,
+            enable_user_specified_doc_id,
         })
     }
 
@@ -120,9 +131,14 @@ impl IndexWriterWrapperImpl {
     }
 
     #[inline]
-    fn add_document(&mut self, document: TantivyDocument, offset: u32) -> Result<()> {
-        self.index_writer
-            .add_document_with_doc_id(offset, document)?;
+    fn add_document(&mut self, mut document: TantivyDocument, offset: u32) -> Result<()> {
+        if self.enable_user_specified_doc_id {
+            self.index_writer
+                .add_document_with_doc_id(offset as u32, document)?;
+        } else {
+            document.add_i64(self.id_field.unwrap(), offset as i64);
+            self.index_writer.add_document(document)?;
+        }
         Ok(())
     }
 
@@ -165,12 +181,7 @@ impl IndexWriterWrapperImpl {
         json_offsets_len: &[usize],
     ) -> Result<()> {
         let mut batch = Vec::with_capacity(BATCH_SIZE);
-        let id_field = self
-            .index_writer
-            .index()
-            .schema()
-            .get_field("doc_id")
-            .unwrap();
+        let id_field = self.id_field.unwrap();
         for i in 0..keys.len() {
             let key = unsafe { CStr::from_ptr(keys[i]) }
                 .to_str()
