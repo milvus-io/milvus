@@ -1838,6 +1838,10 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return importFile
 	})
 	importCollectionInfo, err := s.handler.GetCollection(ctx, in.GetCollectionID())
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(in.GetCollectionID()))
+		return resp, nil
+	}
 	if err != nil {
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("get collection failed, err=%w", err)))
 		return resp, nil
