@@ -34,7 +34,6 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     const TargetBitmap
     In(size_t n, const T* values) override {
-        LOG_INFO("[executor] JsonFlatIndexQueryExecutor In");
         TargetBitmap bitset(this->Count());
         for (size_t i = 0; i < n; ++i) {
             this->wrapper_->json_term_query(json_path_, values[i], &bitset);
@@ -192,7 +191,8 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
 
     explicit JsonFlatIndex(const storage::FileManagerContext& ctx,
                            const std::string& nested_path)
-        : InvertedIndexTantivy<std::string>(TANTIVY_INDEX_LATEST_VERSION, ctx),
+        : InvertedIndexTantivy<std::string>(
+              TANTIVY_INDEX_LATEST_VERSION, ctx, false, false),
           nested_path_(nested_path) {
     }
 
