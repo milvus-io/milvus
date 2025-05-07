@@ -399,7 +399,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
     uint32_t& num_rows,
     uint32_t& dim,
     int64_t& write_offset) {
-    num_rows = uint32_t(field_data->get_num_rows());
+    num_rows += uint32_t(field_data->get_num_rows());
     auto data_type = field_data->get_data_type();
     if (!file_created) {
         auto init_file_info = [&](milvus::DataType dt) {
