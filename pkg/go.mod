@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus/pkg/v2
 
-go 1.24.1
+go 1.24.2
 
 require (
 	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
