@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	shardstats "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
 	"github.com/milvus-io/milvus/internal/types"
@@ -67,6 +68,7 @@ func Apply(opts ...optResourceInit) {
 
 // Done finish all initialization of resources.
 func Done() {
+	r.segmentStatsManager = shardstats.NewStatsManager()
 	r.segmentAssignStatsManager = stats.NewStatsManager()
 	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()
 	r.syncMgr = syncmgr.NewSyncManager(r.chunkManager)
@@ -104,6 +106,7 @@ type resourceImpl struct {
 	mixCoordClient            *syncutil.Future[types.MixCoordClient]
 	streamingNodeCatalog      metastore.StreamingNodeCataLog
 	segmentAssignStatsManager *stats.StatsManager
+	segmentStatsManager       *shardstats.StatsManager
 	timeTickInspector         tinspector.TimeTickSyncInspector
 	vchannelTempStorage       *vchantempstore.VChannelTempStorage
 
@@ -150,6 +153,10 @@ func (r *resourceImpl) MixCoordClient() *syncutil.Future[types.MixCoordClient] {
 // StreamingNodeCataLog returns the streaming node catalog.
 func (r *resourceImpl) StreamingNodeCatalog() metastore.StreamingNodeCataLog {
 	return r.streamingNodeCatalog
+}
+
+func (r *resourceImpl) SegmentStatsManager() *shardstats.StatsManager {
+	return r.segmentStatsManager
 }
 
 // SegmentAssignStatManager returns the segment assign stats manager.
