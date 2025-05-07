@@ -353,11 +353,11 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
         int batch_size = batch_files.size();
         for (int i = 0; i < batch_size; i++) {
             auto field_data = field_datas[i].get()->GetFieldData();
+            num_rows += uint32_t(field_data->get_num_rows());
             cache_raw_data_to_disk_common<DataType>(field_data,
                                                     local_chunk_manager,
                                                     local_data_path,
                                                     file_created,
-                                                    num_rows,
                                                     dim,
                                                     write_offset);
         }
@@ -396,10 +396,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
     const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
     std::string& local_data_path,
     bool& file_created,
-    uint32_t& num_rows,
     uint32_t& dim,
     int64_t& write_offset) {
-    num_rows += uint32_t(field_data->get_num_rows());
     auto data_type = field_data->get_data_type();
     if (!file_created) {
         auto init_file_info = [&](milvus::DataType dt) {
@@ -479,11 +477,11 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     auto field_datas = GetFieldDatasFromStorageV2(
         all_remote_files, GetFieldDataMeta().field_id, data_type.value(), dim);
     for (auto& field_data : field_datas) {
+        num_rows += uint32_t(field_data->get_num_rows());
         cache_raw_data_to_disk_common<DataType>(field_data,
                                                 local_chunk_manager,
                                                 local_data_path,
                                                 file_created,
-                                                num_rows,
                                                 var_dim,
                                                 write_offset);
     }
