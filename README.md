@@ -10,7 +10,7 @@
   <a href="https://x.com/milvusio"><img src="https://img.shields.io/twitter/follow/milvusio" alt="twitter"/></a>
 </div>
 
-## What is Milvus?
+## What is Milvus? 
 
 🐦 [Milvus](https://milvus.io/) is a high-performance vector database built for scale. It powers AI applications by efficiently organizing and searching vast amounts of unstructured data, such as text, images, and multi-modal information.
 
