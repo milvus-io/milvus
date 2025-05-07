@@ -168,6 +168,10 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayContainsAny) {
     auto ref = [this, &elems](size_t offset) -> bool {
         std::unordered_set<TypeParam> row(this->vec_of_array_[offset].begin(),
                                           this->vec_of_array_[offset].end());
+        if (elems.empty()) {
+            return true;
+        }
+
         for (const auto& elem : elems) {
             if (row.find(elem) != row.end()) {
                 return true;
@@ -216,6 +220,10 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayContainsAll) {
     auto ref = [this, &elems](size_t offset) -> bool {
         std::unordered_set<TypeParam> row(this->vec_of_array_[offset].begin(),
                                           this->vec_of_array_[offset].end());
+        if (elems.empty()) {
+            return true;
+        }
+
         for (const auto& elem : elems) {
             if (row.find(elem) == row.end()) {
                 return false;
