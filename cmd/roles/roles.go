@@ -42,6 +42,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -69,8 +70,11 @@ func init() {
 	metrics.RegisterStorageMetrics(Registry.GoRegistry)
 }
 
-func stopRocksmq() {
-	rocksmqimpl.CloseRocksMQ()
+// stopRocksmqIfUsed closes the RocksMQ if it is used.
+func stopRocksmqIfUsed() {
+	if name := util.MustSelectWALName(); name == util.WALTypeRocksmq {
+		rocksmqimpl.CloseRocksMQ()
+	}
 }
 
 type component interface {
@@ -331,11 +335,6 @@ func (mr *MilvusRoles) Run() {
 		}
 
 		params := paramtable.Get()
-		if paramtable.Get().RocksmqEnable() {
-			defer stopRocksmq()
-		} else {
-			panic("only support Rocksmq in standalone mode")
-		}
 		if params.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 			// Start etcd server.
 			etcd.InitEtcdServer(
@@ -347,6 +346,7 @@ func (mr *MilvusRoles) Run() {
 			defer etcd.StopEtcdServer()
 		}
 		paramtable.SetRole(typeutil.StandaloneRole)
+		defer stopRocksmqIfUsed()
 	} else {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode); err != nil {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
