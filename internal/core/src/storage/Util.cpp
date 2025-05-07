@@ -649,6 +649,10 @@ GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id) {
     return (prefix / path / path1).string();
 }
 
+// Get index or field data
+// Build index -> Get raw data ->
+//    is_field_data == True and SetData(buf) -> means double memory
+// Load index -> Get index data -> is_field_data doesn't influence the bottom
 std::unique_ptr<DataCodec>
 DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
                             const std::string& file,

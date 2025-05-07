@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
@@ -335,9 +336,22 @@ func WithEncryptionKey(edek []byte) HeaderExtraWriterOption {
 
 type StreamWriterOption func(*BinlogStreamWriter)
 
-func WithEncryptionContext(encryptor hook.Encryptor) StreamWriterOption {
+func WithEncryptor(encryptor hook.Encryptor) StreamWriterOption {
 	return func(w *BinlogStreamWriter) {
 		w.encrytor = encryptor
+	}
+}
+
+func WithHeaderExtraOptions(headerOpt HeaderExtraWriterOption) StreamWriterOption {
+	return func(w *BinlogStreamWriter) {
+		w.headerOpt = headerOpt
+	}
+}
+
+func GetEncryptionOptions(edek []byte, encryptor hook.Encryptor) []StreamWriterOption {
+	return []StreamWriterOption{
+		WithEncryptor(encryptor),
+		WithHeaderExtraOptions(WithEncryptionKey(edek)),
 	}
 }
 
@@ -347,10 +361,10 @@ type BinlogStreamWriter struct {
 	segmentID    UniqueID
 	fieldSchema  *schemapb.FieldSchema
 
-	buf        bytes.Buffer
-	rw         *singleFieldRecordWriter
-	headerOpts HeaderExtraWriterOption
-	encrytor   hook.Encryptor
+	buf       bytes.Buffer
+	rw        *singleFieldRecordWriter
+	headerOpt HeaderExtraWriterOption
+	encrytor  hook.Encryptor
 }
 
 func (bsw *BinlogStreamWriter) GetRecordWriter() (RecordWriter, error) {
@@ -376,7 +390,16 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 	if err := bsw.writeBinlogHeaders(&b); err != nil {
 		return nil, err
 	}
-	if _, err := b.Write(bsw.buf.Bytes()); err != nil {
+
+	data := bsw.buf.Bytes()
+	var err error
+	if bsw.encrytor != nil {
+		data, err = bsw.encrytor.Encrypt(data)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if _, err := b.Write(data); err != nil {
 		return nil, err
 	}
 	return &Blob{
@@ -398,8 +421,9 @@ func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
 	de.FieldID = bsw.fieldSchema.FieldID
 	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(bsw.rw.writtenUncompressed)))
 	de.descriptorEventData.AddExtra(nullableKey, bsw.fieldSchema.Nullable)
-	if bsw.headerOpts != nil {
-		bsw.headerOpts(de)
+	// Additional head options
+	if bsw.headerOpt != nil {
+		bsw.headerOpt(de)
 	}
 	if err := de.Write(w); err != nil {
 		return err
@@ -432,7 +456,6 @@ func NewBinlogStreamWriters(collectionID, partitionID, segmentID UniqueID,
 			partitionID:  partitionID,
 			segmentID:    segmentID,
 			fieldSchema:  f,
-			// headerOpts:   opts,
 		}
 		for _, writerOption := range writerOptions {
 			writerOption(&writer)
@@ -520,6 +543,7 @@ type CompositeBinlogRecordWriter struct {
 	bm25StatsLog map[FieldID]*datapb.FieldBinlog
 
 	flushedUncompressed uint64
+	options             []StreamWriterOption
 }
 
 var _ BinlogRecordWriter = (*CompositeBinlogRecordWriter)(nil)
@@ -787,6 +811,7 @@ func (c *CompositeBinlogRecordWriter) GetRowNum() int64 {
 
 func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64,
+	options ...StreamWriterOption,
 ) (*CompositeBinlogRecordWriter, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
@@ -807,6 +832,15 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 		bm25Stats[fid] = NewBM25Stats()
 	}
 
+	if hookutil.GetCipher() != nil {
+		var ezID int64 = 0 // TODO: GOOSE, get ezID from schema
+		encryptor, edek, err := hookutil.GetCipher().GetEncryptor(ezID, collectionID)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, GetEncryptionOptions(edek, encryptor)...)
+	}
+
 	return &CompositeBinlogRecordWriter{
 		collectionID: collectionID,
 		partitionID:  partitionID,
@@ -819,6 +853,7 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 		maxRowNum:    maxRowNum,
 		pkstats:      stats,
 		bm25Stats:    bm25Stats,
+		options:      options,
 	}, nil
 }
 

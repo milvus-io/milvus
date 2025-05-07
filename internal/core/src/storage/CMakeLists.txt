@@ -43,4 +43,7 @@ if(USE_OPENDAL)
     set(SOURCE_FILES ${SOURCE_FILES} opendal/OpenDALChunkManager.cpp)
 endif()
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/plugin)
+set(SOURCE_FILES ${SOURCE_FILES} plugin/PluginLoader.hpp)
+
 add_library(milvus_storage OBJECT ${SOURCE_FILES})
