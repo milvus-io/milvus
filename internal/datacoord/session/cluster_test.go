@@ -19,6 +19,7 @@ package session
 import (
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
@@ -33,6 +34,116 @@ import (
 
 func init() {
 	paramtable.Init()
+}
+
+func TestCluster_createTask(t *testing.T) {
+	t.Run("GetClient failed", func(t *testing.T) {
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager := NewMockNodeManager(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, errors.New("mock err"))
+		c := NewCluster(mockNodeManager)
+
+		err := c.(*cluster).createTask(1, &workerpb.CreateTaskRequest{}, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("CreateTask rpc failed", func(t *testing.T) {
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager := NewMockNodeManager(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		c := NewCluster(mockNodeManager)
+
+		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+		err := c.(*cluster).createTask(1, &workerpb.CreateTaskRequest{}, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager := NewMockNodeManager(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		c := NewCluster(mockNodeManager)
+
+		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		err := c.(*cluster).createTask(1, &workerpb.CreateTaskRequest{}, nil)
+		assert.NoError(t, err)
+	})
+}
+
+func TestCluster_queryTask(t *testing.T) {
+	t.Run("GetClient failed", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(nil, errors.New("mock err"))
+		c := NewCluster(mockNodeManager)
+		result, err := c.(*cluster).queryTask(1, nil)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+	})
+
+	t.Run("QueryTask rpc failed", func(t *testing.T) {
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager := NewMockNodeManager(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		c := NewCluster(mockNodeManager)
+
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+
+		result, err := c.(*cluster).queryTask(1, nil)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager := NewMockNodeManager(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		c := NewCluster(mockNodeManager)
+
+		expectedResult := &workerpb.QueryTaskResponse{
+			Status: merr.Success(),
+		}
+		payload, _ := proto.Marshal(expectedResult)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:  merr.Success(),
+			Payload: payload,
+		}, nil)
+
+		result, err := c.(*cluster).queryTask(1, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+	})
+}
+
+func TestCluster_dropTask(t *testing.T) {
+	t.Run("GetClient failed", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(nil, errors.New("mock err"))
+		c := NewCluster(mockNodeManager)
+		err := c.(*cluster).dropTask(1, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("DropTask rpc failed", func(t *testing.T) {
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager := NewMockNodeManager(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		c := NewCluster(mockNodeManager)
+
+		mockClient.EXPECT().DropTask(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+		err := c.(*cluster).dropTask(1, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager := NewMockNodeManager(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		c := NewCluster(mockNodeManager)
+
+		mockClient.EXPECT().DropTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		err := c.(*cluster).dropTask(1, nil)
+		assert.NoError(t, err)
+	})
 }
 
 func TestCluster_QuerySlot(t *testing.T) {
@@ -385,7 +496,7 @@ func TestCluster_Analyze(t *testing.T) {
 
 		// Mock response
 		properties := taskcommon.NewProperties(nil)
-		properties.AppendTaskState(taskcommon.Finished)
+		properties.AppendTaskState(taskcommon.InProgress)
 		expectedResult := &workerpb.QueryJobsV2Response{
 			Result: &workerpb.QueryJobsV2Response_AnalyzeJobResults{
 				AnalyzeJobResults: &workerpb.AnalyzeResults{},
