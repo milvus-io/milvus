@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus
 
-go 1.24.1
+go 1.24.2
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.11.1
