@@ -360,7 +360,7 @@ func TestDatabasePropertiesRgReplicas(t *testing.T) {
 
 	// When load does not specify parameters, rg and replica Properties take effect
 	_, errLoad := mc.LoadCollection(ctx, client.NewLoadCollectionOption(schema.CollectionName))
-	common.CheckErr(t, errLoad, false, "resource group not found[rg=rg1]")
+	common.CheckErr(t, errLoad, false, "resource group not found", "service resource insufficient")
 
 	// actually load with default rg, rg1 not existed
 	taskLoad, errLoad := mc.LoadCollection(ctx, client.NewLoadCollectionOption(schema.CollectionName).WithReplica(1))

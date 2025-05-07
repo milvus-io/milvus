@@ -156,8 +156,8 @@ func NewLoadPartitionsOption(collectionName string, partitionsNames ...string) *
 	return &loadPartitionsOption{
 		collectionName: collectionName,
 		partitionNames: partitionsNames,
-		replicaNum:     1,
-		interval:       time.Millisecond * 200,
+		// replicaNum:     1, The default value of the replicaNum should be set on the server side
+		interval: time.Millisecond * 200,
 	}
 }
 
