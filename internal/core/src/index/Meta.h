@@ -25,7 +25,7 @@ constexpr const char* LOWER_BOUND_VALUE = "lower_bound_value";
 constexpr const char* LOWER_BOUND_INCLUSIVE = "lower_bound_inclusive";
 constexpr const char* UPPER_BOUND_VALUE = "upper_bound_value";
 constexpr const char* UPPER_BOUND_INCLUSIVE = "upper_bound_inclusive";
-constexpr const char* PREFIX_VALUE = "prefix_value";
+constexpr const char* MATCH_VALUE = "match_value";
 // below configurations will be persistent, do not edit them.
 constexpr const char* MARISA_TRIE_INDEX = "marisa_trie_index";
 constexpr const char* MARISA_STR_IDS = "marisa_trie_str_ids";
@@ -50,6 +50,7 @@ constexpr const char* SCALAR_INDEX_ENGINE_VERSION =
     "scalar_index_engine_version";
 constexpr const char* TANTIVY_INDEX_VERSION = "tantivy_index_version";
 constexpr uint32_t TANTIVY_INDEX_LATEST_VERSION = 7;
+constexpr uint32_t TANTIVY_INDEX_MINIMUM_VERSION = 5;
 constexpr const char* INDEX_NON_ENCODING = "index.nonEncoding";
 
 // index meta

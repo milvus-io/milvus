@@ -1,6 +1,9 @@
 package log
 
-import "go.uber.org/zap"
+import (
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+)
 
 const (
 	FieldNameModule    = "module"
@@ -15,4 +18,9 @@ func FieldModule(module string) zap.Field {
 // FieldComponent returns a zap field with the component name.
 func FieldComponent(component string) zap.Field {
 	return zap.String(FieldNameComponent, component)
+}
+
+// FieldMessage returns a zap field with the message object.
+func FieldMessage(msg zapcore.ObjectMarshaler) zap.Field {
+	return zap.Object("message", msg)
 }

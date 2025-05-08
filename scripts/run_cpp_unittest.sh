@@ -71,6 +71,13 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
       fi
   fi
 
+  echo "Running cachinglayer unittest"
+  ${UNITTEST_DIR}/cachinglayer_test
+  if [ $? -ne 0 ]; then
+      echo ${UNITTEST_DIR}/cachinglayer_test "run failed"
+      exit 1
+  fi
+
 done
 
 # run cwrapper unittest

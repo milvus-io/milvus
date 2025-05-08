@@ -215,7 +215,8 @@ RustResult tantivy_create_index(const char *field_name,
                                 const char *path,
                                 uint32_t tantivy_index_version,
                                 uintptr_t num_threads,
-                                uintptr_t overall_memory_budget_in_bytes);
+                                uintptr_t overall_memory_budget_in_bytes,
+                                bool enable_user_specified_doc_id);
 
 RustResult tantivy_create_index_with_single_segment(const char *field_name,
                                                     TantivyDataType data_type,

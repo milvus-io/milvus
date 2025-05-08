@@ -77,7 +77,7 @@ func createVertexAIProvider(url string, schema *schemapb.FieldSchema) (textEmbed
 		},
 	}
 	mockClient := vertexai.NewVertexAIEmbedding(url, []byte{1, 2, 3}, "mock scope", "mock token")
-	return NewVertexAIEmbeddingProvider(schema, functionSchema, mockClient, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.credential_json": "mock"}))
+	return NewVertexAIEmbeddingProvider(schema, functionSchema, mockClient, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.credential_json": "mock"}))
 }
 
 func (s *VertexAITextEmbeddingProviderSuite) TestEmbedding() {
@@ -199,7 +199,7 @@ func (s *VertexAITextEmbeddingProviderSuite) TestGetTaskType() {
 	mockClient := vertexai.NewVertexAIEmbedding("mock_url", []byte{1, 2, 3}, "mock scope", "mock token")
 
 	{
-		provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.credential_json": "mock"}))
+		provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.credential_json": "mock"}))
 		s.NoError(err)
 		s.Equal(provider.getTaskType(InsertMode), "RETRIEVAL_DOCUMENT")
 		s.Equal(provider.getTaskType(SearchMode), "RETRIEVAL_QUERY")
@@ -207,7 +207,7 @@ func (s *VertexAITextEmbeddingProviderSuite) TestGetTaskType() {
 
 	{
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: taskTypeParamKey, Value: vertexAICodeRetrival})
-		provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.credential_json": "mock"}))
+		provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.credential_json": "mock"}))
 		s.NoError(err)
 		s.Equal(provider.getTaskType(InsertMode), "RETRIEVAL_DOCUMENT")
 		s.Equal(provider.getTaskType(SearchMode), "CODE_RETRIEVAL_QUERY")
@@ -215,7 +215,7 @@ func (s *VertexAITextEmbeddingProviderSuite) TestGetTaskType() {
 
 	{
 		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: taskTypeParamKey, Value: vertexAISTS}
-		provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.credential_json": "mock"}))
+		provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.credential_json": "mock"}))
 		s.NoError(err)
 		s.Equal(provider.getTaskType(InsertMode), "SEMANTIC_SIMILARITY")
 		s.Equal(provider.getTaskType(SearchMode), "SEMANTIC_SIMILARITY")
@@ -237,7 +237,7 @@ func (s *VertexAITextEmbeddingProviderSuite) TestNewVertexAIEmbeddingProvider() 
 		},
 	}
 	mockClient := vertexai.NewVertexAIEmbedding("mock_url", []byte{1, 2, 3}, "mock scope", "mock token")
-	provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.credential_json": "mock"}))
+	provider, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.credential_json": "mock"}))
 	s.NoError(err)
 	s.True(provider.MaxBatch() > 0)
 	s.Equal(provider.FieldDim(), int64(4))
@@ -245,7 +245,7 @@ func (s *VertexAITextEmbeddingProviderSuite) TestNewVertexAIEmbeddingProvider() 
 
 func (s *VertexAITextEmbeddingProviderSuite) TestParseCredentail() {
 	{
-		cred := credentials.NewCredentialsManager(map[string]string{})
+		cred := credentials.NewCredentials(map[string]string{})
 		data, err := parseGcpCredentialInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{})
 		s.Nil(data)
 		s.ErrorContains(err, "VetexAI credentials file path is empty")
@@ -253,23 +253,23 @@ func (s *VertexAITextEmbeddingProviderSuite) TestParseCredentail() {
 	{
 		os.Setenv(vertexServiceAccountJSONEnv, "mock.json")
 		defer os.Unsetenv(vertexServiceAccountJSONEnv)
-		cred := credentials.NewCredentialsManager(map[string]string{})
+		cred := credentials.NewCredentials(map[string]string{})
 		data, err := parseGcpCredentialInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{})
 		s.Nil(data)
 		s.ErrorContains(err, "Vertexai: read credentials file failed")
 	}
 	{
-		cred := credentials.NewCredentialsManager(map[string]string{})
+		cred := credentials.NewCredentials(map[string]string{})
 		_, err := parseGcpCredentialInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "noExist"})
 		s.ErrorContains(err, "is not a gcp crediential, can not find key")
 	}
 	{
-		cred := credentials.NewCredentialsManager(map[string]string{"mock.credential_json": "NotBase64"})
+		cred := credentials.NewCredentials(map[string]string{"mock.credential_json": "NotBase64"})
 		_, err := parseGcpCredentialInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "mock"})
 		s.ErrorContains(err, "Parse gcp credential")
 	}
 	{
-		cred := credentials.NewCredentialsManager(map[string]string{"mock.credential_json": "bW9jaw=="})
+		cred := credentials.NewCredentials(map[string]string{"mock.credential_json": "bW9jaw=="})
 		_, err := parseGcpCredentialInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "mock"})
 		s.NoError(err)
 	}

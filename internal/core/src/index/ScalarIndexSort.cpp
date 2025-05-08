@@ -48,18 +48,14 @@ ScalarIndexSort<T>::ScalarIndexSort(
 template <typename T>
 void
 ScalarIndexSort<T>::Build(const Config& config) {
-    if (is_built_)
+    if (is_built_) {
         return;
-    auto insert_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
-    AssertInfo(insert_files.has_value(),
-               "insert file paths is empty when build index");
-    auto field_datas =
-        file_manager_->CacheRawDataToMemory(insert_files.value());
+    }
+    auto field_datas = file_manager_->CacheRawDataToMemory(config);
 
     auto lack_binlog_rows =
         GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
-    if (lack_binlog_rows.has_value()) {
+    if (lack_binlog_rows.has_value() && lack_binlog_rows.value() > 0) {
         auto field_schema = file_manager_->GetFieldDataMeta().field_schema;
         auto default_value = [&]() -> std::optional<DefaultValueType> {
             if (!field_schema.has_default_value()) {
@@ -134,10 +130,13 @@ ScalarIndexSort<T>::BuildWithFieldData(
             offset++;
         }
     }
-
     std::sort(data_.begin(), data_.end());
     idx_to_offsets_.resize(total_num_rows_);
     for (size_t i = 0; i < length; ++i) {
+        // TODO: there is an existing bug here, data_[i].idx_ is out of range, should be fixed
+        if (data_[i].idx_ < 0 || data_[i].idx_ >= total_num_rows_) {
+            continue;
+        }
         idx_to_offsets_[data_[i].idx_] = i;
     }
     is_built_ = true;

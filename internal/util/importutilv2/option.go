@@ -130,7 +130,7 @@ func IsL0Import(options Options) bool {
 // SkipDiskQuotaCheck indicates whether the import skips the disk quota check.
 // This option should only be enabled during backup restoration.
 func SkipDiskQuotaCheck(options Options) bool {
-	if !IsBackup(options) {
+	if !IsBackup(options) && !IsL0Import(options) {
 		return false
 	}
 	skip, err := funcutil.GetAttrByKeyFromRepeatedKV(SkipDQC, options)

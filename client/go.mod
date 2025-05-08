@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus/client/v2
 
-go 1.24.1
+go 1.24.2
 
 require (
 	github.com/blang/semver/v4 v4.0.0

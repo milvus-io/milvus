@@ -9,7 +9,9 @@
 **/cmake-build-release/*
 **/cmake_build_release/*
 **/cmake_build/*
-**/CmakeFiles/*
+**/CMakeFiles/*
+**/.cmake/*
+CMakeCache.txt
 .cache
 coverage_report/
 

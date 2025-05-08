@@ -85,7 +85,6 @@ class ThreadPool {
 
     template <typename F, typename... Args>
     auto
-    // Submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))>;
     Submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
         std::function<decltype(f(args...))()> func =
             std::bind(std::forward<F>(f), std::forward<Args>(args)...);

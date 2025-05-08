@@ -293,6 +293,16 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		OptFields:                 optFields,
 		PartitionKeyIsolation:     it.req.GetPartitionKeyIsolation(),
 		LackBinlogRows:            it.req.GetLackBinlogRows(),
+		StorageVersion:            it.req.GetStorageVersion(),
+	}
+
+	if buildIndexParams.StorageVersion == storage.StorageV2 {
+		buildIndexParams.SegmentInsertFiles = GetSegmentInsertFiles(
+			it.req.GetInsertLogs(),
+			it.req.GetStorageConfig().RootPath,
+			it.req.GetCollectionID(),
+			it.req.GetPartitionID(),
+			it.req.GetSegmentID())
 	}
 
 	log.Info("create index", zap.Any("buildIndexParams", buildIndexParams))

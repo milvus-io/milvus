@@ -12,12 +12,15 @@
 #pragma once
 
 #include <utility>
+
+#include "cachinglayer/CacheSlot.h"
 #include "common/BitsetView.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "query/helper.h"
 #include "segcore/ConcurrentVector.h"
 #include "index/VectorIndex.h"
+#include "mmap/ChunkedColumn.h"
 
 namespace milvus::query {
 
@@ -58,7 +61,7 @@ class CachedSearchIterator {
                          const milvus::DataType& data_type);
 
     // For sealed segment with chunked data, BF
-    CachedSearchIterator(const std::shared_ptr<ChunkedColumnBase>& column,
+    CachedSearchIterator(ChunkedColumnInterface* column,
                          const dataset::SearchDataset& dataset,
                          const SearchInfo& search_info,
                          const std::map<std::string, std::string>& index_info,
@@ -83,7 +86,8 @@ class CachedSearchIterator {
     using IterIdx = size_t;
     using IterIdDisIdPair = std::pair<IterIdx, DisIdPair>;
     using GetChunkDataFunc =
-        std::function<std::pair<const void*, int64_t>(int64_t)>;
+        std::function<std::pair<milvus::cachinglayer::PinWrapper<const void*>,
+                                int64_t>(int64_t)>;
 
     int64_t batch_size_ = 0;
     std::vector<knowhere::IndexNode::IteratorPtr> iterators_;

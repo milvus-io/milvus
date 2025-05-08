@@ -5,8 +5,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 )
@@ -19,6 +21,7 @@ func TestMutableBuilder(t *testing.T) {
 		MustBuildMutable()
 	assert.True(t, b.IsPersisted())
 	assert.Equal(t, b.VChannel(), "")
+	log.Info("test", zap.Object("msg", b))
 
 	b = message.NewTimeTickMessageBuilderV1().
 		WithHeader(&message.TimeTickMessageHeader{}).
@@ -28,6 +31,7 @@ func TestMutableBuilder(t *testing.T) {
 		MustBuildMutable()
 	assert.False(t, b.IsPersisted())
 	assert.Equal(t, b.VChannel(), "v1")
+	log.Info("test", zap.Object("msg", b))
 
 	assert.Panics(t, func() {
 		message.NewCreateCollectionMessageBuilderV1().WithNotPersisted()
@@ -58,7 +62,9 @@ func TestImmutableTxnBuilder(t *testing.T) {
 		WithBody(&msgpb.InsertRequest{}).
 		WithVChannel("v1").
 		MustBuildMutable()
-	immutableMsg := msg.WithTimeTick(2).WithTxnContext(txnCtx).WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
+	mutableMsg := msg.WithTimeTick(2).WithTxnContext(txnCtx).WithLastConfirmed(msgID)
+	log.Info("test", zap.Object("msg", mutableMsg))
+	immutableMsg := mutableMsg.IntoImmutableMessage(msgID)
 	b.Add(immutableMsg)
 
 	commit := message.NewCommitTxnMessageBuilderV2().
@@ -67,10 +73,13 @@ func TestImmutableTxnBuilder(t *testing.T) {
 		WithVChannel("v1").
 		MustBuildMutable()
 	immutableCommit := commit.WithTimeTick(3).WithTxnContext(txnCtx).WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
+	log.Info("test", zap.Object("msg", immutableCommit))
 
 	assert.NotZero(t, b.EstimateSize())
 	beginMsg, msgs := b.Messages()
 	assert.NotEmpty(t, beginMsg)
 	assert.Len(t, msgs, 1)
-	b.Build(message.MustAsImmutableCommitTxnMessageV2(immutableCommit))
+	immutableTxnMsg, err := b.Build(message.MustAsImmutableCommitTxnMessageV2(immutableCommit))
+	assert.NoError(t, err)
+	log.Info("test", zap.Object("msg", immutableTxnMsg))
 }

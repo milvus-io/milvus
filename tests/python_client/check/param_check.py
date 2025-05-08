@@ -236,7 +236,6 @@ def output_field_value_check(search_res, original, pk_name):
     pk_name = ct.default_primary_field_name if pk_name is None else pk_name
     limit = len(search_res[0])
     for i in range(limit):
-        # entity = eval(str(search_res[0][i]).split('entity: ', 1)[1])
         entity = search_res[0][i].fields
         _id = search_res[0][i].id
         for field in entity.keys():

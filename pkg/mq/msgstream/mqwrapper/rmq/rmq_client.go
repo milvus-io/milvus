@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
-// nmqClient implements mqwrapper.Client.
+// rmqClient implements mqwrapper.Client.
 var _ mqwrapper.Client = &rmqClient{}
 
 // var InitRocksMQ = server.InitRocksMQ

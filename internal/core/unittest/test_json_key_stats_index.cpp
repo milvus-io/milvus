@@ -113,7 +113,7 @@ class JsonKeyStatsIndexTest : public ::testing::TestWithParam<bool> {
         std::vector<std::string> index_files;
 
         Config config;
-        config["insert_files"] = std::vector<std::string>{log_path};
+        config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
 
         auto build_index =
             std::make_shared<JsonKeyStatsInvertedIndex>(ctx, false);

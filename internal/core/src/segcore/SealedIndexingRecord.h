@@ -20,13 +20,14 @@
 
 #include "common/Types.h"
 #include "common/EasyAssert.h"
+#include "index/Index.h"
 #include "index/VectorIndex.h"
 
 namespace milvus::segcore {
 
 struct SealedIndexingEntry {
     MetricType metric_type_;
-    index::IndexBasePtr indexing_;
+    index::CacheIndexBasePtr indexing_;
 };
 
 using SealedIndexingEntryPtr = std::shared_ptr<SealedIndexingEntry>;
@@ -35,7 +36,7 @@ struct SealedIndexingRecord {
     void
     append_field_indexing(FieldId field_id,
                           const MetricType& metric_type,
-                          index::IndexBasePtr indexing) {
+                          index::CacheIndexBasePtr indexing) {
         auto ptr = std::make_unique<SealedIndexingEntry>();
         ptr->indexing_ = std::move(indexing);
         ptr->metric_type_ = metric_type;

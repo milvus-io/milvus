@@ -156,8 +156,8 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
     auto str_fid =
         schema->AddDebugField("str", milvus::DataType::VARCHAR, true);
     schema->set_primary_field_id(pk_fid);
-    auto segment = milvus::segcore::CreateGrowingSegment(
-        schema, milvus::segcore::empty_index_meta);
+    auto segment =
+        milvus::segcore::CreateGrowingSegment(schema, milvus::empty_index_meta);
     LoadFieldDataInfo load_info;
     load_info.field_infos = {
         {0,
@@ -305,45 +305,8 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
 }
 
 TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
-    auto schema = std::make_shared<milvus::Schema>();
-    auto bool_field =
-        schema->AddDebugField("bool", milvus::DataType::BOOL, true);
-    auto int8_field =
-        schema->AddDebugField("int8", milvus::DataType::INT8, true);
-    auto int16_field =
-        schema->AddDebugField("int16", milvus::DataType::INT16, true);
-    auto int32_field =
-        schema->AddDebugField("int32", milvus::DataType::INT32, true);
-    auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
-    auto float_field =
-        schema->AddDebugField("float", milvus::DataType::FLOAT, true);
-    auto double_field =
-        schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
-    auto varchar_field =
-        schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
-    auto json_field =
-        schema->AddDebugField("json", milvus::DataType::JSON, true);
-    auto int_array_field = schema->AddDebugField(
-        "int_array", milvus::DataType::ARRAY, milvus::DataType::INT8, true);
-    auto long_array_field = schema->AddDebugField(
-        "long_array", milvus::DataType::ARRAY, milvus::DataType::INT64, true);
-    auto bool_array_field = schema->AddDebugField(
-        "bool_array", milvus::DataType::ARRAY, milvus::DataType::BOOL, true);
-    auto string_array_field = schema->AddDebugField("string_array",
-                                                    milvus::DataType::ARRAY,
-                                                    milvus::DataType::VARCHAR,
-                                                    true);
-    auto double_array_field = schema->AddDebugField("double_array",
-                                                    milvus::DataType::ARRAY,
-                                                    milvus::DataType::DOUBLE,
-                                                    true);
-    auto float_array_field = schema->AddDebugField(
-        "float_array", milvus::DataType::ARRAY, milvus::DataType::FLOAT, true);
-    auto vec = schema->AddDebugField("embeddings",
-                                     milvus::DataType::VECTOR_FLOAT,
-                                     128,
-                                     knowhere::metric::L2);
-    schema->set_primary_field_id(int64_field);
+    auto schema = gen_all_data_types_schema();
+    auto vec = schema->get_field_id(FieldName("embeddings"));
 
     std::map<std::string, std::string> index_params = {
         {"index_type", "IVF_FLAT"},

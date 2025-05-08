@@ -21,6 +21,8 @@
 #include "common/Schema.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
+namespace milvus::test {
+
 bool
 greater(std::pair<float, int64_t> a, std::pair<float, int64_t> b) {
     return a.first > b.first;
@@ -30,6 +32,8 @@ bool
 less(std::pair<float, int64_t> a, std::pair<float, int64_t> b) {
     return a.first < b.first;
 }
+
+}  // namespace milvus::test
 
 auto
 RangeSearchSortResultBF(milvus::DatasetPtr data_set,
@@ -44,7 +48,9 @@ RangeSearchSortResultBF(milvus::DatasetPtr data_set,
     auto p_dist = new float[topk * nq];
     std::fill_n(p_dist, topk * nq, std::numeric_limits<float>::max());
 
-    auto cmp_func = (milvus::PositivelyRelated(metric_type)) ? greater : less;
+    auto cmp_func = (milvus::PositivelyRelated(metric_type))
+                        ? milvus::test::greater
+                        : milvus::test::less;
 
     //  cnt means the subscript of p_id and p_dist
     for (int i = 0; i < nq; i++) {

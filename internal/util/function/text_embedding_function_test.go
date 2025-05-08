@@ -934,19 +934,19 @@ func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertFloat32() {
 
 func (s *TextEmbeddingFunctionSuite) TestParseCredentail() {
 	{
-		cred := credentials.NewCredentialsManager(map[string]string{})
+		cred := credentials.NewCredentials(map[string]string{})
 		ak, url, err := parseAKAndURL(cred, []*commonpb.KeyValuePair{}, map[string]string{}, "")
 		s.Equal(ak, "")
 		s.Equal(url, "")
 		s.NoError(err)
 	}
 	{
-		cred := credentials.NewCredentialsManager(map[string]string{})
+		cred := credentials.NewCredentials(map[string]string{})
 		_, _, err := parseAKAndURL(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "NotExist"}, "")
 		s.ErrorContains(err, "is not a apikey crediential, can not find key")
 	}
 	{
-		cred := credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"})
+		cred := credentials.NewCredentials(map[string]string{"mock.apikey": "mock"})
 		_, _, err := parseAKAndURL(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "mock"}, "")
 		s.NoError(err)
 	}

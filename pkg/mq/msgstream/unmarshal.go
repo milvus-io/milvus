@@ -59,6 +59,10 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	timeTickMsg := TimeTickMsg{}
 	createCollectionMsg := CreateCollectionMsg{}
 	dropCollectionMsg := DropCollectionMsg{}
+	alterCollectionMsg := AlterCollectionMsg{}
+	alterCollectionFieldMsg := AlterCollectionFieldMsg{}
+	renameCollectionMsg := RenameCollectionMsg{}
+
 	createPartitionMsg := CreatePartitionMsg{}
 	dropPartitionMsg := DropPartitionMsg{}
 	dataNodeTtMsg := DataNodeTtMsg{}
@@ -84,8 +88,13 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	dropRoleMsg := DropRoleMsg{}
 	operateUserRoleMsg := OperateUserRoleMsg{}
 	operatePrivilegeMsg := OperatePrivilegeMsg{}
+	operatePrivilegeV2Msg := OperatePrivilegeV2Msg{}
 	replicateMsg := ReplicateMsg{}
 	importMsg := ImportMsg{}
+
+	createAliasMsg := CreateAliasMsg{}
+	dropAliasMsg := DropAliasMsg{}
+	alterAliasMsg := AlterAliasMsg{}
 
 	p := &ProtoUnmarshalDispatcher{}
 	p.TempMap = make(map[commonpb.MsgType]UnmarshalFunc)
@@ -95,6 +104,9 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_CreateCollection] = createCollectionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropCollection] = dropCollectionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_CreatePartition] = createPartitionMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_AlterCollection] = alterCollectionMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_AlterCollectionField] = alterCollectionFieldMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_RenameCollection] = renameCollectionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropPartition] = dropPartitionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DataNodeTt] = dataNodeTtMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_CreateIndex] = createIndexMsg.Unmarshal
@@ -115,8 +127,12 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_DropRole] = dropRoleMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_OperateUserRole] = operateUserRoleMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_OperatePrivilege] = operatePrivilegeMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_OperatePrivilegeV2] = operatePrivilegeV2Msg.Unmarshal
 	p.TempMap[commonpb.MsgType_Replicate] = replicateMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_Import] = importMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_CreateAlias] = createAliasMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_DropAlias] = dropAliasMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_AlterAlias] = alterAliasMsg.Unmarshal
 
 	return p
 }

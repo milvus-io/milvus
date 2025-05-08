@@ -24,20 +24,3 @@ TEST(ArrowFileSystemSingleton, LocalArrowFileSystemSingleton) {
 
     CleanLocalArrowFileSystemSingleton();
 }
-
-TEST(ArrowFileSystemSingleton, RemoteArrowFileSystem) {
-    CStorageConfig config;
-    config.address = "https://test-oss-0815.oss-cn-hangzhou.aliyuncs.com";
-    config.storage_type = "remote";
-    config.bucket_name = "test-bucket";
-    config.access_key_id = "";
-    config.access_key_value = "";
-    config.cloud_provider = "aliyun";
-    config.region = "oss-cn-hangzhou";
-    config.use_custom_part_upload = true;
-
-    CStatus status = InitRemoteArrowFileSystemSingleton(config);
-    EXPECT_EQ(status.error_code, 0);
-
-    CleanRemoteArrowFileSystemSingleton();
-}

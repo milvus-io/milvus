@@ -11,23 +11,15 @@
 
 #pragma once
 
-#include <unordered_map>
-#include <exception>
 #include <memory>
-#include <stdexcept>
 #include <cstdlib>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "common/FieldData.h"
-#include "common/QueryResult.h"
-// #include "common/Schema.h"
 #include "common/Types.h"
 #include "index/Index.h"
-#include "log/Log.h"
-#include "segcore/DeletedRecord.h"
-#include "segcore/InsertRecord.h"
+#include "segcore/ConcurrentVector.h"
 
 namespace milvus::segcore {
 

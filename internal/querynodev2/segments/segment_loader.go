@@ -812,7 +812,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		if err != nil {
 			return err
 		}
-		if (!typeutil.IsVectorType(field.GetDataType()) && !segment.HasRawData(fieldID)) || field.GetIsPrimaryKey() {
+		if !segment.HasRawData(fieldID) || field.GetIsPrimaryKey() {
 			log.Info("field index doesn't include raw data, load binlog...",
 				zap.Int64("fieldID", fieldID),
 				zap.String("index", info.IndexInfo.GetIndexName()),

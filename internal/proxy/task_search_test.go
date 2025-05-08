@@ -289,7 +289,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, []int64{10}, qt.result.Results.Topks)
 		assert.Equal(t, int64(10), qt.result.Results.TopK)
-		assert.Equal(t, []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, qt.result.Results.Ids.GetIntId().Data)
+		assert.Equal(t, []int64{9, 8, 7, 6, 5, 4, 3, 2, 1, 0}, qt.result.Results.Ids.GetIntId().Data)
 	})
 
 	getHybridSearchTaskWithRerank := func(t *testing.T, collName string, funcInput string, data [][]string) *searchTask {
@@ -382,7 +382,6 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		// All data are from the same subsearch
 		qt.resultBuf.Insert(genTestSearchResultData(2, 10, schemapb.DataType_Int64, testInt64Field, fieldNameId[testInt64Field], true))
 		qt.resultBuf.Insert(genTestSearchResultData(2, 10, schemapb.DataType_Int64, testInt64Field, fieldNameId[testInt64Field], true))
-
 		// rerank inputs
 		f1 := testutils.GenerateScalarFieldData(schemapb.DataType_Float, testFloatField, 20)
 		f1.FieldId = fieldNameId[testFloatField]
@@ -405,7 +404,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		assert.Equal(t, []int64{10, 10}, qt.result.Results.Topks)
 		assert.Equal(t, int64(10), qt.result.Results.TopK)
 		assert.Equal(t, int64(2), qt.result.Results.NumQueries)
-		assert.Equal(t, []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}, qt.result.Results.Ids.GetIntId().Data)
+		assert.Equal(t, []int64{9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}, qt.result.Results.Ids.GetIntId().Data)
 		assert.Equal(t, testInt32Field, qt.result.Results.FieldsData[0].FieldName)
 	})
 
@@ -447,7 +446,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		assert.Equal(t, []int64{10, 10}, qt.result.Results.Topks)
 		assert.Equal(t, int64(10), qt.result.Results.TopK)
 		assert.Equal(t, int64(2), qt.result.Results.NumQueries)
-		assert.Equal(t, []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}, qt.result.Results.Ids.GetIntId().Data)
+		assert.Equal(t, []int64{9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}, qt.result.Results.Ids.GetIntId().Data)
 		assert.Equal(t, testInt32Field, qt.result.Results.FieldsData[0].FieldName)
 	})
 
@@ -4253,6 +4252,7 @@ func genTestSearchResultData(nq int64, topk int64, dType schemapb.DataType, fiel
 		Topks: tops,
 		FieldsData: []*schemapb.FieldData{
 			testutils.GenerateScalarFieldData(dType, fieldName, int(nq*topk)),
+			testutils.GenerateScalarFieldData(schemapb.DataType_Int64, testInt64Field, int(nq*topk)),
 		},
 	}
 	resultData.FieldsData[0].FieldId = fieldId
@@ -4265,6 +4265,7 @@ func genTestSearchResultData(nq int64, topk int64, dType schemapb.DataType, fiel
 				SlicedBlob:     sliceBlob,
 				SlicedNumCount: 1,
 				SlicedOffset:   0,
+				MetricType:     "COSINE",
 			},
 		}
 	}

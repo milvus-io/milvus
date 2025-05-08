@@ -103,6 +103,10 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	return newScanner(opt.Name, exclude, c), nil
 }
 
+func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
+	return nil
+}
+
 func (w *walImpl) Close() {
 	// The lifetime control of the producer is delegated to the wal adaptor.
 	// So we just make resource cleanup here.

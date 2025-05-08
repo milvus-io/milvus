@@ -13,12 +13,12 @@
 
 #include <memory>
 #include <utility>
-#include <tuple>
 
 #include "common/LoadInfo.h"
 #include "common/Types.h"
-#include "index/JsonInvertedIndex.h"
+#include "index/Index.h"
 #include "pb/segcore.pb.h"
+#include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
 
@@ -36,13 +36,7 @@ class SegmentSealed : public SegmentInternalInterface {
     DropFieldData(const FieldId field_id) = 0;
 
     virtual void
-    LoadFieldData(FieldId field_id, FieldDataInfo& data) = 0;
-    virtual void
-    MapFieldData(const FieldId field_id, FieldDataInfo& data) = 0;
-    virtual void
     AddFieldDataInfoForSealed(const LoadFieldDataInfo& field_data_info) = 0;
-    virtual void
-    WarmupChunkCache(const FieldId field_id, bool mmap_enabled) = 0;
     virtual void
     RemoveFieldFile(const FieldId field_id) = 0;
     virtual void
@@ -74,18 +68,12 @@ class SegmentSealed : public SegmentInternalInterface {
         FieldId field_id,
         std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) = 0;
 
-    virtual index::JsonKeyStatsInvertedIndex*
-    GetJsonKeyIndex(FieldId field_id) const = 0;
-
-    virtual std::pair<std::string_view, bool>
-    GetJsonData(FieldId field_id, size_t offset) const = 0;
-
     SegmentType
     type() const override {
         return SegmentType::Sealed;
     }
 
-    index::IndexBase*
+    PinWrapper<const index::IndexBase*>
     chunk_index_impl(FieldId field_id,
                      std::string path,
                      int64_t chunk_id) const override {
@@ -94,7 +82,8 @@ class SegmentSealed : public SegmentInternalInterface {
         key.nested_path = path;
         AssertInfo(json_indexings_.find(key) != json_indexings_.end(),
                    "Cannot find json index with path: " + path);
-        return json_indexings_.at(key).get();
+        return PinWrapper<const index::IndexBase*>(
+            json_indexings_.at(key).get());
     }
 
     virtual bool
@@ -114,9 +103,7 @@ class SegmentSealed : public SegmentInternalInterface {
         if (any_type) {
             return true;
         }
-        return data_type == index->second->JsonCastType() ||
-               (data_type == DataType::INT64 &&
-                index->second->JsonCastType() == DataType::DOUBLE);
+        return index->second->IsDataTypeSupported(data_type);
     }
 
  protected:

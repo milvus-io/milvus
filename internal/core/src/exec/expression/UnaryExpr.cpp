@@ -33,11 +33,13 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
     using Index = index::ScalarIndex<IndexInnerType>;
 
     for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-        const Index& index =
-            segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
+        auto pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
+        auto index_ptr = const_cast<Index*>(pw.get());
 
-        if (index.GetIndexType() == milvus::index::ScalarIndexType::HYBRID ||
-            index.GetIndexType() == milvus::index::ScalarIndexType::BITMAP) {
+        if (index_ptr->GetIndexType() ==
+                milvus::index::ScalarIndexType::HYBRID ||
+            index_ptr->GetIndexType() ==
+                milvus::index::ScalarIndexType::BITMAP) {
             return false;
         }
     }
@@ -466,6 +468,40 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                      offsets);
                 break;
             }
+            case proto::plan::PostfixMatch: {
+                UnaryElementFuncForArray<ValueType,
+                                         proto::plan::PostfixMatch,
+                                         filter_type>
+                    func;
+                func(data,
+                     valid_data,
+                     size,
+                     val,
+                     index,
+                     res,
+                     valid_res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
+            case proto::plan::InnerMatch: {
+                UnaryElementFuncForArray<ValueType,
+                                         proto::plan::InnerMatch,
+                                         filter_type>
+                    func;
+                func(data,
+                     valid_data,
+                     size,
+                     val,
+                     index,
+                     res,
+                     valid_res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
             default:
                 PanicInfo(
                     OpTypeInvalid,
@@ -517,91 +553,86 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
     }
 
     // cache the result to suit the framework.
-    auto batch_res =
-        ProcessIndexChunks<IndexInnerType>([this, &val, reverse](Index* _) {
-            boost::container::vector<IndexInnerType> elems;
-            for (auto const& element : val.array()) {
-                auto e = GetValueFromProto<IndexInnerType>(element);
-                if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
-                    elems.push_back(e);
-                }
+    auto batch_res = ProcessIndexChunks<IndexInnerType>([this, &val, reverse](
+                                                            Index* _) {
+        boost::container::vector<IndexInnerType> elems;
+        for (auto const& element : val.array()) {
+            auto e = GetValueFromProto<IndexInnerType>(element);
+            if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
+                elems.push_back(e);
             }
+        }
 
-            // filtering by index, get candidates.
-            std::function<const milvus::ArrayView*(int64_t)> retrieve;
+        // filtering by index, get candidates.
+        std::function<bool(milvus::proto::plan::Array& /*val*/,
+                           int64_t /*offset*/)>
+            is_same;
 
-            // avoid use-after-free
-            milvus::ArrayView array_view_tmp;
-            if (segment_->is_chunked()) {
-                retrieve = [this, &array_view_tmp](
-                               int64_t offset) -> const milvus::ArrayView* {
-                    auto [chunk_idx, chunk_offset] =
-                        segment_->get_chunk_by_offset(field_id_, offset);
-                    const auto& chunk =
-                        segment_->template chunk_view<milvus::ArrayView>(
-                            field_id_, chunk_idx);
-                    array_view_tmp = std::move(chunk.first[chunk_offset]);
-                    return &array_view_tmp;
-                };
+        if (segment_->is_chunked()) {
+            is_same = [this, reverse](milvus::proto::plan::Array& val,
+                                      int64_t offset) -> bool {
+                auto [chunk_idx, chunk_offset] =
+                    segment_->get_chunk_by_offset(field_id_, offset);
+                auto pw = segment_->template chunk_view<milvus::ArrayView>(
+                    field_id_, chunk_idx);
+                auto chunk = pw.get();
+                return chunk.first[chunk_offset].is_same_array(val) ^ reverse;
+            };
+        } else {
+            auto size_per_chunk = segment_->size_per_chunk();
+            is_same = [this, size_per_chunk, reverse](
+                          milvus::proto::plan::Array& val,
+                          int64_t offset) -> bool {
+                auto chunk_idx = offset / size_per_chunk;
+                auto chunk_offset = offset % size_per_chunk;
+                auto pw = segment_->template chunk_data<milvus::ArrayView>(
+                    field_id_, chunk_idx);
+                auto chunk = pw.get();
+                auto array_view = chunk.data() + chunk_offset;
+                return array_view->is_same_array(val) ^ reverse;
+            };
+        }
+
+        // collect all candidates.
+        std::unordered_set<size_t> candidates;
+        std::unordered_set<size_t> tmp_candidates;
+        auto first_callback = [&candidates](size_t offset) -> void {
+            candidates.insert(offset);
+        };
+        auto callback = [&candidates, &tmp_candidates](size_t offset) -> void {
+            if (candidates.find(offset) != candidates.end()) {
+                tmp_candidates.insert(offset);
+            }
+        };
+        auto execute_sub_batch =
+            [](Index* index_ptr,
+               const IndexInnerType& val,
+               const std::function<void(size_t /* offset */)>& callback) {
+                index_ptr->InApplyCallback(1, &val, callback);
+            };
+
+        // run in-filter.
+        for (size_t idx = 0; idx < elems.size(); idx++) {
+            if (idx == 0) {
+                ProcessIndexChunksV2<IndexInnerType>(
+                    execute_sub_batch, elems[idx], first_callback);
             } else {
-                auto size_per_chunk = segment_->size_per_chunk();
-                retrieve = [ size_per_chunk, this ](int64_t offset) -> auto {
-                    auto chunk_idx = offset / size_per_chunk;
-                    auto chunk_offset = offset % size_per_chunk;
-                    const auto& chunk =
-                        segment_->template chunk_data<milvus::ArrayView>(
-                            field_id_, chunk_idx);
-                    return chunk.data() + chunk_offset;
-                };
+                ProcessIndexChunksV2<IndexInnerType>(
+                    execute_sub_batch, elems[idx], callback);
+                candidates = std::move(tmp_candidates);
             }
-
-            // compare the array via the raw data.
-            auto filter = [&retrieve, &val, reverse](size_t offset) -> bool {
-                auto data_ptr = retrieve(offset);
-                return data_ptr->is_same_array(val) ^ reverse;
-            };
-
-            // collect all candidates.
-            std::unordered_set<size_t> candidates;
-            std::unordered_set<size_t> tmp_candidates;
-            auto first_callback = [&candidates](size_t offset) -> void {
-                candidates.insert(offset);
-            };
-            auto callback = [&candidates,
-                             &tmp_candidates](size_t offset) -> void {
-                if (candidates.find(offset) != candidates.end()) {
-                    tmp_candidates.insert(offset);
-                }
-            };
-            auto execute_sub_batch =
-                [](Index* index_ptr,
-                   const IndexInnerType& val,
-                   const std::function<void(size_t /* offset */)>& callback) {
-                    index_ptr->InApplyCallback(1, &val, callback);
-                };
-
-            // run in-filter.
-            for (size_t idx = 0; idx < elems.size(); idx++) {
-                if (idx == 0) {
-                    ProcessIndexChunksV2<IndexInnerType>(
-                        execute_sub_batch, elems[idx], first_callback);
-                } else {
-                    ProcessIndexChunksV2<IndexInnerType>(
-                        execute_sub_batch, elems[idx], callback);
-                    candidates = std::move(tmp_candidates);
-                }
-                // the size of candidates is small enough.
-                if (candidates.size() * 100 < active_count_) {
-                    break;
-                }
+            // the size of candidates is small enough.
+            if (candidates.size() * 100 < active_count_) {
+                break;
             }
-            TargetBitmap res(active_count_);
-            // run post-filter. The filter will only be executed once in the framework.
-            for (const auto& candidate : candidates) {
-                res[candidate] = filter(candidate);
-            }
-            return res;
-        });
+        }
+        TargetBitmap res(active_count_);
+        // run post-filter. The filter will only be executed once in the framework.
+        for (const auto& candidate : candidates) {
+            res[candidate] = is_same(val, candidate);
+        }
+        return res;
+    });
     AssertInfo(batch_res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -834,6 +865,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                 }
                 break;
             }
+            case proto::plan::InnerMatch:
+            case proto::plan::PostfixMatch:
             case proto::plan::PrefixMatch: {
                 for (size_t i = 0; i < size; ++i) {
                     auto offset = i;
@@ -1224,8 +1257,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 switch (op_type) {
                     case proto::plan::GreaterThan:
                         if constexpr (std::is_same_v<GetType,
@@ -1487,6 +1519,16 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
                 res = std::move(func(index_ptr, val));
                 break;
             }
+            case proto::plan::PostfixMatch: {
+                UnaryIndexFunc<T, proto::plan::PostfixMatch> func;
+                res = std::move(func(index_ptr, val));
+                break;
+            }
+            case proto::plan::InnerMatch: {
+                UnaryIndexFunc<T, proto::plan::InnerMatch> func;
+                res = std::move(func(index_ptr, val));
+                break;
+            }
             case proto::plan::Match: {
                 UnaryIndexFunc<T, proto::plan::Match> func;
                 res = std::move(func(index_ptr, val));
@@ -1685,6 +1727,29 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             }
             case proto::plan::PrefixMatch: {
                 UnaryElementFunc<T, proto::plan::PrefixMatch, filter_type> func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
+            case proto::plan::PostfixMatch: {
+                UnaryElementFunc<T, proto::plan::PostfixMatch, filter_type>
+                    func;
+                func(data,
+                     size,
+                     val,
+                     res,
+                     bitmap_input,
+                     processed_cursor,
+                     offsets);
+                break;
+            }
+            case proto::plan::InnerMatch: {
+                UnaryElementFunc<T, proto::plan::InnerMatch, filter_type> func;
                 func(data,
                      size,
                      val,

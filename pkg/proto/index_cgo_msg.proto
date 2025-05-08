@@ -32,6 +32,15 @@ message BinarySet {
   repeated Binary datas = 1;
 }
 
+message FieldInsertFiles {
+  repeated string file_paths = 1;
+}
+
+// segment insert files include all field insert files
+message SegmentInsertFiles {
+  repeated FieldInsertFiles field_insert_files = 1;
+}
+
 // Synchronously modify StorageConfig in index_coord.proto file
 message StorageConfig {
   string address = 1;
@@ -84,6 +93,8 @@ message BuildIndexInfo {
   int32 current_scalar_index_version = 21;
   int64 json_key_stats_tantivy_memory = 22;
   int64 lack_binlog_rows = 23;
+  int64 storage_version = 24;
+  SegmentInsertFiles segment_insert_files = 25;
 }
 
 message LoadTextIndexInfo {

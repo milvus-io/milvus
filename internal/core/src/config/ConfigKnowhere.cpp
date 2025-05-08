@@ -120,4 +120,9 @@ GetCurrentIndexVersion() {
     return knowhere::Version::GetCurrentVersion().VersionNumber();
 }
 
+int32_t
+GetMaximumIndexVersion() {
+    return knowhere::Version::GetMaximumVersion().VersionNumber();
+}
+
 }  // namespace milvus::config
