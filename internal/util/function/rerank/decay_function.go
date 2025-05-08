@@ -185,6 +185,9 @@ func (decay *DecayFunction[T, R]) reScore(multipSearchResultData []*schemapb.Sea
 	for _, data := range multipSearchResultData {
 		var inputField *schemapb.FieldData
 		for _, field := range data.FieldsData {
+			if field == nil {
+				continue
+			}
 			if field.FieldId == decay.GetInputFieldIDs()[0] {
 				inputField = field
 			}
@@ -235,6 +238,30 @@ func (decay *DecayFunction[T, R]) orgnizeNqScores(searchParams *SearchParams, mu
 	return nqScores
 }
 
+func (decay *DecayFunction[T, R]) maxMerge(searchParams *SearchParams, multipSearchResultData []*schemapb.SearchResultData) []map[T]float32 {
+	nqSrcScores := make([]map[T]float32, searchParams.nq)
+	for i := int64(0); i < searchParams.nq; i++ {
+		nqSrcScores[i] = make(map[T]float32)
+	}
+
+	for _, data := range multipSearchResultData {
+		start := int64(0)
+		for nqIdx := int64(0); nqIdx < searchParams.nq; nqIdx++ {
+			realTopk := data.Topks[nqIdx]
+			for j := start; j < start+realTopk; j++ {
+				id := typeutil.GetPK(data.GetIds(), j).(T)
+				if _, exists := nqSrcScores[nqIdx][id]; !exists {
+					nqSrcScores[nqIdx][id] = data.GetScores()[j]
+				} else {
+					nqSrcScores[nqIdx][id] = max(data.GetScores()[j], nqSrcScores[nqIdx][id])
+				}
+			}
+			start += realTopk
+		}
+	}
+	return nqSrcScores
+}
+
 func (decay *DecayFunction[T, R]) Process(ctx context.Context, searchParams *SearchParams, multipSearchResultData []*schemapb.SearchResultData) (*schemapb.SearchResultData, error) {
 	ret := &schemapb.SearchResultData{
 		NumQueries: searchParams.nq,
@@ -245,18 +272,25 @@ func (decay *DecayFunction[T, R]) Process(ctx context.Context, searchParams *Sea
 		Topks:      []int64{},
 	}
 	multipSearchResultData = lo.Filter(multipSearchResultData, func(searchResult *schemapb.SearchResultData, i int) bool {
-		return len(searchResult.FieldsData) != 0
+		return len(searchResult.FieldsData) != 0 && searchResult.Ids != nil
 	})
 
 	if len(multipSearchResultData) == 0 {
 		return ret, nil
 	}
+
 	idScoreData, err := decay.reScore(multipSearchResultData)
 	if err != nil {
 		return nil, err
 	}
-
+	mergedSrcScore := decay.maxMerge(searchParams, multipSearchResultData)
 	nqScores := decay.orgnizeNqScores(searchParams, multipSearchResultData, idScoreData)
+	for i := int64(0); i < searchParams.nq; i++ {
+		for id, score := range mergedSrcScore[i] {
+			nqScores[i][id] = nqScores[i][id] * score
+		}
+	}
+
 	topk := searchParams.limit + searchParams.offset
 	for i := int64(0); i < searchParams.nq; i++ {
 		idScoreMap := nqScores[i]

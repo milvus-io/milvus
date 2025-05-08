@@ -760,7 +760,6 @@ func rankSearchResultDataByPk(ctx context.Context,
 			ret.Results.Scores = append(ret.Results.Scores, score)
 		}
 	}
-
 	return ret, nil
 }
 
