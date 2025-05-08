@@ -99,8 +99,8 @@ func TestCompactionExecutor(t *testing.T) {
 		succeed, err := executor.Execute(mockC)
 		assert.Equal(t, true, succeed)
 		assert.NoError(t, err)
-		assert.Equal(t, int64(8), executor.Slots())
-		assert.Equal(t, int64(8), executor.usingSlots)
+		assert.Equal(t, int64(4), executor.Slots())
+		assert.Equal(t, int64(4), executor.usingSlots)
 
 		assert.EqualValues(t, 1, len(executor.taskCh))
 		assert.EqualValues(t, 1, executor.executing.Len())

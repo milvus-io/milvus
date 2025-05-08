@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // WorkerSlots represents the slot information for a worker node
@@ -45,7 +44,7 @@ type WorkerSlots struct {
 // Cluster defines the interface for tasks
 type Cluster interface {
 	// QuerySlot returns the slot information for all worker nodes
-	QuerySlot() map[typeutil.UniqueID]*WorkerSlots
+	QuerySlot() map[int64]*WorkerSlots
 
 	// CreateCompaction creates a new compaction task on the specified node
 	CreateCompaction(nodeID int64, in *datapb.CompactionPlan) error
@@ -160,7 +159,7 @@ func (c *cluster) dropTask(nodeID int64, properties taskcommon.Properties) error
 	return merr.CheckRPCCall(status, err)
 }
 
-func (c *cluster) QuerySlot() map[typeutil.UniqueID]*WorkerSlots {
+func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 	var (
 		mu        = &sync.Mutex{}
 		wg        = &sync.WaitGroup{}

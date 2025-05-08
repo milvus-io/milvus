@@ -107,8 +107,9 @@ func (e *executor) Execute(task Compactor) (bool, error) {
 	return true, nil
 }
 
+// Slots returns the available slots for compaction
 func (e *executor) Slots() int64 {
-	return paramtable.Get().DataNodeCfg.SlotCap.GetAsInt64() - e.getUsingSlots()
+	return e.getUsingSlots()
 }
 
 func (e *executor) getUsingSlots() int64 {

@@ -46,7 +46,7 @@ func (t *mixCompactionTask) GetTaskState() taskcommon.State {
 }
 
 func (t *mixCompactionTask) GetTaskSlot() int64 {
-	return 4 // TODO: sheep, update slot, make it configurable
+	return paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
 }
 
 func (t *mixCompactionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -383,5 +383,5 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 }
 
 func (t *mixCompactionTask) GetSlotUsage() int64 {
-	return paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
+	return t.GetTaskSlot()
 }

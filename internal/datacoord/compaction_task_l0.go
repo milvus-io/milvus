@@ -63,8 +63,10 @@ func (t *l0CompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
 }
 
-func (t *l0CompactionTask) GetTaskSlot() int64 { // TODO: sheep, update slot
-	return 4
+func (t *l0CompactionTask) GetTaskSlot() int64 {
+	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+	factor := paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
+	return factor * t.GetTaskProto().GetTotalRows() / int64(batchSize)
 }
 
 func (t *l0CompactionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -406,5 +408,5 @@ func (t *l0CompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult) 
 }
 
 func (t *l0CompactionTask) GetSlotUsage() int64 {
-	return paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
+	return t.GetTaskSlot()
 }

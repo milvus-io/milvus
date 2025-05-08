@@ -77,7 +77,7 @@ func (t *clusteringCompactionTask) GetTaskState() taskcommon.State {
 }
 
 func (t *clusteringCompactionTask) GetTaskSlot() int64 {
-	return 8 // TODO: sheep, update slot
+	return paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
 }
 
 func (t *clusteringCompactionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -845,5 +845,5 @@ func (t *clusteringCompactionTask) NeedReAssignNodeID() bool {
 }
 
 func (t *clusteringCompactionTask) GetSlotUsage() int64 {
-	return paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
+	return t.GetTaskSlot()
 }

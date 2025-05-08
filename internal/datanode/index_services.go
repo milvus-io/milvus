@@ -203,21 +203,27 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 		}, nil
 	}
 	defer node.lifetime.Done()
-	unissued, active := node.taskScheduler.TaskQueue.GetTaskNum()
 
-	slots := node.totalSlot - node.taskScheduler.TaskQueue.GetUsingSlot()
-	log.Ctx(ctx).Info("Get Index Job Stats",
-		zap.Int("unissued", unissued),
-		zap.Int("active", active),
-		zap.Int64("slots", slots),
+	var (
+		totalSlots     = node.totalSlot
+		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
+		compactionUsed = node.compactionExecutor.Slots()
+		importUsed     = node.importScheduler.Slots()
+		availableSlots = totalSlots - indexStatsUsed - compactionUsed - importUsed
 	)
+
+	log.Ctx(ctx).Info("query slots done",
+		zap.Int64("totalSlots", totalSlots),
+		zap.Int64("availableSlots", availableSlots),
+		zap.Int64("indexStatsUsed", indexStatsUsed),
+		zap.Int64("compactionUsed", compactionUsed),
+		zap.Int64("importUsed", importUsed),
+	)
+
 	return &workerpb.GetJobStatsResponse{
-		Status:           merr.Success(),
-		TotalJobNum:      int64(active) + int64(unissued),
-		InProgressJobNum: int64(active),
-		EnqueueJobNum:    int64(unissued),
-		TotalSlots:       node.totalSlot,
-		AvailableSlots:   slots,
+		Status:         merr.Success(),
+		TotalSlots:     node.totalSlot,
+		AvailableSlots: availableSlots,
 	}, nil
 }
 

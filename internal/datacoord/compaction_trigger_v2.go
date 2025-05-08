@@ -347,11 +347,16 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 		return
 	}
 
+	totalRows := lo.SumBy(view.GetSegmentsView(), func(segView *SegmentView) int64 {
+		return segView.NumOfRows
+	})
+
 	task := &datapb.CompactionTask{
 		TriggerID:        taskID, // inner trigger, use task id as trigger id
 		PlanID:           taskID,
 		Type:             datapb.CompactionType_Level0DeleteCompaction,
 		StartTime:        time.Now().Unix(),
+		TotalRows:        totalRows,
 		InputSegments:    levelZeroSegs,
 		State:            datapb.CompactionTaskState_pipelining,
 		Channel:          view.GetGroupLabel().Channel,

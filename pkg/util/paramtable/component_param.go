@@ -4613,8 +4613,8 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	p.ClusteringCompactionSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.clusteringCompactionUsage",
 		Version:      "2.4.6",
-		Doc:          "slot usage of clustering compaction job.",
-		DefaultValue: "16",
+		Doc:          "slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.",
+		DefaultValue: "65536",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -4623,8 +4623,8 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	p.MixCompactionSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.mixCompactionUsage",
 		Version:      "2.4.6",
-		Doc:          "slot usage of mix compaction job.",
-		DefaultValue: "8",
+		Doc:          "slot usage of mix compaction task.",
+		DefaultValue: "4",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -4633,7 +4633,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	p.L0DeleteCompactionSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.l0DeleteCompactionUsage",
 		Version:      "2.4.6",
-		Doc:          "slot usage of l0 compaction job.",
+		Doc:          "slot usage of l0 compaction task.",
 		DefaultValue: "8",
 		PanicIfEmpty: false,
 		Export:       true,
