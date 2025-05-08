@@ -41,6 +41,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "google/protobuf/message_lite.h"
+#include "index/VectorIndex.h"
 #include "index/VectorMemIndex.h"
 #include "mmap/ChunkedColumn.h"
 #include "mmap/Types.h"
@@ -122,7 +123,8 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     if (get_bit(field_data_ready_bitset_, field_id)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
-    } else if (get_bit(binlog_index_bitset_, field_id)) {
+    }
+    if (get_bit(binlog_index_bitset_, field_id)) {
         set_bit(binlog_index_bitset_, field_id, false);
         vector_indexings_.drop_field_indexing(field_id);
     }
@@ -1335,7 +1337,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
         return fill_with_empty(field_id, count);
     }
 
-    if (!HasIndex(field_id)) {
+    if (HasFieldData(field_id)) {
         Assert(get_bit(field_data_ready_bitset_, field_id));
         return get_raw_data(field_id, field_meta, seg_offsets, count);
     }
@@ -1424,8 +1426,7 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
     auto fieldID = FieldId(field_id);
     const auto& field_meta = schema_->operator[](fieldID);
     if (IsVectorDataType(field_meta.get_data_type())) {
-        if (get_bit(index_ready_bitset_, fieldID) |
-            get_bit(binlog_index_bitset_, fieldID)) {
+        if (get_bit(index_ready_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
                        "vector index is not ready");
             auto field_indexing = vector_indexings_.get_field_indexing(fieldID);
@@ -1433,6 +1434,14 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
                 field_indexing->indexing_.get());
             return vec_index->HasRawData();
         }
+    } else if (get_bit(binlog_index_bitset_, fieldID)) {
+        AssertInfo(vector_indexings_.is_ready(fieldID),
+                   "vector index is not ready");
+        auto field_indexing = vector_indexings_.get_field_indexing(fieldID);
+        auto vec_index =
+            dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+        return vec_index->HasRawData() ||
+               get_bit(field_data_ready_bitset_, fieldID);
     } else if (IsJsonDataType(field_meta.get_data_type())) {
         return get_bit(field_data_ready_bitset_, fieldID);
     } else {
@@ -1624,6 +1633,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         }
         // check data type
         if (field_meta.get_data_type() != DataType::VECTOR_FLOAT &&
+            field_meta.get_data_type() != DataType::VECTOR_FLOAT16 &&
+            field_meta.get_data_type() != DataType::VECTOR_BFLOAT16 &&
             !is_sparse) {
             return false;
         }
@@ -1668,15 +1679,51 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         auto dim = is_sparse ? std::numeric_limits<uint32_t>::max()
                              : field_meta.get_dim();
 
-        auto build_config = field_binlog_config->GetBuildBaseParams();
+        auto build_config =
+            field_binlog_config->GetBuildBaseParams(field_meta.get_data_type());
         build_config[knowhere::meta::DIM] = std::to_string(dim);
         build_config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
         auto index_metric = field_binlog_config->GetMetricType();
-
-        auto vec_index = std::make_unique<index::VectorMemIndex<float>>(
-            field_binlog_config->GetIndexType(),
-            index_metric,
-            knowhere::Version::GetCurrentVersion().VersionNumber());
+        std::unique_ptr<index::VectorIndex> vec_index = nullptr;
+        if (!is_sparse) {
+            knowhere::ViewDataOp view_data = [field_raw_data_ptr =
+                                                  vec_data](size_t id) {
+                return reinterpret_cast<ChunkedColumn*>(
+                           field_raw_data_ptr.get())
+                    ->ValueAt(id);
+            };
+            if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
+                vec_index = std::make_unique<index::VectorMemIndex<float>>(
+                    field_binlog_config->GetIndexType(),
+                    index_metric,
+                    knowhere::Version::GetCurrentVersion().VersionNumber(),
+                    view_data);
+            } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
+                vec_index =
+                    std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
+                        field_binlog_config->GetIndexType(),
+                        index_metric,
+                        knowhere::Version::GetCurrentVersion().VersionNumber(),
+                        view_data);
+            } else if (field_meta.get_data_type() ==
+                       DataType::VECTOR_BFLOAT16) {
+                vec_index =
+                    std::make_unique<index::VectorMemIndex<knowhere::bf16>>(
+                        field_binlog_config->GetIndexType(),
+                        index_metric,
+                        knowhere::Version::GetCurrentVersion().VersionNumber(),
+                        view_data);
+            }
+        } else {
+            vec_index = std::make_unique<index::VectorMemIndex<float>>(
+                field_binlog_config->GetIndexType(),
+                index_metric,
+                knowhere::Version::GetCurrentVersion().VersionNumber());
+        }
+        if (vec_index == nullptr) {
+            LOG_WARN("fail to generate intermin index, invalid data type.");
+            return false;
+        }
         auto num_chunk = vec_data->num_chunks();
         for (int i = 0; i < num_chunk; ++i) {
             auto pw = vec_data->GetChunk(i);
@@ -1695,19 +1742,26 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
 
         if (enable_binlog_index()) {
             std::unique_lock lck(mutex_);
+            if (vec_index->HasRawData()) {
+                fields_.erase(field_id);
+                set_bit(field_data_ready_bitset_, field_id, false);
+            } else {
+                // some knowhere view data index not has raw data, still keep it
+                set_bit(field_data_ready_bitset_, field_id, true);
+            }
             vector_indexings_.append_field_indexing(
                 field_id, index_metric, std::move(vec_index));
 
             vec_binlog_config_[field_id] = std::move(field_binlog_config);
             set_bit(binlog_index_bitset_, field_id, true);
             LOG_INFO(
-                "replace binlog with binlog index in segment {}, field {}.",
+                "replace binlog with intermin index in segment {}, field {}.",
                 this->get_segment_id(),
                 field_id.get());
         }
         return true;
     } catch (std::exception& e) {
-        LOG_WARN("fail to generate binlog index, because {}", e.what());
+        LOG_WARN("fail to generate intermin index, because {}", e.what());
         return false;
     }
 }
@@ -1803,12 +1857,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         insert_record_.seal_pks();
     }
 
-    if (generate_interim_index(field_id)) {
-        std::unique_lock lck(mutex_);
-        // mmap_fields is useless, no change
-        fields_.erase(field_id);
-        set_bit(field_data_ready_bitset_, field_id, false);
-    } else {
+    if (!generate_interim_index(field_id)) {
         std::unique_lock lck(mutex_);
         set_bit(field_data_ready_bitset_, field_id, true);
     }
