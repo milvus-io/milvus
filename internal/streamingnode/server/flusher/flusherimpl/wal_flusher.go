@@ -29,7 +29,7 @@ func RecoverWALFlusher(param *interceptors.InterceptorBuildParam) *WALFlusherImp
 		wal:      param.WAL,
 		logger: resource.Resource().Logger().With(
 			log.FieldComponent("flusher"),
-			zap.String("pchannel", param.ChannelInfo.Name)),
+			zap.String("pchannel", param.ChannelInfo.String())),
 		metrics: newFlusherMetrics(param.ChannelInfo),
 	}
 	go flusher.Execute()
