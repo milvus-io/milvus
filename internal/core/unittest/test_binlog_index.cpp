@@ -19,6 +19,7 @@
 #include "segcore/segcore_init_c.h"
 #include "segcore/SegmentSealed.h"
 
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -246,8 +247,9 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
 
         LoadIndexInfo load_info;
         load_info.field_id = vec_field_id.get();
-
-        load_info.index = std::move(indexing);
+        load_info.index_params = GenIndexParams(indexing.get());
+        load_info.cache_index =
+            CreateTestCacheIndex("test", std::move(indexing));
         load_info.index_params["metric_type"] = metric_type;
         segment->DropFieldData(vec_field_id);
         ASSERT_NO_THROW(segment->LoadIndex(load_info));
@@ -339,8 +341,9 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
 
         LoadIndexInfo load_info;
         load_info.field_id = vec_field_id.get();
-
-        load_info.index = std::move(indexing);
+        load_info.index_params = GenIndexParams(indexing.get());
+        load_info.cache_index =
+            CreateTestCacheIndex("test", std::move(indexing));
         load_info.index_params["metric_type"] = metric_type;
         segment->DropFieldData(vec_field_id);
         ASSERT_NO_THROW(segment->LoadIndex(load_info));
@@ -388,8 +391,8 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
 
     LoadIndexInfo load_info;
     load_info.field_id = vec_field_id.get();
-
-    load_info.index = std::move(indexing);
+    load_info.index_params = GenIndexParams(indexing.get());
+    load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = metric_type;
 
     segment->DropFieldData(vec_field_id);

@@ -21,7 +21,7 @@ namespace milvus::cachinglayer {
 
 struct Meta {
     StorageType storage_type;
-    Meta(StorageType storage_type) : storage_type(storage_type) {
+    explicit Meta(StorageType storage_type) : storage_type(storage_type) {
     }
 };
 

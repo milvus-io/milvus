@@ -144,7 +144,7 @@ class SegmentExpr : public Expr {
                 bool allow_any_json_cast_type = false)
 
         : Expr(DataType::BOOL, std::move(input), name),
-          segment_(segment),
+          segment_(const_cast<segcore::SegmentInternalInterface*>(segment)),
           field_id_(field_id),
           nested_path_(nested_path),
           value_type_(value_type),
@@ -404,15 +404,14 @@ class SegmentExpr : public Expr {
                                 OffsetVector* input,
                                 ValTypes... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
-        typedef std::
-            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-                IndexInnerType;
+        using IndexInnerType = std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
         using Index = index::ScalarIndex<IndexInnerType>;
         TargetBitmap valid_res(input->size());
 
-        const Index& index =
-            segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
-        auto* index_ptr = const_cast<Index*>(&index);
+        auto pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
+        auto* index_ptr = const_cast<Index*>(pw.get());
+
         auto valid_result = index_ptr->IsNotNull();
         for (auto i = 0; i < input->size(); ++i) {
             valid_res[i] = valid_result[(*input)[i]];
@@ -436,13 +435,11 @@ class SegmentExpr : public Expr {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         auto& skip_index = segment_->GetSkipIndex();
 
-        typedef std::
-            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-                IndexInnerType;
+        using IndexInnerType = std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
         using Index = index::ScalarIndex<IndexInnerType>;
-        const Index& index =
-            segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
-        auto* index_ptr = const_cast<Index*>(&index);
+        auto pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
+        auto* index_ptr = const_cast<Index*>(pw.get());
         auto valid_result = index_ptr->IsNotNull();
         auto batch_size = input->size();
 
@@ -828,19 +825,18 @@ class SegmentExpr : public Expr {
             // executing costs quite much time.
             if (cached_index_chunk_id_ != i) {
                 Index* index_ptr = nullptr;
+                PinWrapper<const Index*> pw;
 
                 if (field_type_ == DataType::JSON) {
                     auto pointer = milvus::Json::pointer(nested_path_);
 
-                    const Index& index =
-                        segment_->chunk_scalar_index<IndexInnerType>(
-                            field_id_, pointer, i);
-                    index_ptr = const_cast<Index*>(&index);
+                    pw = segment_->chunk_scalar_index<IndexInnerType>(
+                        field_id_, pointer, i);
+                    index_ptr = const_cast<Index*>(pw.get());
                 } else {
-                    const Index& index =
-                        segment_->chunk_scalar_index<IndexInnerType>(field_id_,
-                                                                     i);
-                    index_ptr = const_cast<Index*>(&index);
+                    pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_,
+                                                                      i);
+                    index_ptr = const_cast<Index*>(pw.get());
                 }
                 cached_index_chunk_res_ = std::move(func(index_ptr, values...));
                 auto valid_result = index_ptr->IsNotNull();
@@ -973,9 +969,9 @@ class SegmentExpr : public Expr {
                                   element_type);
                 }
             }
-            const Index& index =
+            auto pw =
                 segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
-            auto* index_ptr = const_cast<Index*>(&index);
+            auto* index_ptr = const_cast<Index*>(pw.get());
             const auto& res = index_ptr->IsNotNull();
             for (auto i = 0; i < batch_size; ++i) {
                 valid_result[i] = res[input[i]];
@@ -1091,9 +1087,8 @@ class SegmentExpr : public Expr {
     template <typename T>
     TargetBitmap
     ProcessIndexChunksForValid() {
-        typedef std::
-            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-                IndexInnerType;
+        using IndexInnerType = std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
         using Index = index::ScalarIndex<IndexInnerType>;
         int processed_rows = 0;
         TargetBitmap valid_result;
@@ -1104,9 +1099,9 @@ class SegmentExpr : public Expr {
             // It avoids indexing execute for every batch because indexing
             // executing costs quite much time.
             if (cached_index_chunk_id_ != i) {
-                const Index& index =
+                auto pw =
                     segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-                auto* index_ptr = const_cast<Index*>(&index);
+                auto* index_ptr = const_cast<Index*>(pw.get());
                 auto execute_sub_batch = [](Index* index_ptr) {
                     TargetBitmap res = index_ptr->IsNotNull();
                     return res;
@@ -1176,9 +1171,9 @@ class SegmentExpr : public Expr {
         using Index = index::ScalarIndex<IndexInnerType>;
 
         for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-            const Index& index =
+            auto pw =
                 segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-            auto* index_ptr = const_cast<Index*>(&index);
+            auto* index_ptr = const_cast<Index*>(pw.get());
             func(index_ptr, values...);
         }
     }
@@ -1196,11 +1191,13 @@ class SegmentExpr : public Expr {
         using Index = index::ScalarIndex<IndexInnerType>;
         if (op == OpType::Match) {
             for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-                const Index& index =
+                auto pw =
                     segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
+                auto index_ptr = const_cast<Index*>(pw.get());
                 // 1, index support regex query, then index handles the query;
                 // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
-                if (!index.SupportRegexQuery() && !index.HasRawData()) {
+                if (!index_ptr->SupportRegexQuery() &&
+                    !index_ptr->HasRawData()) {
                     return false;
                 }
                 // all chunks have same index.
@@ -1220,9 +1217,10 @@ class SegmentExpr : public Expr {
 
         using Index = index::ScalarIndex<IndexInnerType>;
         for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-            const Index& index =
+            auto pw =
                 segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-            if (!index.HasRawData()) {
+            auto* index_ptr = const_cast<Index*>(pw.get());
+            if (!index_ptr->HasRawData()) {
                 return false;
             }
         }

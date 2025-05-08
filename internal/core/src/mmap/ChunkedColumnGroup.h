@@ -79,7 +79,7 @@ class ChunkedColumnGroup {
     int64_t
     GetNumRowsUntilChunk(int64_t chunk_id) const {
         AssertInfo(chunk_id >= 0 && chunk_id <= num_chunks_,
-                  "chunk_id out of range: " + std::to_string(chunk_id));
+                   "chunk_id out of range: " + std::to_string(chunk_id));
         return GetNumRowsUntilChunk()[chunk_id];
     }
 

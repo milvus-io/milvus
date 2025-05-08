@@ -14,6 +14,7 @@
 #include <string>
 
 #include "bitset/detail/element_wise.h"
+#include "cachinglayer/Utils.h"
 #include "common/BitsetView.h"
 #include "common/QueryInfo.h"
 #include "common/Types.h"
@@ -53,8 +54,11 @@ SearchOnSealedIndex(const Schema& schema,
 
     auto dataset = knowhere::GenDataSet(num_queries, dim, query_data);
     dataset->SetIsSparse(is_sparse);
+    auto accessor = field_indexing->indexing_->PinCells({0})
+                        .via(&folly::InlineExecutor::instance())
+                        .get();
     auto vec_index =
-        dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+        dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
     if (search_info.iterator_v2_info_.has_value()) {
         CachedSearchIterator cached_iter(

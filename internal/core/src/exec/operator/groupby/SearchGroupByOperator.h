@@ -130,8 +130,9 @@ class SealedDataGetter : public DataGetter<T> {
             }
         } else {
             // null is not supported for indexed fields
-            auto& chunk_index = segment_.chunk_scalar_index<T>(field_id_, 0);
-            auto raw = chunk_index.Reverse_Lookup(idx);
+            auto pw = segment_.chunk_scalar_index<T>(field_id_, 0);
+            auto* chunk_index = pw.get();
+            auto raw = chunk_index->Reverse_Lookup(idx);
             AssertInfo(raw.has_value(), "field data not found");
             return raw.value();
         }

@@ -177,7 +177,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
         const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
         std::string& local_data_path,
         bool& file_created,
-        uint32_t& num_rows,
         uint32_t& dim,
         int64_t& write_offset);
 

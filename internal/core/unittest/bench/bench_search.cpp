@@ -16,6 +16,7 @@
 #include "segcore/segment_c.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentSealed.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -127,7 +128,7 @@ Search_Sealed(benchmark::State& state) {
         auto indexing =
             GenVecIndexing(N, dim, vec.data(), knowhere::IndexEnum::INDEX_HNSW);
         segcore::LoadIndexInfo info;
-        info.index = std::move(indexing);
+        info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
         info.field_id = (*schema)[FieldName("fakevec")].get_id().get();
         info.index_params["index_type"] = "HNSW";
         info.index_params["metric_type"] = knowhere::metric::L2;

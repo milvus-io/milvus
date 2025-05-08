@@ -12,10 +12,12 @@
 #include <gtest/gtest.h>
 #include <regex>
 
+#include "cachinglayer/Manager.h"
 #include "pb/plan.pb.h"
 #include "index/InvertedIndexTantivy.h"
 #include "common/Schema.h"
 
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "query/PlanProto.h"
@@ -117,7 +119,8 @@ class ArrayInvertedIndexTest : public ::testing::Test {
         index->BuildWithRawDataForUT(N_, vec_of_array_.data(), cfg);
         LoadIndexInfo info{
             .field_id = schema_->get_field_id(FieldName("array")).get(),
-            .index = std::move(index),
+            .index_params = GenIndexParams(index.get()),
+            .cache_index = CreateTestCacheIndex("test", std::move(index)),
         };
         seg_->LoadIndex(info);
     }

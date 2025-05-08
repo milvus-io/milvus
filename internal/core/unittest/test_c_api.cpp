@@ -39,6 +39,7 @@
 #include "futures/Future.h"
 #include "futures/future_c.h"
 #include "test_utils/DataGen.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 #include "test_utils/PbHelper.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -1934,11 +1935,14 @@ TEST(CApiTest, LoadIndexSearch) {
     milvus::segcore::LoadIndexInfo load_index_info;
     auto& index_params = load_index_info.index_params;
     index_params["index_type"] = knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
-    load_index_info.index = std::make_unique<VectorMemIndex<float>>(
+    auto index = std::make_unique<VectorMemIndex<float>>(
         index_params["index_type"],
         knowhere::metric::L2,
         knowhere::Version::GetCurrentVersion().VersionNumber());
-    load_index_info.index->Load(binary_set);
+    index->Load(binary_set);
+    index_params = GenIndexParams(index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(index));
 
     // search
     auto query_dataset =
@@ -4301,7 +4305,9 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
     age8_index->Build(N, age8_col.data());
     load_index_info.field_id = i8_fid.get();
     load_index_info.field_type = DataType::INT8;
-    load_index_info.index = std::move(age8_index);
+    load_index_info.index_params = GenIndexParams(age8_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age8_index));
     segment->LoadIndex(load_index_info);
 
     // load index for 16 field
@@ -4311,7 +4317,9 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
     age16_index->Build(N, age16_col.data());
     load_index_info.field_id = i16_fid.get();
     load_index_info.field_type = DataType::INT16;
-    load_index_info.index = std::move(age16_index);
+    load_index_info.index_params = GenIndexParams(age16_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age16_index));
     segment->LoadIndex(load_index_info);
 
     // load index for int32 field
@@ -4321,7 +4329,9 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
     age32_index->Build(N, age32_col.data());
     load_index_info.field_id = i32_fid.get();
     load_index_info.field_type = DataType::INT32;
-    load_index_info.index = std::move(age32_index);
+    load_index_info.index_params = GenIndexParams(age32_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age32_index));
     segment->LoadIndex(load_index_info);
 
     // load index for int64 field
@@ -4331,7 +4341,9 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
     age64_index->Build(N, age64_col.data());
     load_index_info.field_id = i64_fid.get();
     load_index_info.field_type = DataType::INT64;
-    load_index_info.index = std::move(age64_index);
+    load_index_info.index_params = GenIndexParams(age64_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age64_index));
     segment->LoadIndex(load_index_info);
 
     // load index for float field
@@ -4341,7 +4353,9 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
     age_float_index->Build(N, age_float_col.data());
     load_index_info.field_id = float_fid.get();
     load_index_info.field_type = DataType::FLOAT;
-    load_index_info.index = std::move(age_float_index);
+    load_index_info.index_params = GenIndexParams(age_float_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age_float_index));
     segment->LoadIndex(load_index_info);
 
     // load index for double field
@@ -4351,7 +4365,9 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
     age_double_index->Build(N, age_double_col.data());
     load_index_info.field_id = double_fid.get();
     load_index_info.field_type = DataType::FLOAT;
-    load_index_info.index = std::move(age_double_index);
+    load_index_info.index_params = GenIndexParams(age_double_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age_double_index));
     segment->LoadIndex(load_index_info);
 
     // create retrieve plan

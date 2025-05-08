@@ -14,6 +14,7 @@
 #include "query/Plan.h"
 
 #include "segcore/reduce_c.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -78,7 +79,9 @@ TEST(IterativeFilter, SealedIndex) {
         N, dim, vector_data.data(), knowhere::IndexEnum::INDEX_HNSW);
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
-    load_index_info.index = std::move(indexing);
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(load_index_info);
     int topK = 10;

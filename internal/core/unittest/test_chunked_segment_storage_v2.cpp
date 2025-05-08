@@ -51,6 +51,7 @@
 #include "segcore/memory_planner.h"
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -293,7 +294,9 @@ TEST_P(TestChunkSegmentStorageV2, TestCompareExpr) {
 
     index->BuildWithRawDataForUT(data.size(), data.data());
     segcore::LoadIndexInfo load_index_info;
-    load_index_info.index = std::move(index);
+    load_index_info.index_params = GenIndexParams(index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test_index", std::move(index));
     load_index_info.field_id = fid.get();
     segment->LoadIndex(load_index_info);
 

@@ -143,10 +143,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     // deprecated
-    const index::IndexBase*
+    PinWrapper<const index::IndexBase*>
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const final {
-        return indexing_record_.get_field_indexing(field_id).get_chunk_indexing(
-            chunk_id);
+        return PinWrapper<const index::IndexBase*>(
+            indexing_record_.get_field_indexing(field_id)
+                .get_chunk_indexing(chunk_id)
+                .get());
     }
 
     int64_t

@@ -231,7 +231,9 @@ MACRO(using_ccache_if_defined MILVUS_USE_CCACHE)
             # let ccache preserve C++ comments, because some of them may be
             # meaningful to the compiler
             set(ENV{CCACHE_COMMENTS} "1")
-        endif (CCACHE_FOUND)
+        else()
+            message(WARNING "ccache not found!")
+        endif()
     endif ()
 ENDMACRO(using_ccache_if_defined)
 

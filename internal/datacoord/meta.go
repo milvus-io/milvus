@@ -290,9 +290,12 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 		// for 2.2.2 issue https://github.com/milvus-io/milvus/issues/22181
 		pos.ChannelName = vChannel
 		m.channelCPs.checkpoints[vChannel] = pos
-		ts, _ := tsoutil.ParseTS(pos.Timestamp)
-		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
-			Set(float64(ts.Unix()))
+		if pos.Timestamp != math.MaxUint64 {
+			// Should not be set as metric since it's a tombstone value.
+			ts, _ := tsoutil.ParseTS(pos.Timestamp)
+			metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
+				Set(float64(ts.Unix()))
+		}
 	}
 
 	log.Ctx(ctx).Info("DataCoord meta reloadFromKV done", zap.Int("numSegments", numSegments), zap.Duration("duration", record.ElapseSpan()))
