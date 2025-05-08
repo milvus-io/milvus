@@ -991,9 +991,10 @@ type alterCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterCollectionRequest
-	ctx      context.Context
-	mixCoord types.MixCoordClient
-	result   *commonpb.Status
+	ctx                context.Context
+	mixCoord           types.MixCoordClient
+	result             *commonpb.Status
+	replicateMsgStream msgstream.MsgStream
 }
 
 func (t *alterCollectionTask) TraceCtx() context.Context {
@@ -1206,7 +1207,11 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 func (t *alterCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.AlterCollection(ctx, t.AlterCollectionRequest)
-	return merr.CheckRPCCall(t.result, err)
+	if err = merr.CheckRPCCall(t.result, err); err != nil {
+		return err
+	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.AlterCollectionRequest)
+	return nil
 }
 
 func (t *alterCollectionTask) PostExecute(ctx context.Context) error {
@@ -1217,9 +1222,10 @@ type alterCollectionFieldTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterCollectionFieldRequest
-	ctx      context.Context
-	mixCoord types.MixCoordClient
-	result   *commonpb.Status
+	ctx                context.Context
+	mixCoord           types.MixCoordClient
+	result             *commonpb.Status
+	replicateMsgStream msgstream.MsgStream
 }
 
 func (t *alterCollectionFieldTask) TraceCtx() context.Context {
@@ -1382,7 +1388,11 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 func (t *alterCollectionFieldTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.AlterCollectionField(ctx, t.AlterCollectionFieldRequest)
-	return merr.CheckRPCCall(t.result, err)
+	if err = merr.CheckRPCCall(t.result, err); err != nil {
+		return err
+	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.AlterCollectionFieldRequest)
+	return nil
 }
 
 func (t *alterCollectionFieldTask) PostExecute(ctx context.Context) error {

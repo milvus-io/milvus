@@ -1338,6 +1338,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 		Condition:              NewTaskCondition(ctx),
 		AlterCollectionRequest: request,
 		mixCoord:               node.mixCoord,
+		replicateMsgStream:     node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1402,6 +1403,7 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 		Condition:                   NewTaskCondition(ctx),
 		AlterCollectionFieldRequest: request,
 		mixCoord:                    node.mixCoord,
+		replicateMsgStream:          node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -3895,6 +3897,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		Condition:          NewTaskCondition(ctx),
 		CreateAliasRequest: request,
 		mixCoord:           node.mixCoord,
+		replicateMsgStream: node.replicateMsgStream,
 	}
 
 	method := "CreateAlias"
@@ -4082,10 +4085,11 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 	defer sp.End()
 
 	dat := &DropAliasTask{
-		ctx:              ctx,
-		Condition:        NewTaskCondition(ctx),
-		DropAliasRequest: request,
-		mixCoord:         node.mixCoord,
+		ctx:                ctx,
+		Condition:          NewTaskCondition(ctx),
+		DropAliasRequest:   request,
+		mixCoord:           node.mixCoord,
+		replicateMsgStream: node.replicateMsgStream,
 	}
 
 	method := "DropAlias"
@@ -4145,10 +4149,11 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 	defer sp.End()
 
 	aat := &AlterAliasTask{
-		ctx:               ctx,
-		Condition:         NewTaskCondition(ctx),
-		AlterAliasRequest: request,
-		mixCoord:          node.mixCoord,
+		ctx:                ctx,
+		Condition:          NewTaskCondition(ctx),
+		AlterAliasRequest:  request,
+		mixCoord:           node.mixCoord,
+		replicateMsgStream: node.replicateMsgStream,
 	}
 
 	method := "AlterAlias"
@@ -5973,6 +5978,10 @@ func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCol
 	if err != nil {
 		log.Warn("failed to rename collection", zap.Error(err))
 		return merr.Status(err), err
+	}
+
+	if merr.Ok(resp) {
+		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 
 	return resp, nil
