@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
@@ -397,6 +398,45 @@ func TestCluster_Index(t *testing.T) {
 		assert.NotNil(t, result)
 	})
 
+	t.Run("query index failed", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		// Mock client
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		// Mock response
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Failed)
+		expectedResult := &workerpb.QueryJobsV2Response{
+			Result: &workerpb.QueryJobsV2Response_IndexJobResults{
+				IndexJobResults: &workerpb.IndexJobResults{
+					Results: []*workerpb.IndexTaskInfo{
+						{
+							BuildID:    1,
+							State:      commonpb.IndexState_Failed,
+							FailReason: "mock reason",
+						},
+					},
+				},
+			},
+		}
+		payload, _ := proto.Marshal(expectedResult)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		// Test
+		result, err := cluster.QueryIndex(1, &workerpb.QueryJobsRequest{TaskIDs: []int64{1}})
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, commonpb.IndexState_Failed, result.Results[0].State)
+		assert.Equal(t, "mock reason", result.Results[0].FailReason)
+	})
+
 	t.Run("drop index", func(t *testing.T) {
 		mockNodeManager := NewMockNodeManager(t)
 		cluster := NewCluster(mockNodeManager)
@@ -456,6 +496,45 @@ func TestCluster_Stats(t *testing.T) {
 		assert.NotNil(t, result)
 	})
 
+	t.Run("query stats failed", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		// Mock client
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		// Mock response
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Failed)
+		expectedResult := &workerpb.QueryJobsV2Response{
+			Result: &workerpb.QueryJobsV2Response_StatsJobResults{
+				StatsJobResults: &workerpb.StatsResults{
+					Results: []*workerpb.StatsResult{
+						{
+							TaskID:     1,
+							State:      taskcommon.Failed,
+							FailReason: "mock reason",
+						},
+					},
+				},
+			},
+		}
+		payload, _ := proto.Marshal(expectedResult)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		// Test
+		result, err := cluster.QueryStats(1, &workerpb.QueryJobsRequest{TaskIDs: []int64{1}})
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, taskcommon.Failed, result.Results[0].State)
+		assert.Equal(t, "mock reason", result.Results[0].FailReason)
+	})
+
 	t.Run("drop stats", func(t *testing.T) {
 		mockNodeManager := NewMockNodeManager(t)
 		cluster := NewCluster(mockNodeManager)
@@ -513,6 +592,45 @@ func TestCluster_Analyze(t *testing.T) {
 		result, err := cluster.QueryAnalyze(1, &workerpb.QueryJobsRequest{TaskIDs: []int64{1}})
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
+	})
+
+	t.Run("query analyze failed", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		// Mock client
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		// Mock response
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Failed)
+		expectedResult := &workerpb.QueryJobsV2Response{
+			Result: &workerpb.QueryJobsV2Response_AnalyzeJobResults{
+				AnalyzeJobResults: &workerpb.AnalyzeResults{
+					Results: []*workerpb.AnalyzeResult{
+						{
+							TaskID:     1,
+							State:      taskcommon.Failed,
+							FailReason: "mock reason",
+						},
+					},
+				},
+			},
+		}
+		payload, _ := proto.Marshal(expectedResult)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		// Test
+		result, err := cluster.QueryAnalyze(1, &workerpb.QueryJobsRequest{TaskIDs: []int64{1}})
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, taskcommon.Failed, result.Results[0].State)
+		assert.Equal(t, "mock reason", result.Results[0].FailReason)
 	})
 
 	t.Run("drop analyze", func(t *testing.T) {
