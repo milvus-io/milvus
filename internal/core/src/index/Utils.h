@@ -84,6 +84,9 @@ template <typename T>
 inline std::optional<T>
 GetValueFromConfig(const Config& cfg, const std::string& key) {
     if (cfg.contains(key)) {
+        if (cfg.at(key).is_null()) {
+            return std::nullopt;
+        }
         try {
             // compatibility for boolean string
             if constexpr (std::is_same_v<T, bool>) {

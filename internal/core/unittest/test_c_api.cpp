@@ -5285,7 +5285,7 @@ TEST(CApiTest, IsLoadWithDisk) {
 
 TEST(CApiTest, TestGetValueFromConfig) {
     nlohmann::json cfg = nlohmann::json::parse(
-        R"({"a" : 100, "b" : true, "c" : "true", "d" : 1.234})");
+        R"({"a" : 100, "b" : true, "c" : "true", "d" : 1.234, "e" : null})");
     auto a_value = GetValueFromConfig<int64_t>(cfg, "a");
     ASSERT_EQ(a_value.value(), 100);
 
@@ -5306,4 +5306,7 @@ TEST(CApiTest, TestGetValueFromConfig) {
                       std::string::npos,
                   true);
     }
+
+    auto e_value = GetValueFromConfig<std::string>(cfg, "e");
+    ASSERT_FALSE(e_value.has_value());
 }
