@@ -209,8 +209,12 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
 		compactionUsed = node.compactionExecutor.Slots()
 		importUsed     = node.importScheduler.Slots()
-		availableSlots = totalSlots - indexStatsUsed - compactionUsed - importUsed
 	)
+
+	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
+	if availableSlots < 0 {
+		availableSlots = 0
+	}
 
 	log.Ctx(ctx).Info("query slots done",
 		zap.Int64("totalSlots", totalSlots),
