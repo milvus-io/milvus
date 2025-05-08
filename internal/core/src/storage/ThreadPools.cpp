@@ -19,7 +19,11 @@ namespace milvus {
 
 std::map<ThreadPoolPriority, std::unique_ptr<ThreadPool>>
     ThreadPools::thread_pool_map;
-std::map<ThreadPoolPriority, std::string> ThreadPools::name_map;
+std::map<ThreadPoolPriority, std::string> ThreadPools::name_map = {
+    {ThreadPoolPriority::LOW, "low_priority_thread_pool"},
+    {ThreadPoolPriority::MIDDLE, "middle_priority_thread_pool"},
+    {ThreadPoolPriority::HIGH, "high_priority_thread_pool"}};
+;
 std::shared_mutex ThreadPools::mutex_;
 
 void
