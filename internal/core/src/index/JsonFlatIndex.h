@@ -74,7 +74,11 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         size_t n,
         const T* values,
         const std::function<void(size_t /* offset */)>& callback) override {
-        PanicInfo(ErrorCode::Unsupported, "InApplyCallback is not implemented");
+        TargetBitmap bitset(this->Count());
+        for (size_t i = 0; i < n; ++i) {
+            this->wrapper_->json_term_query(json_path_, values[i], &bitset);
+            apply_hits_with_callback(bitset, callback);
+        }
     }
 
     const TargetBitmap
@@ -123,7 +127,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     const TargetBitmap
     Query(const DatasetPtr& dataset) override {
-        InvertedIndexTantivy<T>::Query(dataset);
+        return InvertedIndexTantivy<T>::Query(dataset);
     }
 
     const TargetBitmap
@@ -144,11 +148,10 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
     }
 
     const TargetBitmap
-    PrefixMatch(const std::string& prefix) {
-        LOG_INFO("[executor] JsonFlatIndexQueryExecutor PrefixMatch {}",
-                 prefix);
+    PrefixMatch(const std::string_view prefix) override {
         TargetBitmap bitset(this->Count());
-        this->wrapper_->json_prefix_query(json_path_, prefix, &bitset);
+        this->wrapper_->json_prefix_query(
+            json_path_, std::string(prefix), &bitset);
         return bitset;
     }
 
@@ -169,17 +172,6 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
  private:
     std::string json_path_;
 };
-
-template <>
-inline const TargetBitmap
-JsonFlatIndexQueryExecutor<std::string>::Query(const DatasetPtr& dataset) {
-    auto op = dataset->Get<OpType>(OPERATOR_TYPE);
-    if (op == OpType::PrefixMatch) {
-        auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
-        return PrefixMatch(prefix);
-    }
-    return ScalarIndex<std::string>::Query(dataset);
-}
 
 // JsonFlatIndex is not bound to any specific type,
 // we need to reuse InvertedIndexTantivy's Build and Load implementation, so we specify the template parameter as std::string

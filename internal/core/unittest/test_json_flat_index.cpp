@@ -505,4 +505,52 @@ TEST_F(JsonFlatIndexTest, TestArrayNumberRangeQuery) {
     ASSERT_TRUE(range_result[2]);  // Charlie has score 91
 }
 
+TEST_F(JsonFlatIndexTest, TestInApply) {
+    auto json_flat_index =
+        dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
+    ASSERT_NE(json_flat_index, nullptr);
+
+    std::string json_path = "/profile/name/first";
+    auto executor = json_flat_index->create_executor<std::string>(json_path);
+
+    std::string values[] = {"Alice", "Bob"};
+    auto result =
+        executor->InApplyFilter(2, values, [](size_t offset) { return true; });
+    ASSERT_EQ(result.size(), json_data_.size());
+    ASSERT_TRUE(result[0]);   // Alice
+    ASSERT_TRUE(result[1]);   // Bob
+    ASSERT_FALSE(result[2]);  // Charlie
+}
+
+TEST_F(JsonFlatIndexTest, TestInApplyCallback) {
+    auto json_flat_index =
+        dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
+    ASSERT_NE(json_flat_index, nullptr);
+
+    std::string json_path = "/profile/name/first";
+    auto executor = json_flat_index->create_executor<std::string>(json_path);
+    std::string values[] = {"Alice", "Bob"};
+    executor->InApplyCallback(2, values, [](size_t offset) {
+        ASSERT_TRUE(offset == 0 || offset == 1);
+    });
+}
+
+TEST_F(JsonFlatIndexTest, TestQuery) {
+    auto json_flat_index =
+        dynamic_cast<index::JsonFlatIndex*>(json_index_.get());
+    ASSERT_NE(json_flat_index, nullptr);
+
+    std::string json_path = "/profile/name/first";
+    auto executor = json_flat_index->create_executor<std::string>(json_path);
+
+    auto dataset = std::make_unique<Dataset>();
+    dataset->Set(milvus::index::OPERATOR_TYPE,
+                 proto::plan::OpType::PrefixMatch);
+    dataset->Set<std::string>(milvus::index::PREFIX_VALUE, "Alice");
+    auto result = executor->Query(std::move(dataset));
+    ASSERT_EQ(result.size(), json_data_.size());
+    ASSERT_TRUE(result[0]);   // Alice
+    ASSERT_FALSE(result[1]);  // Bob
+    ASSERT_FALSE(result[2]);  // Charlie
+}
 }  // namespace milvus::test

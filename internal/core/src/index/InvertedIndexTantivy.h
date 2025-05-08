@@ -188,7 +188,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         return Count();
     }
 
-    const TargetBitmap
+    virtual const TargetBitmap
     PrefixMatch(const std::string_view prefix);
 
     const TargetBitmap
