@@ -18,6 +18,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "pb/schema.pb.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "query/PlanProto.h"
@@ -180,7 +181,7 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnJsonField) {
 struct MockStringIndex : index::StringIndexSort {
     const bool
     HasRawData() const override {
-        return false;
+        return true;
     }
 
     bool
@@ -252,7 +253,8 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
             index->BuildWithRawDataForUT(arr.ByteSize(), buffer.data());
             LoadIndexInfo info{
                 .field_id = schema->get_field_id(FieldName("str")).get(),
-                .index = std::move(index),
+                .index_params = GenIndexParams(index.get()),
+                .cache_index = CreateTestCacheIndex("test", std::move(index)),
             };
             seg->LoadIndex(info);
         }
@@ -262,7 +264,8 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
             LoadIndexInfo info{
                 .field_id =
                     schema->get_field_id(FieldName("another_int64")).get(),
-                .index = std::move(index),
+                .index_params = GenIndexParams(index.get()),
+                .cache_index = CreateTestCacheIndex("test", std::move(index)),
             };
             seg->LoadIndex(info);
         }
@@ -275,7 +278,8 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
         index->BuildWithRawDataForUT(N, raw_str.data());
         LoadIndexInfo info{
             .field_id = schema->get_field_id(FieldName("str")).get(),
-            .index = std::move(index),
+            .index_params = GenIndexParams(index.get()),
+            .cache_index = CreateTestCacheIndex("test", std::move(index)),
         };
         seg->LoadIndex(info);
     }
@@ -292,7 +296,8 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
         index->BuildWithRawDataForUT(arr.ByteSize(), buffer.data());
         LoadIndexInfo info{
             .field_id = schema->get_field_id(FieldName("str")).get(),
-            .index = std::move(index),
+            .index_params = GenIndexParams(index.get()),
+            .cache_index = CreateTestCacheIndex("test", std::move(index)),
         };
         seg->LoadIndex(info);
     }

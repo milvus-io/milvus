@@ -54,6 +54,7 @@
 #include "exec/expression/function/FunctionFactory.h"
 #include "expr/ITypeExpr.h"
 #include "mmap/Types.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -3076,7 +3077,9 @@ TEST_P(ExprTest, TestCompareWithScalarIndex) {
     age32_index->Build(N, age32_col.data());
     load_index_info.field_id = i32_fid.get();
     load_index_info.field_type = DataType::INT32;
-    load_index_info.index = std::move(age32_index);
+    load_index_info.index_params = GenIndexParams(age32_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age32_index));
     seg->LoadIndex(load_index_info);
 
     // load index for int64 field
@@ -3086,7 +3089,9 @@ TEST_P(ExprTest, TestCompareWithScalarIndex) {
     age64_index->Build(N, age64_col.data());
     load_index_info.field_id = i64_fid.get();
     load_index_info.field_type = DataType::INT64;
-    load_index_info.index = std::move(age64_index);
+    load_index_info.index_params = GenIndexParams(age64_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age64_index));
     seg->LoadIndex(load_index_info);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
@@ -3233,7 +3238,9 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable) {
     nullable_index->Build(N, nullable_col.data(), valid_data_col.data());
     load_index_info.field_id = nullable_fid.get();
     load_index_info.field_type = DataType::INT32;
-    load_index_info.index = std::move(nullable_index);
+    load_index_info.index_params = GenIndexParams(nullable_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(nullable_index));
     seg->LoadIndex(load_index_info);
 
     // load index for int64 field
@@ -3243,7 +3250,9 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable) {
     age64_index->Build(N, age64_col.data());
     load_index_info.field_id = i64_fid.get();
     load_index_info.field_type = DataType::INT64;
-    load_index_info.index = std::move(age64_index);
+    load_index_info.index_params = GenIndexParams(age64_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age64_index));
     seg->LoadIndex(load_index_info);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
@@ -3391,7 +3400,9 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable2) {
     nullable_index->Build(N, nullable_col.data(), valid_data_col.data());
     load_index_info.field_id = nullable_fid.get();
     load_index_info.field_type = DataType::INT32;
-    load_index_info.index = std::move(nullable_index);
+    load_index_info.index_params = GenIndexParams(nullable_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(nullable_index));
     seg->LoadIndex(load_index_info);
 
     // load index for int64 field
@@ -3401,7 +3412,9 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable2) {
     age64_index->Build(N, age64_col.data());
     load_index_info.field_id = i64_fid.get();
     load_index_info.field_type = DataType::INT64;
-    load_index_info.index = std::move(age64_index);
+    load_index_info.index_params = GenIndexParams(age64_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age64_index));
     seg->LoadIndex(load_index_info);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
@@ -5991,7 +6004,9 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMaris) {
     str1_index->Build(N, str1_col.data());
     load_index_info.field_id = str1_fid.get();
     load_index_info.field_type = DataType::VARCHAR;
-    load_index_info.index = std::move(str1_index);
+    load_index_info.index_params = GenIndexParams(str1_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(str1_index));
     seg->LoadIndex(load_index_info);
 
     // load index for int64 field
@@ -6000,7 +6015,9 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMaris) {
     str2_index->Build(N, str2_col.data());
     load_index_info.field_id = str2_fid.get();
     load_index_info.field_type = DataType::VARCHAR;
-    load_index_info.index = std::move(str2_index);
+    load_index_info.index_params = GenIndexParams(str2_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(str2_index));
     seg->LoadIndex(load_index_info);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
@@ -6143,7 +6160,9 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable) {
     str1_index->Build(N, str1_col.data());
     load_index_info.field_id = str1_fid.get();
     load_index_info.field_type = DataType::VARCHAR;
-    load_index_info.index = std::move(str1_index);
+    load_index_info.index_params = GenIndexParams(str1_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(str1_index));
     seg->LoadIndex(load_index_info);
 
     // load index for int64 field
@@ -6153,7 +6172,9 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable) {
     str2_index->Build(N, nullable_col.data(), valid_data_col.data());
     load_index_info.field_id = nullable_fid.get();
     load_index_info.field_type = DataType::VARCHAR;
-    load_index_info.index = std::move(str2_index);
+    load_index_info.index_params = GenIndexParams(str2_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(str2_index));
     seg->LoadIndex(load_index_info);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
@@ -6296,7 +6317,9 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable2) {
     str1_index->Build(N, str1_col.data());
     load_index_info.field_id = str1_fid.get();
     load_index_info.field_type = DataType::VARCHAR;
-    load_index_info.index = std::move(str1_index);
+    load_index_info.index_params = GenIndexParams(str1_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(str1_index));
     seg->LoadIndex(load_index_info);
 
     // load index for int64 field
@@ -6306,7 +6329,9 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable2) {
     str2_index->Build(N, nullable_col.data(), valid_data_col.data());
     load_index_info.field_id = nullable_fid.get();
     load_index_info.field_type = DataType::VARCHAR;
-    load_index_info.index = std::move(str2_index);
+    load_index_info.index_params = GenIndexParams(str2_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(str2_index));
     seg->LoadIndex(load_index_info);
 
     query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
@@ -10605,7 +10630,9 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
     age8_index->Build(N, age8_col.data(), nullptr);
     load_index_info.field_id = i8_fid.get();
     load_index_info.field_type = DataType::INT8;
-    load_index_info.index = std::move(age8_index);
+    load_index_info.index_params = GenIndexParams(age8_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age8_index));
     seg->LoadIndex(load_index_info);
 
     // load index for 16 field
@@ -10615,7 +10642,9 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
     age16_index->Build(N, age16_col.data(), nullptr);
     load_index_info.field_id = i16_fid.get();
     load_index_info.field_type = DataType::INT16;
-    load_index_info.index = std::move(age16_index);
+    load_index_info.index_params = GenIndexParams(age16_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age16_index));
     seg->LoadIndex(load_index_info);
 
     // load index for int32 field
@@ -10625,7 +10654,9 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
     age32_index->Build(N, age32_col.data(), nullptr);
     load_index_info.field_id = i32_fid.get();
     load_index_info.field_type = DataType::INT32;
-    load_index_info.index = std::move(age32_index);
+    load_index_info.index_params = GenIndexParams(age32_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age32_index));
     seg->LoadIndex(load_index_info);
 
     // load index for int64 field
@@ -10635,7 +10666,9 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
     age64_index->Build(N, age64_col.data(), nullptr);
     load_index_info.field_id = i64_fid.get();
     load_index_info.field_type = DataType::INT64;
-    load_index_info.index = std::move(age64_index);
+    load_index_info.index_params = GenIndexParams(age64_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age64_index));
     seg->LoadIndex(load_index_info);
 
     // load index for float field
@@ -10645,7 +10678,9 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
     age_float_index->Build(N, age_float_col.data(), nullptr);
     load_index_info.field_id = float_fid.get();
     load_index_info.field_type = DataType::FLOAT;
-    load_index_info.index = std::move(age_float_index);
+    load_index_info.index_params = GenIndexParams(age_float_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age_float_index));
     seg->LoadIndex(load_index_info);
 
     // load index for double field
@@ -10655,7 +10690,9 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
     age_double_index->Build(N, age_double_col.data(), nullptr);
     load_index_info.field_id = double_fid.get();
     load_index_info.field_type = DataType::FLOAT;
-    load_index_info.index = std::move(age_double_index);
+    load_index_info.index_params = GenIndexParams(age_double_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age_double_index));
     seg->LoadIndex(load_index_info);
 
     auto seg_promote = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
@@ -11345,7 +11382,9 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
     age8_index->Build(N, age8_col.data(), i8_valid_data.data());
     load_index_info.field_id = i8_nullable_fid.get();
     load_index_info.field_type = DataType::INT8;
-    load_index_info.index = std::move(age8_index);
+    load_index_info.index_params = GenIndexParams(age8_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age8_index));
     seg->LoadIndex(load_index_info);
 
     // load index for 16 field
@@ -11355,7 +11394,9 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
     age16_index->Build(N, age16_col.data(), i16_valid_data.data());
     load_index_info.field_id = i16_nullable_fid.get();
     load_index_info.field_type = DataType::INT16;
-    load_index_info.index = std::move(age16_index);
+    load_index_info.index_params = GenIndexParams(age16_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age16_index));
     seg->LoadIndex(load_index_info);
 
     // load index for int32 field
@@ -11365,7 +11406,9 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
     age32_index->Build(N, age32_col.data(), i32_valid_data.data());
     load_index_info.field_id = i32_nullable_fid.get();
     load_index_info.field_type = DataType::INT32;
-    load_index_info.index = std::move(age32_index);
+    load_index_info.index_params = GenIndexParams(age32_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age32_index));
     seg->LoadIndex(load_index_info);
 
     // load index for int64 field
@@ -11375,7 +11418,9 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
     age64_index->Build(N, age64_col.data(), i64_valid_data.data());
     load_index_info.field_id = i64_nullable_fid.get();
     load_index_info.field_type = DataType::INT64;
-    load_index_info.index = std::move(age64_index);
+    load_index_info.index_params = GenIndexParams(age64_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age64_index));
     seg->LoadIndex(load_index_info);
 
     // load index for float field
@@ -11385,7 +11430,9 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
     age_float_index->Build(N, age_float_col.data(), float_valid_data.data());
     load_index_info.field_id = float_nullable_fid.get();
     load_index_info.field_type = DataType::FLOAT;
-    load_index_info.index = std::move(age_float_index);
+    load_index_info.index_params = GenIndexParams(age_float_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age_float_index));
     seg->LoadIndex(load_index_info);
 
     // load index for double field
@@ -11395,7 +11442,9 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
     age_double_index->Build(N, age_double_col.data(), double_valid_data.data());
     load_index_info.field_id = double_nullable_fid.get();
     load_index_info.field_type = DataType::FLOAT;
-    load_index_info.index = std::move(age_double_index);
+    load_index_info.index_params = GenIndexParams(age_double_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(age_double_index));
     seg->LoadIndex(load_index_info);
 
     auto seg_promote = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());

@@ -20,6 +20,7 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -127,7 +128,8 @@ TEST(Sealed, without_predicate) {
 
     LoadIndexInfo load_info;
     load_info.field_id = fake_id.get();
-    load_info.index = std::move(indexing);
+    load_info.index_params = GenIndexParams(indexing.get());
+    load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -206,7 +208,8 @@ TEST(Sealed, without_search_ef_less_than_limit) {
 
     LoadIndexInfo load_info;
     load_info.field_id = fake_id.get();
-    load_info.index = std::move(indexing);
+    load_info.index_params = GenIndexParams(indexing.get());
+    load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -327,7 +330,8 @@ TEST(Sealed, with_predicate) {
 
     LoadIndexInfo load_info;
     load_info.field_id = fake_id.get();
-    load_info.index = std::move(indexing);
+    load_info.index_params = GenIndexParams(indexing.get());
+    load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -421,7 +425,9 @@ TEST(Sealed, with_predicate_filter_all) {
 
     LoadIndexInfo load_info;
     load_info.field_id = fake_id.get();
-    load_info.index = std::move(ivf_indexing);
+    load_info.index_params = GenIndexParams(ivf_indexing.get());
+    load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(ivf_indexing));
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -456,7 +462,9 @@ TEST(Sealed, with_predicate_filter_all) {
 
     LoadIndexInfo hnsw_load_info;
     hnsw_load_info.field_id = fake_id.get();
-    hnsw_load_info.index = std::move(hnsw_indexing);
+    hnsw_load_info.index_params = GenIndexParams(hnsw_indexing.get());
+    hnsw_load_info.cache_index =
+        CreateTestCacheIndex("test", std::move(hnsw_indexing));
     hnsw_load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -556,7 +564,8 @@ TEST(Sealed, LoadFieldData) {
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
-    vec_info.index = std::move(indexing);
+    vec_info.index_params = GenIndexParams(indexing.get());
+    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -719,7 +728,8 @@ TEST(Sealed, ClearData) {
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
-    vec_info.index = std::move(indexing);
+    vec_info.index_params = GenIndexParams(indexing.get());
+    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -823,7 +833,8 @@ TEST(Sealed, LoadFieldDataMmap) {
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
-    vec_info.index = std::move(indexing);
+    vec_info.index_params = GenIndexParams(indexing.get());
+    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -867,7 +878,9 @@ TEST(Sealed, LoadPkScalarIndex) {
     pk_index.field_type = DataType::INT64;
     pk_index.index_params["index_type"] = "sort";
     auto pk_data = dataset.get_col<int64_t>(pk_id);
-    pk_index.index = GenScalarIndexing<int64_t>(N, pk_data.data());
+    auto index = GenScalarIndexing<int64_t>(N, pk_data.data());
+    pk_index.index_params = GenIndexParams(index.get());
+    pk_index.cache_index = CreateTestCacheIndex("test", std::move(index));
     segment->LoadIndex(pk_index);
 }
 
@@ -934,7 +947,8 @@ TEST(Sealed, LoadScalarIndex) {
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
     vec_info.field_type = DataType::VECTOR_FLOAT;
-    vec_info.index = std::move(indexing);
+    vec_info.index_params = GenIndexParams(indexing.get());
+    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -943,7 +957,9 @@ TEST(Sealed, LoadScalarIndex) {
     counter_index.field_type = DataType::INT64;
     counter_index.index_params["index_type"] = "sort";
     auto counter_data = dataset.get_col<int64_t>(counter_id);
-    counter_index.index = GenScalarIndexing<int64_t>(N, counter_data.data());
+    auto index = GenScalarIndexing<int64_t>(N, counter_data.data());
+    counter_index.index_params = GenIndexParams(index.get());
+    counter_index.cache_index = CreateTestCacheIndex("test", std::move(index));
     segment->LoadIndex(counter_index);
 
     LoadIndexInfo double_index;
@@ -951,7 +967,9 @@ TEST(Sealed, LoadScalarIndex) {
     double_index.field_type = DataType::DOUBLE;
     double_index.index_params["index_type"] = "sort";
     auto double_data = dataset.get_col<double>(double_id);
-    double_index.index = GenScalarIndexing<double>(N, double_data.data());
+    auto temp1 = GenScalarIndexing<double>(N, double_data.data());
+    double_index.index_params = GenIndexParams(temp1.get());
+    double_index.cache_index = CreateTestCacheIndex("test", std::move(temp1));
     segment->LoadIndex(double_index);
 
     LoadIndexInfo nothing_index;
@@ -959,7 +977,9 @@ TEST(Sealed, LoadScalarIndex) {
     nothing_index.field_type = DataType::INT32;
     nothing_index.index_params["index_type"] = "sort";
     auto nothing_data = dataset.get_col<int32_t>(nothing_id);
-    nothing_index.index = GenScalarIndexing<int32_t>(N, nothing_data.data());
+    auto temp2 = GenScalarIndexing<int32_t>(N, nothing_data.data());
+    nothing_index.index_params = GenIndexParams(temp2.get());
+    nothing_index.cache_index = CreateTestCacheIndex("test", std::move(temp2));
     segment->LoadIndex(nothing_index);
 
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
@@ -1406,7 +1426,8 @@ TEST(Sealed, GetVector) {
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
-    vec_info.index = std::move(indexing);
+    vec_info.index_params = GenIndexParams(indexing.get());
+    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment_sealed->LoadIndex(vec_info);
 
