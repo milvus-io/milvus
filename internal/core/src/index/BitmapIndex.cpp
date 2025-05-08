@@ -1235,45 +1235,39 @@ BitmapIndex<std::string>::Query(const DatasetPtr& dataset) {
     AssertInfo(is_built_, "index has not been built");
 
     auto op = dataset->Get<OpType>(OPERATOR_TYPE);
-    if (op == OpType::PrefixMatch) {
-        auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
-        TargetBitmap res(total_num_rows_, false);
-        if (is_mmap_) {
-            for (auto it = bitmap_info_map_.begin();
-                 it != bitmap_info_map_.end();
-                 ++it) {
-                const auto& key = it->first;
-                if (milvus::query::Match(key, prefix, op)) {
-                    for (const auto& v : it->second) {
-                        res.set(v);
-                    }
-                }
-            }
-            return res;
-        }
-        if (build_mode_ == BitmapIndexBuildMode::ROARING) {
-            for (auto it = data_.begin(); it != data_.end(); ++it) {
-                const auto& key = it->first;
-                if (milvus::query::Match(key, prefix, op)) {
-                    for (const auto& v : it->second) {
-                        res.set(v);
-                    }
-                }
-            }
-        } else {
-            for (auto it = bitsets_.begin(); it != bitsets_.end(); ++it) {
-                const auto& key = it->first;
-                if (milvus::query::Match(key, prefix, op)) {
-                    res |= it->second;
+    auto val = dataset->Get<std::string>(MATCH_VALUE);
+    TargetBitmap res(total_num_rows_, false);
+    if (is_mmap_) {
+        for (auto it = bitmap_info_map_.begin(); it != bitmap_info_map_.end();
+             ++it) {
+            const auto& key = it->first;
+            if (milvus::query::Match(key, val, op)) {
+                for (const auto& v : it->second) {
+                    res.set(v);
                 }
             }
         }
-
         return res;
-    } else {
-        PanicInfo(OpTypeInvalid,
-                  fmt::format("unsupported op_type:{} for bitmap query", op));
     }
+    if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+        for (auto it = data_.begin(); it != data_.end(); ++it) {
+            const auto& key = it->first;
+            if (milvus::query::Match(key, val, op)) {
+                for (const auto& v : it->second) {
+                    res.set(v);
+                }
+            }
+        }
+    } else {
+        for (auto it = bitsets_.begin(); it != bitsets_.end(); ++it) {
+            const auto& key = it->first;
+            if (milvus::query::Match(key, val, op)) {
+                res |= it->second;
+            }
+        }
+    }
+
+    return res;
 }
 
 template <typename T>

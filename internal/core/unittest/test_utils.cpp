@@ -40,16 +40,39 @@ TEST(Util, StringMatch) {
 
     ASSERT_TRUE(PrefixMatch("prefix1", "prefix"));
     ASSERT_TRUE(PostfixMatch("1postfix", "postfix"));
+    ASSERT_TRUE(InnerMatch("xxinner1xx", "inner"));
     ASSERT_TRUE(Match(
         std::string("prefix1"), std::string("prefix"), OpType::PrefixMatch));
     ASSERT_TRUE(Match(
         std::string("1postfix"), std::string("postfix"), OpType::PostfixMatch));
+    ASSERT_TRUE(Match(std::string("xxpostfixxx"),
+                      std::string("postfix"),
+                      OpType::InnerMatch));
 
     ASSERT_FALSE(PrefixMatch("", "longer"));
     ASSERT_FALSE(PostfixMatch("", "longer"));
+    ASSERT_FALSE(InnerMatch("", "longer"));
 
     ASSERT_FALSE(PrefixMatch("dontmatch", "prefix"));
-    ASSERT_FALSE(PostfixMatch("dontmatch", "postfix"));
+    ASSERT_FALSE(InnerMatch("dontmatch", "postfix"));
+
+    ASSERT_TRUE(Match(std::string_view("prefix1"),
+                      std::string("prefix"),
+                      OpType::PrefixMatch));
+
+    ASSERT_TRUE(Match(std::string_view("1postfix"),
+                      std::string("postfix"),
+                      OpType::PostfixMatch));
+
+    ASSERT_TRUE(Match(std::string_view("xxpostfixxx"),
+                      std::string("postfix"),
+                      OpType::InnerMatch));
+    ASSERT_TRUE(
+        Match(std::string_view("x"), std::string("x"), OpType::PrefixMatch));
+    ASSERT_FALSE(
+        Match(std::string_view(""), std::string("x"), OpType::InnerMatch));
+    ASSERT_TRUE(
+        Match(std::string_view("x"), std::string(""), OpType::InnerMatch));
 }
 
 TEST(Util, GetDeleteBitmap) {

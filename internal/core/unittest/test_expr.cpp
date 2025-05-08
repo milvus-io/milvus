@@ -34,6 +34,7 @@
 #include "gtest/gtest.h"
 #include "index/Meta.h"
 #include "index/JsonInvertedIndex.h"
+#include "index/BitmapIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "mmap/Types.h"
 #include "pb/plan.pb.h"
@@ -5512,6 +5513,59 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeBenchExpr) {
         }
         std::cout << " cost: " << all_cost / 50.0 << "us" << std::endl;
     }
+}
+
+TEST(BitmapIndexTest, PatternMatchTest) {
+    // Initialize bitmap index
+    using namespace milvus::index;
+    BitmapIndex<std::string> index;
+
+    // Add test data
+    std::vector<std::string> data = {"apple", "banana", "orange", "pear"};
+
+    // Build index
+    index.Build(data.size(), data.data(), nullptr);
+
+    // Create test datasets with different operators
+    auto prefix_dataset = std::make_shared<Dataset>();
+    prefix_dataset->Set(OPERATOR_TYPE, OpType::PrefixMatch);
+    prefix_dataset->Set(MATCH_VALUE, std::string("a"));
+
+    auto contains_dataset = std::make_shared<Dataset>();
+    contains_dataset->Set(OPERATOR_TYPE, OpType::InnerMatch);
+    contains_dataset->Set(MATCH_VALUE, std::string("an"));
+
+    auto posix_dataset = std::make_shared<Dataset>();
+    posix_dataset->Set(OPERATOR_TYPE, OpType::PostfixMatch);
+    posix_dataset->Set(MATCH_VALUE, std::string("a"));
+
+    // Execute queries
+    auto prefix_result = index.Query(prefix_dataset);
+    auto contains_result = index.Query(contains_dataset);
+    auto posix_result = index.Query(posix_dataset);
+
+    // Verify results
+    EXPECT_TRUE(prefix_result[0]);
+    EXPECT_FALSE(prefix_result[2]);
+
+    EXPECT_FALSE(contains_result[0]);
+    EXPECT_TRUE(contains_result[1]);
+    EXPECT_TRUE(contains_result[2]);
+
+    EXPECT_FALSE(posix_result[0]);
+    EXPECT_TRUE(posix_result[1]);
+    EXPECT_FALSE(posix_result[2]);
+
+    auto prefix_result2 =
+        index.PatternMatch(std::string("a"), OpType::PrefixMatch);
+    auto contains_result2 =
+        index.PatternMatch(std::string("an"), OpType::InnerMatch);
+    auto posix_result2 =
+        index.PatternMatch(std::string("a"), OpType::PostfixMatch);
+
+    EXPECT_TRUE(prefix_result == prefix_result2);
+    EXPECT_TRUE(contains_result == contains_result2);
+    EXPECT_TRUE(posix_result == posix_result2);
 }
 
 TEST(Expr, TestExprNull) {
