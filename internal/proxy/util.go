@@ -1522,24 +1522,23 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 			} else {
 				if schema.EnableDynamicField {
 					if schema.IsFieldLoaded(dynamicField.GetFieldID()) {
-						schemaH, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
-						if err != nil {
-							return nil, nil, nil, false, err
-						}
-						err = planparserv2.ParseIdentifier(schemaH, outputFieldName, func(expr *planpb.Expr) error {
-							if len(expr.GetColumnExpr().GetInfo().GetNestedPath()) == 1 &&
-								expr.GetColumnExpr().GetInfo().GetNestedPath()[0] == outputFieldName {
+						dynamicNestedPath := outputFieldName
+						err := planparserv2.ParseIdentifier(schema.schemaHelper, outputFieldName, func(expr *planpb.Expr) error {
+							if len(expr.GetColumnExpr().GetInfo().GetNestedPath()) == 1 {
+								if expr.GetColumnExpr().GetInfo().GetNestedPath()[0] != outputFieldName {
+									dynamicNestedPath = expr.GetColumnExpr().GetInfo().GetNestedPath()[0]
+								}
 								return nil
 							}
 							return errors.New("not support getting subkeys of json field yet")
 						})
 						if err != nil {
-							log.Info("parse output field name failed", zap.String("field name", outputFieldName))
+							log.Info("parse output field name failed", zap.String("field name", outputFieldName), zap.Error(err))
 							return nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
 						}
 						resultFieldNameMap[common.MetaFieldName] = true
 						userOutputFieldsMap[outputFieldName] = true
-						userDynamicFieldsMap[outputFieldName] = true
+						userDynamicFieldsMap[dynamicNestedPath] = true
 					} else {
 						// TODO after cold field be able to fetched with chunk cache, this check shall be removed
 						return nil, nil, nil, false, fmt.Errorf("field %s cannot be returned since dynamic field not loaded", outputFieldName)
