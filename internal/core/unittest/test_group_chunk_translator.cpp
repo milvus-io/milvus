@@ -148,12 +148,12 @@ TEST_P(TestGroupChunkTranslator, TestWithMmap) {
         std::string mmap_dir = std::to_string(segment_id_);
         EXPECT_TRUE(std::filesystem::exists(mmap_dir));
 
-        // Verify each field has a corresponding file
-        for (size_t i = 0; i < field_id_list.size(); ++i) {
-            auto field_id = field_id_list.Get(i);
-            std::string field_file = mmap_dir + "/" + std::to_string(field_id);
-            EXPECT_TRUE(std::filesystem::exists(field_file));
-        }
+        // DO NOT Verify each field has a corresponding file: files are unlinked immediately after being mmaped.
+        // for (size_t i = 0; i < field_id_list.size(); ++i) {
+        //     auto field_id = field_id_list.Get(i);
+        //     std::string field_file = mmap_dir + "/" + std::to_string(field_id);
+        //     EXPECT_TRUE(std::filesystem::exists(field_file));
+        // }
     }
 }
 
