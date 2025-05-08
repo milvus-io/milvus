@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -32,9 +33,11 @@ type CreateAliasTask struct {
 	baseTask
 	Condition
 	*milvuspb.CreateAliasRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *commonpb.Status
+
+	ctx                context.Context
+	rootCoord          types.RootCoordClient
+	replicateMsgStream msgstream.MsgStream
+	result             *commonpb.Status
 }
 
 // TraceCtx returns the trace context of the task.
@@ -106,7 +109,11 @@ func (t *CreateAliasTask) PreExecute(ctx context.Context) error {
 func (t *CreateAliasTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.rootCoord.CreateAlias(ctx, t.CreateAliasRequest)
-	return merr.CheckRPCCall(t.result, err)
+	if err = merr.CheckRPCCall(t.result, err); err != nil {
+		return err
+	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.CreateAliasRequest)
+	return nil
 }
 
 // PostExecute defines the post execution, do nothing for create alias
@@ -119,9 +126,11 @@ type DropAliasTask struct {
 	baseTask
 	Condition
 	*milvuspb.DropAliasRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *commonpb.Status
+
+	ctx                context.Context
+	rootCoord          types.RootCoordClient
+	replicateMsgStream msgstream.MsgStream
+	result             *commonpb.Status
 }
 
 // TraceCtx returns the context for trace
@@ -180,7 +189,11 @@ func (t *DropAliasTask) PreExecute(ctx context.Context) error {
 func (t *DropAliasTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.rootCoord.DropAlias(ctx, t.DropAliasRequest)
-	return merr.CheckRPCCall(t.result, err)
+	if err = merr.CheckRPCCall(t.result, err); err != nil {
+		return err
+	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.DropAliasRequest)
+	return nil
 }
 
 func (t *DropAliasTask) PostExecute(ctx context.Context) error {
@@ -192,9 +205,11 @@ type AlterAliasTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterAliasRequest
-	ctx       context.Context
-	rootCoord types.RootCoordClient
-	result    *commonpb.Status
+
+	ctx                context.Context
+	rootCoord          types.RootCoordClient
+	replicateMsgStream msgstream.MsgStream
+	result             *commonpb.Status
 }
 
 func (t *AlterAliasTask) TraceCtx() context.Context {
@@ -256,7 +271,11 @@ func (t *AlterAliasTask) PreExecute(ctx context.Context) error {
 func (t *AlterAliasTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.rootCoord.AlterAlias(ctx, t.AlterAliasRequest)
-	return merr.CheckRPCCall(t.result, err)
+	if err = merr.CheckRPCCall(t.result, err); err != nil {
+		return err
+	}
+	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.AlterAliasRequest)
+	return nil
 }
 
 func (t *AlterAliasTask) PostExecute(ctx context.Context) error {
