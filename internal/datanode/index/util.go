@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func getCurrentIndexVersion(v int32) int32 {
@@ -91,7 +92,12 @@ func CalculateNodeSlots() int64 {
 	if slot > memorySlot {
 		slot = memorySlot
 	}
-	return max(slot, 1) * paramtable.Get().DataNodeCfg.WorkerSlotUnit.GetAsInt64() * paramtable.Get().DataNodeCfg.BuildParallel.GetAsInt64()
+
+	totalSlot := max(slot, 1) * paramtable.Get().DataNodeCfg.WorkerSlotUnit.GetAsInt64() * paramtable.Get().DataNodeCfg.BuildParallel.GetAsInt64()
+	if paramtable.GetRole() == typeutil.StandaloneRole {
+		totalSlot = max(totalSlot/2, 1)
+	}
+	return totalSlot
 }
 
 func GetSegmentInsertFiles(fieldBinlogs []*datapb.FieldBinlog, rootPath string, collectionID int64, partitionID int64, segmentID int64) *indexcgopb.SegmentInsertFiles {
