@@ -350,6 +350,11 @@ func (d *distribution) SyncTargetVersion(newVersion int64, partitions []int64, g
 
 	// update working partition list
 	d.genSnapshot()
+
+	if d.idfOracle != nil {
+		d.idfOracle.SetNext(d.current.Load())
+		d.idfOracle.LazyRemoveGrowings(newVersion, redundantGrowings...)
+	}
 	// if sealed segment in leader view is less than sealed segment in target, set delegator to unserviceable
 	d.updateServiceable("SyncTargetVersion")
 
@@ -442,9 +447,6 @@ func (d *distribution) genSnapshot() chan struct{} {
 	d.current.Store(newSnapShot)
 	// shall be a new one
 	d.snapshots.GetOrInsert(d.snapshotVersion, newSnapShot)
-	if d.idfOracle != nil {
-		d.idfOracle.SyncDistribution(newSnapShot)
-	}
 
 	// first snapshot, return closed chan
 	if last == nil {
