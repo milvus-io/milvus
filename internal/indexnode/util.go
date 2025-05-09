@@ -22,6 +22,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType) (uint64, error) {
@@ -59,5 +61,9 @@ func calculateNodeSlots() int64 {
 	if slot > memorySlot {
 		slot = memorySlot
 	}
-	return max(slot, 1) * Params.IndexNodeCfg.WorkerSlotUnit.GetAsInt64() * Params.IndexNodeCfg.BuildParallel.GetAsInt64()
+	totalSlot := max(slot, 1) * Params.IndexNodeCfg.WorkerSlotUnit.GetAsInt64() * Params.IndexNodeCfg.BuildParallel.GetAsInt64()
+	if paramtable.GetRole() == typeutil.StandaloneRole {
+		totalSlot = max(totalSlot/2, 1)
+	}
+	return totalSlot
 }
