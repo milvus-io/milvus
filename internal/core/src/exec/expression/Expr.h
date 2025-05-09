@@ -1247,6 +1247,12 @@ class SegmentExpr : public Expr {
         return false;
     }
 
+    bool
+    CanUseNgramIndex(FieldId field_id) const {
+        return segment_->type() == SegmentType::Sealed &&
+               segment_->GetNgramIndex(field_id) != nullptr;
+    }
+
  protected:
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
@@ -1285,6 +1291,9 @@ class SegmentExpr : public Expr {
     // Cache for text match.
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};
     int32_t consistency_level_{0};
+
+    // Cache for ngram match.
+    std::shared_ptr<TargetBitmap> cached_ngram_match_res_{nullptr};
 };
 
 bool

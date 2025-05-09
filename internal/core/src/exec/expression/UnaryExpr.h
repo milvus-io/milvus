@@ -18,6 +18,7 @@
 
 #include <fmt/core.h>
 
+#include <optional>
 #include <utility>
 
 #include "common/EasyAssert.h"
@@ -447,6 +448,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     VectorPtr
     ExecTextMatch();
+
+    std::optional<VectorPtr>
+    ExecNgramMatch();
 
     std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);

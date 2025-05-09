@@ -105,3 +105,15 @@ message LoadJsonKeyIndexInfo {
   int64 collectionID = 6;
   int64 partitionID = 7;
 }
+
+message LoadNgramIndexInfo {
+  int64 FieldID = 1;
+  int64 version = 2;
+  int64 buildID = 3;
+  repeated string files = 4;
+  schema.FieldSchema schema = 5;
+  int64 collectionID = 6;
+  int64 partitionID = 7;
+  int64 min_gram = 8;
+  int64 max_gram = 9;
+}

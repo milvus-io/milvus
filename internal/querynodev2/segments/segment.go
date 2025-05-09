@@ -298,6 +298,7 @@ type LocalSegment struct {
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
 	warmupDispatcher   *AsyncWarmupDispatcher
 	fieldJSONStats     []int64
+	fieldNgramStats    []int64
 }
 
 func NewSegment(ctx context.Context,
@@ -1198,6 +1199,50 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 	}).Await()
 	s.fieldJSONStats = append(s.fieldJSONStats, jsonKeyStats.GetFieldID())
 	return HandleCStatus(ctx, &status, "Load JsonKeyStats failed")
+}
+
+func (s *LocalSegment) LoadNgramIndex(ctx context.Context, ngramStats *datapb.NgramIndexStats, schemaHelper *typeutil.SchemaHelper) error {
+	log.Ctx(ctx).Info("load ngram index", zap.Int64("field id", ngramStats.GetFieldID()), zap.Any("ngram logs", ngramStats))
+	exists := false
+	for _, field := range s.fieldNgramStats {
+		if field == ngramStats.GetFieldID() {
+			exists = true
+			break
+		}
+	}
+	if exists {
+		log.Warn("NgramIndexStats already loaded")
+		return nil
+	}
+	f, err := schemaHelper.GetFieldFromID(ngramStats.GetFieldID())
+	if err != nil {
+		return err
+	}
+
+	cgoProto := &indexcgopb.LoadNgramIndexInfo{
+		FieldID:      ngramStats.GetFieldID(),
+		Version:      ngramStats.GetVersion(),
+		BuildID:      ngramStats.GetBuildID(),
+		Files:        ngramStats.GetFiles(),
+		Schema:       f,
+		CollectionID: s.Collection(),
+		PartitionID:  s.Partition(),
+		MinGram:      ngramStats.GetMinGram(),
+		MaxGram:      ngramStats.GetMaxGram(),
+	}
+
+	marshaled, err := proto.Marshal(cgoProto)
+	if err != nil {
+		return err
+	}
+	var status C.CStatus
+	_, _ = GetLoadPool().Submit(func() (any, error) {
+		traceCtx := ParseCTraceContext(ctx)
+		status = C.LoadNgramIndex(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)))
+		return nil, nil
+	}).Await()
+	s.fieldNgramStats = append(s.fieldNgramStats, ngramStats.GetFieldID())
+	return HandleCStatus(ctx, &status, "Load NgramIndexStats failed")
 }
 
 func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, info *LoadIndexInfo) error {

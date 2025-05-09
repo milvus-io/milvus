@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <boost/filesystem.hpp>
+#include <optional>
 
 #include "exec/expression/Expr.h"
 #include "index/InvertedIndexTantivy.h"
@@ -25,7 +26,7 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
-    TargetBitmap
+    std::optional<TargetBitmap>
     InnerMatchQuery(const std::string& literal, exec::SegmentExpr* segment);
 
  private:

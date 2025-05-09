@@ -64,9 +64,13 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
                                                      milvus::index::SetBitset);
 }
 
-TargetBitmap
+std::optional<TargetBitmap>
 NgramInvertedIndex::InnerMatchQuery(const std::string& literal,
                                     exec::SegmentExpr* segment) {
+    if (literal.length() < min_gram_) {
+        return std::nullopt;
+    }
+
     TargetBitmap bitset{static_cast<size_t>(Count())};
     wrapper_->inner_match_ngram(literal, min_gram_, max_gram_, &bitset);
 
@@ -104,7 +108,7 @@ NgramInvertedIndex::InnerMatchQuery(const std::string& literal,
             execute_sub_batch, std::nullptr_t{}, res, valid_res);
     }
 
-    return bitset;
+    return std::optional<TargetBitmap>(std::move(bitset));
 }
 
 }  // namespace milvus::index

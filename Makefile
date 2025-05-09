@@ -263,7 +263,7 @@ generated-proto: download-milvus-proto build-3rdparty get-proto-deps
 	@echo "Generate proto ..."
 	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
-build-cpp: generated-proto
+build-cpp:
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 
@@ -271,7 +271,7 @@ build-cpp-gpu: generated-proto
 	@echo "Building Milvus cpp gpu library ... "
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 
-build-cpp-with-unittest: generated-proto
+build-cpp-with-unittest:
 	@echo "Building Milvus cpp library with unittest ... "
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 

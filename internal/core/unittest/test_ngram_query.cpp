@@ -103,95 +103,6 @@ struct ChunkManagerWrapper2 {
     std::unordered_set<std::string> written_;
 };
 
-namespace {
-SchemaPtr
-GenTestSchema(std::map<std::string, std::string> params = {},
-              bool nullable = false) {
-    auto schema = std::make_shared<Schema>();
-    {
-        FieldMeta f(FieldName("pk"),
-                    FieldId(100),
-                    DataType::INT64,
-                    false,
-                    std::nullopt);
-        schema->AddField(std::move(f));
-        schema->set_primary_field_id(FieldId(100));
-    }
-    {
-        FieldMeta f(FieldName("str"),
-                    FieldId(101),
-                    DataType::VARCHAR,
-                    65536,
-                    nullable,
-                    true,
-                    true,
-                    params,
-                    std::nullopt);
-        schema->AddField(std::move(f));
-    }
-    {
-        FieldMeta f(FieldName("fvec"),
-                    FieldId(102),
-                    DataType::VECTOR_FLOAT,
-                    16,
-                    knowhere::metric::L2,
-                    false,
-                    std::nullopt);
-        schema->AddField(std::move(f));
-    }
-    return schema;
-}
-std::shared_ptr<milvus::plan::FilterBitsNode>
-GetMatchExpr(SchemaPtr schema,
-             const std::string& query,
-             proto::plan::OpType op,
-             int64_t slop = 0) {
-    const auto& str_meta = schema->operator[](FieldName("str"));
-    auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
-                                           proto::schema::DataType::VarChar,
-                                           false,
-                                           false);
-
-    auto unary_range_expr = test::GenUnaryRangeExpr(op, query);
-    unary_range_expr->set_allocated_column_info(column_info);
-    auto generic_for_slop = milvus::test::GenGenericValue(slop);
-    unary_range_expr->add_extra_values()->CopyFrom(*generic_for_slop);
-    delete generic_for_slop;
-    auto expr = test::GenExpr();
-    expr->set_allocated_unary_range_expr(unary_range_expr);
-
-    auto parser = ProtoParser(*schema);
-    auto typed_expr = parser.ParseExprs(*expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
-    return parsed;
-};
-
-std::shared_ptr<milvus::plan::FilterBitsNode>
-GetNotMatchExpr(SchemaPtr schema,
-                const std::string& query,
-                proto::plan::OpType op,
-                int64_t slop = 0) {
-    const auto& str_meta = schema->operator[](FieldName("str"));
-    proto::plan::GenericValue val;
-    val.set_string_val(query);
-    std::vector<proto::plan::GenericValue> extra_values;
-    auto generic_for_slop = milvus::test::GenGenericValue(slop);
-    extra_values.push_back(*generic_for_slop);
-    delete generic_for_slop;
-    auto child_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
-        milvus::expr::ColumnInfo(str_meta.get_id(), DataType::VARCHAR),
-        op,
-        val,
-        extra_values);
-    auto expr = std::make_shared<expr::LogicalUnaryExpr>(
-        expr::LogicalUnaryExpr::OpType::LogicalNot, child_expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    return parsed;
-};
-}  // namespace
-
 TEST(NgramIndex, TestPerfNgram) {
     int64_t collection_id = 1;
     int64_t partition_id = 2;
@@ -346,6 +257,22 @@ TEST(NgramIndex, TestPerfNgram) {
             std::chrono::duration_cast<std::chrono::microseconds>(end - now);
         std::cout << "Execution time: " << duration.count() / 1000.f << "ms"
                   << std::endl;
+
+        std::string operand = "%story%";
+        auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
+        auto column_info = test::GenColumnInfo(
+            field_id.get(), proto::schema::DataType::VarChar, false, false);
+        unary_range_expr->set_allocated_column_info(column_info);
+        auto expr = test::GenExpr();
+        expr->set_allocated_unary_range_expr(unary_range_expr);
+        auto parser = ProtoParser(*schema);
+        auto typed_expr = parser.ParseExprs(*expr);
+        auto parsed = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, typed_expr);
+        BitsetType final;
+        final = ExecuteQueryExpr(parsed, segment.get(), nb, MAX_TIMESTAMP);
+        std::cout << "literal: " << operand
+                  << " matched count: " << final.count() << std::endl;
     }
 }
 

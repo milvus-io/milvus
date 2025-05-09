@@ -545,7 +545,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 };
             } else {
                 auto size_per_chunk = segment_->size_per_chunk();
-                retrieve = [ size_per_chunk, this ](int64_t offset) -> auto {
+                retrieve = [size_per_chunk, this](int64_t offset) -> auto {
                     auto chunk_idx = offset / size_per_chunk;
                     auto chunk_offset = offset % size_per_chunk;
                     const auto& chunk =
@@ -1420,6 +1420,14 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
                 fmt::format("match query does not support iterative filter"));
         }
         return ExecTextMatch();
+    } else if (expr_->op_type_ == proto::plan::OpType::Match &&
+               !has_offset_input_ && CanUseNgramIndex(field_id_)) {
+        auto res = ExecNgramMatch();
+        // If nullopt is returned, it means the query cannot be
+        // optimized by ngram index. Forward it to the normal path.
+        if (res.has_value()) {
+            return res.value();
+        }
     }
 
     if (CanUseIndex<T>() && !has_offset_input_) {
@@ -1817,6 +1825,79 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
     auto res = ProcessTextMatchIndex(func, query);
     return res;
 };
+
+std::optional<std::string>
+convert_to_ngram_literal(const std::string& pattern) {
+    std::string r;
+    r.reserve(2 * pattern.size());
+    bool escape_mode = false;
+    for (char c : pattern) {
+        if (escape_mode) {
+            if (is_special(c)) {
+                r += '\\';
+            }
+            r += c;
+            escape_mode = false;
+        } else {
+            if (c == '\\') {
+                escape_mode = true;
+            } else if (c == '%') {
+                r += "[\\s\\S]*";
+            } else if (c == '_') {
+                // todo: now not support '_'
+                return std::nullopt;
+            } else {
+                if (is_special(c)) {
+                    r += '\\';
+                }
+                r += c;
+            }
+        }
+    }
+    return std::optional<std::string>(r);
+}
+
+std::optional<VectorPtr>
+PhyUnaryRangeFilterExpr::ExecNgramMatch() {
+    if (!arg_inited_) {
+        value_arg_.SetValue<std::string>(expr_->val_);
+        arg_inited_ = true;
+    }
+
+    auto pattern = value_arg_.GetValue<std::string>();
+    auto ngram_literal = convert_to_ngram_literal(pattern);
+    if (!ngram_literal.has_value()) {
+        return std::nullopt;
+    }
+
+    TargetBitmap result;
+    TargetBitmap valid_result;
+
+    if (cached_ngram_match_res_ == nullptr) {
+        auto index = segment_->GetNgramIndex(field_id_);
+        auto res_opt = index->InnerMatchQuery(ngram_literal.value(), this);
+        if (!res_opt.has_value()) {
+            return std::nullopt;
+        }
+        auto valid_res = index->IsNotNull();
+        cached_ngram_match_res_ =
+            std::make_shared<TargetBitmap>(std::move(res_opt.value()));
+        cached_index_chunk_valid_res_ = std::move(valid_res);
+    }
+
+    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
+                               ? active_count_ - current_data_chunk_pos_
+                               : batch_size_;
+    result.append(
+        *cached_ngram_match_res_, current_data_chunk_pos_, real_batch_size);
+    valid_result.append(cached_index_chunk_valid_res_,
+                        current_data_chunk_pos_,
+                        real_batch_size);
+    current_data_chunk_pos_ += real_batch_size;
+
+    return std::optional<VectorPtr>(std::make_shared<ColumnVector>(
+        std::move(result), std::move(valid_result)));
+}
 
 }  // namespace exec
 }  // namespace milvus
