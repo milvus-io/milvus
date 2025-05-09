@@ -1524,13 +1524,25 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 					if schema.IsFieldLoaded(dynamicField.GetFieldID()) {
 						dynamicNestedPath := outputFieldName
 						err := planparserv2.ParseIdentifier(schema.schemaHelper, outputFieldName, func(expr *planpb.Expr) error {
-							if len(expr.GetColumnExpr().GetInfo().GetNestedPath()) == 1 {
-								if expr.GetColumnExpr().GetInfo().GetNestedPath()[0] != outputFieldName {
-									dynamicNestedPath = expr.GetColumnExpr().GetInfo().GetNestedPath()[0]
-								}
-								return nil
+							columnInfo := expr.GetColumnExpr().GetInfo()
+							nestedPaths := columnInfo.GetNestedPath()
+							// fieldName["A"]["B"] not allowed for now
+							if len(nestedPaths) != 1 {
+								return errors.New("not support getting subkeys of json field yet")
 							}
-							return errors.New("not support getting subkeys of json field yet")
+							// $meta["dyn_field"], output field name could be:
+							// 1. "dyn_field", outputFieldName == nestedPath
+							// 2. `$meta["dyn_field"]` explicit form
+							if nestedPaths[0] != outputFieldName {
+								// there must be no error here
+								dynamicField, _ := schema.schemaHelper.GetDynamicField()
+								if dynamicField.GetFieldID() != columnInfo.GetFieldId() {
+									return errors.New("not support getting subkeys of json field yet")
+								}
+								// use "dyn_field" as userDynamicFieldsMap when outputField = `$meta["dyn_field"]`
+								dynamicNestedPath = nestedPaths[0]
+							}
+							return nil
 						})
 						if err != nil {
 							log.Info("parse output field name failed", zap.String("field name", outputFieldName), zap.Error(err))
