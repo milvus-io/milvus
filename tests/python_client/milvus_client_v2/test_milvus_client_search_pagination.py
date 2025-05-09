@@ -83,7 +83,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         client = self._client()
 
         # Create collection
-        collection_schema = self.create_schema(client, enable_dynamic_field=self.enable_dynamic_field)[0]
+        collection_schema = self.create_schema(client)[0]
         collection_schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         collection_schema.add_field(self.float_vector_field_name, DataType.FLOAT_VECTOR, dim=128)
         collection_schema.add_field(self.bfloat16_vector_field_name, DataType.BFLOAT16_VECTOR, dim=200)
@@ -92,7 +92,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         collection_schema.add_field(default_float_field_name, DataType.FLOAT)
         collection_schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=256)
         collection_schema.add_field(default_int64_field_name, DataType.INT64)
-        self.create_collection(client, self.collection_name, schema=collection_schema, force_teardown=False)
+        self.create_collection(client, self.collection_name, schema=collection_schema, 
+                               enable_dynamic_field=self.enable_dynamic_field, force_teardown=False)
         for partition_name in self.partition_names:
             self.create_partition(client, self.collection_name, partition_name=partition_name)
 
@@ -167,7 +168,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                                metric_type="JACCARD",
                                index_type="BIN_IVF_FLAT",
                                params={"nlist": 128})
-        self.create_index(client, self.collection_name, index_params=index_params)
+        self.create_index(client, self.collection_name, index_params=index_params, timeout=300)
 
         # Load collection
         self.load_collection(client, self.collection_name)
