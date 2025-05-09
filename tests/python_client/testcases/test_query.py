@@ -2822,7 +2822,7 @@ class TestQueryString(TestcaseBase):
         output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
         collection_w.query(expression, output_fields=output_fields,
                            check_task=CheckTasks.check_query_results, 
-                           check_items={exp_res: res， "pk_name": collection_w.primary_field.name})
+                           check_items={exp_res: res, "pk_name": collection_w.primary_field.name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_string_expr_with_inner_match(self):
