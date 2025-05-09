@@ -912,6 +912,11 @@ func (sd *shardDelegator) Close() {
 	sd.tsCond.Broadcast()
 	sd.lifetime.Wait()
 
+	// clean idf oracle
+	if sd.idfOracle != nil {
+		sd.idfOracle.Close()
+	}
+
 	// clean up l0 segment in delete buffer
 	start := time.Now()
 	sd.deleteBuffer.Clear()
@@ -1032,8 +1037,9 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	}
 
 	if len(sd.isBM25Field) > 0 {
-		sd.idfOracle = NewIDFOracle(collection.Schema().GetFunctions())
+		sd.idfOracle = NewIDFOracle(sd.collectionID, collection.Schema().GetFunctions())
 		sd.distribution.SetIDFOracle(sd.idfOracle)
+		sd.idfOracle.Start()
 	}
 
 	m := sync.Mutex{}

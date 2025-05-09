@@ -515,6 +515,10 @@ queryNode:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
+  idfOracle:
+    enableDisk: true # if save sgment bm25 stats to disk
+    localPath: "/var/lib/milvus/bm25_logs" # local path to save segment bm25 stats
+    writeConcurrency: 4 # the concurrency of write disk segment bm25 stats
   enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
   queryStreamBatchSize: 4194304 # return min batch size of stream query
   queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
