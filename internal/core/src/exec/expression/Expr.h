@@ -1189,22 +1189,17 @@ class SegmentExpr : public Expr {
         }
 
         using Index = index::ScalarIndex<IndexInnerType>;
-        if (op == OpType::Match) {
-            for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-                auto pw =
-                    segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-                auto index_ptr = const_cast<Index*>(pw.get());
-                // 1, index support regex query, then index handles the query;
-                // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
-                if (!index_ptr->SupportRegexQuery() &&
-                    !index_ptr->HasRawData()) {
-                    return false;
-                }
-                // all chunks have same index.
-                return true;
-            }
+        if (op == OpType::Match || op == OpType::InnerMatch ||
+            op == OpType::PostfixMatch) {
+            auto pw = segment_->chunk_scalar_index<IndexInnerType>(
+                field_id_, current_index_chunk_);
+            auto* index_ptr = const_cast<Index*>(pw.get());
+            // 1, index support regex query and try use it, then index handles the query;
+            // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
+            return (index_ptr->TryUseRegexQuery() &&
+                    index_ptr->SupportRegexQuery()) ||
+                   index_ptr->HasRawData();
         }
-
         return true;
     }
 
