@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -1238,7 +1239,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnMultiCollections()
 		collection.Status = querypb.LoadStatus_Loaded
 		balancer.meta.CollectionManager.PutCollection(ctx, collection)
 		balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, collectionID))
-		balancer.meta.ReplicaManager.Spawn(ctx, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+		balancer.meta.ReplicaManager.Spawn(ctx, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 
 		channels := make([]*datapb.VchannelInfo, channelNum)
 		for i := 0; i < channelNum; i++ {
@@ -1323,7 +1324,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnDifferentQN() {
 	collection.Status = querypb.LoadStatus_Loaded
 	balancer.meta.CollectionManager.PutCollection(ctx, collection)
 	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, collectionID))
-	balancer.meta.ReplicaManager.Spawn(ctx, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+	balancer.meta.ReplicaManager.Spawn(ctx, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 
 	channels := make([]*datapb.VchannelInfo, channelNum)
 	for i := 0; i < channelNum; i++ {
@@ -1399,7 +1400,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnChannelExclusive()
 		collection.Status = querypb.LoadStatus_Loaded
 		balancer.meta.CollectionManager.PutCollection(ctx, collection)
 		balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, collectionID))
-		balancer.meta.ReplicaManager.Spawn(ctx, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+		balancer.meta.ReplicaManager.Spawn(ctx, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 
 		channels := make([]*datapb.VchannelInfo, channelNum)
 		for i := 0; i < channelNum; i++ {
@@ -1486,7 +1487,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnStoppingNode() {
 		collection.Status = querypb.LoadStatus_Loaded
 		balancer.meta.CollectionManager.PutCollection(ctx, collection)
 		balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, collectionID))
-		balancer.meta.ReplicaManager.Spawn(ctx, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+		balancer.meta.ReplicaManager.Spawn(ctx, collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 
 		channels := make([]*datapb.VchannelInfo, channelNum)
 		for i := 0; i < channelNum; i++ {

@@ -475,7 +475,11 @@ LoadTextIndex(CSegmentInterface c_segment,
             files.push_back(f);
         }
         config["index_files"] = files;
-
+        config[milvus::THREAD_POOL_PRIORITY] =
+            info_proto->load_priority() ==
+                    milvus::proto::common::LoadPriority::HIGH
+                ? milvus::ThreadPoolPriority::HIGH
+                : milvus::ThreadPoolPriority::LOW;
         milvus::storage::FileManagerContext ctx(
             field_meta, index_meta, remote_chunk_manager);
 
@@ -528,6 +532,11 @@ LoadJsonKeyIndex(CTraceContext c_trace,
             files.push_back(f);
         }
         config["index_files"] = files;
+        config[milvus::THREAD_POOL_PRIORITY] =
+            info_proto->load_priority() ==
+                    milvus::proto::common::LoadPriority::HIGH
+                ? milvus::ThreadPoolPriority::HIGH
+                : milvus::ThreadPoolPriority::LOW;
 
         milvus::storage::FileManagerContext file_ctx(
             field_meta, index_meta, remote_chunk_manager);

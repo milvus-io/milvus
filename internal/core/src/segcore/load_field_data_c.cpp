@@ -109,3 +109,9 @@ EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
     auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
     info->field_infos[field_id].enable_mmap = enabled;
 }
+
+void
+SetLoadPriority(CLoadFieldDataInfo c_load_field_data_info, int32_t priority) {
+    auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+    info->load_priority = milvus::proto::common::LoadPriority(priority);
+}
