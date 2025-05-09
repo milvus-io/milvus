@@ -223,6 +223,16 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
         return nested_path_;
     }
 
+    void
+    finish() {
+        this->wrapper_->finish();
+    }
+
+    void
+    create_reader() {
+        this->wrapper_->create_reader();
+    }
+
  private:
     std::string nested_path_;
 };

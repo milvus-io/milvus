@@ -12,10 +12,19 @@
 #include <gtest/gtest.h>
 #include <functional>
 #include <boost/filesystem.hpp>
+#include <memory>
 #include <unordered_set>
 
+#include "common/Consts.h"
 #include "common/Tracer.h"
+#include "expr/ITypeExpr.h"
 #include "index/JsonFlatIndex.h"
+#include "pb/plan.pb.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegmentSealed.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "storage/InsertData.h"
 #include "indexbuilder/IndexFactory.h"
@@ -26,6 +35,7 @@
 #include "common/Json.h"
 #include "simdjson/padded_string.h"
 #include "common/FieldData.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 
@@ -552,5 +562,124 @@ TEST_F(JsonFlatIndexTest, TestQuery) {
     ASSERT_TRUE(result[0]);   // Alice
     ASSERT_FALSE(result[1]);  // Bob
     ASSERT_FALSE(result[2]);  // Charlie
+}
+
+class JsonFlatIndexExprTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        json_data_ = {
+            R"({"a": 1.0})",
+            R"({"a": "abc"})",
+            R"({"a": 3.0})",
+            R"({"a": true})",
+            R"({"a": {"b": 1}})",
+            R"({"a": []})",
+            R"({"a": ["a", "b"]})",
+            R"({"a": null})",  // exists null
+            R"(1)",
+            R"("abc")",
+            R"(1.0)",
+            R"(true)",
+            R"([1, 2, 3])",
+            R"({"a": 1, "b": 2})",
+            R"({})",
+            R"(null)",
+        };
+
+        auto json_index_path = "";
+
+        auto schema = std::make_shared<Schema>();
+        auto vec_fid = schema->AddDebugField(
+            "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+        auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+        json_fid_ = schema->AddDebugField("json", DataType::JSON, true);
+        schema->set_primary_field_id(i64_fid);
+
+        segment_ = segcore::CreateSealedSegment(schema);
+        segcore::LoadIndexInfo load_index_info;
+
+        auto file_manager_ctx = storage::FileManagerContext();
+        file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+            milvus::proto::schema::JSON);
+        file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(
+            json_fid_.get());
+        file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
+        auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
+            index::INVERTED_INDEX_TYPE,
+            JsonCastType::FromString("JSON"),
+            json_index_path,
+            file_manager_ctx);
+
+        json_index_ = std::unique_ptr<index::JsonFlatIndex>(
+            static_cast<index::JsonFlatIndex*>(index.release()));
+
+        auto json_field =
+            std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+        std::vector<milvus::Json> jsons;
+        for (auto& json_str : json_data_) {
+            jsons.push_back(milvus::Json(simdjson::padded_string(json_str)));
+        }
+        json_field->add_json_data(jsons);
+        auto json_valid_data = json_field->ValidData();
+        json_valid_data[0] = 0xFF;
+        json_valid_data[1] = 0xFF;
+
+        json_index_->BuildWithFieldData({json_field});
+        json_index_->finish();
+        json_index_->create_reader();
+
+        load_index_info.field_id = json_fid_.get();
+        load_index_info.field_type = DataType::JSON;
+        load_index_info.index = std::move(json_index_);
+        load_index_info.index_params = {{JSON_PATH, json_index_path}};
+        segment_->LoadIndex(load_index_info);
+        auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                      .GetRemoteChunkManager();
+        auto load_info = PrepareSingleFieldInsertBinlog(
+            1, 1, 1, json_fid_.get(), {json_field}, cm);
+        segment_->LoadFieldData(load_info);
+    }
+
+    void
+    TearDown() override {
+    }
+
+    FieldId json_fid_;
+    std::vector<std::string> json_data_;
+    std::unique_ptr<index::JsonFlatIndex> json_index_;
+    segcore::SegmentSealedUPtr segment_;
+};
+
+TEST_F(JsonFlatIndexExprTest, TestUnaryExpr) {
+    proto::plan::GenericValue value;
+    value.set_int64_val(1);
+    auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {""}),
+        proto::plan::OpType::GreaterEqual,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    auto final = query::ExecuteQueryExpr(
+        plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 3);
+    EXPECT_TRUE(final[8]);
+    EXPECT_TRUE(final[10]);
+    EXPECT_TRUE(final[12]);
+}
+
+TEST_F(JsonFlatIndexExprTest, TestExistsExpr) {
+    auto expr = std::make_shared<expr::ExistsExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {""}));
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    auto final = query::ExecuteQueryExpr(
+        plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(final.count(), 12);
+    EXPECT_FALSE(final[5]);
+    EXPECT_FALSE(final[7]);
+    EXPECT_FALSE(final[14]);
+    EXPECT_FALSE(final[15]);
 }
 }  // namespace milvus::test
