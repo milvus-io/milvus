@@ -29,7 +29,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 	"unsafe"
 
@@ -295,7 +294,6 @@ type LocalSegment struct {
 	lastDeltaTimestamp *atomic.Uint64
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
-	warmupDispatcher   *AsyncWarmupDispatcher
 	fieldJSONStats     []int64
 }
 
@@ -304,7 +302,6 @@ func NewSegment(ctx context.Context,
 	segmentType SegmentType,
 	version int64,
 	loadInfo *querypb.SegmentLoadInfo,
-	warmupDispatcher *AsyncWarmupDispatcher,
 ) (Segment, error) {
 	log := log.Ctx(ctx)
 	/*
@@ -363,10 +360,9 @@ func NewSegment(ctx context.Context,
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 
-		memSize:          atomic.NewInt64(-1),
-		rowNum:           atomic.NewInt64(-1),
-		insertCount:      atomic.NewInt64(0),
-		warmupDispatcher: warmupDispatcher,
+		memSize:     atomic.NewInt64(-1),
+		rowNum:      atomic.NewInt64(-1),
+		insertCount: atomic.NewInt64(0),
 	}
 
 	if err := segment.initializeSegment(); err != nil {
@@ -1381,58 +1377,6 @@ func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, i
 		return false, err
 	}
 	return !typeutil.IsVectorType(fieldSchema.DataType) && s.HasRawData(indexInfo.IndexInfo.FieldID), nil
-}
-
-type (
-	WarmupTask            = func() (any, error)
-	AsyncWarmupDispatcher struct {
-		mu     sync.RWMutex
-		tasks  []WarmupTask
-		notify chan struct{}
-	}
-)
-
-func NewWarmupDispatcher() *AsyncWarmupDispatcher {
-	return &AsyncWarmupDispatcher{
-		notify: make(chan struct{}, 1),
-	}
-}
-
-func (d *AsyncWarmupDispatcher) AddTask(task func() (any, error)) {
-	d.mu.Lock()
-	d.tasks = append(d.tasks, task)
-	d.mu.Unlock()
-	select {
-	case d.notify <- struct{}{}:
-	default:
-	}
-}
-
-func (d *AsyncWarmupDispatcher) Run(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-d.notify:
-			d.mu.RLock()
-			tasks := make([]WarmupTask, len(d.tasks))
-			copy(tasks, d.tasks)
-			d.mu.RUnlock()
-
-			for _, task := range tasks {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					GetWarmupPool().Submit(task)
-				}
-			}
-
-			d.mu.Lock()
-			d.tasks = d.tasks[len(tasks):]
-			d.mu.Unlock()
-		}
-	}
 }
 
 func (s *LocalSegment) GetFieldJSONIndexStats() []int64 {
