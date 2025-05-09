@@ -79,9 +79,10 @@ type ShardDelegator interface {
 	ProcessInsert(insertRecords map[int64]*InsertData)
 	ProcessDelete(deleteData []*DeleteData, ts uint64)
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
+	LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
-	SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)
+	SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition, deleteSeekPos *msgpb.MsgPosition)
 	GetTargetVersion() int64
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
 
@@ -813,6 +814,11 @@ func (sd *shardDelegator) Close() {
 	// broadcast to all waitTsafe goroutine to quit
 	sd.tsCond.Broadcast()
 	sd.lifetime.Wait()
+
+	// clean up l0 segment in delete buffer
+	start := time.Now()
+	sd.deleteBuffer.Clear()
+	log.Info("unregister all  l0 segments", zap.Duration("cost", time.Since(start)))
 
 	metrics.QueryNodeDeleteBufferSize.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
 	metrics.QueryNodeDeleteBufferRowNum.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)

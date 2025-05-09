@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
 var _ Checker = (*LeaderChecker)(nil)
@@ -164,10 +163,7 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 	latestNodeDist := utils.FindMaxVersionSegments(dist)
 	for _, s := range latestNodeDist {
 		segment := c.target.GetSealedSegment(ctx, leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst)
-		existInTarget := segment != nil
-		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
-		// shouldn't set l0 segment location to delegator. l0 segment should be reload in delegator
-		if !existInTarget || isL0Segment {
+		if segment == nil {
 			continue
 		}
 
@@ -218,8 +214,7 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *me
 		_, ok := distMap[sid]
 		segment := c.target.GetSealedSegment(ctx, leaderView.CollectionID, sid, meta.CurrentTargetFirst)
 		existInTarget := segment != nil
-		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
-		if ok || existInTarget || isL0Segment {
+		if ok || existInTarget {
 			continue
 		}
 		log.Debug("leader checker append a segment to remove",
