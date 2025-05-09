@@ -222,7 +222,7 @@ DiskFileManagerImpl::AddBatchIndexFiles(
 void
 DiskFileManagerImpl::CacheIndexToDiskInternal(
     const std::vector<std::string>& remote_files,
-    const std::function<std::string()>& get_local_index_prefix) noexcept {
+    const std::function<std::string()>& get_local_index_prefix) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
 

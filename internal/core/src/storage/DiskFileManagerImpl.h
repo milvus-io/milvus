@@ -160,7 +160,7 @@ class DiskFileManagerImpl : public FileManagerImpl {
     void
     CacheIndexToDiskInternal(
         const std::vector<std::string>& remote_files,
-        const std::function<std::string()>& get_local_index_prefix) noexcept;
+        const std::function<std::string()>& get_local_index_prefix);
 
     template <typename DataType>
     std::string
