@@ -10,6 +10,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
 )
 
+const (
+	truncateCursorSubscriptionName = "truncate-cursor"
+)
+
 var _ walimpls.OpenerImpls = (*openerImpl)(nil)
 
 // openerImpl is the opener for pulsar wal.
@@ -33,6 +37,19 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		if err != nil {
 			return nil, err
 		}
+
+		// Initialize a persistent cursor to protect the topic from being retention.
+		cursor, err := o.c.Subscribe(pulsar.ConsumerOptions{
+			Topic:                       opt.Channel.Name,
+			SubscriptionName:            truncateCursorSubscriptionName,
+			Type:                        pulsar.Exclusive,
+			MaxPendingChunkedMessage:    1,
+			SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
+		})
+		if err != nil {
+			return nil, err
+		}
+		cursor.Close()
 	}
 	return &walImpl{
 		WALHelper: helper.NewWALHelper(opt),

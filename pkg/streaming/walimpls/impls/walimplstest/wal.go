@@ -57,6 +57,9 @@ func (w *walImpls) Read(ctx context.Context, opts walimpls.ReadOption) (walimpls
 }
 
 func (w *walImpls) Truncate(ctx context.Context, id message.MessageID) error {
+	if w.Channel().AccessMode != types.AccessModeRW {
+		panic("truncate on a wal that is not in read-write mode")
+	}
 	return nil
 }
 

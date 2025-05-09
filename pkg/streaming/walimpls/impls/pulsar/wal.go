@@ -77,7 +77,20 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 }
 
 func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
-	return nil
+	if w.Channel().AccessMode != types.AccessModeRW {
+		panic("truncate on a wal that is not in read-write mode")
+	}
+	cursor, err := w.c.Subscribe(pulsar.ConsumerOptions{
+		Topic:                    w.Channel().Name,
+		SubscriptionName:         truncateCursorSubscriptionName,
+		Type:                     pulsar.Exclusive,
+		MaxPendingChunkedMessage: 1,
+	})
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+	return cursor.Seek(id.(pulsarID).PulsarID())
 }
 
 func (w *walImpl) Close() {
