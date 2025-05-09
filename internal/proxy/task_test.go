@@ -652,6 +652,9 @@ func TestTranslateOutputFields(t *testing.T) {
 		assert.True(t, requestedPK)
 
 		// Test invalid dynamic field expressions
+		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, `$meta["A"]["B"]`}, schema, true)
+		assert.Error(t, err)
+
 		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[\"\"]"}, schema, true)
 		assert.Error(t, err)
 
