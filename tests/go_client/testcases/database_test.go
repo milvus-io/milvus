@@ -358,8 +358,15 @@ func TestDatabasePropertiesRgReplicas(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 
-	_, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(schema.CollectionName))
-	common.CheckErr(t, err, true)
+	// When load does not specify parameters, rg and replica Properties take effect
+	_, errLoad := mc.LoadCollection(ctx, client.NewLoadCollectionOption(schema.CollectionName))
+	common.CheckErr(t, errLoad, false, "resource group not found", "service resource insufficient")
+
+	// actually load with default rg, rg1 not existed
+	taskLoad, errLoad := mc.LoadCollection(ctx, client.NewLoadCollectionOption(schema.CollectionName).WithReplica(1))
+	common.CheckErr(t, errLoad, true)
+	errLoad = taskLoad.Await(ctx)
+	common.CheckErr(t, errLoad, true)
 
 	_, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithLimit(10))
 	common.CheckErr(t, err, true)
