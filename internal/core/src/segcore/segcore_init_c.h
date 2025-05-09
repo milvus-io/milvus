@@ -59,8 +59,16 @@ GetCurrentIndexVersion();
 int32_t
 GetMinimalIndexVersion();
 
+int32_t
+GetMaximumIndexVersion();
+
 void
 SetThreadName(const char*);
+
+void
+ConfigureTieredStorage(const bool enabled_globally,
+                       const int64_t memory_limit_bytes,
+                       const int64_t disk_limit_bytes);
 
 #ifdef __cplusplus
 }

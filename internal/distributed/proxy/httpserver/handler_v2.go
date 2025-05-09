@@ -1157,6 +1157,13 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupSize, Value: strconv.FormatInt(int64(httpReq.GroupSize), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamStrictGroupSize, Value: strconv.FormatBool(httpReq.StrictGroupSize)})
 	}
+	if len(httpReq.FunctionScore.Functions) != 0 {
+		if req.FunctionScore, err = genFunctionScore(ctx, &httpReq.FunctionScore); err != nil {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+	}
+
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
 	body, _ := c.Get(gin.BodyBytesKey)
 	placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
@@ -1275,6 +1282,12 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	if httpReq.GroupByField != "" && httpReq.GroupSize > 0 {
 		req.RankParams = append(req.RankParams, &commonpb.KeyValuePair{Key: ParamGroupSize, Value: strconv.FormatInt(int64(httpReq.GroupSize), 10)})
 		req.RankParams = append(req.RankParams, &commonpb.KeyValuePair{Key: ParamStrictGroupSize, Value: strconv.FormatBool(httpReq.StrictGroupSize)})
+	}
+	if len(httpReq.FunctionScore.Functions) != 0 {
+		if req.FunctionScore, err = genFunctionScore(ctx, &httpReq.FunctionScore); err != nil {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
 	}
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/HybridSearch", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.HybridSearch(reqCtx, req.(*milvuspb.HybridSearchRequest))
@@ -1417,30 +1430,16 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		allOutputFields := []string{}
 
 		for _, function := range httpReq.Schema.Functions {
-			functionTypeValue, ok := schemapb.FunctionType_value[function.FunctionType]
-			if !ok {
-				log.Ctx(ctx).Warn("function's data type is invalid(case sensitive).", zap.Any("function.DataType", function.FunctionType), zap.Any("function", function))
-				err := merr.WrapErrParameterInvalid("FunctionType", function.FunctionType, "function data type is invalid(case sensitive)")
+			f, err := genFunctionSchema(ctx, &function)
+			if err != nil {
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 					HTTPReturnMessage: err.Error(),
 				})
 				return nil, err
 			}
-			functionType := schemapb.FunctionType(functionTypeValue)
-			description := function.Description
-			params := []*commonpb.KeyValuePair{}
-			for key, value := range function.Params {
-				params = append(params, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
-			}
-			collSchema.Functions = append(collSchema.Functions, &schemapb.FunctionSchema{
-				Name:             function.FunctionName,
-				Description:      description,
-				Type:             functionType,
-				InputFieldNames:  function.InputFieldNames,
-				OutputFieldNames: function.OutputFieldNames,
-				Params:           params,
-			})
+
+			collSchema.Functions = append(collSchema.Functions, f)
 			allOutputFields = append(allOutputFields, function.OutputFieldNames...)
 		}
 

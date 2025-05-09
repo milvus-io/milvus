@@ -646,19 +646,6 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *segcore.Retr
 	return retrieveResult, nil
 }
 
-func (s *LocalSegment) GetFieldDataPath(index *IndexedFieldInfo, offset int64) (dataPath string, offsetInBinlog int64) {
-	offsetInBinlog = offset
-	for _, binlog := range index.FieldBinlog.Binlogs {
-		if offsetInBinlog < binlog.EntriesNum {
-			dataPath = binlog.GetLogPath()
-			break
-		} else {
-			offsetInBinlog -= binlog.EntriesNum
-		}
-	}
-	return dataPath, offsetInBinlog
-}
-
 func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error {
 	if s.Type() != SegmentTypeGrowing {
 		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())

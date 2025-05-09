@@ -253,6 +253,19 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		Key:   common.IndexNonEncoding,
 		Value: indexNonEncoding,
 	})
+
+	currentVecIndexVersion := dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion()
+	// if specify target vec index version, use it with high priority
+	if Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
+		// if force rebuild segment index is true, use target vec index version directly
+		if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() {
+			currentVecIndexVersion = Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32()
+		} else {
+			// if force rebuild segment index is not enabled, use newer index version between current index version and target index version
+			currentVecIndexVersion = max(currentVecIndexVersion, Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32())
+		}
+	}
+
 	it.req = &workerpb.CreateJobRequest{
 		ClusterID:                 Params.CommonCfg.ClusterPrefix.GetValue(),
 		IndexFilePrefix:           path.Join(dependency.chunkManager.RootPath(), common.SegmentIndexPath),
@@ -262,7 +275,7 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		IndexParams:               indexParams,
 		TypeParams:                typeParams,
 		NumRows:                   segIndex.NumRows,
-		CurrentIndexVersion:       dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
+		CurrentIndexVersion:       currentVecIndexVersion,
 		CurrentScalarIndexVersion: dependency.indexEngineVersionManager.GetCurrentScalarIndexEngineVersion(),
 		CollectionID:              segment.GetCollectionID(),
 		PartitionID:               segment.GetPartitionID(),
@@ -275,8 +288,9 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		OptionalScalarFields:      optionalFields,
 		Field:                     field,
 		PartitionKeyIsolation:     partitionKeyIsolation,
-		StorageVersion:            segment.StorageVersion,
+		StorageVersion:            segment.GetStorageVersion(),
 		TaskSlot:                  it.taskSlot,
+		InsertLogs:                segment.GetBinlogs(),
 	}
 
 	it.req.LackBinlogRows = it.req.NumRows - totalRows

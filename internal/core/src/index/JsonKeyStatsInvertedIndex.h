@@ -103,19 +103,13 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
             return bitset;
         };
 
-        if (is_growing) {
-            if (shouldTriggerCommit() || is_strong_consistency) {
-                if (is_data_uncommitted_) {
-                    Commit();
-                }
-                Reload();
-                return processArray();
-            } else {
-                return processArray();
+        if (is_growing && (shouldTriggerCommit() || is_strong_consistency)) {
+            if (is_data_uncommitted_) {
+                Commit();
             }
-        } else {
-            return processArray();
+            Reload();
         }
+        return processArray();
     }
 
     void

@@ -43,7 +43,9 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
                       segment,
                       expr->column_.field_id_,
                       expr->column_.nested_path_,
-                      DataType::NONE,
+                      expr->vals_.empty()
+                          ? DataType::NONE
+                          : FromValCase(expr->vals_[0].val_case()),
                       active_count,
                       batch_size,
                       consistency_level),
@@ -121,7 +123,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     ExecJsonContainsWithDiffTypeByKeyIndex();
 
     VectorPtr
-    EvalArrayContainsForIndexSegment();
+    EvalArrayContainsForIndexSegment(DataType data_type);
 
     template <typename ExprValueType>
     VectorPtr

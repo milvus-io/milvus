@@ -71,7 +71,7 @@ class MilvusConan(ConanFile):
         "aws-sdk-cpp:config": True,
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
-        "gtest:build_gmock": False,
+        "gtest:build_gmock": True,
         "boost:without_locale": False,
         "boost:without_test": True,
         "glog:with_gflags": True,

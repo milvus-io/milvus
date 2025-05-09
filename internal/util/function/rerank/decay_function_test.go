@@ -121,7 +121,7 @@ func (s *DecayFunctionSuite) TestNewDecayErrors() {
 	}
 
 	{
-		fs := []string{gaussFunction, linerFunction, expFunction}
+		fs := []string{gaussFunction, linearFunction, expFunction}
 		for i := 0; i < 3; i++ {
 			functionSchema.Params[4].Value = fs[i]
 			_, err := newDecayFunction(schema, functionSchema)
@@ -216,14 +216,14 @@ func (s *DecayFunctionSuite) TestAllTypesInput() {
 	{
 		functionSchema.Params[3].Value = "-1"
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Decay function param: offset must => 0")
+		s.ErrorContains(err, "Decay function param: offset must >= 0")
 		functionSchema.Params[3].Value = "0.5"
 	}
 
 	{
 		functionSchema.Params[4].Value = "10"
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Decay function param: decay must 0 < decay < 1 0")
+		s.ErrorContains(err, "Decay function param: decay must 0 < decay < 1")
 		functionSchema.Params[2].Value = "0.5"
 	}
 }
@@ -279,6 +279,11 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 	// singleSearchResultData
 	// nq = 1
 	{
+		// source scores: [0 1 2 3 4 5 6 7 8 9]
+		// decay scores:  [1 1 1 0.9576033 0.8408964 0.6771278 0.5 0.3385639 0.2102241 0.11970041]
+		// Final scores:  [0, 1, 2, 2.87281, 3.3635857, 3.385639, 3, 2.3699472, 1.6817929, 1.0773036]
+		// top ids     :  [5, 4, 6, 3, 7, 2, 8, 9, 1, 0]
+		// top3, offset 2: [6, 3, 7]
 		nq := int64(1)
 		f, err := newDecayFunction(schema, functionSchema)
 		s.NoError(err)
@@ -287,7 +292,7 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		s.NoError(err)
 		s.Equal([]int64{3}, ret.Topks)
 		s.Equal(int64(3), ret.TopK)
-		s.Equal([]int64{2, 3, 4}, ret.Ids.GetIntId().Data)
+		s.Equal([]int64{6, 3, 7}, ret.Ids.GetIntId().Data)
 	}
 	// nq = 3
 	{
@@ -299,7 +304,7 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		s.NoError(err)
 		s.Equal([]int64{3, 3, 3}, ret.Topks)
 		s.Equal(int64(3), ret.TopK)
-		s.Equal([]int64{2, 3, 4, 12, 13, 14, 22, 23, 24}, ret.Ids.GetIntId().Data)
+		s.Equal([]int64{6, 3, 7, 12, 13, 14, 22, 23, 24}, ret.Ids.GetIntId().Data)
 	}
 
 	// multipSearchResultData
@@ -327,7 +332,7 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		s.NoError(err)
 		s.Equal([]int64{3}, ret.Topks)
 		s.Equal(int64(3), ret.TopK)
-		s.Equal([]int64{5, 6, 7}, ret.Ids.GetIntId().Data)
+		s.Equal([]int64{7, 6, 5}, ret.Ids.GetIntId().Data)
 	}
 	// nq = 3
 	{
@@ -346,7 +351,7 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		s.NoError(err)
 		s.Equal([]int64{3, 3, 3}, ret.Topks)
 		s.Equal(int64(3), ret.TopK)
-		s.Equal([]int64{5, 6, 7, 6, 7, 10, 10, 11, 20}, ret.Ids.GetIntId().Data)
+		s.Equal([]int64{7, 6, 5, 6, 11, 5, 10, 11, 20}, ret.Ids.GetIntId().Data)
 	}
 }
 

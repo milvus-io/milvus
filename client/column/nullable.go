@@ -42,18 +42,24 @@ var (
 type NullableColumnCreateFunc[T any, Col interface {
 	Column
 	Data() []T
-}] func(name string, values []T, validData []bool) (Col, error)
+}] func(name string, values []T, validData []bool, opts ...ColumnOption[T]) (Col, error)
 
 type NullableColumnCreator[col interface {
 	Column
 	withValidData([]bool)
+	base() *genericColumnBase[T]
 }, T any] struct {
 	base func(name string, values []T) col
 }
 
-func (c NullableColumnCreator[col, T]) New(name string, values []T, validData []bool) (col, error) {
+func (c NullableColumnCreator[col, T]) New(name string, values []T, validData []bool, opts ...ColumnOption[T]) (col, error) {
 	result := c.base(name, values)
 	result.withValidData(validData)
+	base := result.base()
+
+	for _, opt := range opts {
+		opt(base)
+	}
 
 	return result, result.ValidateNullable()
 }
@@ -61,6 +67,7 @@ func (c NullableColumnCreator[col, T]) New(name string, values []T, validData []
 func NewNullableColumnCreator[col interface {
 	Column
 	withValidData([]bool)
+	base() *genericColumnBase[T]
 }, T any](base func(name string, values []T) col) NullableColumnCreator[col, T] {
 	return NullableColumnCreator[col, T]{
 		base: base,

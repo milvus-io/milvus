@@ -23,6 +23,7 @@
 #include "log/Log.h"
 #include "storage/Util.h"
 #include "storage/FileManager.h"
+#include "index/Utils.h"
 
 namespace milvus::storage {
 
@@ -131,8 +132,23 @@ MemFileManagerImpl::LoadIndexToMemory(
 }
 
 std::vector<FieldDataPtr>
-MemFileManagerImpl::CacheRawDataToMemory(
-    std::vector<std::string> remote_files) {
+MemFileManagerImpl::CacheRawDataToMemory(const Config& config) {
+    auto storage_version =
+        index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
+            .value_or(0);
+    if (storage_version == STORAGE_V2) {
+        return cache_row_data_to_memory_storage_v2(config);
+    }
+    return cache_row_data_to_memory_internal(config);
+}
+
+std::vector<FieldDataPtr>
+MemFileManagerImpl::cache_row_data_to_memory_internal(const Config& config) {
+    auto insert_files = index::GetValueFromConfig<std::vector<std::string>>(
+        config, INSERT_FILES_KEY);
+    AssertInfo(insert_files.has_value(),
+               "insert file paths is empty when build index");
+    auto remote_files = insert_files.value();
     SortByPath(remote_files);
 
     auto parallel_degree =
@@ -158,6 +174,27 @@ MemFileManagerImpl::CacheRawDataToMemory(
         FetchRawData();
     }
 
+    AssertInfo(field_datas.size() == remote_files.size(),
+               "inconsistent file num and raw data num!");
+    return field_datas;
+}
+
+std::vector<FieldDataPtr>
+MemFileManagerImpl::cache_row_data_to_memory_storage_v2(const Config& config) {
+    auto data_type = index::GetValueFromConfig<DataType>(config, DATA_TYPE_KEY);
+    AssertInfo(data_type.has_value(), "data type is empty when build index");
+    auto dim = index::GetValueFromConfig<int64_t>(config, DIM_KEY).value_or(0);
+    auto segment_insert_files =
+        index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
+            config, SEGMENT_INSERT_FILES_KEY);
+    AssertInfo(segment_insert_files.has_value(),
+               "insert file paths for storage v2 is empty when build index");
+    auto remote_files = segment_insert_files.value();
+    for (auto& files : remote_files) {
+        SortByPath(files);
+    }
+    auto field_datas = GetFieldDatasFromStorageV2(
+        remote_files, field_meta_.field_id, data_type.value(), dim);
     AssertInfo(field_datas.size() == remote_files.size(),
                "inconsistent file num and raw data num!");
     return field_datas;

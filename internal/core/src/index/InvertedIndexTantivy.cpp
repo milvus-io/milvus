@@ -165,14 +165,10 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
 template <typename T>
 void
 InvertedIndexTantivy<T>::Build(const Config& config) {
-    auto insert_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
-    AssertInfo(insert_files.has_value(), "insert_files were empty");
-    auto field_datas =
-        mem_file_manager_->CacheRawDataToMemory(insert_files.value());
+    auto field_datas = mem_file_manager_->CacheRawDataToMemory(config);
     auto lack_binlog_rows =
         GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
-    if (lack_binlog_rows.has_value()) {
+    if (lack_binlog_rows.has_value() && lack_binlog_rows.value() > 0) {
         auto field_schema = mem_file_manager_->GetFieldDataMeta().field_schema;
         auto default_value = [&]() -> std::optional<DefaultValueType> {
             if (!field_schema.has_default_value()) {
@@ -427,7 +423,7 @@ const TargetBitmap
 InvertedIndexTantivy<std::string>::Query(const DatasetPtr& dataset) {
     auto op = dataset->Get<OpType>(OPERATOR_TYPE);
     if (op == OpType::PrefixMatch) {
-        auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
+        auto prefix = dataset->Get<std::string>(MATCH_VALUE);
         return PrefixMatch(prefix);
     }
     return ScalarIndex<std::string>::Query(dataset);

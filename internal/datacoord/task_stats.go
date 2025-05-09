@@ -252,7 +252,9 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		JsonKeyStatsDataFormat:    1,
 		EnableJsonKeyStatsInSort:  Params.DataCoordCfg.EnabledJSONKeyStatsInSort.GetAsBool(),
 		TaskSlot:                  st.taskSlot,
-		StorageVersion:            segment.StorageVersion,
+		StorageVersion:            segment.GetStorageVersion(),
+		CurrentScalarIndexVersion: dependency.indexEngineVersionManager.GetCurrentScalarIndexEngineVersion(),
+		InsertLogs:                segment.GetBinlogs(),
 	}
 
 	log.Info("stats task pre check successfully", zap.String("subJobType", st.subJobType.String()),

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"os"
 	"sync"
 	"testing"
 
@@ -12,32 +11,8 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/nmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
-
-func BenchmarkProduceAndConsumeNatsMQ(b *testing.B) {
-	storeDir, err := os.MkdirTemp("", "milvus_mq_nmq")
-	assert.NoError(b, err)
-	defer os.RemoveAll(storeDir)
-
-	paramtable.Init()
-	cfg := nmq.ParseServerOption(paramtable.Get())
-	cfg.Opts.StoreDir = storeDir
-	nmq.MustInitNatsMQ(cfg)
-
-	client, err := nmq.NewClientWithDefaultOptions(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	cases := generateRandBytes(64*1024, 10000)
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		benchmarkProduceAndConsume(b, client, cases)
-	}
-}
 
 func benchmarkProduceAndConsume(b *testing.B, mqClient mqwrapper.Client, cases [][]byte) {
 	topic := fmt.Sprintf("test_produce_and_consume_topic_%d", rand.Int31n(100000))

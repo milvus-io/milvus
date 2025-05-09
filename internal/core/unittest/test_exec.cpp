@@ -13,14 +13,11 @@
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <memory>
-#include <regex>
 #include <vector>
 #include <chrono>
 
-#include "query/PlanNode.h"
-#include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentSealed.h"
-#include "test_utils/AssertUtils.h"
+#include "test_utils/storage_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "plan/PlanNode.h"
 #include "exec/Task.h"
@@ -87,25 +84,10 @@ class TaskTest : public testing::TestWithParam<DataType> {
         field_map_.insert({"json", json_fid});
         schema->set_primary_field_id(str1_fid);
 
-        auto segment = CreateSealedSegment(schema);
         size_t N = 100000;
         num_rows_ = N;
         auto raw_data = DataGen(schema, N);
-        auto fields = schema->get_fields();
-        for (auto field_data : raw_data.raw_->fields_data()) {
-            int64_t field_id = field_data.field_id();
-
-            auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-            auto field_meta = fields.at(FieldId(field_id));
-            auto arrow_data_wrapper =
-                storage::ConvertFieldDataToArrowDataWrapper(
-                    CreateFieldDataFromDataArray(N, &field_data, field_meta));
-
-            info.arrow_reader_channel->push(arrow_data_wrapper);
-            info.arrow_reader_channel->close();
-
-            segment->LoadFieldData(FieldId(field_id), info);
-        }
+        auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
         segment_ = SegmentSealedSPtr(segment.release());
     }
 
@@ -181,6 +163,7 @@ TEST_P(TaskTest, CallExprEmpty) {
     EXPECT_EQ(num_rows, num_rows_);
 }
 
+// TODO(tiered storage 1): this is slower due to the overhead of RawAt.
 TEST_P(TaskTest, UnaryExpr) {
     ::milvus::proto::plan::GenericValue value;
     value.set_int64_val(-1);

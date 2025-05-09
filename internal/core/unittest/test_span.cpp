@@ -61,21 +61,22 @@ TEST(Span, Naive) {
         auto begin = chunk_id * size_per_chunk;
         auto end = std::min((chunk_id + 1) * size_per_chunk, N);
         auto size_of_chunk = end - begin;
-        ASSERT_EQ(age_span.valid_data(), nullptr);
+        ASSERT_EQ(age_span.get().valid_data(), nullptr);
         for (int i = 0; i < size_of_chunk * 512 / 8; ++i) {
-            ASSERT_EQ(vec_span.data()[i], vec_ptr[i + begin * 512 / 8]);
+            ASSERT_EQ(vec_span.get().data()[i], vec_ptr[i + begin * 512 / 8]);
         }
         for (int i = 0; i < size_of_chunk; ++i) {
-            ASSERT_EQ(age_span.data()[i], age_ptr[i + begin]);
+            ASSERT_EQ(age_span.get().data()[i], age_ptr[i + begin]);
         }
         for (int i = 0; i < size_of_chunk; ++i) {
-            ASSERT_EQ(float_span.data()[i], float_ptr[i + begin * 32]);
+            ASSERT_EQ(float_span.get().data()[i], float_ptr[i + begin * 32]);
         }
         for (int i = 0; i < size_of_chunk; ++i) {
-            ASSERT_EQ(null_field_span.data()[i], nullable_data_ptr[i + begin]);
+            ASSERT_EQ(null_field_span.get().data()[i],
+                      nullable_data_ptr[i + begin]);
         }
         for (int i = 0; i < size_of_chunk; ++i) {
-            ASSERT_EQ(null_field_span.valid_data()[i],
+            ASSERT_EQ(null_field_span.get().valid_data()[i],
                       nullable_valid_data_ptr[i + begin]);
         }
     }

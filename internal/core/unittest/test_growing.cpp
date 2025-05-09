@@ -42,7 +42,7 @@ TEST(Growing, DeleteCount) {
     Timestamp begin_ts = 100;
     auto tss = GenTss(c, begin_ts);
     auto del_pks = GenPKs(pks.begin(), pks.end());
-    auto status = segment->Delete(offset, c, del_pks.get(), tss.data());
+    auto status = segment->Delete(c, del_pks.get(), tss.data());
     ASSERT_TRUE(status.ok());
 
     auto cnt = segment->get_deleted_count();
@@ -70,11 +70,9 @@ TEST(Growing, RealCount) {
 
     // delete half.
     auto half = c / 2;
-    auto del_offset1 = 0;
     auto del_ids1 = GenPKs(pks.begin(), pks.begin() + half);
     auto del_tss1 = GenTss(half, c);
-    auto status =
-        segment->Delete(del_offset1, half, del_ids1.get(), del_tss1.data());
+    auto status = segment->Delete(half, del_ids1.get(), del_tss1.data());
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(c - half, segment->get_real_count());
 
@@ -82,8 +80,7 @@ TEST(Growing, RealCount) {
     auto del_offset2 = segment->get_deleted_count();
     ASSERT_EQ(del_offset2, half);
     auto del_tss2 = GenTss(half, c + half);
-    status =
-        segment->Delete(del_offset2, half, del_ids1.get(), del_tss2.data());
+    status = segment->Delete(half, del_ids1.get(), del_tss2.data());
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(c - half, segment->get_real_count());
 
@@ -92,7 +89,7 @@ TEST(Growing, RealCount) {
     ASSERT_EQ(del_offset3, half);
     auto del_ids3 = GenPKs(pks.begin(), pks.end());
     auto del_tss3 = GenTss(c, c + half * 2);
-    status = segment->Delete(del_offset3, c, del_ids3.get(), del_tss3.data());
+    status = segment->Delete(c, del_ids3.get(), del_tss3.data());
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(0, segment->get_real_count());
 }

@@ -1,6 +1,7 @@
 package message
 
 import (
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -13,6 +14,8 @@ var (
 
 // BasicMessage is the basic interface of message.
 type BasicMessage interface {
+	zapcore.ObjectMarshaler
+
 	// MessageType returns the type of message.
 	MessageType() MessageType
 

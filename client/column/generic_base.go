@@ -24,6 +24,11 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
+type GColumn[T any] interface {
+	Value(idx int) T
+	AppendValue(v T)
+}
+
 var _ Column = (*genericColumnBase[any])(nil)
 
 // genericColumnBase implements `Column` interface
@@ -37,6 +42,17 @@ type genericColumnBase[T any] struct {
 	// note that nullable must be set to true explicitly
 	nullable  bool
 	validData []bool
+	// nullable column could be presented in two modes
+	// - compactMode, in which all valid data are compacted into one slice
+	// - sparseMode, in which valid data are located in its index position
+	// while invalid one are filled with zero value.
+	// for Milvus 2.5.x and before, insert request shall be in compactMode while
+	// search & query results are formed in sparseMode
+	// this flag indicates which form current column are in and peform validation
+	// or conversion logical based on it
+	sparseMode bool
+	// indexMapping stores the compact-sparse mapping
+	indexMapping []int
 }
 
 // Name returns column name.
@@ -69,6 +85,7 @@ func (c *genericColumnBase[T]) AppendValue(a any) error {
 	c.values = append(c.values, v)
 	if c.nullable {
 		c.validData = append(c.validData, true)
+		c.indexMapping = append(c.indexMapping, len(c.values)-1)
 	}
 	return nil
 }
@@ -77,6 +94,7 @@ func (c *genericColumnBase[T]) Slice(start, end int) Column {
 	return c.slice(start, end)
 }
 
+// WARNING: this methods works only for sparse mode column
 func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
 	l := c.Len()
 	if start > l {
@@ -86,10 +104,11 @@ func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
 		end = l
 	}
 	result := &genericColumnBase[T]{
-		name:      c.name,
-		fieldType: c.fieldType,
-		values:    c.values[start:end],
-		nullable:  c.nullable,
+		name:       c.name,
+		fieldType:  c.fieldType,
+		values:     c.values[start:end],
+		nullable:   c.nullable,
+		sparseMode: c.sparseMode,
 	}
 	if c.nullable {
 		result.validData = c.validData[start:end]
@@ -115,6 +134,7 @@ func (c *genericColumnBase[T]) rangeCheck(idx int) error {
 }
 
 func (c *genericColumnBase[T]) Get(idx int) (any, error) {
+	idx = c.valueIndex(idx)
 	if err := c.rangeCheck(idx); err != nil {
 		return nil, err
 	}
@@ -122,6 +142,7 @@ func (c *genericColumnBase[T]) Get(idx int) (any, error) {
 }
 
 func (c *genericColumnBase[T]) GetAsInt64(idx int) (int64, error) {
+	idx = c.valueIndex(idx)
 	if err := c.rangeCheck(idx); err != nil {
 		return 0, err
 	}
@@ -129,6 +150,7 @@ func (c *genericColumnBase[T]) GetAsInt64(idx int) (int64, error) {
 }
 
 func (c *genericColumnBase[T]) GetAsString(idx int) (string, error) {
+	idx = c.valueIndex(idx)
 	if err := c.rangeCheck(idx); err != nil {
 		return "", err
 	}
@@ -136,6 +158,7 @@ func (c *genericColumnBase[T]) GetAsString(idx int) (string, error) {
 }
 
 func (c *genericColumnBase[T]) GetAsDouble(idx int) (float64, error) {
+	idx = c.valueIndex(idx)
 	if err := c.rangeCheck(idx); err != nil {
 		return 0, err
 	}
@@ -143,6 +166,7 @@ func (c *genericColumnBase[T]) GetAsDouble(idx int) (float64, error) {
 }
 
 func (c *genericColumnBase[T]) GetAsBool(idx int) (bool, error) {
+	idx = c.valueIndex(idx)
 	if err := c.rangeCheck(idx); err != nil {
 		return false, err
 	}
@@ -150,6 +174,7 @@ func (c *genericColumnBase[T]) GetAsBool(idx int) (bool, error) {
 }
 
 func (c *genericColumnBase[T]) Value(idx int) (T, error) {
+	idx = c.valueIndex(idx)
 	var z T
 	if err := c.rangeCheck(idx); err != nil {
 		return z, err
@@ -157,11 +182,19 @@ func (c *genericColumnBase[T]) Value(idx int) (T, error) {
 	return c.values[idx], nil
 }
 
+func (c *genericColumnBase[T]) valueIndex(idx int) int {
+	if !c.nullable || c.sparseMode {
+		return idx
+	}
+	return c.indexMapping[idx]
+}
+
 func (c *genericColumnBase[T]) Data() []T {
 	return c.values
 }
 
 func (c *genericColumnBase[T]) MustValue(idx int) T {
+	idx = c.valueIndex(idx)
 	if idx < 0 || idx > c.Len() {
 		panic("index out of range")
 	}
@@ -174,6 +207,9 @@ func (c *genericColumnBase[T]) AppendNull() error {
 	}
 
 	c.validData = append(c.validData, false)
+	if !c.sparseMode {
+		c.indexMapping = append(c.indexMapping, -1)
+	}
 	return nil
 }
 
@@ -215,19 +251,72 @@ func (c *genericColumnBase[T]) ValidateNullable() error {
 		return nil
 	}
 
+	if c.sparseMode {
+		return c.validateNullableSparse()
+	}
+	return c.validateNullableCompact()
+}
+
+func (c *genericColumnBase[T]) validateNullableCompact() error {
 	// count valid entries
-	validCnt := lo.CountBy(c.validData, func(v bool) bool {
-		return v
-	})
+	var validCnt int
+	c.indexMapping = make([]int, len(c.validData))
+	for idx, v := range c.validData {
+		if v {
+			c.indexMapping[idx] = validCnt
+			validCnt++
+		} else {
+			c.indexMapping[idx] = -1
+		}
+	}
 	if validCnt != len(c.values) {
 		return errors.Newf("values number(%d) does not match valid count(%d)", len(c.values), validCnt)
 	}
 	return nil
 }
 
+func (c *genericColumnBase[T]) validateNullableSparse() error {
+	if len(c.validData) != len(c.values) {
+		return errors.Newf("values number (%d) does not match valid data len(%d)", len(c.values), len(c.validData))
+	}
+	return nil
+}
+
+func (c *genericColumnBase[T]) CompactNullableValues() {
+	if !c.nullable || !c.sparseMode {
+		return
+	}
+
+	c.indexMapping = make([]int, len(c.validData))
+	var cnt int
+	for idx, valid := range c.validData {
+		if !valid {
+			c.indexMapping[idx] = -1
+			continue
+		}
+		c.values[cnt] = c.values[idx]
+		c.indexMapping[idx] = cnt
+		cnt++
+	}
+	c.values = c.values[0:cnt]
+}
+
 func (c *genericColumnBase[T]) withValidData(validData []bool) {
 	if len(validData) > 0 {
 		c.nullable = true
 		c.validData = validData
+	}
+}
+
+func (c *genericColumnBase[T]) base() *genericColumnBase[T] {
+	return c
+}
+
+type ColumnOption[T any] func(*genericColumnBase[T])
+
+// WithSparseNullableMode returns a ColumnOption that sets the sparse mode for the column.
+func WithSparseNullableMode[T any](flag bool) ColumnOption[T] {
+	return func(c *genericColumnBase[T]) {
+		c.sparseMode = flag
 	}
 }

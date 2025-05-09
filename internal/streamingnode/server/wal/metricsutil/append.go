@@ -22,16 +22,15 @@ func (im *InterceptorMetrics) String() string {
 
 // AppendMetrics is the metrics for append operation.
 type AppendMetrics struct {
-	wm          *WriteMetrics
-	bytes       int
-	messageType message.MessageType
+	wm    *WriteMetrics
+	bytes int
+	msg   message.MutableMessage
 
 	result             *types.AppendResult
 	err                error
 	appendDuration     time.Duration
 	implAppendDuration time.Duration
 	interceptors       map[string][]*InterceptorMetrics
-	persisted          bool
 }
 
 type AppendMetricsGuard struct {
@@ -65,11 +64,9 @@ func (m *AppendMetrics) StartAppendGuard() *AppendMetricsGuard {
 // IntoLogFields convert the metrics to log fields.
 func (m *AppendMetrics) IntoLogFields() []zap.Field {
 	fields := []zap.Field{
-		zap.String("message_type", m.messageType.String()),
-		zap.Int("bytes", m.bytes),
+		zap.Object("message", m.msg),
 		zap.Duration("append_duration", m.appendDuration),
 		zap.Duration("impl_append_duration", m.implAppendDuration),
-		zap.Bool("presisted", m.persisted),
 	}
 	for name, ims := range m.interceptors {
 		for i, im := range ims {
@@ -108,11 +105,6 @@ func (m *AppendMetrics) RangeOverInterceptors(f func(name string, ims []*Interce
 	for name, ims := range m.interceptors {
 		f(name, ims)
 	}
-}
-
-// NotPersisted mark the message is not persisted.
-func (m *AppendMetrics) NotPersisted() {
-	m.persisted = false
 }
 
 // Done push the metrics.

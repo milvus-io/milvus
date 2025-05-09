@@ -2686,6 +2686,10 @@ type queryNodeConfig struct {
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
+	// TODO this should be refreshable?
+	TieredStorageEnableGlobal          ParamItem `refreshable:"false"`
+	TieredStorageMemoryAllocationRatio ParamItem `refreshable:"false"`
+	TieredStorageDiskAllocationRatio   ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -2822,6 +2826,47 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.StatsPublishInterval.Init(base.mgr)
+
+	p.TieredStorageEnableGlobal = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.enableGlobally",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "Whether or not to turn on Tiered Storage globally in this cluster.",
+		Export:       true,
+	}
+	p.TieredStorageEnableGlobal.Init(base.mgr)
+
+	p.TieredStorageMemoryAllocationRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.memoryAllocationRatio",
+		Version:      "2.6.0",
+		DefaultValue: "0.5",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio < 0 || ratio > 1 {
+				return "0.5"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Doc:    "The ratio of memory allocation for Tiered Storage.",
+		Export: true,
+	}
+	p.TieredStorageMemoryAllocationRatio.Init(base.mgr)
+
+	p.TieredStorageDiskAllocationRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.diskAllocationRatio",
+		Version:      "2.6.0",
+		DefaultValue: "0.5",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio < 0 || ratio > 1 {
+				return "0.5"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Doc:    "The ratio of disk allocation for Tiered Storage.",
+		Export: true,
+	}
+	p.TieredStorageDiskAllocationRatio.Init(base.mgr)
 
 	p.KnowhereThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereThreadPoolNumRatio",
@@ -3565,6 +3610,8 @@ type dataCoordConfig struct {
 	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
 	GrowingSegmentsMemSizeInMB     ParamItem `refreshable:"true"`
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
+	ForceRebuildSegmentIndex       ParamItem `refreshable:"true"`
+	TargetVecIndexVersion          ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 	BlockingL0EntryNum             ParamItem `refreshable:"true"`
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
@@ -4432,6 +4479,28 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.AutoUpgradeSegmentIndex.Init(base.mgr)
 
+	p.ForceRebuildSegmentIndex = ParamItem{
+		Key:          "dataCoord.forceRebuildSegmentIndex",
+		Version:      "2.5.10",
+		DefaultValue: "false",
+		PanicIfEmpty: true,
+		Doc:          "force rebuild segment index to specify index engine's version",
+		Export:       true,
+	}
+	p.ForceRebuildSegmentIndex.Init(base.mgr)
+
+	p.TargetVecIndexVersion = ParamItem{
+		Key:          "dataCoord.targetVecIndexVersion",
+		Version:      "2.5.10",
+		DefaultValue: "-1",
+		PanicIfEmpty: true,
+		Doc: `if param forceRebuildSegmentIndex is enabled, the vector index will be rebuilt to aligned with targetVecIndexVersion.
+if param forceRebuildSegmentIndex is not enabled, the newly created vector index will be aligned with the newer one of index engine's version and targetVecIndexVersion.
+if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version `,
+		Export: true,
+	}
+	p.TargetVecIndexVersion.Init(base.mgr)
+
 	p.SegmentFlushInterval = ParamItem{
 		Key:          "dataCoord.segmentFlushInterval",
 		Version:      "2.4.6",
@@ -5200,6 +5269,9 @@ type streamingConfig struct {
 	// write ahead buffer
 	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
 	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
+
+	// logging
+	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -5327,6 +5399,16 @@ it also determine the depth of depth first search method that is used to find th
 		Export:       true,
 	}
 	p.WALWriteAheadBufferKeepalive.Init(base.mgr)
+
+	p.LoggingAppendSlowThreshold = ParamItem{
+		Key:     "streaming.logging.appendSlowThreshold",
+		Version: "2.6.0",
+		Doc: `The threshold of slow log, 1s by default. 
+If the wal implementation is woodpecker, the minimum threshold is 3s`,
+		DefaultValue: "1s",
+		Export:       true,
+	}
+	p.LoggingAppendSlowThreshold.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

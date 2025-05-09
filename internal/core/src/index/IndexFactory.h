@@ -58,22 +58,23 @@ class IndexFactory {
     IndexLoadResource(DataType field_type,
                       IndexVersion index_version,
                       float index_size,
-                      std::map<std::string, std::string>& index_params,
+                      const std::map<std::string, std::string>& index_params,
                       bool mmap_enable);
 
     LoadResourceRequest
     VecIndexLoadResource(DataType field_type,
                          IndexVersion index_version,
                          float index_size,
-                         std::map<std::string, std::string>& index_params,
+                         const std::map<std::string, std::string>& index_params,
                          bool mmap_enable);
 
     LoadResourceRequest
-    ScalarIndexLoadResource(DataType field_type,
-                            IndexVersion index_version,
-                            float index_size,
-                            std::map<std::string, std::string>& index_params,
-                            bool mmap_enable);
+    ScalarIndexLoadResource(
+        DataType field_type,
+        IndexVersion index_version,
+        float index_size,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable);
 
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,

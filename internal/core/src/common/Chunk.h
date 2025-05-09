@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <sys/types.h>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -51,6 +52,11 @@ class Chunk {
 
     uint64_t
     Size() const {
+        return size_;
+    }
+
+    size_t
+    CellByteSize() const {
         return size_;
     }
 

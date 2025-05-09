@@ -36,7 +36,6 @@
 
 #include "PbHelper.h"
 #include "segcore/collection_c.h"
-#include "segcore/SegmentSealed.h"
 #include "common/Types.h"
 #include "storage/BinlogReader.h"
 #include "storage/Event.h"
@@ -46,6 +45,10 @@
 #include "milvus-storage/common/constants.h"
 
 using boost::algorithm::starts_with;
+
+constexpr int64_t kCollectionID = 1;
+constexpr int64_t kPartitionID = 1;
+constexpr int64_t kSegmentID = 1;
 
 namespace milvus::segcore {
 
@@ -333,15 +336,59 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline GeneratedData DataGen(SchemaPtr schema,
-                             int64_t N,
-                             uint64_t seed = 42,
-                             uint64_t ts_offset = 0,
-                             int repeat_count = 1,
-                             int array_len = 10,
-                             bool random_pk = false,
-                             bool random_val = true,
-                             bool random_valid = false) {
+inline SchemaPtr CreateTestSchema() {
+    auto schema = std::make_shared<milvus::Schema>();
+    auto bool_field =
+        schema->AddDebugField("bool", milvus::DataType::BOOL, true);
+    auto int8_field =
+        schema->AddDebugField("int8", milvus::DataType::INT8, true);
+    auto int16_field =
+        schema->AddDebugField("int16", milvus::DataType::INT16, true);
+    auto int32_field =
+        schema->AddDebugField("int32", milvus::DataType::INT32, true);
+    auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
+    auto float_field =
+        schema->AddDebugField("float", milvus::DataType::FLOAT, true);
+    auto double_field =
+        schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
+    auto varchar_field =
+        schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
+    auto json_field =
+        schema->AddDebugField("json", milvus::DataType::JSON, true);
+    auto int_array_field = schema->AddDebugField(
+        "int_array", milvus::DataType::ARRAY, milvus::DataType::INT8, true);
+    auto long_array_field = schema->AddDebugField(
+        "long_array", milvus::DataType::ARRAY, milvus::DataType::INT64, true);
+    auto bool_array_field = schema->AddDebugField(
+        "bool_array", milvus::DataType::ARRAY, milvus::DataType::BOOL, true);
+    auto string_array_field = schema->AddDebugField("string_array",
+                                                    milvus::DataType::ARRAY,
+                                                    milvus::DataType::VARCHAR,
+                                                    true);
+    auto double_array_field = schema->AddDebugField("double_array",
+                                                    milvus::DataType::ARRAY,
+                                                    milvus::DataType::DOUBLE,
+                                                    true);
+    auto float_array_field = schema->AddDebugField(
+        "float_array", milvus::DataType::ARRAY, milvus::DataType::FLOAT, true);
+    auto vec = schema->AddDebugField("embeddings",
+                                     milvus::DataType::VECTOR_FLOAT,
+                                     128,
+                                     knowhere::metric::L2);
+    schema->set_primary_field_id(int64_field);
+    return schema;
+}
+
+inline GeneratedData
+DataGen(SchemaPtr schema,
+        int64_t N,
+        uint64_t seed = 42,
+        uint64_t ts_offset = 0,
+        int repeat_count = 1,
+        int array_len = 10,
+        bool random_pk = false,
+        bool random_val = true,
+        bool random_valid = false) {
     using std::vector;
     std::default_random_engine random(seed);
     std::normal_distribution<> distr(0, 1);
@@ -950,7 +997,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                                        int64_t dim) {
         field_data = storage::CreateFieldData(data_type, true, dim);
         int byteSize = (raw_count + 7) / 8;
-        uint8_t* valid_data = new uint8_t[byteSize];
+        std::vector<uint8_t> valid_data(byteSize);
         for (int i = 0; i < raw_count; i++) {
             bool value = raw_valid_data[i];
             int byteIndex = i / 8;
@@ -961,8 +1008,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 valid_data[byteIndex] &= ~(1 << bitIndex);
             }
         }
-        field_data->FillFieldData(raw_data, valid_data, raw_count);
-        delete[] valid_data;
+        field_data->FillFieldData(raw_data, valid_data.data(), raw_count);
     };
 
     if (field_meta.is_vector()) {
@@ -1144,80 +1190,6 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
     }
 
     return field_data;
-}
-
-inline void
-SealedLoadFieldData(const GeneratedData& dataset,
-                    SegmentSealed& seg,
-                    const std::set<int64_t>& exclude_fields = {},
-                    bool with_mmap = false) {
-    auto row_count = dataset.row_ids_.size();
-    {
-        auto field_data = std::make_shared<milvus::FieldData<int64_t>>(
-            DataType::INT64, false);
-        field_data->FillFieldData(dataset.row_ids_.data(), row_count);
-
-        auto arrow_data_wrapper =
-            storage::ConvertFieldDataToArrowDataWrapper(field_data);
-
-        auto field_data_info = FieldDataInfo(
-            RowFieldID.get(),
-            row_count,
-            std::vector<std::shared_ptr<milvus::ArrowDataWrapper>>{
-                arrow_data_wrapper});
-        seg.LoadFieldData(RowFieldID, field_data_info);
-    }
-    {
-        auto field_data = std::make_shared<milvus::FieldData<int64_t>>(
-            DataType::INT64, false);
-        field_data->FillFieldData(dataset.timestamps_.data(), row_count);
-        auto arrow_data_wrapper =
-            storage::ConvertFieldDataToArrowDataWrapper(field_data);
-        auto field_data_info = FieldDataInfo(
-            TimestampFieldID.get(),
-            row_count,
-            std::vector<std::shared_ptr<milvus::ArrowDataWrapper>>{
-                arrow_data_wrapper});
-        seg.LoadFieldData(TimestampFieldID, field_data_info);
-    }
-    for (auto& iter : dataset.schema_->get_fields()) {
-        int64_t field_id = iter.first.get();
-        if (exclude_fields.find(field_id) != exclude_fields.end()) {
-            continue;
-        }
-    }
-    auto fields = dataset.schema_->get_fields();
-    for (auto& field_data : dataset.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-        if (exclude_fields.find(field_id) != exclude_fields.end()) {
-            continue;
-        }
-        FieldDataInfo info;
-        if (with_mmap) {
-            info.mmap_dir_path = "./data/mmap-test";
-        }
-        info.field_id = field_data.field_id();
-        info.row_count = row_count;
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(row_count, &field_data, field_meta));
-
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        if (with_mmap) {
-            seg.MapFieldData(FieldId(field_id), info);
-        } else {
-            seg.LoadFieldData(FieldId(field_id), info);
-        }
-    }
-}
-
-inline std::unique_ptr<SegmentSealed>
-SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
-    auto segment = CreateSealedSegment(schema);
-    SealedLoadFieldData(dataset, *segment);
-    return segment;
 }
 
 inline std::unique_ptr<milvus::index::VectorIndex>
@@ -1414,7 +1386,9 @@ ConvertToArrowRecordBatch(const GeneratedData& dataset,
             auto arrow_data_wrapper =
                 storage::ConvertFieldDataToArrowDataWrapper(field_data_ptr);
             std::shared_ptr<arrow::RecordBatch> batch;
-            arrow_data_wrapper->reader->ReadNext(&batch);
+            auto status = arrow_data_wrapper->reader->ReadNext(&batch);
+            AssertInfo(status.ok(),
+                       "Failed to read record batch from arrow data wrapper");
             if (batch) {
                 arrays.push_back(batch->column(0));
             }
@@ -1424,6 +1398,89 @@ ConvertToArrowRecordBatch(const GeneratedData& dataset,
     }
     return arrow::RecordBatch::Make(
         arrow_schema, dataset.raw_->num_rows(), arrays);
+}
+
+inline storage::FieldDataMeta
+gen_field_meta(int64_t collection_id = 1,
+               int64_t partition_id = 2,
+               int64_t segment_id = 3,
+               int64_t field_id = 101,
+               DataType data_type = DataType::NONE,
+               DataType element_type = DataType::NONE,
+               bool nullable = false) {
+    auto meta = storage::FieldDataMeta{
+        .collection_id = collection_id,
+        .partition_id = partition_id,
+        .segment_id = segment_id,
+        .field_id = field_id,
+    };
+    meta.field_schema.set_data_type(
+        static_cast<proto::schema::DataType>(data_type));
+    meta.field_schema.set_element_type(
+        static_cast<proto::schema::DataType>(element_type));
+    meta.field_schema.set_nullable(nullable);
+    return meta;
+}
+
+inline std::shared_ptr<Schema>
+gen_all_data_types_schema() {
+    auto schema = std::make_shared<milvus::Schema>();
+    auto bool_field =
+        schema->AddDebugField("bool", milvus::DataType::BOOL, true);
+    auto int8_field =
+        schema->AddDebugField("int8", milvus::DataType::INT8, true);
+    auto int16_field =
+        schema->AddDebugField("int16", milvus::DataType::INT16, true);
+    auto int32_field =
+        schema->AddDebugField("int32", milvus::DataType::INT32, true);
+    auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
+    auto float_field =
+        schema->AddDebugField("float", milvus::DataType::FLOAT, true);
+    auto double_field =
+        schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
+    auto varchar_field =
+        schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
+    auto json_field =
+        schema->AddDebugField("json", milvus::DataType::JSON, true);
+    auto int_array_field = schema->AddDebugField(
+        "int_array", milvus::DataType::ARRAY, milvus::DataType::INT8, true);
+    auto long_array_field = schema->AddDebugField(
+        "long_array", milvus::DataType::ARRAY, milvus::DataType::INT64, true);
+    auto bool_array_field = schema->AddDebugField(
+        "bool_array", milvus::DataType::ARRAY, milvus::DataType::BOOL, true);
+    auto string_array_field = schema->AddDebugField("string_array",
+                                                    milvus::DataType::ARRAY,
+                                                    milvus::DataType::VARCHAR,
+                                                    true);
+    auto double_array_field = schema->AddDebugField("double_array",
+                                                    milvus::DataType::ARRAY,
+                                                    milvus::DataType::DOUBLE,
+                                                    true);
+    auto float_array_field = schema->AddDebugField(
+        "float_array", milvus::DataType::ARRAY, milvus::DataType::FLOAT, true);
+    auto vec = schema->AddDebugField("embeddings",
+                                     milvus::DataType::VECTOR_FLOAT,
+                                     128,
+                                     knowhere::metric::L2);
+    schema->set_primary_field_id(int64_field);
+    return schema;
+}
+
+inline SchemaPtr
+GenChunkedSegmentTestSchema(bool pk_is_string) {
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64, true);
+    auto pk_fid = schema->AddDebugField(
+        "pk", pk_is_string ? DataType::VARCHAR : DataType::INT64, false);
+    auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR, true);
+    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR, true);
+    schema->AddField(FieldName("ts"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk_fid);
+    return schema;
 }
 
 }  // namespace milvus::segcore

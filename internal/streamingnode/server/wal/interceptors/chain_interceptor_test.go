@@ -3,6 +3,7 @@ package interceptors_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -16,7 +17,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	code := m.Run()
+	if code != 0 {
+		os.Exit(code)
+	}
+}
 
 func TestChainInterceptor(t *testing.T) {
 	for i := 0; i < 5; i++ {

@@ -173,3 +173,20 @@ func BuildConsumeMsgPack(pack *MsgPack) *ConsumeMsgPack {
 		EndPositions:   pack.EndPositions,
 	}
 }
+
+// MustBuildMsgPackFromConsumeMsgPack is a helper function to build MsgPack from ConsumeMsgPack.
+func MustBuildMsgPackFromConsumeMsgPack(pack *ConsumeMsgPack, unmarshaler UnmarshalDispatcher) *MsgPack {
+	return &MsgPack{
+		BeginTs: pack.BeginTs,
+		EndTs:   pack.EndTs,
+		Msgs: lo.Map(pack.Msgs, func(msg ConsumeMsg, _ int) TsMsg {
+			tsMsg, err := msg.Unmarshal(unmarshaler)
+			if err != nil {
+				panic("failed to unmarshal msg: " + err.Error())
+			}
+			return tsMsg
+		}),
+		StartPositions: pack.StartPositions,
+		EndPositions:   pack.EndPositions,
+	}
+}

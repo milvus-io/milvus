@@ -95,4 +95,8 @@ class CollectionIndexMeta {
 
 using IndexMetaPtr = std::shared_ptr<CollectionIndexMeta>;
 
+const static IndexMetaPtr empty_index_meta =
+    std::make_shared<CollectionIndexMeta>(1024,
+                                          std::map<FieldId, FieldIndexMeta>());
+
 }  //namespace milvus

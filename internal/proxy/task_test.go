@@ -787,13 +787,6 @@ func TestAddFieldTask(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		// not support dynamic field
-		task.oldSchema.EnableDynamicField = true
-		err = task.PreExecute(ctx)
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		task.oldSchema.EnableDynamicField = false
-
 		// too many fields
 		Params.Save(Params.ProxyCfg.MaxFieldNum.Key, fmt.Sprint(task.oldSchema.Fields))
 		fSchema := &schemapb.FieldSchema{
@@ -862,7 +855,20 @@ func TestAddFieldTask(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		// not support partition key
+		// not support add partition key
+		fSchema = &schemapb.FieldSchema{
+			IsPartitionKey: true,
+			DataType:       schemapb.DataType_Bool,
+			Nullable:       true,
+			Name:           "new field",
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
 		Params.Save(Params.ProxyCfg.MustUsePartitionKey.Key, "true")
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)

@@ -14,29 +14,35 @@
 #include <tbb/concurrent_priority_queue.h>
 #include <tbb/concurrent_vector.h>
 
-#include <deque>
-#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "folly/executors/InlineExecutor.h"
+
 #include "ConcurrentVector.h"
 #include "DeletedRecord.h"
 #include "SealedIndexingRecord.h"
 #include "SegmentSealed.h"
-#include "TimestampIndex.h"
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "google/protobuf/message_lite.h"
 #include "mmap/ChunkedColumn.h"
-#include "index/ScalarIndex.h"
-#include "sys/mman.h"
+#include "mmap/Types.h"
 #include "common/Types.h"
 #include "common/IndexMeta.h"
+#include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/CacheSlot.h"
 
 namespace milvus::segcore {
+
+namespace storagev1translator {
+class InsertRecordTranslator;
+}
+
+using namespace milvus::cachinglayer;
 
 class ChunkedSegmentSealedImpl : public SegmentSealed {
  public:
@@ -70,10 +76,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return insert_record_.contain(pk);
     }
 
-    void
-    LoadFieldData(FieldId field_id, FieldDataInfo& data) override;
-    void
-    MapFieldData(const FieldId field_id, FieldDataInfo& data) override;
     void
     AddFieldDataInfoForSealed(
         const LoadFieldDataInfo& field_data_info) override;
@@ -117,21 +119,27 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return iter->second.get();
     }
 
-    std::pair<std::string_view, bool>
+    // TODO(tiered storage 1): should return a PinWrapper
+    std::pair<milvus::Json, bool>
     GetJsonData(FieldId field_id, size_t offset) const override {
-        auto column = fields_.at(field_id);
+        auto column =
+            std::dynamic_pointer_cast<ChunkedVariableColumn<milvus::Json>>(
+                fields_.at(field_id));
         bool is_valid = column->IsValid(offset);
-        return std::make_pair(std::move(column->RawAt(offset)), is_valid);
+        if (!is_valid) {
+            return std::make_pair(milvus::Json(), false);
+        }
+        return std::make_pair(milvus::Json(column->RawAt(offset)), is_valid);
     }
 
     void
-    reopen(SchemaPtr sch) override;
+    Reopen(SchemaPtr sch) override;
 
     void
-    lazy_check_schema(const query::Plan* plan) override;
+    LazyCheckSchema(const Schema& sch) override;
 
     void
-    finish_load() override;
+    FinishLoad() override;
 
  public:
     size_t
@@ -156,9 +164,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::vector<SegOffset>
     search_pk(const PkType& pk, Timestamp timestamp) const override;
 
-    std::vector<SegOffset>
-    search_pk(const PkType& pk, int64_t insert_barrier) const override;
-
     template <typename Condition>
     std::vector<SegOffset>
     search_sorted_pk(const PkType& pk, Condition condition) const;
@@ -170,11 +175,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     bool
     is_nullable(FieldId field_id) const override {
-        auto it = fields_.find(field_id);
-        AssertInfo(it != fields_.end(),
-                   "Cannot find field with field_id: " +
-                       std::to_string(field_id.get()));
-        return it->second->IsNullable();
+        auto& field_meta = schema_->operator[](field_id);
+        return field_meta.is_nullable();
     };
 
     bool
@@ -210,8 +212,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     debug() const override;
 
     SegcoreError
-    Delete(int64_t reserved_offset,
-           int64_t size,
+    Delete(int64_t size,
            const IdArray* pks,
            const Timestamp* timestamps) override;
 
@@ -246,33 +247,27 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
  protected:
     // blob and row_count
-    SpanBase
+    PinWrapper<SpanBase>
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_string_view_impl(
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
-    std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
     chunk_array_view_impl(
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
-    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_view_by_offsets(FieldId field_id,
                           int64_t chunk_id,
                           const FixedVector<int32_t>& offsets) const override;
 
-    std::pair<BufferView, FixedVector<bool>>
-    get_chunk_buffer(FieldId field_id,
-                     int64_t chunk_id,
-                     int64_t start_offset,
-                     int64_t length) const override;
-
-    const index::IndexBase*
+    PinWrapper<const index::IndexBase*>
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]],
@@ -295,6 +290,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
  private:
+    void
+    load_system_field_internal(FieldId field_id, FieldDataInfo& data);
+
     template <typename S, typename T = S>
     static void
     bulk_subscript_impl(const void* src_raw,
@@ -304,35 +302,28 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     template <typename S, typename T = S>
     static void
-    bulk_subscript_impl(const ChunkedColumnBase* field,
+    bulk_subscript_impl(ChunkedColumnInterface* field,
                         const int64_t* seg_offsets,
                         int64_t count,
                         T* dst_raw);
 
     template <typename S, typename T = S>
     static void
-    bulk_subscript_impl(const ChunkedColumnBase* field,
-                        const int64_t* seg_offsets,
-                        int64_t count,
-                        void* dst_raw);
-
-    template <typename S, typename T = S>
-    static void
-    bulk_subscript_ptr_impl(const ChunkedColumnBase* field,
+    bulk_subscript_ptr_impl(ChunkedColumnInterface* field,
                             const int64_t* seg_offsets,
                             int64_t count,
                             google::protobuf::RepeatedPtrField<T>* dst_raw);
 
     template <typename T>
     static void
-    bulk_subscript_array_impl(const ChunkedColumnBase* column,
+    bulk_subscript_array_impl(ChunkedColumnInterface* column,
                               const int64_t* seg_offsets,
                               int64_t count,
                               google::protobuf::RepeatedPtrField<T>* dst);
 
     static void
     bulk_subscript_impl(int64_t element_sizeof,
-                        const ChunkedColumnBase* field,
+                        ChunkedColumnInterface* field,
                         const int64_t* seg_offsets,
                         int64_t count,
                         void* dst_raw);
@@ -348,11 +339,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     update_row_count(int64_t row_count) {
-        // if (row_count_opt_.has_value()) {
-        //     AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
-        // } else {
         num_rows_ = row_count;
-        // }
         deleted_record_.set_sealed_row_count(row_count);
     }
 
@@ -375,14 +362,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     bool
     is_system_field_ready() const {
-        return system_ready_count_ == 2;
+        return system_ready_count_ == 1;
     }
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
-
-    std::tuple<std::string, int64_t>
-    GetFieldDataPath(FieldId field_id, int64_t offset) const;
 
     void
     LoadVecIndex(const LoadIndexInfo& info);
@@ -390,16 +374,35 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadScalarIndex(const LoadIndexInfo& info);
 
-    void
-    WarmupChunkCache(const FieldId field_id, bool mmap_enabled) override;
-
     bool
     generate_interim_index(const FieldId field_id);
 
     void
     fill_empty_field(const FieldMeta& field_meta);
 
+    void
+    init_timestamp_index(const std::vector<Timestamp>& timestamps,
+                         size_t num_rows);
+
+    void
+    load_field_data_internal(const LoadFieldDataInfo& load_info);
+
+    void
+    load_column_group_data_internal(const LoadFieldDataInfo& load_info);
+
+    void
+    load_field_data_common(
+        FieldId field_id,
+        const std::shared_ptr<ChunkedColumnInterface>& column,
+        size_t num_rows,
+        DataType data_type,
+        bool enable_mmap,
+        bool is_proxy_column);
+
  private:
+    // InsertRecord needs to pin pk column.
+    friend class storagev1translator::InsertRecordTranslator;
+
     // mmap descriptor, used in chunk cache
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     // segment loading state
@@ -413,7 +416,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::optional<int64_t> num_rows_;
 
     // scalar field index
-    std::unordered_map<FieldId, index::IndexBasePtr> scalar_indexings_;
+    std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings_;
     // vector field index
     SealedIndexingRecord vector_indexings_;
 
@@ -427,7 +430,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     SchemaPtr schema_;
     int64_t id_;
-    std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnBase>> fields_;
+    mutable std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
+        fields_;
     std::unordered_set<FieldId> mmap_fields_;
 
     // only useful in binlog
@@ -443,6 +447,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bool TEST_skip_index_for_retrieve_ = false;
 
     // whether the segment is sorted by the pk
+    // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
     // used for json expr optimization
     std::unordered_map<FieldId,
@@ -453,7 +458,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 inline SegmentSealedUPtr
 CreateSealedSegment(
     SchemaPtr schema,
-    IndexMetaPtr index_meta = nullptr,
+    IndexMetaPtr index_meta = empty_index_meta,
     int64_t segment_id = 0,
     const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
     bool TEST_skip_index_for_retrieve = false,

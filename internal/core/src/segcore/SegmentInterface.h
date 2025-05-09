@@ -20,8 +20,10 @@
 #include <index/ScalarIndex.h>
 
 #include "FieldIndexing.h"
+#include "cachinglayer/CacheSlot.h"
 #include "common/Common.h"
 #include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
@@ -30,17 +32,19 @@
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "index/IndexInfo.h"
 #include "index/SkipIndex.h"
-#include "mmap/Column.h"
 #include "index/TextMatchIndex.h"
 #include "index/JsonKeyStatsInvertedIndex.h"
 
 namespace milvus::segcore {
+
+using namespace milvus::cachinglayer;
 
 struct SegmentStats {
     // we stat the memory size used by the segment,
@@ -105,14 +109,8 @@ class SegmentInterface {
                        int64_t num_rows,
                        int64_t field_size) = 0;
 
-    //  virtual int64_t
-    //  PreDelete(int64_t size) = 0;
-
     virtual SegcoreError
-    Delete(int64_t reserved_offset,
-           int64_t size,
-           const IdArray* pks,
-           const Timestamp* timestamps) = 0;
+    Delete(int64_t size, const IdArray* pks, const Timestamp* timestamps) = 0;
 
     virtual void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) = 0;
@@ -145,20 +143,20 @@ class SegmentInterface {
     virtual index::JsonKeyStatsInvertedIndex*
     GetJsonKeyIndex(FieldId field_id) const = 0;
 
-    virtual std::pair<std::string_view, bool>
+    virtual std::pair<milvus::Json, bool>
     GetJsonData(FieldId field_id, size_t offset) const = 0;
 
     virtual void
-    lazy_check_schema(const query::Plan* plan) = 0;
+    LazyCheckSchema(const Schema& sch) = 0;
 
     // reopen segment with new schema
     virtual void
-    reopen(SchemaPtr sch) = 0;
+    Reopen(SchemaPtr sch) = 0;
 
-    // finish_load notifies the segment that all load operation are done
+    // FinishLoad notifies the segment that all load operation are done
     // currently it's used to sync field data list with updated schema.
     virtual void
-    finish_load() = 0;
+    FinishLoad() = 0;
 };
 
 // internal API for DSL calculation
@@ -166,40 +164,40 @@ class SegmentInterface {
 class SegmentInternalInterface : public SegmentInterface {
  public:
     template <typename T>
-    Span<T>
+    PinWrapper<Span<T>>
     chunk_data(FieldId field_id, int64_t chunk_id) const {
-        return static_cast<Span<T>>(chunk_data_impl(field_id, chunk_id));
+        return chunk_data_impl(field_id, chunk_id)
+            .transform<Span<T>>([](SpanBase&& span_base) {
+                return static_cast<Span<T>>(span_base);
+            });
     }
 
     template <typename ViewType>
-    std::pair<std::vector<ViewType>, FixedVector<bool>>
+    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
     chunk_view(FieldId field_id,
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len =
                    std::nullopt) const {
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
-            auto [string_views, valid_data] =
-                chunk_string_view_impl(field_id, chunk_id, offset_len);
-            return std::make_pair(std::move(string_views),
-                                  std::move(valid_data));
+            return chunk_string_view_impl(field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
-            auto [array_views, valid_data] =
-                chunk_array_view_impl(field_id, chunk_id, offset_len);
-            return std::make_pair(array_views, valid_data);
+            return chunk_array_view_impl(field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, Json>) {
-            auto [string_views, valid_data] =
-                chunk_string_view_impl(field_id, chunk_id, offset_len);
+            auto pw = chunk_string_view_impl(field_id, chunk_id, offset_len);
+            auto [string_views, valid_data] = pw.get();
             std::vector<Json> res;
             res.reserve(string_views.size());
             for (const auto& str_view : string_views) {
                 res.emplace_back(str_view);
             }
-            return {std::move(res), std::move(valid_data)};
+            return PinWrapper<
+                std::pair<std::vector<ViewType>, FixedVector<bool>>>(
+                {std::move(res), std::move(valid_data)});
         }
     }
 
     template <typename ViewType>
-    std::pair<std::vector<ViewType>, FixedVector<bool>>
+    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
     get_batch_views(FieldId field_id,
                     int64_t chunk_id,
                     int64_t start_offset,
@@ -213,7 +211,7 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     template <typename ViewType>
-    std::pair<std::vector<ViewType>, FixedVector<bool>>
+    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
     get_views_by_offsets(FieldId field_id,
                          int64_t chunk_id,
                          const FixedVector<int32_t>& offsets) const {
@@ -221,28 +219,32 @@ class SegmentInternalInterface : public SegmentInterface {
             PanicInfo(ErrorCode::Unsupported,
                       "get chunk views not supported for growing segment");
         }
-        auto chunk_view = chunk_view_by_offsets(field_id, chunk_id, offsets);
+        auto pw = chunk_view_by_offsets(field_id, chunk_id, offsets);
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
-            return chunk_view;
+            return pw;
         } else {
+            static_assert(std::is_same_v<ViewType, milvus::Json>,
+                          "only Json is supported for get_views_by_offsets");
             std::vector<ViewType> res;
-            res.reserve(chunk_view.first.size());
-            for (const auto& view : chunk_view.first) {
+            res.reserve(pw.get().first.size());
+            for (const auto& view : pw.get().first) {
                 res.emplace_back(view);
             }
-            return {res, chunk_view.second};
+            return PinWrapper<
+                std::pair<std::vector<ViewType>, FixedVector<bool>>>(
+                {std::move(res), pw.get().second});
         }
     }
 
     template <typename T>
-    const index::ScalarIndex<T>&
+    PinWrapper<const index::ScalarIndex<T>*>
     chunk_scalar_index(FieldId field_id, int64_t chunk_id) const {
         static_assert(IsScalar<T>);
         using IndexType = index::ScalarIndex<T>;
-        auto base_ptr = chunk_index_impl(field_id, chunk_id);
-        auto ptr = dynamic_cast<const IndexType*>(base_ptr);
+        auto pw = chunk_index_impl(field_id, chunk_id);
+        auto ptr = dynamic_cast<const IndexType*>(pw.get());
         AssertInfo(ptr, "entry mismatch");
-        return *ptr;
+        return PinWrapper<const index::ScalarIndex<T>*>(pw, ptr);
     }
 
     // union(segment_id, field_id) as unique id
@@ -253,15 +255,15 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     template <typename T>
-    const index::ScalarIndex<T>&
+    PinWrapper<const index::ScalarIndex<T>*>
     chunk_scalar_index(FieldId field_id,
                        std::string path,
                        int64_t chunk_id) const {
         using IndexType = index::ScalarIndex<T>;
-        auto base_ptr = chunk_index_impl(field_id, path, chunk_id);
-        auto ptr = dynamic_cast<const IndexType*>(base_ptr);
+        auto pw = chunk_index_impl(field_id, path, chunk_id);
+        auto ptr = dynamic_cast<const IndexType*>(pw.get());
         AssertInfo(ptr, "entry mismatch");
-        return *ptr;
+        return PinWrapper<const index::ScalarIndex<T>*>(pw, ptr);
     }
 
     std::unique_ptr<SearchResult>
@@ -461,36 +463,31 @@ class SegmentInternalInterface : public SegmentInterface {
  protected:
     // todo: use an Unified struct for all type in growing/seal segment to store data and valid_data.
     // internal API: return chunk_data in span
-    virtual SpanBase
+    virtual PinWrapper<SpanBase>
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const = 0;
 
     // internal API: return chunk string views in vector
-    virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    virtual PinWrapper<
+        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_string_view_impl(FieldId field_id,
                            int64_t chunk_id,
                            std::optional<std::pair<int64_t, int64_t>>
                                offset_len = std::nullopt) const = 0;
 
-    virtual std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
     chunk_array_view_impl(FieldId field_id,
                           int64_t chunk_id,
                           std::optional<std::pair<int64_t, int64_t>>
                               offset_len = std::nullopt) const = 0;
 
-    // internal API: return buffer reference to field chunk data located from start_offset
-    virtual std::pair<BufferView, FixedVector<bool>>
-    get_chunk_buffer(FieldId field_id,
-                     int64_t chunk_id,
-                     int64_t start_offset,
-                     int64_t length) const = 0;
-
-    virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    virtual PinWrapper<
+        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_view_by_offsets(FieldId field_id,
                           int64_t chunk_id,
                           const FixedVector<int32_t>& offsets) const = 0;
 
     // internal API: return chunk_index in span, support scalar index only
-    virtual const index::IndexBase*
+    virtual PinWrapper<const index::IndexBase*>
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const = 0;
     virtual void
     check_search(const query::Plan* plan) const = 0;
@@ -499,7 +496,7 @@ class SegmentInternalInterface : public SegmentInterface {
     get_timestamps() const = 0;
 
  public:
-    virtual const index::IndexBase*
+    virtual PinWrapper<const index::IndexBase*>
     chunk_index_impl(FieldId field_id,
                      std::string path,
                      int64_t chunk_id) const {
@@ -530,9 +527,6 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual std::vector<SegOffset>
     search_pk(const PkType& pk, Timestamp timestamp) const = 0;
-
-    virtual std::vector<SegOffset>
-    search_pk(const PkType& pk, int64_t insert_barrier) const = 0;
 
  protected:
     mutable std::shared_mutex mutex_;

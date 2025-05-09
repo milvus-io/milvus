@@ -73,13 +73,25 @@ func (n *numberField[T]) GetFloat64(idx int) (float64, error) {
 func getNumberic(inputField *schemapb.FieldData) (any, error) {
 	switch inputField.Type {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-		return &numberField[int32]{inputField.GetScalars().GetIntData().Data}, nil
+		if inputField.GetScalars() != nil && inputField.GetScalars().GetIntData() != nil {
+			return &numberField[int32]{inputField.GetScalars().GetIntData().Data}, nil
+		}
+		return &numberField[int32]{}, nil
 	case schemapb.DataType_Int64:
-		return &numberField[int64]{inputField.GetScalars().GetLongData().Data}, nil
+		if inputField.GetScalars() != nil && inputField.GetScalars().GetLongData() != nil {
+			return &numberField[int64]{inputField.GetScalars().GetLongData().Data}, nil
+		}
+		return &numberField[int64]{}, nil
 	case schemapb.DataType_Float:
-		return &numberField[float32]{inputField.GetScalars().GetFloatData().Data}, nil
+		if inputField.GetScalars() != nil && inputField.GetScalars().GetFloatData() != nil {
+			return &numberField[float32]{inputField.GetScalars().GetFloatData().Data}, nil
+		}
+		return &numberField[float32]{}, nil
 	case schemapb.DataType_Double:
-		return &numberField[float64]{inputField.GetScalars().GetDoubleData().Data}, nil
+		if inputField.GetScalars() != nil && inputField.GetScalars().GetDoubleData() != nil {
+			return &numberField[float64]{inputField.GetScalars().GetDoubleData().Data}, nil
+		}
+		return &numberField[float64]{}, nil
 	default:
 		return nil, fmt.Errorf("Unsupported field type:%s, only support numberic field", inputField.Type.String())
 	}

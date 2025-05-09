@@ -19,7 +19,8 @@
 #include "segcore/segment_c.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/c_api_test_utils.h"
-
+#include "test_utils/storage_test_utils.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
@@ -27,35 +28,6 @@ using namespace milvus::storage;
 using namespace milvus::tracer;
 
 const char* METRICS_TYPE = "metric_type";
-
-void
-prepareSegmentSystemFieldData(const std::unique_ptr<SegmentSealed>& segment,
-                              size_t row_count,
-                              GeneratedData& data_set) {
-    auto field_data =
-        std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
-    field_data->FillFieldData(data_set.row_ids_.data(), row_count);
-    auto arrow_data_wrapper =
-        storage::ConvertFieldDataToArrowDataWrapper(field_data);
-    auto field_data_info = FieldDataInfo{
-        RowFieldID.get(),
-        row_count,
-        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
-    segment->LoadFieldData(RowFieldID, field_data_info);
-
-    field_data =
-        std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
-    field_data->FillFieldData(data_set.timestamps_.data(), row_count);
-
-    auto timestamp_arrow_data_wrapper =
-        storage::ConvertFieldDataToArrowDataWrapper(field_data);
-    field_data_info =
-        FieldDataInfo{TimestampFieldID.get(),
-                      row_count,
-                      std::vector<std::shared_ptr<ArrowDataWrapper>>{
-                          timestamp_arrow_data_wrapper}};
-    segment->LoadFieldData(TimestampFieldID, field_data_info);
-}
 
 int
 GetSearchResultBound(const SearchResult& search_result) {
@@ -98,26 +70,11 @@ TEST(GroupBY, SealedIndex) {
     auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
     schema->set_primary_field_id(str_fid);
-    auto segment = CreateSealedSegment(schema);
     size_t N = 50;
 
     //2. load raw data
     auto raw_data = DataGen(schema, N, 42, 0, 8, 10, false, false);
-    auto fields = schema->get_fields();
-    for (const auto& field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N);
-        auto field_meta = fields.at(FieldId(field_id));
-        // Assuming 'channel' is not a member of FieldDataInfo, we need to handle it differently
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        segment->LoadFieldData(FieldId(field_id), info);
-    }
-    prepareSegmentSystemFieldData(segment, N, raw_data);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
 
     //3. load index
     auto vector_data = raw_data.get_col<float>(vec_fid);
@@ -125,7 +82,9 @@ TEST(GroupBY, SealedIndex) {
         N, dim, vector_data.data(), knowhere::IndexEnum::INDEX_HNSW);
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
-    load_index_info.index = std::move(indexing);
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
     load_index_info.index_params[METRICS_TYPE] = knowhere::metric::L2;
     segment->LoadIndex(load_index_info);
     int topK = 15;
@@ -453,25 +412,11 @@ TEST(GroupBY, SealedData) {
     auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
     schema->set_primary_field_id(str_fid);
-    auto segment = CreateSealedSegment(schema);
     size_t N = 100;
 
     //2. load raw data
     auto raw_data = DataGen(schema, N, 42, 0, 20, 10, false, false);
-    auto fields = schema->get_fields();
-    for (auto&& field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N);
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(
-                N, &field_data, fields.at(FieldId(field_id))));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-
-        segment->LoadFieldData(FieldId(field_id), info);
-    }
-    prepareSegmentSystemFieldData(segment, N, raw_data);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
 
     int topK = 10;
     int group_size = 5;
@@ -541,14 +486,12 @@ TEST(GroupBY, Reduce) {
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64, true);
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64, false);
     auto fp16_fid = schema->AddDebugField(
         "fakevec_fp16", DataType::VECTOR_FLOAT16, dim, knowhere::metric::L2);
     auto bf16_fid = schema->AddDebugField(
         "fakevec_bf16", DataType::VECTOR_BFLOAT16, dim, knowhere::metric::L2);
     schema->set_primary_field_id(int64_fid);
-    auto segment1 = CreateSealedSegment(schema);
-    auto segment2 = CreateSealedSegment(schema);
 
     //1. load raw data
     size_t N = 100;
@@ -561,32 +504,8 @@ TEST(GroupBY, Reduce) {
     auto raw_data2 =
         DataGen(schema, N, seed, ts_offset, repeat_count_2, false, false);
 
-    auto fields = schema->get_fields();
-    //load segment1 raw data
-    for (auto field_data : raw_data1.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-        auto info = FieldDataInfo(field_data.field_id(), N);
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-        segment1->LoadFieldData(FieldId(field_id), info);
-    }
-    prepareSegmentSystemFieldData(segment1, N, raw_data1);
-
-    //load segment2 raw data
-    for (auto&& field_data : raw_data2.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-        auto info = FieldDataInfo(field_data.field_id(), N);
-        auto field_meta = fields.at(FieldId(field_id));
-        auto arrow_data_wrapper = storage::ConvertFieldDataToArrowDataWrapper(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.arrow_reader_channel->push(arrow_data_wrapper);
-        info.arrow_reader_channel->close();
-        segment2->LoadFieldData(FieldId(field_id), info);
-    }
-    prepareSegmentSystemFieldData(segment2, N, raw_data2);
+    auto segment1 = CreateSealedWithFieldDataLoaded(schema, raw_data1);
+    auto segment2 = CreateSealedWithFieldDataLoaded(schema, raw_data2);
 
     //3. load index
     auto vector_data_1 = raw_data1.get_col<float>(vec_fid);
@@ -594,7 +513,9 @@ TEST(GroupBY, Reduce) {
         N, dim, vector_data_1.data(), knowhere::IndexEnum::INDEX_HNSW);
     LoadIndexInfo load_index_info_1;
     load_index_info_1.field_id = vec_fid.get();
-    load_index_info_1.index = std::move(indexing_1);
+    load_index_info_1.index_params = GenIndexParams(indexing_1.get());
+    load_index_info_1.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing_1));
     load_index_info_1.index_params[METRICS_TYPE] = knowhere::metric::L2;
     segment1->LoadIndex(load_index_info_1);
 
@@ -603,7 +524,9 @@ TEST(GroupBY, Reduce) {
         N, dim, vector_data_2.data(), knowhere::IndexEnum::INDEX_HNSW);
     LoadIndexInfo load_index_info_2;
     load_index_info_2.field_id = vec_fid.get();
-    load_index_info_2.index = std::move(indexing_2);
+    load_index_info_2.index_params = GenIndexParams(indexing_2.get());
+    load_index_info_2.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing_2));
     load_index_info_2.index_params[METRICS_TYPE] = knowhere::metric::L2;
     segment2->LoadIndex(load_index_info_2);
 

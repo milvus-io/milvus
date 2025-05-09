@@ -37,7 +37,6 @@ set(MILVUS_TEST_FILES
         test_bitmap_index.cpp
         test_bool_index.cpp
         test_c_api.cpp
-        test_chunk_cache.cpp
         test_chunk.cpp
         test_chunk_vector.cpp
         test_common.cpp
@@ -100,6 +99,10 @@ set(MILVUS_TEST_FILES
         test_types.cpp
         test_growing_storage_v2.cpp
         test_memory_planner.cpp
+        test_storage_v2_index_raw_data.cpp
+        test_chunked_column_group.cpp
+        test_group_chunk_translator.cpp
+        test_chunked_segment_storage_v2.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )
@@ -121,7 +124,8 @@ if (LINUX OR APPLE)
             ${MILVUS_TEST_FILES}
             test_scalar_index_creator.cpp
             test_string_index.cpp
-            test_array.cpp test_array_expr.cpp)
+            test_array.cpp
+            test_array_expr.cpp)
 endif()
 
 if (DEFINED AZURE_BUILD_DIR)
@@ -177,6 +181,7 @@ add_executable(all_tests
 
 target_link_libraries(all_tests
         gtest
+        gmock
         milvus_core
         knowhere
         milvus-storage
@@ -185,26 +190,27 @@ target_link_libraries(all_tests
 install(TARGETS all_tests DESTINATION unittest)
 
 add_subdirectory(bench)
+add_subdirectory(test_cachinglayer)
 
 # if (USE_DYNAMIC_SIMD)
 # add_executable(dynamic_simd_test
 #                test_simd.cpp)
-# 
+#
 # target_link_libraries(dynamic_simd_test
 #                 milvus_simd
 #                 milvus_log
 #                 gtest
 #                 ${CONAN_LIBS})
-# 
+#
 # install(TARGETS dynamic_simd_test DESTINATION unittest)
 # endif()
 
-add_executable(bitset_test 
+add_executable(bitset_test
         test_bitset.cpp
 )
-target_link_libraries(bitset_test 
-        milvus_bitset 
-        gtest 
+target_link_libraries(bitset_test
+        milvus_bitset
+        gtest
         ${CONAN_LIBS}
 )
 install(TARGETS bitset_test DESTINATION unittest)

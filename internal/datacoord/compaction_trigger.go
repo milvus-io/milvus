@@ -700,6 +700,14 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		return true
 	}
 
+	if t.ShouldRebuildSegmentIndex(segment) {
+		return true
+	}
+
+	return false
+}
+
+func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool {
 	if Params.DataCoordCfg.AutoUpgradeSegmentIndex.GetAsBool() {
 		// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
 		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
@@ -712,6 +720,24 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 					zap.Strings("indexFileKeys", index.IndexFileKeys),
 					zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
 					zap.Int32("currentEngineVersion", t.indexEngineVersionManager.GetCurrentIndexEngineVersion()))
+				return true
+			}
+		}
+	}
+
+	// enable force rebuild index with target index version
+	if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() && Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
+		// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
+		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+		for _, index := range indexIDToSegIdxes {
+			if index.CurrentIndexVersion != Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32() &&
+				len(index.IndexFileKeys) > 0 {
+				log.Info("index version is not equal to target vec index version, trigger compaction",
+					zap.Int64("segmentID", segment.ID),
+					zap.Int64("indexID", index.IndexID),
+					zap.Strings("indexFileKeys", index.IndexFileKeys),
+					zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
+					zap.Int32("targetIndexVersion", Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32()))
 				return true
 			}
 		}

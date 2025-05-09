@@ -13,11 +13,9 @@
 
 #include "pb/schema.pb.h"
 #include "query/PlanImpl.h"
-#include "query/PlanNode.h"
-#include "query/ExecPlanNodeVisitor.h"
-#include "segcore/SegmentSealed.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/storage_test_utils.h"
 
 using json = nlohmann::json;
 using namespace milvus;
@@ -594,11 +592,7 @@ TEST(Query, DISABLED_FillSegment) {
                         dataset.raw_);
         return segment;
     }());
-    segments.emplace_back([&] {
-        auto segment = CreateSealedSegment(schema);
-        SealedLoadFieldData(dataset, *segment);
-        return segment;
-    }());
+    segments.emplace_back(CreateSealedWithFieldDataLoaded(schema, dataset));
 
     // add field
     {

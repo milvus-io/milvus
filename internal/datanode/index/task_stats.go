@@ -413,6 +413,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		zap.Int64("collectionID", st.req.GetCollectionID()),
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
+		zap.Int64("storageVersion", st.req.GetStorageVersion()),
 	)
 
 	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
@@ -451,16 +452,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			return err
 		}
 
-		buildIndexParams := &indexcgopb.BuildIndexInfo{
-			BuildID:       taskID,
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			SegmentID:     segmentID,
-			IndexVersion:  version,
-			InsertFiles:   files,
-			FieldSchema:   field,
-			StorageConfig: newStorageConfig,
-		}
+		buildIndexParams := buildIndexParams(st.req, files, field, newStorageConfig, 0)
 
 		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
 		if err != nil {
@@ -550,17 +542,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			return err
 		}
 
-		buildIndexParams := &indexcgopb.BuildIndexInfo{
-			BuildID:                   taskID,
-			CollectionID:              collectionID,
-			PartitionID:               partitionID,
-			SegmentID:                 segmentID,
-			IndexVersion:              version,
-			InsertFiles:               files,
-			FieldSchema:               field,
-			StorageConfig:             newStorageConfig,
-			JsonKeyStatsTantivyMemory: tantivyMemory,
-		}
+		buildIndexParams := buildIndexParams(st.req, files, field, newStorageConfig, tantivyMemory)
 
 		uploaded, err := indexcgowrapper.CreateJSONKeyStats(ctx, buildIndexParams)
 		if err != nil {
@@ -594,4 +576,37 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
 		zap.Duration("total elapse", totalElapse))
 	return nil
+}
+
+func buildIndexParams(
+	req *workerpb.CreateStatsRequest,
+	files []string,
+	field *schemapb.FieldSchema,
+	storageConfig *indexcgopb.StorageConfig,
+	tantivyMemory int64,
+) *indexcgopb.BuildIndexInfo {
+	params := &indexcgopb.BuildIndexInfo{
+		BuildID:                   req.GetTaskID(),
+		CollectionID:              req.GetCollectionID(),
+		PartitionID:               req.GetPartitionID(),
+		SegmentID:                 req.GetTargetSegmentID(),
+		IndexVersion:              req.GetTaskVersion(),
+		InsertFiles:               files,
+		FieldSchema:               field,
+		StorageConfig:             storageConfig,
+		CurrentScalarIndexVersion: req.GetCurrentScalarIndexVersion(),
+		StorageVersion:            req.GetStorageVersion(),
+		JsonKeyStatsTantivyMemory: tantivyMemory,
+	}
+
+	if req.GetStorageVersion() == storage.StorageV2 {
+		params.SegmentInsertFiles = GetSegmentInsertFiles(
+			req.GetInsertLogs(),
+			req.GetStorageConfig().RootPath,
+			req.GetCollectionID(),
+			req.GetPartitionID(),
+			req.GetTargetSegmentID())
+	}
+
+	return params
 }

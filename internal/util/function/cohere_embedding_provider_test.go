@@ -82,7 +82,7 @@ func createCohereProvider(url string, schema *schemapb.FieldSchema, providerName
 	}
 	switch providerName {
 	case cohereProvider:
-		return NewCohereEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
+		return NewCohereEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -270,18 +270,18 @@ func (s *CohereTextEmbeddingProviderSuite) TestNewCohereProvider() {
 		},
 	}
 
-	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
+	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 	s.NoError(err)
 	s.Equal(provider.truncate, "END")
 
 	functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: truncateParamKey, Value: "START"})
-	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
+	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 	s.NoError(err)
 	s.Equal(provider.truncate, "START")
 
 	// Invalid truncateParam
 	functionSchema.Params[2].Value = "Unknow"
-	_, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
+	_, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 	s.Error(err)
 }
 
@@ -299,13 +299,13 @@ func (s *CohereTextEmbeddingProviderSuite) TestGetInputType() {
 		},
 	}
 
-	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
+	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 	s.NoError(err)
 	s.Equal(provider.getInputType(InsertMode), "")
 	s.Equal(provider.getInputType(SearchMode), "")
 
 	functionSchema.Params[0].Value = "model-v3.0"
-	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
+	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 	s.NoError(err)
 	s.Equal(provider.getInputType(InsertMode), "search_document")
 	s.Equal(provider.getInputType(SearchMode), "search_query")

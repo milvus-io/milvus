@@ -22,6 +22,7 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "segcore/Record.h"
 #include "common/Exception.h"
 #include "knowhere/sparse_utils.h"
 #include "pb/schema.pb.h"
@@ -39,16 +40,39 @@ TEST(Util, StringMatch) {
 
     ASSERT_TRUE(PrefixMatch("prefix1", "prefix"));
     ASSERT_TRUE(PostfixMatch("1postfix", "postfix"));
+    ASSERT_TRUE(InnerMatch("xxinner1xx", "inner"));
     ASSERT_TRUE(Match(
         std::string("prefix1"), std::string("prefix"), OpType::PrefixMatch));
     ASSERT_TRUE(Match(
         std::string("1postfix"), std::string("postfix"), OpType::PostfixMatch));
+    ASSERT_TRUE(Match(std::string("xxpostfixxx"),
+                      std::string("postfix"),
+                      OpType::InnerMatch));
 
     ASSERT_FALSE(PrefixMatch("", "longer"));
     ASSERT_FALSE(PostfixMatch("", "longer"));
+    ASSERT_FALSE(InnerMatch("", "longer"));
 
     ASSERT_FALSE(PrefixMatch("dontmatch", "prefix"));
-    ASSERT_FALSE(PostfixMatch("dontmatch", "postfix"));
+    ASSERT_FALSE(InnerMatch("dontmatch", "postfix"));
+
+    ASSERT_TRUE(Match(std::string_view("prefix1"),
+                      std::string("prefix"),
+                      OpType::PrefixMatch));
+
+    ASSERT_TRUE(Match(std::string_view("1postfix"),
+                      std::string("postfix"),
+                      OpType::PostfixMatch));
+
+    ASSERT_TRUE(Match(std::string_view("xxpostfixxx"),
+                      std::string("postfix"),
+                      OpType::InnerMatch));
+    ASSERT_TRUE(
+        Match(std::string_view("x"), std::string("x"), OpType::PrefixMatch));
+    ASSERT_FALSE(
+        Match(std::string_view(""), std::string("x"), OpType::InnerMatch));
+    ASSERT_TRUE(
+        Match(std::string_view("x"), std::string(""), OpType::InnerMatch));
 }
 
 TEST(Util, GetDeleteBitmap) {
@@ -63,7 +87,7 @@ TEST(Util, GetDeleteBitmap) {
     schema->set_primary_field_id(i64_fid);
     auto N = 10;
     uint64_t seg_id = 101;
-    InsertRecord insert_record(*schema, N);
+    InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
         [&insert_record](const PkType& pk, Timestamp timestamp) {

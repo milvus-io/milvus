@@ -105,11 +105,19 @@ class HybridScalarIndex : public ScalarIndex<T> {
         return internal_index_->Query(dataset);
     }
 
+    bool
+    SupportPatternMatch() const override {
+        return internal_index_->SupportPatternMatch();
+    }
+
     const TargetBitmap
-    PatternMatch(const std::string& pattern) override {
-        PatternMatchTranslator translator;
-        auto regex_pattern = translator(pattern);
-        return RegexQuery(regex_pattern);
+    PatternMatch(const std::string& pattern, proto::plan::OpType op) override {
+        return internal_index_->PatternMatch(pattern, op);
+    }
+
+    bool
+    TryUseRegexQuery() const override {
+        return internal_index_->TryUseRegexQuery();
     }
 
     bool

@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus/pkg/v2
 
-go 1.24.1
+go 1.24.2
 
 require (
 	cloud.google.com/go/storage v1.43.0
@@ -20,10 +20,8 @@ require (
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.17.9
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.0-beta.0.20250325034212-6e98baa34971
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.0-beta.0.20250429023443-20f3b3d3e030
 	github.com/minio/minio-go/v7 v7.0.73
-	github.com/nats-io/nats-server/v2 v2.10.12
-	github.com/nats-io/nats.go v1.34.1
 	github.com/panjf2000/ants/v2 v2.7.2
 	github.com/prometheus/client_golang v1.14.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
@@ -41,7 +39,7 @@ require (
 	github.com/tikv/client-go/v2 v2.0.4
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	github.com/x448/float16 v0.8.4
-	github.com/zilliztech/woodpecker v0.0.0-20250418010644-1a9ae136fa65
+	github.com/zilliztech/woodpecker v0.0.0-20250427123625-654f0175eff0
 	go.etcd.io/etcd/api/v3 v3.5.5
 	go.etcd.io/etcd/client/v3 v3.5.5
 	go.etcd.io/etcd/server/v3 v3.5.5
@@ -146,14 +144,10 @@ require (
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mattn/go-runewidth v0.0.8 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-	github.com/minio/highwayhash v1.0.2 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mtibben/percent v0.2.1 // indirect
-	github.com/nats-io/jwt/v2 v2.5.5 // indirect
-	github.com/nats-io/nkeys v0.4.7 // indirect
-	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect

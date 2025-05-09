@@ -35,6 +35,7 @@
 #include "common/File.h"
 #include "common/Slice.h"
 #include "common/Types.h"
+#include "index/Utils.h"
 #include "log/Log.h"
 
 #include "storage/DiskFileManagerImpl.h"
@@ -42,6 +43,7 @@
 #include "storage/IndexData.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
 
 namespace milvus::storage {
@@ -220,7 +222,7 @@ DiskFileManagerImpl::AddBatchIndexFiles(
 void
 DiskFileManagerImpl::CacheIndexToDiskInternal(
     const std::vector<std::string>& remote_files,
-    const std::function<std::string()>& get_local_index_prefix) noexcept {
+    const std::function<std::string()>& get_local_index_prefix) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
 
@@ -308,7 +310,24 @@ DiskFileManagerImpl::CacheJsonKeyIndexToDisk(
 
 template <typename DataType>
 std::string
-DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
+DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
+    auto storage_version =
+        index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
+            .value_or(0);
+    if (storage_version == STORAGE_V2) {
+        return cache_raw_data_to_disk_storage_v2<DataType>(config);
+    }
+    return cache_raw_data_to_disk_internal<DataType>(config);
+}
+
+template <typename DataType>
+std::string
+DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
+    auto insert_files = index::GetValueFromConfig<std::vector<std::string>>(
+        config, INSERT_FILES_KEY);
+    AssertInfo(insert_files.has_value(),
+               "insert file paths is empty when build index");
+    auto remote_files = insert_files.value();
     SortByPath(remote_files);
 
     auto segment_id = GetFieldDataMeta().segment_id;
@@ -318,16 +337,6 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string local_data_path;
     bool file_created = false;
-
-    auto init_file_info = [&](milvus::DataType dt) {
-        local_data_path = storage::GenFieldRawDataPathPrefix(
-                              local_chunk_manager, segment_id, field_id) +
-                          "raw_data";
-        if (dt == milvus::DataType::VECTOR_SPARSE_FLOAT) {
-            local_data_path += ".sparse_u32_f32";
-        }
-        local_chunk_manager->CreateFile(local_data_path);
-    };
 
     // get batch raw data from s3 and write batch data to disk file
     // TODO: load and write of different batches at the same time
@@ -342,52 +351,15 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
     auto FetchRawData = [&]() {
         auto field_datas = GetObjectData(rcm_.get(), batch_files);
         int batch_size = batch_files.size();
-        for (int i = 0; i < batch_size; ++i) {
+        for (int i = 0; i < batch_size; i++) {
             auto field_data = field_datas[i].get()->GetFieldData();
             num_rows += uint32_t(field_data->get_num_rows());
-            auto data_type = field_data->get_data_type();
-            if (!file_created) {
-                init_file_info(data_type);
-                file_created = true;
-            }
-            if (data_type == milvus::DataType::VECTOR_SPARSE_FLOAT) {
-                dim = std::max(
-                    dim,
-                    (uint32_t)(std::dynamic_pointer_cast<
-                                   FieldData<SparseFloatVector>>(field_data)
-                                   ->Dim()));
-                auto sparse_rows =
-                    static_cast<const knowhere::sparse::SparseRow<float>*>(
-                        field_data->Data());
-                for (size_t i = 0; i < field_data->Length(); ++i) {
-                    auto row = sparse_rows[i];
-                    auto row_byte_size = row.data_byte_size();
-                    uint32_t nnz = row.size();
-                    local_chunk_manager->Write(local_data_path,
-                                               write_offset,
-                                               const_cast<uint32_t*>(&nnz),
-                                               sizeof(nnz));
-                    write_offset += sizeof(nnz);
-                    local_chunk_manager->Write(local_data_path,
-                                               write_offset,
-                                               row.data(),
-                                               row_byte_size);
-                    write_offset += row_byte_size;
-                }
-            } else {
-                AssertInfo(dim == 0 || dim == field_data->get_dim(),
-                           "inconsistent dim value in multi binlogs!");
-                dim = field_data->get_dim();
-
-                auto data_size = field_data->get_num_rows() *
-                                 milvus::GetVecRowSize<DataType>(dim);
-                local_chunk_manager->Write(
-                    local_data_path,
-                    write_offset,
-                    const_cast<void*>(field_data->Data()),
-                    data_size);
-                write_offset += data_size;
-            }
+            cache_raw_data_to_disk_common<DataType>(field_data,
+                                                    local_chunk_manager,
+                                                    local_data_path,
+                                                    file_created,
+                                                    dim,
+                                                    write_offset);
         }
     };
 
@@ -413,6 +385,114 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
     write_offset += sizeof(num_rows);
     local_chunk_manager->Write(
         local_data_path, write_offset, &dim, sizeof(dim));
+
+    return local_data_path;
+}
+
+template <typename DataType>
+void
+DiskFileManagerImpl::cache_raw_data_to_disk_common(
+    const FieldDataPtr& field_data,
+    const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
+    std::string& local_data_path,
+    bool& file_created,
+    uint32_t& dim,
+    int64_t& write_offset) {
+    auto data_type = field_data->get_data_type();
+    if (!file_created) {
+        auto init_file_info = [&](milvus::DataType dt) {
+            local_data_path = storage::GenFieldRawDataPathPrefix(
+                                  local_chunk_manager,
+                                  GetFieldDataMeta().segment_id,
+                                  GetFieldDataMeta().field_id) +
+                              "raw_data";
+            if (dt == milvus::DataType::VECTOR_SPARSE_FLOAT) {
+                local_data_path += ".sparse_u32_f32";
+            }
+            local_chunk_manager->CreateFile(local_data_path);
+        };
+        init_file_info(data_type);
+        file_created = true;
+    }
+    if (data_type == milvus::DataType::VECTOR_SPARSE_FLOAT) {
+        dim =
+            (uint32_t)(std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
+                           field_data)
+                           ->Dim());
+        auto sparse_rows =
+            static_cast<const knowhere::sparse::SparseRow<float>*>(
+                field_data->Data());
+        for (size_t i = 0; i < field_data->Length(); ++i) {
+            auto row = sparse_rows[i];
+            auto row_byte_size = row.data_byte_size();
+            uint32_t nnz = row.size();
+            local_chunk_manager->Write(local_data_path,
+                                       write_offset,
+                                       const_cast<uint32_t*>(&nnz),
+                                       sizeof(nnz));
+            write_offset += sizeof(nnz);
+            local_chunk_manager->Write(
+                local_data_path, write_offset, row.data(), row_byte_size);
+            write_offset += row_byte_size;
+        }
+    } else {
+        dim = field_data->get_dim();
+        auto data_size =
+            field_data->get_num_rows() * milvus::GetVecRowSize<DataType>(dim);
+        local_chunk_manager->Write(local_data_path,
+                                   write_offset,
+                                   const_cast<void*>(field_data->Data()),
+                                   data_size);
+        write_offset += data_size;
+    }
+}
+
+template <typename T>
+std::string
+DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
+    auto data_type = index::GetValueFromConfig<DataType>(config, DATA_TYPE_KEY);
+    AssertInfo(data_type.has_value(), "data type is empty when build index");
+    auto dim = index::GetValueFromConfig<int64_t>(config, DIM_KEY).value_or(0);
+    auto segment_insert_files =
+        index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
+            config, SEGMENT_INSERT_FILES_KEY);
+    AssertInfo(segment_insert_files.has_value(),
+               "segment insert files is empty when build index");
+    auto all_remote_files = segment_insert_files.value();
+    for (auto& remote_files : all_remote_files) {
+        SortByPath(remote_files);
+    }
+
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    std::string local_data_path;
+    bool file_created = false;
+
+    // file format
+    // num_rows(uint32) | dim(uint32) | index_data ([]uint8_t)
+    uint32_t num_rows = 0;
+    uint32_t var_dim = 0;
+    int64_t write_offset = sizeof(num_rows) + sizeof(var_dim);
+
+    auto field_datas = GetFieldDatasFromStorageV2(
+        all_remote_files, GetFieldDataMeta().field_id, data_type.value(), dim);
+    for (auto& field_data : field_datas) {
+        num_rows += uint32_t(field_data->get_num_rows());
+        cache_raw_data_to_disk_common<DataType>(field_data,
+                                                local_chunk_manager,
+                                                local_data_path,
+                                                file_created,
+                                                var_dim,
+                                                write_offset);
+    }
+
+    // write num_rows and dim value to file header
+    write_offset = 0;
+    local_chunk_manager->Write(
+        local_data_path, write_offset, &num_rows, sizeof(num_rows));
+    write_offset += sizeof(num_rows);
+    local_chunk_manager->Write(
+        local_data_path, write_offset, &var_dim, sizeof(var_dim));
 
     return local_data_path;
 }
@@ -692,15 +772,12 @@ DiskFileManagerImpl::IsExisted(const std::string& file) noexcept {
 }
 
 template std::string
-DiskFileManagerImpl::CacheRawDataToDisk<float>(
-    std::vector<std::string> remote_files);
+DiskFileManagerImpl::CacheRawDataToDisk<float>(const Config& config);
 template std::string
-DiskFileManagerImpl::CacheRawDataToDisk<float16>(
-    std::vector<std::string> remote_files);
+DiskFileManagerImpl::CacheRawDataToDisk<float16>(const Config& config);
 template std::string
-DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(
-    std::vector<std::string> remote_files);
+DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(const Config& config);
 template std::string
-DiskFileManagerImpl::CacheRawDataToDisk<bin1>(
-    std::vector<std::string> remote_files);
+DiskFileManagerImpl::CacheRawDataToDisk<bin1>(const Config& config);
+
 }  // namespace milvus::storage

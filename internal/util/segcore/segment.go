@@ -229,8 +229,6 @@ func (s *cSegmentImpl) preInsert(numOfRecords int) (int64, error) {
 
 // Delete deletes entities from the segment.
 func (s *cSegmentImpl) Delete(ctx context.Context, request *DeleteRequest) (*DeleteResult, error) {
-	cOffset := C.int64_t(0) // depre
-
 	cSize := C.int64_t(request.PrimaryKeys.Len())
 	cTimestampsPtr := (*C.uint64_t)(&(request.Timestamps)[0])
 
@@ -244,7 +242,6 @@ func (s *cSegmentImpl) Delete(ctx context.Context, request *DeleteRequest) (*Del
 		return nil, fmt.Errorf("failed to marshal ids: %s", err)
 	}
 	status := C.Delete(s.ptr,
-		cOffset,
 		cSize,
 		(*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
 		(C.uint64_t)(len(dataBlob)),

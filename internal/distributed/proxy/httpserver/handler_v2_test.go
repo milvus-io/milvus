@@ -471,7 +471,7 @@ func TestDocInDocOutCreateCollection(t *testing.T) {
 				"outputFieldNames": ["sparse_vector_1"]
 			}
 		]`)),
-		errMsg:  "actual=BM25_",
+		errMsg:  "Unsupported function type: BM25_",
 		errCode: 1100,
 	})
 
@@ -484,7 +484,7 @@ func TestDocInDocOutCreateCollection(t *testing.T) {
 				"outputFieldNames": ["sparse_vector_1"]
 			}
 		]`)),
-		errMsg:  "actual=", // unprovided function type is empty string
+		errMsg:  "Unsupported function type:", // unprovided function type is empty string
 		errCode: 1100,
 	})
 
@@ -602,6 +602,77 @@ func TestDocInDocOutInsertInvalid(t *testing.T) {
 	}
 
 	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
+func TestSearchWithRerank(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+		TopK:         int64(3),
+		OutputFields: []string{FieldWordCount},
+		FieldsData:   generateFieldData(),
+		Ids:          generateIDs(schemapb.DataType_Int64, 3),
+		Scores:       DefaultScores,
+	}}, nil).Once()
+
+	testcase := requestBodyTestCase{
+		path: versionalV2(EntityCategory, SearchAction),
+		requestBody: []byte(`{
+                                         "collectionName": "book",
+                                         "data": [[0.1, 0.2]],
+                                         "limit": 4,
+                                         "outputFields": ["word_count"],
+                                         "functionScore": {
+                                             "functions": [{
+                                                  "name": "testRank",
+                                                  "description": "",
+                                                  "type": "Rerank",
+                                                  "inputFieldNames": ["FieldWordCount"],
+                                                  "params": {"name": "decay"}
+                                          }]}}`),
+	}
+	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
+func TestHybridSearchWithRerank(t *testing.T) {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+
+	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+		TopK:         int64(3),
+		OutputFields: []string{FieldWordCount},
+		FieldsData:   generateFieldData(),
+		Ids:          generateIDs(schemapb.DataType_Int64, 3),
+		Scores:       DefaultScores,
+	}}, nil).Once()
+
+	queryTestCases := requestBodyTestCase{
+		path:        versionalV2(EntityCategory, HybridSearchAction),
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}, {"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}], "functionScore": {"functions": [{"name": "testRank", "type": "Rerank", "inputFieldNames": ["FieldWordCount"], "params": {"name": "decay"}}]}}`),
+	}
+	sendReqAndVerify(t, testEngine, queryTestCases.path, http.MethodPost, queryTestCases)
 }
 
 func TestDocInDocOutSearch(t *testing.T) {
