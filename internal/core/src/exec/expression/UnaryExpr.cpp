@@ -1247,8 +1247,6 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                         CompareValueWithOpType(type, value, val, op_type);
                     case proto::plan::NotEqual:
                         CompareValueWithOpType(type, value, val, op_type);
-                    case proto::plan::PrefixMatch:
-                    case proto::plan::Match:
                     default:
                         return false;
                 }
@@ -1378,6 +1376,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                                 }
                             }
                         }
+                    case proto::plan::InnerMatch:
+                    case proto::plan::PostfixMatch:
                     case proto::plan::PrefixMatch:
                         if constexpr (std::is_same_v<GetType,
                                                      proto::plan::Array>) {
