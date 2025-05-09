@@ -317,7 +317,7 @@ message SegmentInfo {
   string insert_channel = 4;
   int64 num_of_rows = 5;
   common.SegmentState state = 6;
-  int64 max_row_num = 7;
+  int64 max_row_num = 7 [deprecated = true]; // deprecated, we use the binary size to control the segment size but not a estimate rows.
   uint64 last_expire_time = 8;
   msg.MsgPosition start_position = 9;
   msg.MsgPosition dml_position = 10;
