@@ -323,7 +323,8 @@ class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
                                check_task=CheckTasks.check_search_results,
                                check_items={"enable_milvus_client_api": True,
                                             "nq": len(vectors_to_search),
-                                            "limit": default_limit})
+                                            "limit": default_limit,
+                                            "pk_name": default_primary_key_field_name})
         tasks.append(search_task)
         # 6. query
         query_task = self.async_milvus_client_wrap. \
@@ -331,7 +332,7 @@ class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
                               check_task=CheckTasks.check_query_results,
                               check_items={"exp_res": rows,
                                            "with_vec": True,
-                                           "primary_field": default_primary_key_field_name})
+                                           "pk_name": default_primary_key_field_name})
         tasks.append(query_task)
         res = await asyncio.gather(*tasks)
 

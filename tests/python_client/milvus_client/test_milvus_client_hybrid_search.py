@@ -365,7 +365,8 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
                            check_items={"enable_milvus_client_api": True,
                                         "nq": len(vectors_to_search),
                                         "ids": insert_ids,
-                                        "limit": default_limit})
+                                        "limit": default_limit,
+                                        "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -396,6 +397,7 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
                            check_items={"enable_milvus_client_api": True,
                                         "nq": len(vectors_to_search),
                                         "ids": insert_ids,
+                                        "pk_name": default_primary_key_field_name,
                                         "limit": default_limit})
         self.drop_collection(client, collection_name)
 
@@ -472,6 +474,7 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
                            check_items={"enable_milvus_client_api": True,
                                         "nq": len(vectors_to_search),
                                         "ids": insert_ids,
+                                        "pk_name": default_primary_key_field_name,
                                         "limit": default_limit})
         sub_search1 = AnnSearchRequest(vectors_to_search, default_vector_field_name, {"level": 1}, 20,
                                        expr=f"{json_field_name}['a']['b']>=10")
@@ -484,5 +487,6 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
                            check_items={"enable_milvus_client_api": True,
                                         "nq": len(vectors_to_search),
                                         "ids": insert_ids,
+                                        "pk_name": default_primary_key_field_name,
                                         "limit": default_limit})
         self.drop_collection(client, collection_name)

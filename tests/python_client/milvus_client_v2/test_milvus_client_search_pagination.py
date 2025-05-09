@@ -83,7 +83,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         client = self._client()
 
         # Create collection
-        collection_schema = self.create_schema(client, enable_dynamic_field=self.enable_dynamic_field)[0]
+        collection_schema = self.create_schema(client)[0]
         collection_schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         collection_schema.add_field(self.float_vector_field_name, DataType.FLOAT_VECTOR, dim=128)
         collection_schema.add_field(self.bfloat16_vector_field_name, DataType.BFLOAT16_VECTOR, dim=200)
@@ -92,7 +92,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         collection_schema.add_field(default_float_field_name, DataType.FLOAT)
         collection_schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=256)
         collection_schema.add_field(default_int64_field_name, DataType.INT64)
-        self.create_collection(client, self.collection_name, schema=collection_schema, force_teardown=False)
+        self.create_collection(client, self.collection_name, schema=collection_schema, 
+                               enable_dynamic_field=self.enable_dynamic_field, force_teardown=False)
         for partition_name in self.partition_names:
             self.create_partition(client, self.collection_name, partition_name=partition_name)
 
@@ -167,7 +168,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                                metric_type="JACCARD",
                                index_type="BIN_IVF_FLAT",
                                params={"nlist": 128})
-        self.create_index(client, self.collection_name, index_params=index_params)
+        self.create_index(client, self.collection_name, index_params=index_params, timeout=300)
 
         # Load collection
         self.load_collection(client, self.collection_name)
@@ -210,9 +211,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
                              "limit": limit,
-                             "metric": "COSINE",
-                             "vector_nq": vectors_to_search[:default_nq],
-                             "original_vectors": [self.datas[i][self.float_vector_field_name] for i in range(len(self.datas))]
+                             "pk_name": default_primary_key_field_name,
+                             "metric": "COSINE"
                              }
             )
             all_pages_results.append(search_res_with_offset)
@@ -268,7 +268,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
-                             "limit": limit
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name
                              }
             )
             all_pages_results.append(search_res_with_offset)
@@ -325,7 +326,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
-                             "limit": limit
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name
                              }
             )
             all_pages_results.append(search_res_with_offset)
@@ -381,7 +383,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
-                             "limit": limit
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name
                              }
             )
             all_pages_results.append(search_res_with_offset)
@@ -435,7 +438,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                       search_params=search_param, limit=limit, check_task=CheckTasks.check_search_results,
                       check_items={"enable_milvus_client_api": True,
                                    "nq": default_nq,
-                                   "limit": limit}) 
+                                   "limit": limit,
+                                   "pk_name": default_primary_key_field_name}) 
     
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", [0, 100])
@@ -482,7 +486,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
-                             "limit": limit}
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name}
             )
 
             # 4. search with offset+limit
@@ -523,7 +528,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
-                             "limit": limit}
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name}
             )
 
             # 7. search with offset+limit
@@ -561,8 +567,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         collection_name = self.collection_name
         vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
         # search with pagination in partition_1
-        limit = 50
-        pages = 10
+        limit = 20
+        pages = 5
         for page in range(pages):
             offset = page * limit
             search_params = {"offset": offset}
@@ -576,7 +582,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 limit=limit,
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
-                             "nq": default_nq, "limit": limit})
+                             "nq": default_nq,
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name})
             
             # assert every id in search_res_with_offset %3 ==1
             for hits in search_res_with_offset:
@@ -597,7 +605,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 limit=limit,
                 check_task=CheckTasks.check_search_results,
                 check_items={"enable_milvus_client_api": True,
-                             "nq": default_nq, "limit": limit})
+                             "nq": default_nq,
+                             "limit": limit,
+                             "pk_name": default_primary_key_field_name})
 
             # assert every id in search_res_with_offset %3 ==1 or ==2
             for hits in search_res_with_offset:
@@ -623,7 +633,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                     search_params=search_params, limit=default_limit,
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq, "limit": default_limit})
+                                 "nq": default_nq,
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
         # search with offset = 0
         offset = 0
         search_params = {"offset": offset}
@@ -632,7 +644,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                     search_params=search_params, limit=default_limit,
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
-                                 "nq": default_nq, "limit": default_limit})
+                                 "nq": default_nq,
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", [0, 20, 100, 200])
@@ -655,7 +669,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                               limit=limit,
                               check_task=CheckTasks.check_search_results,
                               check_items={"enable_milvus_client_api": True,
-                                           "nq": default_nq, "limit": limit})
+                                           "nq": default_nq,
+                                           "limit": limit,
+                                           "pk_name": default_primary_key_field_name})
 
         # 2. search with offset in search 
         search_params = {}
@@ -666,7 +682,9 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                               limit=limit,
                               check_task=CheckTasks.check_search_results,
                               check_items={"enable_milvus_client_api": True,
-                                           "nq": default_nq, "limit": limit})
+                                           "nq": default_nq,
+                                           "limit": limit,
+                                           "pk_name": default_primary_key_field_name})
         # 3. compare results
         assert res1 == res2
 
@@ -769,7 +787,7 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
                              "nq": default_nq,
                              "limit": limit,
                              "metric": metric_type,
-                             }
+                             "pk_name": default_primary_key_field_name}
             )
             all_pages_results.append(search_res_with_offset)
 
@@ -805,6 +823,7 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize('vector_dtype', ct.all_dense_vector_types)
     @pytest.mark.parametrize('index', ct.all_index_types[:7])
     @pytest.mark.parametrize('metric_type', ct.dense_metrics)

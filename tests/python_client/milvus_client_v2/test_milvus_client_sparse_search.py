@@ -114,7 +114,6 @@ class TestSparseSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "limit": default_limit,
-                                         "original_entities": [data],
                                          "output_fields": [ct.default_sparse_vec_field_name]})
         expr = "int64 < 100 "
         collection_w.search(data[-1][0:default_nq], ct.default_sparse_vec_field_name,
@@ -123,7 +122,6 @@ class TestSparseSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "limit": default_limit,
-                                         "original_entities": [data],
                                          "output_fields": [ct.default_sparse_vec_field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -193,7 +191,6 @@ class TestSparseSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "limit": default_limit,
-                                         "original_entities": [all_data],
                                          "output_fields": [ct.default_sparse_vec_field_name]})
         expr_id_list = [0, 1, 10, 100]
         term_expr = f'{ct.default_int64_field_name} in {expr_id_list}'

@@ -178,7 +178,8 @@ class TestCollectionSearchJSON(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit})
+                                         "limit": default_limit,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_json_nullable_load_before_insert(self, nq, is_flush, enable_dynamic_field):
@@ -204,7 +205,8 @@ class TestCollectionSearchJSON(TestcaseBase):
                             default_search_params, default_limit,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
-                                         "limit": default_limit})
+                                         "limit": default_limit,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="issue 37113")
@@ -233,7 +235,8 @@ class TestCollectionSearchJSON(TestcaseBase):
                             default_search_params, default_limit,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
-                                         "limit": default_limit})
+                                         "limit": default_limit,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_expression_json_contains(self, enable_dynamic_field):
@@ -270,7 +273,8 @@ class TestCollectionSearchJSON(TestcaseBase):
                                 default_search_params, default_limit, expression,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
-                                             "limit": 3})
+                                             "limit": 3,
+                                             "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_expression_json_contains_list(self, auto_id):
@@ -308,7 +312,8 @@ class TestCollectionSearchJSON(TestcaseBase):
                                 default_search_params, limit, expression,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
-                                             "limit": limit})
+                                             "limit": limit,
+                                             "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_expression_json_contains_combined_with_normal(self, enable_dynamic_field):
@@ -347,7 +352,8 @@ class TestCollectionSearchJSON(TestcaseBase):
                                 default_search_params, limit, expression,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
-                                             "limit": limit // 2})
+                                             "limit": limit // 2,
+                                             "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expr_prefix", ["array_contains", "ARRAY_CONTAINS"])
