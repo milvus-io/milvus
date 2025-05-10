@@ -287,6 +287,7 @@ replace (
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20250415035630-0728e795e4e9
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
+	github.com/golang-jwt/jwt => github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/greatroar/blobloom => github.com/milvus-io/blobloom v0.0.0-20240603110411-471ae49f3b93
 	github.com/ianlancetaylor/cgosymbolizer => github.com/milvus-io/cgosymbolizer v0.0.0-20250318084424-114f4050c3a6
 	github.com/milvus-io/milvus/pkg/v2 => ./pkg
