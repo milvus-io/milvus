@@ -168,12 +168,23 @@ func (impl *flusherComponents) recover(ctx context.Context, recoverInfos map[str
 		futures[vchannel] = future
 	}
 	dataServices := make(map[string]*dataSyncServiceWrapper, len(futures))
+	var lastErr error
 	for vchannel, future := range futures {
 		ds, err := future.Await()
 		if err != nil {
-			return err
+			lastErr = err
+			continue
 		}
 		dataServices[vchannel] = ds.(*dataSyncServiceWrapper)
+	}
+	if lastErr != nil {
+		// release all the data sync services if operation is canceled.
+		// otherwise, the write buffer will leak.
+		for _, ds := range dataServices {
+			ds.Close()
+		}
+		impl.logger.Warn("failed to build data sync service, may be canceled when recovering", zap.Error(lastErr))
+		return lastErr
 	}
 	impl.dataServices = dataServices
 	for vchannel, ds := range dataServices {
