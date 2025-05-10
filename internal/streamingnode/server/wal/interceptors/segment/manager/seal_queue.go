@@ -113,12 +113,13 @@ func (q *sealQueue) tryToSealSegments(ctx context.Context, segments ...*segmentA
 	// send flush message into wal.
 	for collectionID, vchannelSegments := range sealedSegments {
 		for vchannel, segments := range vchannelSegments {
-			if err := q.sendFlushSegmentsMessageIntoWAL(ctx, collectionID, vchannel, segments); err != nil {
-				q.logger.Warn("fail to send flush message into wal", zap.String("vchannel", vchannel), zap.Int64("collectionID", collectionID), zap.Error(err))
-				undone = append(undone, segments...)
-				continue
-			}
 			for _, segment := range segments {
+				if err := q.sendFlushSegmentsMessageIntoWAL(ctx, collectionID, vchannel, segment); err != nil {
+					q.logger.Warn("fail to send flush message into wal", zap.String("vchannel", vchannel), zap.Int64("collectionID", collectionID), zap.Error(err))
+					undone = append(undone, segments...)
+					continue
+				}
+
 				tx := segment.BeginModification()
 				tx.IntoFlushed()
 				if err := tx.Commit(ctx); err != nil {
@@ -202,16 +203,13 @@ func (q *sealQueue) transferSegmentStateIntoSealed(ctx context.Context, segments
 }
 
 // sendFlushSegmentsMessageIntoWAL sends a flush message into wal.
-func (m *sealQueue) sendFlushSegmentsMessageIntoWAL(ctx context.Context, collectionID int64, vchannel string, segments []*segmentAllocManager) error {
-	segmentIDs := make([]int64, 0, len(segments))
-	for _, segment := range segments {
-		segmentIDs = append(segmentIDs, segment.GetSegmentID())
-	}
+func (m *sealQueue) sendFlushSegmentsMessageIntoWAL(ctx context.Context, collectionID int64, vchannel string, segment *segmentAllocManager) error {
 	msg, err := message.NewFlushMessageBuilderV2().
 		WithVChannel(vchannel).
 		WithHeader(&message.FlushMessageHeader{
 			CollectionId: collectionID,
-			SegmentIds:   segmentIDs,
+			PartitionId:  segment.GetPartitionID(),
+			SegmentId:    segment.GetSegmentID(),
 		}).
 		WithBody(&message.FlushMessageBody{}).BuildMutable()
 	if err != nil {
@@ -220,9 +218,9 @@ func (m *sealQueue) sendFlushSegmentsMessageIntoWAL(ctx context.Context, collect
 
 	msgID, err := m.wal.Get().Append(ctx, msg)
 	if err != nil {
-		m.logger.Warn("send flush message into wal failed", zap.Int64("collectionID", collectionID), zap.String("vchannel", vchannel), zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
+		m.logger.Warn("send flush message into wal failed", zap.Int64("collectionID", collectionID), zap.String("vchannel", vchannel), zap.Int64("segmentID", segment.GetSegmentID()), zap.Error(err))
 		return err
 	}
-	m.logger.Info("send flush message into wal", zap.Int64("collectionID", collectionID), zap.String("vchannel", vchannel), zap.Int64s("segmentIDs", segmentIDs), zap.Any("msgID", msgID))
+	m.logger.Info("send flush message into wal", zap.Int64("collectionID", collectionID), zap.String("vchannel", vchannel), zap.Int64("segmentID", segment.GetSegmentID()), zap.Any("msgID", msgID))
 	return nil
 }

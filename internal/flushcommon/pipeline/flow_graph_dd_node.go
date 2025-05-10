@@ -249,7 +249,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				zap.Uint64("timetick", createSegment.CreateSegmentMessage.TimeTick()),
 			)
 			logger.Info("receive create segment message")
-			if err := ddn.msgHandler.HandleCreateSegment(context.Background(), ddn.vChannelName, createSegment.CreateSegmentMessage); err != nil {
+			if err := ddn.msgHandler.HandleCreateSegment(ddn.ctx, createSegment.CreateSegmentMessage); err != nil {
 				logger.Warn("handle create segment message failed", zap.Error(err))
 			} else {
 				logger.Info("handle create segment message success")
@@ -262,7 +262,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				zap.Uint64("timetick", flushMsg.FlushMessage.TimeTick()),
 			)
 			logger.Info("receive flush message")
-			if err := ddn.msgHandler.HandleFlush(ddn.vChannelName, flushMsg.FlushMessage); err != nil {
+			if err := ddn.msgHandler.HandleFlush(flushMsg.FlushMessage); err != nil {
 				logger.Warn("handle flush message failed", zap.Error(err))
 			} else {
 				logger.Info("handle flush message success")
@@ -276,7 +276,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				zap.Uint64("flushTs", manualFlushMsg.ManualFlushMessage.Header().FlushTs),
 			)
 			logger.Info("receive manual flush message")
-			if err := ddn.msgHandler.HandleManualFlush(ddn.vChannelName, manualFlushMsg.ManualFlushMessage); err != nil {
+			if err := ddn.msgHandler.HandleManualFlush(manualFlushMsg.ManualFlushMessage); err != nil {
 				logger.Warn("handle manual flush message failed", zap.Error(err))
 			} else {
 				logger.Info("handle manual flush message success")
@@ -311,7 +311,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			}
 			fgMsg.updatedSchema = body.GetSchema()
 			fgMsg.schemaVersion = schemaMsg.BeginTs()
-			ddn.msgHandler.HandleSchemaChange(ddn.ctx, ddn.vChannelName, schemaMsg)
+			ddn.msgHandler.HandleSchemaChange(ddn.ctx, schemaMsg.SchemaChangeMessage)
 		}
 	}
 

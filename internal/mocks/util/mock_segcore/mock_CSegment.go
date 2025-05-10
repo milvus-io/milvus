@@ -23,7 +23,7 @@ func (_m *MockCSegment) EXPECT() *MockCSegment_Expecter {
 }
 
 // AddFieldDataInfo provides a mock function with given fields: ctx, request
-func (_m *MockCSegment) AddFieldDataInfo(ctx context.Context, request *segcore.LoadFieldDataRequest) (*segcore.AddFieldDataInfoResult, error) {
+func (_m *MockCSegment) AddFieldDataInfo(ctx context.Context, request *segcore.AddFieldDataInfoRequest) (*segcore.AddFieldDataInfoResult, error) {
 	ret := _m.Called(ctx, request)
 
 	if len(ret) == 0 {
@@ -32,10 +32,10 @@ func (_m *MockCSegment) AddFieldDataInfo(ctx context.Context, request *segcore.L
 
 	var r0 *segcore.AddFieldDataInfoResult
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *segcore.LoadFieldDataRequest) (*segcore.AddFieldDataInfoResult, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.AddFieldDataInfoRequest) (*segcore.AddFieldDataInfoResult, error)); ok {
 		return rf(ctx, request)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *segcore.LoadFieldDataRequest) *segcore.AddFieldDataInfoResult); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.AddFieldDataInfoRequest) *segcore.AddFieldDataInfoResult); ok {
 		r0 = rf(ctx, request)
 	} else {
 		if ret.Get(0) != nil {
@@ -43,7 +43,7 @@ func (_m *MockCSegment) AddFieldDataInfo(ctx context.Context, request *segcore.L
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *segcore.LoadFieldDataRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *segcore.AddFieldDataInfoRequest) error); ok {
 		r1 = rf(ctx, request)
 	} else {
 		r1 = ret.Error(1)
@@ -59,14 +59,14 @@ type MockCSegment_AddFieldDataInfo_Call struct {
 
 // AddFieldDataInfo is a helper method to define mock.On call
 //   - ctx context.Context
-//   - request *segcore.LoadFieldDataRequest
+//   - request *segcore.AddFieldDataInfoRequest
 func (_e *MockCSegment_Expecter) AddFieldDataInfo(ctx interface{}, request interface{}) *MockCSegment_AddFieldDataInfo_Call {
 	return &MockCSegment_AddFieldDataInfo_Call{Call: _e.mock.On("AddFieldDataInfo", ctx, request)}
 }
 
-func (_c *MockCSegment_AddFieldDataInfo_Call) Run(run func(ctx context.Context, request *segcore.LoadFieldDataRequest)) *MockCSegment_AddFieldDataInfo_Call {
+func (_c *MockCSegment_AddFieldDataInfo_Call) Run(run func(ctx context.Context, request *segcore.AddFieldDataInfoRequest)) *MockCSegment_AddFieldDataInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*segcore.LoadFieldDataRequest))
+		run(args[0].(context.Context), args[1].(*segcore.AddFieldDataInfoRequest))
 	})
 	return _c
 }
@@ -76,7 +76,7 @@ func (_c *MockCSegment_AddFieldDataInfo_Call) Return(_a0 *segcore.AddFieldDataIn
 	return _c
 }
 
-func (_c *MockCSegment_AddFieldDataInfo_Call) RunAndReturn(run func(context.Context, *segcore.LoadFieldDataRequest) (*segcore.AddFieldDataInfoResult, error)) *MockCSegment_AddFieldDataInfo_Call {
+func (_c *MockCSegment_AddFieldDataInfo_Call) RunAndReturn(run func(context.Context, *segcore.AddFieldDataInfoRequest) (*segcore.AddFieldDataInfoResult, error)) *MockCSegment_AddFieldDataInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
