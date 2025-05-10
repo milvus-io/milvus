@@ -42,9 +42,9 @@ import (
 )
 
 func getCurrentIndexVersion(v int32) int32 {
-	cCurrent := int32(C.GetCurrentIndexVersion())
-	if cCurrent < v {
-		return cCurrent
+	cMaximum := int32(C.GetMaximumIndexVersion())
+	if cMaximum < v {
+		return cMaximum
 	}
 	return v
 }
