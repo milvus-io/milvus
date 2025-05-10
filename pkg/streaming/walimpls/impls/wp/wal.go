@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
 )
@@ -25,6 +26,10 @@ func (w *walImpl) WALName() string {
 }
 
 func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+	if w.Channel().AccessMode != types.AccessModeRW {
+		panic("write on a wal that is not in read-write mode")
+	}
+
 	r := w.p.Write(ctx,
 		&wp.WriterMessage{
 			Payload:    msg.Payload(),
@@ -70,7 +75,10 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (walimpls.S
 }
 
 func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
-	return w.l.Truncate(ctx, id.(*wpID).logMsgId)
+	if w.Channel().AccessMode != types.AccessModeRW {
+		panic("truncate on a wal that is not in read-write mode")
+	}
+	return w.l.Truncate(ctx, id.(wpID).logMsgId)
 }
 
 func (w *walImpl) Close() {
