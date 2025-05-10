@@ -35,8 +35,8 @@ type Manager interface {
 	Get(nodeID int64) *NodeInfo
 	GetAll() []*NodeInfo
 
-	Suspend(nodeID int64) error
-	Resume(nodeID int64) error
+	MarkResourceExhausted(nodeID int64)
+	IsResourceExhausted(nodeID int64) bool
 }
 
 type NodeManager struct {
@@ -135,6 +135,8 @@ type NodeInfo struct {
 	immutableInfo ImmutableNodeInfo
 	state         State
 	lastHeartbeat *atomic.Int64
+
+	resourceExhaustionExpireAt time.Time
 }
 
 func (n *NodeInfo) ID() int64 {
@@ -240,4 +242,39 @@ func WithMemCapacity(capacity float64) StatsOption {
 	return func(n *NodeInfo) {
 		n.setMemCapacity(capacity)
 	}
+}
+
+func (m *NodeManager) MarkResourceExhaustion(nodeID int64, duration time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if node, ok := m.nodes[nodeID]; ok {
+		node.mu.Lock()
+		if duration > 0 {
+			node.resourceExhaustionExpireAt = time.Now().Add(duration)
+		} else {
+			node.resourceExhaustionExpireAt = time.Time{}
+		}
+		node.mu.Unlock()
+	}
+}
+
+func (m *NodeManager) IsResourceExhausted(nodeID int64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	node := m.nodes[nodeID]
+	if node == nil {
+		return false
+	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
+
+	// Auto-clear when expired
+	if time.Now().After(node.resourceExhaustionExpireAt) {
+		node.resourceExhaustionExpireAt = time.Time{}
+		return false
+	}
+	return !node.resourceExhaustionExpireAt.IsZero()
 }
