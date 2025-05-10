@@ -186,7 +186,7 @@ func (p *ComponentParam) Watch(key string, watcher config.EventHandler) {
 }
 
 func (p *ComponentParam) WatchKeyPrefix(keyPrefix string, watcher config.EventHandler) {
-	p.baseTable.mgr.Dispatcher.RegisterForKeyPrefix(keyPrefix, watcher)
+	p.baseTable.RegisterKeyPrefixWatcher(keyPrefix, watcher)
 }
 
 func (p *ComponentParam) Unwatch(key string, watcher config.EventHandler) {

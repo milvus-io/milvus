@@ -32,14 +32,14 @@ import (
 )
 
 const (
+	version         = "version"
 	originalSizeKey = "original_size"
 	nullableKey     = "nullable"
+	edekKey         = "edek"
+
+	// mark useMultiFieldFormat if there are multi fields in a log file
+	MultiField = "MULTI_FIELD"
 )
-
-const version = "version"
-
-// mark useMultiFieldFormat if there are multi fields in a log file
-const MultiField = "MULTI_FIELD"
 
 type descriptorEventData struct {
 	DescriptorEventDataFixPart
@@ -85,6 +85,18 @@ func (data *descriptorEventData) GetNullable() (bool, error) {
 	return nullable, nil
 }
 
+func (data *descriptorEventData) GetEdek() (string, bool) {
+	edek, ok := data.Extras[edekKey]
+	// previous descriptorEventData not store edek
+	if !ok {
+		return "", false
+	}
+
+	// won't be not ok, already checked format when write with FinishExtra
+	edekStr, _ := edek.(string)
+	return edekStr, true
+}
+
 // GetMemoryUsageInBytes returns the memory size of DescriptorEventDataFixPart.
 func (data *descriptorEventData) GetMemoryUsageInBytes() int32 {
 	return data.GetEventDataFixPartSize() + int32(binary.Size(data.PostHeaderLengths)) + int32(binary.Size(data.ExtraLength)) + data.ExtraLength
@@ -121,6 +133,14 @@ func (data *descriptorEventData) FinishExtra() error {
 		_, ok := nullableStore.(bool)
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("value of %v must in bool format", nullableKey))
+		}
+	}
+
+	edekStored, exist := data.Extras[edekKey]
+	if exist {
+		_, ok := edekStored.(string)
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("value of %v must in string format", edekKey))
 		}
 	}
 
