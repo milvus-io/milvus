@@ -207,6 +207,8 @@ func packSubChannelRequest(
 	loadMeta *querypb.LoadMetaInfo,
 	channel *meta.DmChannel,
 	indexInfo []*indexpb.IndexInfo,
+	partitions []int64,
+	targetVersion int64,
 ) *querypb.WatchDmChannelsRequest {
 	return &querypb.WatchDmChannelsRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -215,12 +217,14 @@ func packSubChannelRequest(
 		),
 		NodeID:        action.Node(),
 		CollectionID:  task.CollectionID(),
+		PartitionIDs:  partitions,
 		Infos:         []*datapb.VchannelInfo{channel.VchannelInfo},
 		Schema:        schema,   // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
 		LoadMeta:      loadMeta, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
 		ReplicaID:     task.ReplicaID(),
 		Version:       time.Now().UnixNano(),
 		IndexInfoList: indexInfo,
+		TargetVersion: targetVersion,
 	}
 }
 
@@ -251,6 +255,7 @@ func fillSubChannelRequest(
 	req.SegmentInfos = lo.SliceToMap(segmentInfos, func(info *datapb.SegmentInfo) (int64, *datapb.SegmentInfo) {
 		return info.GetID(), info
 	})
+
 	return nil
 }
 

@@ -104,6 +104,7 @@ type collectionInfo struct {
 	partitionKeyIsolation bool
 	replicateID           string
 	updateTimestamp       uint64
+	shardsNum             int32
 }
 
 type databaseInfo struct {
@@ -474,6 +475,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			consistencyLevel:      collection.ConsistencyLevel,
 			partitionKeyIsolation: isolation,
 			updateTimestamp:       collection.UpdateTimestamp,
+			shardsNum:             collection.ShardsNum,
 		}, nil
 	}
 	_, dbOk := m.collInfo[database]
@@ -492,6 +494,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		partitionKeyIsolation: isolation,
 		replicateID:           replicateID,
 		updateTimestamp:       collection.UpdateTimestamp,
+		shardsNum:             collection.ShardsNum,
 	}
 
 	log.Ctx(ctx).Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName),
@@ -967,7 +970,6 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		}
 
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
-		log.Info("no shard cache for collection, try to get shard leaders from QueryCoord")
 	}
 
 	info, err := m.getFullCollectionInfo(ctx, database, collectionName, collectionID)
@@ -980,7 +982,8 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 			commonpbutil.WithMsgType(commonpb.MsgType_GetShardLeaders),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		CollectionID: info.collID,
+		CollectionID:            info.collID,
+		WithUnserviceableShards: true,
 	}
 
 	tr := timerecord.NewTimeRecorder("UpdateShardCache")
@@ -997,6 +1000,19 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		collectionID: info.collID,
 		shardLeaders: shards,
 		idx:          atomic.NewInt64(0),
+	}
+
+	// convert shards map to string for logging
+	if log.Logger.Level() == zap.DebugLevel {
+		shardStr := make([]string, 0, len(shards))
+		for channel, nodes := range shards {
+			nodeStrs := make([]string, 0, len(nodes))
+			for _, node := range nodes {
+				nodeStrs = append(nodeStrs, node.String())
+			}
+			shardStr = append(shardStr, fmt.Sprintf("%s:[%s]", channel, strings.Join(nodeStrs, ", ")))
+		}
+		log.Debug("update shard leader cache", zap.String("newShardLeaders", strings.Join(shardStr, ", ")))
 	}
 
 	m.leaderMut.Lock()
@@ -1025,7 +1041,7 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 		qns := make([]nodeInfo, len(leaders.GetNodeIds()))
 
 		for j := range qns {
-			qns[j] = nodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j]}
+			qns[j] = nodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j], leaders.GetServiceable()[j]}
 		}
 
 		shard2QueryNodes[leaders.GetChannelName()] = qns

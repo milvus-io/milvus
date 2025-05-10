@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -49,8 +50,7 @@ type DistHandlerSuite struct {
 	executedFlagChan chan struct{}
 	dist             *meta.DistributionManager
 	target           *meta.MockTargetManager
-
-	handler *distHandler
+	handler          *distHandler
 }
 
 func (suite *DistHandlerSuite) SetupSuite() {
@@ -114,8 +114,7 @@ func (suite *DistHandlerSuite) TestBasic() {
 		LastModifyTs: 1,
 	}, nil)
 
-	syncTargetVersionFn := func(collectionID int64) {}
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, syncTargetVersionFn)
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {})
 	defer suite.handler.stop()
 
 	time.Sleep(3 * time.Second)
@@ -135,8 +134,7 @@ func (suite *DistHandlerSuite) TestGetDistributionFailed() {
 	}))
 	suite.client.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("fake error"))
 
-	syncTargetVersionFn := func(collectionID int64) {}
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, syncTargetVersionFn)
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {})
 	defer suite.handler.stop()
 
 	time.Sleep(3 * time.Second)
@@ -184,11 +182,83 @@ func (suite *DistHandlerSuite) TestForcePullDist() {
 		LastModifyTs: 1,
 	}, nil)
 	suite.executedFlagChan <- struct{}{}
-	syncTargetVersionFn := func(collectionID int64) {}
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, syncTargetVersionFn)
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {})
 	defer suite.handler.stop()
 
 	time.Sleep(300 * time.Millisecond)
+}
+
+func (suite *DistHandlerSuite) TestHandlerWithSyncDelegatorChanges() {
+	if suite.dispatchMockCall != nil {
+		suite.dispatchMockCall.Unset()
+		suite.dispatchMockCall = nil
+	}
+
+	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
+	suite.dispatchMockCall = suite.scheduler.EXPECT().Dispatch(mock.Anything).Maybe()
+	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+
+	// Test scenario: update segments and channels distribution without replicaMgr
+	suite.client.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{
+		Status: merr.Success(),
+		NodeID: 1,
+		Channels: []*querypb.ChannelVersionInfo{
+			{
+				Channel:    "test-channel-1",
+				Collection: 1,
+				Version:    1,
+			},
+		},
+		Segments: []*querypb.SegmentVersionInfo{
+			{
+				ID:         1,
+				Collection: 1,
+				Partition:  1,
+				Channel:    "test-channel-1",
+				Version:    1,
+			},
+		},
+		LeaderViews: []*querypb.LeaderView{
+			{
+				Collection:    1,
+				Channel:       "test-channel-1",
+				TargetVersion: 1011,
+				Status: &querypb.LeaderViewStatus{
+					Serviceable: true,
+				},
+			},
+		},
+		LastModifyTs: 2, // Different from previous test to ensure update happens
+	}, nil)
+
+	notifyCounter := atomic.NewInt32(0)
+	notifyFunc := func(collectionID ...int64) {
+		suite.Require().Equal(1, len(collectionID))
+		suite.Require().Equal(int64(1), collectionID[0])
+		notifyCounter.Inc()
+	}
+
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, notifyFunc)
+	defer suite.handler.stop()
+
+	// Wait for distribution to be processed
+	time.Sleep(1000 * time.Millisecond)
+
+	// Verify that the distributions were updated correctly
+	segments := suite.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(1))
+	suite.Require().Equal(1, len(segments))
+	suite.Require().Equal(int64(1), segments[0].SegmentInfo.ID)
+
+	channels := suite.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(1))
+	suite.Require().Equal(1, len(channels))
+	suite.Require().Equal("test-channel-1", channels[0].VchannelInfo.ChannelName)
+
+	// Verify that the notification was called
+	suite.Require().Greater(notifyCounter.Load(), int32(0))
 }
 
 func TestDistHandlerSuite(t *testing.T) {

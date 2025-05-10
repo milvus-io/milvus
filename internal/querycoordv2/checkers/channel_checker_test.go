@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -169,10 +170,38 @@ func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
 
-	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel1"))
-	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel1"})
-	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel2"))
-	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel2"})
+	checker.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel1",
+		},
+		Node:    1,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:      1,
+			Channel: "test-insert-channel1",
+			Version: 1,
+			Status: &querypb.LeaderViewStatus{
+				Serviceable: true,
+			},
+		},
+	}, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel2",
+		},
+		Node:    1,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:      1,
+			Channel: "test-insert-channel2",
+			Version: 1,
+			Status: &querypb.LeaderViewStatus{
+				Serviceable: true,
+			},
+		},
+	})
+
 	suite.setNodeAvailable(1)
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -210,15 +239,59 @@ func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
-	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
-	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 2, "test-insert-channel"))
+	checker.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    1,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:      1,
+			Channel: "test-insert-channel",
+			Version: 1,
+			Status:  &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 2,
+		View: &meta.LeaderView{
+			ID:      2,
+			Channel: "test-insert-channel",
+			Version: 2,
+			Status: &querypb.LeaderViewStatus{
+				Serviceable: false,
+			},
+		},
+	})
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 0)
 
 	suite.setNodeAvailable(1, 2)
-	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel"})
-	checker.dist.LeaderViewManager.Update(2, &meta.LeaderView{ID: 2, Channel: "test-insert-channel"})
+
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 2,
+		View: &meta.LeaderView{
+			ID:      2,
+			Channel: "test-insert-channel",
+			Version: 2,
+			Status: &querypb.LeaderViewStatus{
+				Serviceable: true,
+			},
+		},
+	})
+
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.EqualValues(1, tasks[0].ReplicaID())
@@ -239,19 +312,6 @@ func (suite *ChannelCheckerTestSuite) TestReleaseDirtyChannels() {
 	err = checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1}))
 	suite.NoError(err)
 
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			InsertChannel: "test-insert-channel",
-		},
-	}
-
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-	}
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -263,13 +323,38 @@ func (suite *ChannelCheckerTestSuite) TestReleaseDirtyChannels() {
 		Hostname: "localhost",
 	}))
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
-	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 2, "test-insert-channel"))
-	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 2, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(1, &meta.LeaderView{ID: 1, Channel: "test-insert-channel"})
-	checker.dist.LeaderViewManager.Update(2, &meta.LeaderView{ID: 2, Channel: "test-insert-channel"})
+	checker.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    1,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:      1,
+			Channel: "test-insert-channel",
+			Version: 1,
+			Status: &querypb.LeaderViewStatus{
+				Serviceable: true,
+			},
+		},
+	})
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 2,
+		View: &meta.LeaderView{
+			ID:      2,
+			Channel: "test-insert-channel",
+			Version: 2,
+			Status: &querypb.LeaderViewStatus{
+				Serviceable: true,
+			},
+		},
+	})
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)

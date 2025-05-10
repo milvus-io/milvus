@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -264,6 +265,11 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 	if ob.shouldUpdateNextTarget(ctx, collectionID) {
 		// update next target in collection level
 		ob.updateNextTarget(ctx, collectionID)
+
+		// sync next target to delegator if current target not exist, to support partial search
+		if !ob.targetMgr.IsCurrentTargetExist(ctx, collectionID, -1) {
+			ob.syncCollectionTargetViewToDelegator(ctx, collectionID, ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID)))
+		}
 	}
 }
 
@@ -393,35 +399,40 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		return false
 	}
 
-	collectionReadyLeaders := make([]*meta.LeaderView, 0)
+	newVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
+	collReadyDelegatorList := make([]*meta.DmChannel, 0)
 	for channel := range channelNames {
-		channelReadyLeaders := lo.Filter(ob.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel)), func(leader *meta.LeaderView, _ int) bool {
-			return utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, leader, meta.NextTarget) == nil
+		chReadyDelegatorList := lo.Filter(ob.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channel)), func(ch *meta.DmChannel, _ int) bool {
+			return (newVersion == ch.View.TargetVersion && ch.IsServiceable()) || utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, ch.View, meta.NextTarget) == nil
 		})
 
 		// to avoid stuck here in dynamic increase replica case, we just check available delegator number
-		if int32(len(channelReadyLeaders)) < replicaNum {
+		if int32(len(chReadyDelegatorList)) < replicaNum {
 			log.RatedInfo(10, "channel not ready",
-				zap.Int("readyReplicaNum", len(channelReadyLeaders)),
+				zap.Int("readyReplicaNum", len(chReadyDelegatorList)),
 				zap.String("channelName", channel),
 			)
 			return false
 		}
-		collectionReadyLeaders = append(collectionReadyLeaders, channelReadyLeaders...)
+		collReadyDelegatorList = append(collReadyDelegatorList, chReadyDelegatorList...)
 	}
 
+	return ob.syncCollectionTargetViewToDelegator(ctx, collectionID, collReadyDelegatorList)
+}
+
+// sync next target info to delegator
+// 1. if next target is changed before delegator becomes serviceable, we need to sync the new next target to delegator to support partial search
+// 2. if next target is ready to read, we need to sync the next target to delegator to support full search
+func (ob *TargetObserver) syncCollectionTargetViewToDelegator(ctx context.Context, collectionID int64, collReadyDelegatorList []*meta.DmChannel) bool {
 	var partitions []int64
 	var indexInfo []*indexpb.IndexInfo
 	var err error
 	newVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
-	for _, leader := range collectionReadyLeaders {
-		updateVersionAction := ob.checkNeedUpdateTargetVersion(ctx, leader, newVersion)
-		if updateVersionAction == nil {
-			continue
-		}
-		replica := ob.meta.ReplicaManager.GetByCollectionAndNode(ctx, collectionID, leader.ID)
+	for _, d := range collReadyDelegatorList {
+		updateVersionAction := ob.genSyncAction(ctx, d.View, newVersion)
+		replica := ob.meta.ReplicaManager.GetByCollectionAndNode(ctx, collectionID, d.Node)
 		if replica == nil {
-			log.Warn("replica not found", zap.Int64("nodeID", leader.ID), zap.Int64("collectionID", collectionID))
+			log.Warn("replica not found", zap.Int64("nodeID", d.Node), zap.Int64("collectionID", collectionID))
 			continue
 		}
 		// init all the meta information
@@ -440,38 +451,35 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			}
 		}
 
-		if !ob.sync(ctx, replica, leader, []*querypb.SyncAction{updateVersionAction}, partitions, indexInfo) {
+		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, partitions, indexInfo) {
 			return false
 		}
 	}
 	return true
 }
 
-func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, diffs []*querypb.SyncAction,
+func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Replica, LeaderView *meta.LeaderView, action *querypb.SyncAction,
 	partitions []int64, indexInfo []*indexpb.IndexInfo,
 ) bool {
-	if len(diffs) == 0 {
-		return true
-	}
 	replicaID := replica.GetID()
 
 	log := log.With(
-		zap.Int64("leaderID", leaderView.ID),
-		zap.Int64("collectionID", leaderView.CollectionID),
-		zap.String("channel", leaderView.Channel),
+		zap.Int64("leaderID", LeaderView.ID),
+		zap.Int64("collectionID", LeaderView.CollectionID),
+		zap.String("channel", LeaderView.Channel),
 	)
 
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SyncDistribution),
 		),
-		CollectionID: leaderView.CollectionID,
+		CollectionID: LeaderView.CollectionID,
 		ReplicaID:    replicaID,
-		Channel:      leaderView.Channel,
-		Actions:      diffs,
+		Channel:      LeaderView.Channel,
+		Actions:      []*querypb.SyncAction{action},
 		LoadMeta: &querypb.LoadMetaInfo{
-			LoadType:      ob.meta.GetLoadType(ctx, leaderView.CollectionID),
-			CollectionID:  leaderView.CollectionID,
+			LoadType:      ob.meta.GetLoadType(ctx, LeaderView.CollectionID),
+			CollectionID:  LeaderView.CollectionID,
 			PartitionIDs:  partitions,
 			ResourceGroup: replica.GetResourceGroup(),
 		},
@@ -481,7 +489,7 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
-	resp, err := ob.cluster.SyncDistribution(ctx, leaderView.ID, req)
+	resp, err := ob.cluster.SyncDistribution(ctx, LeaderView.ID, req)
 	if err != nil {
 		log.Warn("failed to sync distribution", zap.Error(err))
 		return false
@@ -495,31 +503,34 @@ func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leade
 	return true
 }
 
-func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, leaderView *meta.LeaderView, targetVersion int64) *querypb.SyncAction {
-	log.Ctx(ctx).WithRateGroup("qcv2.LeaderObserver", 1, 60)
-	if targetVersion <= leaderView.TargetVersion {
-		return nil
-	}
-
-	log.RatedInfo(10, "Update readable segment version",
-		zap.Int64("collectionID", leaderView.CollectionID),
-		zap.String("channelName", leaderView.Channel),
-		zap.Int64("nodeID", leaderView.ID),
-		zap.Int64("oldVersion", leaderView.TargetVersion),
-		zap.Int64("newVersion", targetVersion),
-	)
+// sync next target info to delegator
+// 1. if next target is changed before delegator becomes serviceable, we need to sync the new next target to delegator to support partial search
+// 2. if next target is ready to read, we need to sync the next target to delegator to support full search
+func (ob *TargetObserver) genSyncAction(ctx context.Context, leaderView *meta.LeaderView, targetVersion int64) *querypb.SyncAction {
+	log.Ctx(ctx).WithRateGroup("qcv2.LeaderObserver", 1, 60).
+		RatedInfo(10, "Update readable segment version",
+			zap.Int64("collectionID", leaderView.CollectionID),
+			zap.String("channelName", leaderView.Channel),
+			zap.Int64("nodeID", leaderView.ID),
+			zap.Int64("oldVersion", leaderView.TargetVersion),
+			zap.Int64("newVersion", targetVersion),
+		)
 
 	sealedSegments := ob.targetMgr.GetSealedSegmentsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	growingSegments := ob.targetMgr.GetGrowingSegmentsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	droppedSegments := ob.targetMgr.GetDroppedSegmentsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	channel := ob.targetMgr.GetDmChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTargetFirst)
+	sealedSegmentRowCount := lo.MapValues(sealedSegments, func(segment *datapb.SegmentInfo, _ int64) int64 {
+		return segment.GetNumOfRows()
+	})
 
 	action := &querypb.SyncAction{
-		Type:            querypb.SyncType_UpdateVersion,
-		GrowingInTarget: growingSegments.Collect(),
-		SealedInTarget:  lo.Keys(sealedSegments),
-		DroppedInTarget: droppedSegments,
-		TargetVersion:   targetVersion,
+		Type:                  querypb.SyncType_UpdateVersion,
+		GrowingInTarget:       growingSegments.Collect(),
+		SealedInTarget:        lo.Keys(sealedSegmentRowCount),
+		DroppedInTarget:       droppedSegments,
+		TargetVersion:         targetVersion,
+		SealedSegmentRowCount: sealedSegmentRowCount,
 	}
 
 	if channel != nil {

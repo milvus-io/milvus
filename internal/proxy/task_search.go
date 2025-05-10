@@ -930,11 +930,12 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 
 	err := t.lb.Execute(ctx, CollectionWorkLoad{
-		db:             t.request.GetDbName(),
-		collectionID:   t.SearchRequest.CollectionID,
-		collectionName: t.collectionName,
-		nq:             t.Nq,
-		exec:           t.searchShard,
+		db:                             t.request.GetDbName(),
+		collectionID:                   t.SearchRequest.CollectionID,
+		collectionName:                 t.collectionName,
+		nq:                             t.Nq,
+		exec:                           t.searchShard,
+		partialResultRequiredDataRatio: float64(t.SearchRequest.GetPartialResultRequiredDataRatio()),
 	})
 	if err != nil {
 		log.Warn("search execute failed", zap.Error(err))
@@ -1051,6 +1052,27 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		err = t.searchPostProcess(ctx, sp, toReduceResults)
 	}
 
+	if t.SearchRequest.GetEnablePartialResult() && len(toReduceResults) > 0 {
+		collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), t.collectionName, t.CollectionID)
+		if err != nil {
+			log.Warn("failed to get collection info", zap.Error(err))
+			return err
+		}
+		ratioSum := lo.SumBy(toReduceResults, func(r *internalpb.SearchResults) float32 {
+			return r.GetAccessedDataRatio()
+		})
+		if ratioSum > 0 {
+			t.result.AccessedDataRatio = ratioSum / float32(collectionInfo.shardsNum)
+		}
+	}
+
+	if t.SearchRequest.GetEnablePartialResult() && t.result.AccessedDataRatio < t.SearchRequest.GetPartialResultRequiredDataRatio() {
+		log.Info("search result accessed data ratio is less than partial result required data ratio",
+			zap.Float32("accessed data ratio", t.result.AccessedDataRatio),
+			zap.Float32("partial result required data ratio", t.SearchRequest.GetPartialResultRequiredDataRatio()))
+		return merr.WrapErrCollectionNotFullyLoaded(t.collectionName)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -1107,7 +1129,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string, partialResultRequiredDataRatio float64) error {
 	searchReq := typeutil.Clone(t.SearchRequest)
 	searchReq.GetBase().TargetID = nodeID
 	req := &querypb.SearchRequest{
@@ -1125,6 +1147,7 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	var result *internalpb.SearchResults
 	var err error
 
+	req.Req.PartialResultRequiredDataRatio = float32(partialResultRequiredDataRatio)
 	result, err = qn.Search(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode search return error", zap.Error(err))
@@ -1141,10 +1164,12 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 			zap.String("reason", result.GetStatus().GetReason()))
 		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to search on QueryNode %d", nodeID)
 	}
+
 	if t.resultBuf != nil {
 		t.resultBuf.Insert(result)
 	}
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
+	log.Debug("get query result", zap.Float32("accessedDataRatio", result.GetAccessedDataRatio()))
 
 	return nil
 }

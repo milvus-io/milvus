@@ -487,10 +487,10 @@ func (s *Server) fillReplicaInfo(ctx context.Context, replica *meta.Replica, wit
 	}
 
 	for _, channel := range channels {
-		leader, ok := s.dist.ChannelDistManager.GetShardLeader(replica, channel.GetChannelName())
+		leader := s.dist.ChannelDistManager.GetShardLeader(channel.ChannelName, replica)
 		var leaderInfo *session.NodeInfo
-		if ok {
-			leaderInfo = s.nodeMgr.Get(leader)
+		if leader != nil {
+			leaderInfo = s.nodeMgr.Get(leader.Node)
 		}
 		if leaderInfo == nil {
 			log.Warn("failed to get shard leader for shard",
@@ -501,10 +501,10 @@ func (s *Server) fillReplicaInfo(ctx context.Context, replica *meta.Replica, wit
 		}
 
 		shard := &milvuspb.ShardReplica{
-			LeaderID:      leader,
+			LeaderID:      leader.Node,
 			LeaderAddr:    leaderInfo.Addr(),
 			DmChannelName: channel.GetChannelName(),
-			NodeIds:       []int64{leader},
+			NodeIds:       []int64{leader.Node},
 		}
 		if withShardNodes {
 			shardNodes := lo.FilterMap(segments, func(segment *meta.Segment, _ int) (int64, bool) {
