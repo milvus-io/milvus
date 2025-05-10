@@ -89,9 +89,10 @@ message CreateSegmentMessageBody {
 
 // CreateSegmentInfo is the info of create segment.
 message CreateSegmentInfo {
-    int64 partition_id  = 1;
-    int64 segment_id    = 2;
-    int64 storage_version = 3;
+    int64 partition_id  = 1;          // the partition id of the segment.
+    int64 segment_id    = 2;          // the segment id.
+    int64 storage_version = 3;        // the storage version of the segment.
+    uint64 max_segment_size = 4; // the max size bytes of the segment.
 }
 
 // BeginTxnMessageBody is the body of begin transaction message.
@@ -164,6 +165,7 @@ message CreateSegmentMessageHeader {
 message ManualFlushMessageHeader {
     int64 collection_id = 1;
     uint64 flush_ts     = 2;
+    repeated int64 segment_ids   = 3; // the segment ids to be flushed
 }
 
 // CreateCollectionMessageHeader is the header of create collection message.

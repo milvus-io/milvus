@@ -29,9 +29,9 @@ func NewSegmentStatFromProto(statProto *streamingpb.SegmentAssignmentStat) *Segm
 			BinarySize: statProto.InsertedBinarySize,
 		},
 		MaxBinarySize:    statProto.MaxBinarySize,
-		CreateTime:       time.Unix(0, statProto.CreateTimestampNanoseconds),
+		CreateTime:       time.Unix(statProto.CreateTimestamp, 0),
 		BinLogCounter:    statProto.BinlogCounter,
-		LastModifiedTime: time.Unix(0, statProto.LastModifiedTimestampNanoseconds),
+		LastModifiedTime: time.Unix(statProto.LastModifiedTimestamp, 0),
 	}
 }
 
@@ -41,12 +41,12 @@ func NewProtoFromSegmentStat(stat *SegmentStats) *streamingpb.SegmentAssignmentS
 		return nil
 	}
 	return &streamingpb.SegmentAssignmentStat{
-		MaxBinarySize:                    stat.MaxBinarySize,
-		InsertedRows:                     stat.Insert.Rows,
-		InsertedBinarySize:               stat.Insert.BinarySize,
-		CreateTimestampNanoseconds:       stat.CreateTime.UnixNano(),
-		BinlogCounter:                    stat.BinLogCounter,
-		LastModifiedTimestampNanoseconds: stat.LastModifiedTime.UnixNano(),
+		MaxBinarySize:         stat.MaxBinarySize,
+		InsertedRows:          stat.Insert.Rows,
+		InsertedBinarySize:    stat.Insert.BinarySize,
+		CreateTimestamp:       stat.CreateTime.Unix(),
+		BinlogCounter:         stat.BinLogCounter,
+		LastModifiedTimestamp: stat.LastModifiedTime.Unix(),
 	}
 }
 

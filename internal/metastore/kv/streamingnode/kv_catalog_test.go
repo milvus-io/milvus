@@ -66,14 +66,44 @@ func TestCatalogSegmentAssignments(t *testing.T) {
 	kv.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(nil)
 	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
 
-	err = catalog.SaveSegmentAssignments(ctx, "p1", []*streamingpb.SegmentAssignmentMeta{
-		{
+	err = catalog.SaveSegmentAssignments(ctx, "p1", map[int64]*streamingpb.SegmentAssignmentMeta{
+		1: {
 			SegmentId: 1,
 			State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
 		},
-		{
+		2: {
 			SegmentId: 2,
-			State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_PENDING,
+			State:     streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+		},
+	})
+	assert.NoError(t, err)
+}
+
+func TestCatalogVChannel(t *testing.T) {
+	kv := mocks.NewMetaKv(t)
+	k := "p1/vchannel-1"
+	v := streamingpb.VChannelMeta{}
+	vs, err := proto.Marshal(&v)
+	assert.NoError(t, err)
+
+	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return([]string{k}, []string{string(vs)}, nil)
+	catalog := NewCataLog(kv)
+	ctx := context.Background()
+	metas, err := catalog.ListVChannel(ctx, "p1")
+	assert.Len(t, metas, 1)
+	assert.NoError(t, err)
+
+	kv.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(nil)
+	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
+
+	err = catalog.SaveVChannels(ctx, "p1", map[string]*streamingpb.VChannelMeta{
+		"vchannel-1": {
+			Vchannel: "vchannel-1",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_DROPPED,
+		},
+		"vchannel-2": {
+			Vchannel: "vchannel-2",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 		},
 	})
 	assert.NoError(t, err)

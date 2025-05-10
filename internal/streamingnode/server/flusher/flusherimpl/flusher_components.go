@@ -28,18 +28,12 @@ import (
 
 // flusherComponents is the components of the flusher.
 type flusherComponents struct {
-	wal               wal.WAL
-	broker            broker.Broker
-	cpUpdater         *util.ChannelCheckpointUpdater
-	chunkManager      storage.ChunkManager
-	dataServices      map[string]*dataSyncServiceWrapper
-	checkpointManager *pchannelCheckpointManager
-	logger            *log.MLogger
-}
-
-// StartMessageID returns the start message id of the flusher after recovering.
-func (impl *flusherComponents) StartMessageID() message.MessageID {
-	return impl.checkpointManager.StartMessageID()
+	wal          wal.WAL
+	broker       broker.Broker
+	cpUpdater    *util.ChannelCheckpointUpdater
+	chunkManager storage.ChunkManager
+	dataServices map[string]*dataSyncServiceWrapper
+	logger       *log.MLogger
 }
 
 // WhenCreateCollection handles the create collection message.
@@ -109,7 +103,6 @@ func (impl *flusherComponents) WhenDropCollection(vchannel string) {
 		delete(impl.dataServices, vchannel)
 		impl.logger.Info("drop data sync service", zap.String("vchannel", vchannel))
 	}
-	impl.checkpointManager.DropVChannel(vchannel)
 }
 
 // HandleMessage handles the plain message.
@@ -140,7 +133,6 @@ func (impl *flusherComponents) addNewDataSyncService(
 	input chan<- *msgstream.MsgPack,
 	ds *pipeline.DataSyncService,
 ) {
-	impl.checkpointManager.AddVChannel(createCollectionMsg.VChannel(), createCollectionMsg.LastConfirmedMessageID())
 	newDS := newDataSyncServiceWrapper(createCollectionMsg.VChannel(), input, ds)
 	newDS.Start()
 	impl.dataServices[createCollectionMsg.VChannel()] = newDS
@@ -154,7 +146,6 @@ func (impl *flusherComponents) Close() {
 		impl.logger.Info("data sync service closed for flusher closing", zap.String("vchannel", vchannel))
 	}
 	impl.cpUpdater.Close()
-	impl.checkpointManager.Close()
 }
 
 // recover recover the components of the flusher.

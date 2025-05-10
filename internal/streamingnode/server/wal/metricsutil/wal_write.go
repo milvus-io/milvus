@@ -33,7 +33,7 @@ func NewWriteMetrics(pchannel types.PChannelInfo, walName string) *WriteMetrics 
 		slowLogThreshold = time.Second
 	}
 	if walName == wp.WALName && slowLogThreshold < 3*time.Second {
-		// slow log threshold is not set in woodpecker, so we set it to 0.
+		// woodpecker wal is always slow, so we need to set a higher threshold by default.
 		slowLogThreshold = 3 * time.Second
 	}
 	return &WriteMetrics{
