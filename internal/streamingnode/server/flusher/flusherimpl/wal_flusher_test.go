@@ -59,6 +59,12 @@ func TestWALFlusher(t *testing.T) {
 			},
 		},
 	}, nil)
+	mixcoord.EXPECT().AllocSegment(mock.Anything, mock.Anything).Return(&datapb.AllocSegmentResponse{
+		Status: merr.Status(nil),
+	}, nil)
+	mixcoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
+		Status: merr.Status(nil),
+	}, nil)
 	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	fMixcoord.Set(mixcoord)
 	resource.InitForTest(

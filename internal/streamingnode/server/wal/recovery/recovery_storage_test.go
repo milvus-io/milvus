@@ -317,20 +317,13 @@ func (b *streamBuilder) createSegment() message.ImmutableMessage {
 			return message.NewCreateSegmentMessageBuilderV2().
 				WithVChannel(b.vchannels[collectionID]).
 				WithHeader(&message.CreateSegmentMessageHeader{
-					CollectionId: collectionID,
-					SegmentIds:   []int64{segmentID},
+					CollectionId:   collectionID,
+					SegmentId:      segmentID,
+					PartitionId:    partitionID,
+					StorageVersion: 1,
+					MaxSegmentSize: 1024,
 				}).
-				WithBody(&message.CreateSegmentMessageBody{
-					CollectionId: collectionID,
-					Segments: []*messagespb.CreateSegmentInfo{
-						{
-							PartitionId:    partitionID,
-							SegmentId:      segmentID,
-							StorageVersion: 1,
-							MaxSegmentSize: 1024,
-						},
-					},
-				}).
+				WithBody(&message.CreateSegmentMessageBody{}).
 				MustBuildMutable().
 				WithTimeTick(b.timetick).
 				WithLastConfirmed(rmq.NewRmqID(b.lastConfirmedMessageID)).
@@ -397,21 +390,17 @@ func (b *streamBuilder) flushSegment() message.ImmutableMessage {
 			if rand.Int31n(3) < 1 {
 				continue
 			}
-			segmentIDs := make([]int64, 0, len(collection[partitionID]))
 			for segmentID := range collection[partitionID] {
 				if rand.Int31n(4) < 1 {
 					continue
 				}
 				delete(collection[partitionID], segmentID)
-				segmentIDs = append(segmentIDs, segmentID)
-			}
-			if len(segmentIDs) > 0 {
 				b.nextMessage()
 				return message.NewFlushMessageBuilderV2().
 					WithVChannel(b.vchannels[collectionID]).
 					WithHeader(&message.FlushMessageHeader{
 						CollectionId: collectionID,
-						SegmentIds:   segmentIDs,
+						SegmentId:    segmentID,
 					}).
 					WithBody(&message.FlushMessageBody{}).
 					MustBuildMutable().

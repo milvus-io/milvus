@@ -34,24 +34,14 @@ func TestNewSegmentRecoveryInfoFromSegmentAssignmentMeta(t *testing.T) {
 
 func TestSegmentRecoveryInfo(t *testing.T) {
 	msg := message.NewCreateSegmentMessageBuilderV2().
-		WithHeader(&message.CreateSegmentMessageHeader{}).
-		WithBody(&message.CreateSegmentMessageBody{
-			CollectionId: 100,
-			Segments: []*messagespb.CreateSegmentInfo{
-				{
-					PartitionId:    1,
-					SegmentId:      2,
-					StorageVersion: storage.StorageV1,
-					MaxSegmentSize: 100,
-				},
-				{
-					PartitionId:    2,
-					SegmentId:      3,
-					StorageVersion: storage.StorageV2,
-					MaxSegmentSize: 200,
-				},
-			},
+		WithHeader(&message.CreateSegmentMessageHeader{
+			CollectionId:   100,
+			PartitionId:    1,
+			SegmentId:      2,
+			StorageVersion: storage.StorageV1,
+			MaxSegmentSize: 100,
 		}).
+		WithBody(&message.CreateSegmentMessageBody{}).
 		WithVChannel("vchannel-1").
 		MustBuildMutable()
 
@@ -59,20 +49,13 @@ func TestSegmentRecoveryInfo(t *testing.T) {
 	ts := uint64(12345)
 	immutableMsg := msg.WithTimeTick(ts).WithLastConfirmed(id).IntoImmutableMessage(id)
 
-	recoverInfos := newSegmentRecoveryInfoFromCreateSegmentMessage(message.MustAsImmutableCreateSegmentMessageV2(immutableMsg))
-	assert.Len(t, recoverInfos, 2)
-	assert.Equal(t, int64(2), recoverInfos[0].meta.SegmentId)
-	assert.Equal(t, int64(3), recoverInfos[1].meta.SegmentId)
-	assert.Equal(t, int64(1), recoverInfos[0].meta.PartitionId)
-	assert.Equal(t, int64(2), recoverInfos[1].meta.PartitionId)
-	assert.Equal(t, storage.StorageV1, recoverInfos[0].meta.StorageVersion)
-	assert.Equal(t, storage.StorageV2, recoverInfos[1].meta.StorageVersion)
-	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING, recoverInfos[0].meta.State)
-	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING, recoverInfos[1].meta.State)
-	assert.Equal(t, uint64(100), recoverInfos[0].meta.Stat.MaxBinarySize)
-	assert.Equal(t, uint64(200), recoverInfos[1].meta.Stat.MaxBinarySize)
+	info := newSegmentRecoveryInfoFromCreateSegmentMessage(message.MustAsImmutableCreateSegmentMessageV2(immutableMsg))
+	assert.Equal(t, int64(2), info.meta.SegmentId)
+	assert.Equal(t, int64(1), info.meta.PartitionId)
+	assert.Equal(t, storage.StorageV1, info.meta.StorageVersion)
+	assert.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING, info.meta.State)
+	assert.Equal(t, uint64(100), info.meta.Stat.MaxBinarySize)
 
-	info := recoverInfos[0]
 	ts += 1
 	assign := &messagespb.PartitionSegmentAssignment{
 		PartitionId: 1,

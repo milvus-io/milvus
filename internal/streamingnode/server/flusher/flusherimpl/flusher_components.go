@@ -190,16 +190,15 @@ func (impl *flusherComponents) buildDataSyncServiceWithRetry(ctx context.Context
 	// Flush all the growing segment that is not created by streaming.
 	segmentIDs := make([]int64, 0, len(recoverInfo.GetInfo().UnflushedSegments))
 	for _, segment := range recoverInfo.GetInfo().UnflushedSegments {
-		if !segment.IsCreatedByStreaming {
-			segmentIDs = append(segmentIDs, segment.ID)
+		if segment.IsCreatedByStreaming {
+			continue
 		}
-	}
-	if len(segmentIDs) > 0 {
 		msg := message.NewFlushMessageBuilderV2().
 			WithVChannel(recoverInfo.GetInfo().GetChannelName()).
 			WithHeader(&message.FlushMessageHeader{
 				CollectionId: recoverInfo.GetInfo().GetCollectionID(),
-				SegmentIds:   segmentIDs,
+				PartitionId:  segment.PartitionID,
+				SegmentId:    segment.ID,
 			}).
 			WithBody(&message.FlushMessageBody{}).MustBuildMutable()
 		if err := retry.Do(ctx, func() error {

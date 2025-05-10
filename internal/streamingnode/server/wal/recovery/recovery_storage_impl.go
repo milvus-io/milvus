@@ -66,7 +66,6 @@ func newRecoveryStorage(channel types.PChannelInfo) *RecoveryStorage {
 // It will consume the message from the wal, consume the message in wal, and update the checkpoint for it.
 type RecoveryStorage struct {
 	log.Binder
-
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
 	cfg                    *config
 	mu                     sync.Mutex
@@ -141,6 +140,7 @@ func (r *RecoveryStorage) observeMessage(msg message.ImmutableMessage) {
 	if msg.TimeTick() <= r.checkpoint.TimeTick {
 		if r.Logger().Level().Enabled(zap.DebugLevel) {
 			r.Logger().Debug("skip the message before the checkpoint",
+				log.FieldMessage(msg),
 				zap.Uint64("checkpoint", r.checkpoint.TimeTick),
 				zap.Uint64("incoming", msg.TimeTick()),
 			)
@@ -238,21 +238,17 @@ func (r *RecoveryStorage) handleDelete(msg message.ImmutableDeleteMessageV1) {
 
 // handleCreateSegment handles the create segment message.
 func (r *RecoveryStorage) handleCreateSegment(msg message.ImmutableCreateSegmentMessageV2) {
-	segments := newSegmentRecoveryInfoFromCreateSegmentMessage(msg)
-	for _, segment := range segments {
-		r.segments[segment.meta.SegmentId] = segment
-		r.Logger().Info("create segment", log.FieldMessage(msg))
-	}
+	segment := newSegmentRecoveryInfoFromCreateSegmentMessage(msg)
+	r.segments[segment.meta.SegmentId] = segment
+	r.Logger().Info("create segment", log.FieldMessage(msg))
 }
 
 // handleFlush handles the flush message.
 func (r *RecoveryStorage) handleFlush(msg message.ImmutableFlushMessageV2) {
 	header := msg.Header()
-	for _, segmentID := range header.SegmentIds {
-		if segment, ok := r.segments[segmentID]; ok {
-			segment.ObserveFlush(msg.TimeTick())
-			r.Logger().Info("flush segment", log.FieldMessage(msg), zap.Uint64("rows", segment.Rows()), zap.Uint64("binarySize", segment.BinarySize()))
-		}
+	if segment, ok := r.segments[header.SegmentId]; ok {
+		segment.ObserveFlush(msg.TimeTick())
+		r.Logger().Info("flush segment", log.FieldMessage(msg), zap.Uint64("rows", segment.Rows()), zap.Uint64("binarySize", segment.BinarySize()))
 	}
 }
 
