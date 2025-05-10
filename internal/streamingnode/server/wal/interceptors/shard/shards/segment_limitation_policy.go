@@ -1,4 +1,4 @@
-package policy
+package shards
 
 import (
 	"math/rand"

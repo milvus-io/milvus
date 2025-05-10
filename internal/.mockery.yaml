@@ -52,7 +52,7 @@ packages:
       InterceptorWithReady:
       InterceptorWithMetrics:
       InterceptorBuilder:
-  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/inspector:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils:
     interfaces:
       SealOperator:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector:

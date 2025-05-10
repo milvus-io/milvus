@@ -22,19 +22,18 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 )
 
 type MsgHandler interface {
-	HandleCreateSegment(ctx context.Context, vchannel string, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error
+	HandleCreateSegment(ctx context.Context, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error
 
-	HandleFlush(vchannel string, flushMsg message.ImmutableFlushMessageV2) error
+	HandleFlush(flushMsg message.ImmutableFlushMessageV2) error
 
-	HandleManualFlush(vchannel string, flushMsg message.ImmutableManualFlushMessageV2) error
+	HandleManualFlush(flushMsg message.ImmutableManualFlushMessageV2) error
 
 	HandleImport(ctx context.Context, vchannel string, importMsg *msgpb.ImportMsg) error
 
-	HandleSchemaChange(ctx context.Context, vchannel string, msg *adaptor.SchemaChangeMessageBody) error
+	HandleSchemaChange(ctx context.Context, schemaChangeMsg message.ImmutableSchemaChangeMessageV2) error
 }
 
 func ConvertInternalImportFile(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {

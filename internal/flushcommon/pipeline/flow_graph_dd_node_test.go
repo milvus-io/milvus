@@ -98,9 +98,9 @@ func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 
 func TestFlowGraph_DDNode_OperateFlush(t *testing.T) {
 	h := mock_util.NewMockMsgHandler(t)
-	h.EXPECT().HandleCreateSegment(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	h.EXPECT().HandleFlush(mock.Anything, mock.Anything).Return(nil)
-	h.EXPECT().HandleManualFlush(mock.Anything, mock.Anything).Return(nil)
+	h.EXPECT().HandleCreateSegment(mock.Anything, mock.Anything).Return(nil)
+	h.EXPECT().HandleFlush(mock.Anything).Return(nil)
+	h.EXPECT().HandleManualFlush(mock.Anything).Return(nil)
 
 	ddn := ddNode{
 		ctx:          context.Background(),

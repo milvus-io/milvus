@@ -4,12 +4,17 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-type PolicyName string
+type (
+	PolicyName        string
+	SegmentLimitation = shards.SegmentLimitation
+)
 
 var (
+	GetSegmentLimitationPolicy             = shards.GetSegmentLimitationPolicy
 	PolicyNamePartitionNotFound PolicyName = "partition_not_found"
 	PolicyNamePartitionRemoved  PolicyName = "partition_removed"
 	PolicyNameCollectionRemoved PolicyName = "collection_removed"

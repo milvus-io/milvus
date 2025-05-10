@@ -29,9 +29,9 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -48,39 +48,64 @@ type msgHandlerImpl struct {
 	wbMgr writebuffer.BufferManager
 }
 
-func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, vchannel string, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error {
-	body, err := createSegmentMsg.Body()
-	if err != nil {
-		return errors.Wrap(err, "failed to get create segment message body")
+func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error {
+	vchannel := createSegmentMsg.VChannel()
+	h := createSegmentMsg.Header()
+	if err := impl.createNewGrowingSegment(ctx, vchannel, h); err != nil {
+		return err
 	}
-	for _, segmentInfo := range body.GetSegments() {
-		if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, segmentInfo.GetPartitionId(), segmentInfo.GetSegmentId()); err != nil {
-			log.Warn("fail to create new growing segment",
-				zap.String("vchannel", vchannel),
-				zap.Int64("partition_id", segmentInfo.GetPartitionId()),
-				zap.Int64("segment_id", segmentInfo.GetSegmentId()))
-			return err
-		}
-		log.Info("create new growing segment",
-			zap.String("vchannel", vchannel),
-			zap.Int64("partition_id", segmentInfo.GetPartitionId()),
-			zap.Int64("segment_id", segmentInfo.GetSegmentId()),
-			zap.Int64("storage_version", segmentInfo.GetStorageVersion()))
+	logger := log.With(log.FieldMessage(createSegmentMsg))
+	if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, h.PartitionId, h.SegmentId); err != nil {
+		logger.Warn("fail to create new growing segment")
+		return err
 	}
+	log.Info("create new growing segment")
 	return nil
 }
 
-func (impl *msgHandlerImpl) HandleFlush(vchannel string, flushMsg message.ImmutableFlushMessageV2) error {
-	if err := impl.wbMgr.SealSegments(context.Background(), vchannel, flushMsg.Header().SegmentIds); err != nil {
+func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchannel string, h *message.CreateSegmentMessageHeader) error {
+	// Transfer the pending segment into growing state.
+	// Alloc the growing segment at datacoord first.
+	mix, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	logger := log.With(zap.Int64("collectionID", h.CollectionId), zap.Int64("partitionID", h.PartitionId), zap.Int64("segmentID", h.SegmentId))
+	return retry.Do(ctx, func() (err error) {
+		resp, err := mix.AllocSegment(ctx, &datapb.AllocSegmentRequest{
+			CollectionId:         h.CollectionId,
+			PartitionId:          h.PartitionId,
+			SegmentId:            h.SegmentId,
+			Vchannel:             vchannel,
+			StorageVersion:       h.StorageVersion,
+			IsCreatedByStreaming: true,
+		})
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			logger.Warn("failed to alloc growing segment at datacoord")
+			return errors.Wrap(err, "failed to alloc growing segment at datacoord")
+		}
+		logger.Info("alloc growing segment at datacoord")
+		return nil
+	}, retry.AttemptAlways())
+}
+
+func (impl *msgHandlerImpl) HandleFlush(flushMsg message.ImmutableFlushMessageV2) error {
+	vchannel := flushMsg.VChannel()
+	if err := impl.wbMgr.SealSegments(context.Background(), vchannel, []int64{flushMsg.Header().SegmentId}); err != nil {
 		return errors.Wrap(err, "failed to seal segments")
 	}
 	return nil
 }
 
-func (impl *msgHandlerImpl) HandleManualFlush(vchannel string, flushMsg message.ImmutableManualFlushMessageV2) error {
-	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.Header().GetFlushTs()); err != nil {
-		return errors.Wrap(err, "failed to flush channel")
+func (impl *msgHandlerImpl) HandleManualFlush(flushMsg message.ImmutableManualFlushMessageV2) error {
+	vchannel := flushMsg.VChannel()
+	if err := impl.wbMgr.SealSegments(context.Background(), vchannel, flushMsg.Header().SegmentIds); err != nil {
+		return errors.Wrap(err, "failed to seal segments")
 	}
+	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.Header().FlushTs); err != nil {
+		return errors.Wrap(err, "failed to flush channel")
+	} // may be redundant.
+
 	broadcastID := flushMsg.BroadcastHeader().BroadcastID
 	if broadcastID == 0 {
 		return nil
@@ -91,9 +116,11 @@ func (impl *msgHandlerImpl) HandleManualFlush(vchannel string, flushMsg message.
 	})
 }
 
-func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, vchannel string, msg *adaptor.SchemaChangeMessageBody) error {
+func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.ImmutableSchemaChangeMessageV2) error {
+	vchannel := msg.VChannel()
+	impl.wbMgr.SealSegments(context.Background(), msg.VChannel(), msg.Header().FlushedSegmentIds)
 	return streaming.WAL().Broadcast().Ack(ctx, types.BroadcastAckRequest{
-		BroadcastID: msg.BroadcastID,
+		BroadcastID: msg.BroadcastHeader().BroadcastID,
 		VChannel:    vchannel,
 	})
 }
