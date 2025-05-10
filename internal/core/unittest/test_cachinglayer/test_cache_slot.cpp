@@ -46,8 +46,10 @@ class MockTranslator : public Translator<TestCell> {
                    bool for_concurrent_test = false)
         : uid_to_cid_map_(std::move(uid_to_cid_map)),
           key_(key),
-          meta_(storage_type),
-          num_unique_cids_(cell_sizes.size()) {
+          meta_(
+              storage_type, CacheWarmupPolicy::CacheWarmupPolicy_Disable, true),
+          num_unique_cids_(cell_sizes.size()),
+          for_concurrent_test_(for_concurrent_test) {
         cid_set_.reserve(cell_sizes.size());
         cell_sizes_.reserve(cell_sizes.size());
         for (const auto& pair : cell_sizes) {
@@ -217,8 +219,9 @@ class CacheSlotTest : public ::testing::Test {
 
     void
     SetUp() override {
+        auto limit = ResourceUsage{MEMORY_LIMIT, DISK_LIMIT};
         dlist_ = std::make_unique<DList>(
-            ResourceUsage{MEMORY_LIMIT, DISK_LIMIT}, DList::TouchConfig{});
+            limit, limit, limit, EvictionConfig{10, 600});
 
         auto temp_translator_uptr = std::make_unique<MockTranslator>(
             cell_sizes_, uid_to_cid_map_, SLOT_KEY, StorageType::MEMORY);
@@ -509,9 +512,13 @@ TEST_F(CacheSlotTest, TranslatorReturnsExtraCells) {
 
 TEST_F(CacheSlotTest, EvictionTest) {
     // Sizes: 0:50, 1:150, 2:100, 3:200
-    ResourceUsage NEW_LIMIT = ResourceUsage(300, 0);
-    EXPECT_TRUE(dlist_->UpdateLimit(NEW_LIMIT));
-    EXPECT_EQ(DListTestFriend::get_max_memory(*dlist_), NEW_LIMIT);
+    ResourceUsage new_limit = ResourceUsage(300, 0);
+    ResourceUsage new_high_watermark = ResourceUsage(250, 0);
+    ResourceUsage new_low_watermark = ResourceUsage(200, 0);
+    EXPECT_TRUE(dlist_->UpdateLimit(new_limit));
+    dlist_->UpdateHighWatermark(new_high_watermark);
+    dlist_->UpdateLowWatermark(new_low_watermark);
+    EXPECT_EQ(DListTestFriend::get_max_memory(*dlist_), new_limit);
 
     std::vector<cl_uid_t> uids_012 = {10, 20, 30};
     std::vector<cid_t> cids_012 = {0, 1, 2};
@@ -554,7 +561,7 @@ TEST_F(CacheSlotTest, EvictionTest) {
 
     // Verify eviction happened
     ResourceUsage used_after_evict1 = DListTestFriend::get_used_memory(*dlist_);
-    EXPECT_LE(used_after_evict1.memory_bytes, NEW_LIMIT.memory_bytes);
+    EXPECT_LE(used_after_evict1.memory_bytes, new_limit.memory_bytes);
     EXPECT_GE(used_after_evict1.memory_bytes, size_3.memory_bytes);
     EXPECT_LT(
         used_after_evict1.memory_bytes,
@@ -569,18 +576,26 @@ TEST_P(CacheSlotConcurrentTest, ConcurrentAccessMultipleSlots) {
     // Slot 2 Cells: 0-4 (Sizes: 55, 65, 75, 85, 95) -> Total 375
     // Total potential size = 350 + 375 = 725
     // Set limit lower than total potential size to force eviction
-    ResourceUsage NEW_LIMIT = ResourceUsage(600, 0);
-    ASSERT_TRUE(dlist_->UpdateLimit(NEW_LIMIT));
+    ResourceUsage new_limit = ResourceUsage(700, 0);
+    ResourceUsage new_high_watermark = ResourceUsage(650, 0);
+    ResourceUsage new_low_watermark = ResourceUsage(600, 0);
+    ASSERT_TRUE(dlist_->UpdateLimit(new_limit));
+    dlist_->UpdateHighWatermark(new_high_watermark);
+    dlist_->UpdateLowWatermark(new_low_watermark);
     EXPECT_EQ(DListTestFriend::get_max_memory(*dlist_).memory_bytes,
-              NEW_LIMIT.memory_bytes);
+              new_limit.memory_bytes);
 
     // 1. Setup CacheSlots sharing dlist_
     std::vector<std::pair<cid_t, int64_t>> cell_sizes_1 = {
         {0, 50}, {1, 60}, {2, 70}, {3, 80}, {4, 90}};
     std::unordered_map<cl_uid_t, cid_t> uid_map_1 = {
         {1000, 0}, {1001, 1}, {1002, 2}, {1003, 3}, {1004, 4}};
-    auto translator_1_ptr = std::make_unique<MockTranslator>(
-        cell_sizes_1, uid_map_1, "slot1", StorageType::MEMORY, true);
+    auto translator_1_ptr =
+        std::make_unique<MockTranslator>(cell_sizes_1,
+                                         uid_map_1,
+                                         "slot1",
+                                         StorageType::MEMORY,
+                                         /*for_concurrent_test*/ true);
     MockTranslator* translator_1 = translator_1_ptr.get();
     auto slot1 = std::make_shared<CacheSlot<TestCell>>(
         std::move(translator_1_ptr), dlist_.get());
@@ -589,8 +604,12 @@ TEST_P(CacheSlotConcurrentTest, ConcurrentAccessMultipleSlots) {
         {0, 55}, {1, 65}, {2, 75}, {3, 85}, {4, 95}};
     std::unordered_map<cl_uid_t, cid_t> uid_map_2 = {
         {2000, 0}, {2001, 1}, {2002, 2}, {2003, 3}, {2004, 4}};
-    auto translator_2_ptr = std::make_unique<MockTranslator>(
-        cell_sizes_2, uid_map_2, "slot2", StorageType::MEMORY, true);
+    auto translator_2_ptr =
+        std::make_unique<MockTranslator>(cell_sizes_2,
+                                         uid_map_2,
+                                         "slot2",
+                                         StorageType::MEMORY,
+                                         /*for_concurrent_test*/ true);
     MockTranslator* translator_2 = translator_2_ptr.get();
     auto slot2 = std::make_shared<CacheSlot<TestCell>>(
         std::move(translator_2_ptr), dlist_.get());
@@ -722,11 +741,14 @@ TEST_P(CacheSlotConcurrentTest, ConcurrentAccessMultipleSlots) {
         {3000, 0}, {3001, 1}, {3002, 2}, {3003, 3}, {3004, 4}};
     std::vector<cl_uid_t> slot3_uids = {3000, 3001, 3002, 3003, 3004};
     auto create_new_slot3 = [&]() {
-        auto translator_3_ptr = std::make_unique<MockTranslator>(
-            cell_sizes_3, uid_map_3, "slot3", StorageType::MEMORY, true);
+        auto translator_3_ptr =
+            std::make_unique<MockTranslator>(cell_sizes_3,
+                                             uid_map_3,
+                                             "slot3",
+                                             StorageType::MEMORY,
+                                             /*for_concurrent_test*/ true);
         auto sl = std::make_shared<CacheSlot<TestCell>>(
             std::move(translator_3_ptr), dlist_ptr);
-        // std::cout << "Created new SSSSSSslot3 at " << (void*)sl.get() << std::endl;
         return sl;
     };
     std::shared_ptr<CacheSlot<TestCell>> slot3 = create_new_slot3();
@@ -783,7 +805,6 @@ TEST_P(CacheSlotConcurrentTest, ConcurrentAccessMultipleSlots) {
                 }
 
                 if (ops_since_recreate >= recreate_interval) {
-                    // std::cout << "Destroying SSSSSSslot3 at " << (void*)slot3.get() << std::endl;
                     slot3 = nullptr;
                     int sleep_ms = recreate_sleep_dist(gen);
                     std::this_thread::sleep_for(
@@ -828,9 +849,9 @@ TEST_P(CacheSlotConcurrentTest, ConcurrentAccessMultipleSlots) {
 
     // bonus cell may cause memory usage to exceed the limit
     if (!with_bonus_cells) {
-        EXPECT_LE(final_memory_usage.memory_bytes, NEW_LIMIT.memory_bytes)
+        EXPECT_LE(final_memory_usage.memory_bytes, new_limit.memory_bytes)
             << "Final memory usage (" << final_memory_usage.memory_bytes
-            << ") exceeds the limit (" << NEW_LIMIT.memory_bytes
+            << ") exceeds the limit (" << new_limit.memory_bytes
             << ") after concurrent access.";
     }
 

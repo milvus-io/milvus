@@ -335,12 +335,11 @@ class SegmentInternalInterface : public SegmentInterface {
                            const bool* valid_data,
                            int64_t count);
 
-    template <typename T>
     void
     LoadStringSkipIndex(FieldId field_id,
                         int64_t chunk_id,
-                        const T& var_column) {
-        skip_index_.LoadString(field_id, chunk_id, var_column);
+                        const ChunkedColumnInterface& column) {
+        skip_index_.LoadString(field_id, chunk_id, column);
     }
 
     virtual DataType

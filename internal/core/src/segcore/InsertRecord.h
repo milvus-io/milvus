@@ -415,7 +415,6 @@ struct InsertRecord {
 
  protected:
     storage::MmapChunkDescriptorPtr mmap_descriptor_;
-    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
     mutable std::shared_mutex shared_mutex_{};
 };
 
@@ -708,6 +707,7 @@ struct InsertRecord<false> : public InsertRecord<true> {
     AckResponder ack_responder_;
 
  private:
+    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
     std::unordered_map<FieldId, ThreadSafeValidDataPtr> valid_data_{};
 };
 

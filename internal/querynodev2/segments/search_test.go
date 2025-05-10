@@ -57,6 +57,8 @@ func (suite *SearchSuite) SetupTest() {
 	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(paramtable.Get())
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
+	initcore.InitLocalChunkManager(suite.T().Name())
+	initcore.InitMmapManager(paramtable.Get())
 
 	suite.collectionID = 100
 	suite.partitionID = 10
@@ -88,7 +90,6 @@ func (suite *SearchSuite) SetupTest() {
 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
-		nil,
 	)
 	suite.Require().NoError(err)
 
@@ -117,7 +118,6 @@ func (suite *SearchSuite) SetupTest() {
 			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
-		nil,
 	)
 	suite.Require().NoError(err)
 

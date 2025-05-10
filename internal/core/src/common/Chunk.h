@@ -166,7 +166,7 @@ class StringChunk : public Chunk {
 
     std::string_view
     operator[](const int i) const {
-        if (i < 0 || i > row_nums_) {
+        if (i < 0 || i >= row_nums_) {
             PanicInfo(ErrorCode::OutOfRange, "index out of range");
         }
 

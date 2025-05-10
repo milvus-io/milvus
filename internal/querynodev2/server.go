@@ -271,11 +271,72 @@ func (node *QueryNode) InitSegcore() error {
 		return err
 	}
 
-	tieredStorageEnabledGlobally := C.bool(paramtable.Get().QueryNodeCfg.TieredStorageEnableGlobal.GetAsBool())
-	tieredStorageMemoryLimit := C.int64_t(paramtable.Get().QueryNodeCfg.TieredStorageMemoryAllocationRatio.GetAsFloat() * float64(hardware.GetMemoryCount()))
-	diskCapacity := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
-	tieredStorageDiskLimit := C.int64_t(paramtable.Get().QueryNodeCfg.TieredStorageDiskAllocationRatio.GetAsFloat() * float64(diskCapacity))
-	C.ConfigureTieredStorage(tieredStorageEnabledGlobally, tieredStorageMemoryLimit, tieredStorageDiskLimit)
+	// init tiered storage
+	scalarFieldCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.GetValue())
+	if err != nil {
+		return err
+	}
+	vectorFieldCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.GetValue())
+	if err != nil {
+		return err
+	}
+	scalarIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
+	if err != nil {
+		return err
+	}
+	vectorIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.GetValue())
+	if err != nil {
+		return err
+	}
+	osMemBytes := hardware.GetMemoryCount()
+	osDiskBytes := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
+
+	memoryLowWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredMemoryLowWatermarkRatio.GetAsFloat()
+	memoryHighWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredMemoryHighWatermarkRatio.GetAsFloat()
+	memoryMaxRatio := paramtable.Get().QueryNodeCfg.TieredMemoryMaxRatio.GetAsFloat()
+	diskLowWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredDiskLowWatermarkRatio.GetAsFloat()
+	diskHighWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredDiskHighWatermarkRatio.GetAsFloat()
+	diskMaxRatio := paramtable.Get().QueryNodeCfg.TieredDiskMaxRatio.GetAsFloat()
+
+	if memoryLowWatermarkRatio > memoryHighWatermarkRatio {
+		return errors.New("memoryLowWatermarkRatio should not be greater than memoryHighWatermarkRatio")
+	}
+	if memoryHighWatermarkRatio > memoryMaxRatio {
+		return errors.New("memoryHighWatermarkRatio should not be greater than memoryMaxRatio")
+	}
+	if memoryMaxRatio >= 1 {
+		return errors.New("memoryMaxRatio should not be greater than 1")
+	}
+
+	if diskLowWatermarkRatio > diskHighWatermarkRatio {
+		return errors.New("diskLowWatermarkRatio should not be greater than diskHighWatermarkRatio")
+	}
+	if diskHighWatermarkRatio > diskMaxRatio {
+		return errors.New("diskHighWatermarkRatio should not be greater than diskMaxRatio")
+	}
+	if diskMaxRatio >= 1 {
+		return errors.New("diskMaxRatio should not be greater than 1")
+	}
+
+	memoryLowWatermarkBytes := C.int64_t(memoryLowWatermarkRatio * float64(osMemBytes))
+	memoryHighWatermarkBytes := C.int64_t(memoryHighWatermarkRatio * float64(osMemBytes))
+	memoryMaxBytes := C.int64_t(memoryMaxRatio * float64(osMemBytes))
+
+	diskLowWatermarkBytes := C.int64_t(diskLowWatermarkRatio * float64(osDiskBytes))
+	diskHighWatermarkBytes := C.int64_t(diskHighWatermarkRatio * float64(osDiskBytes))
+	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
+
+	evictionEnabled := C.bool(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
+	cacheTouchWindowMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
+	evictionIntervalMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredEvictionIntervalMs.GetAsInt64())
+
+	C.ConfigureTieredStorage(C.CacheWarmupPolicy(scalarFieldCacheWarmupPolicy),
+		C.CacheWarmupPolicy(vectorFieldCacheWarmupPolicy),
+		C.CacheWarmupPolicy(scalarIndexCacheWarmupPolicy),
+		C.CacheWarmupPolicy(vectorIndexCacheWarmupPolicy),
+		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
+		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
+		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs)
 
 	initcore.InitTraceConfig(paramtable.Get())
 	C.InitExecExpressionFunctionFactory()
@@ -432,7 +493,6 @@ func (node *QueryNode) Start() error {
 		mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 		mmapScalarIndex := paramtable.Get().QueryNodeCfg.MmapScalarIndex.GetAsBool()
 		mmapScalarField := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
-		mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
@@ -446,7 +506,6 @@ func (node *QueryNode) Start() error {
 			zap.Bool("mmapVectorField", mmapVectorField),
 			zap.Bool("mmapScalarIndex", mmapScalarIndex),
 			zap.Bool("mmapScalarField", mmapScalarField),
-			zap.Bool("mmapChunkCache", mmapChunkCache),
 		)
 	})
 

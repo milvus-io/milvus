@@ -106,16 +106,18 @@ struct ResourceUsage {
 
     std::string
     ToString() const {
-        return fmt::format("ResourceUsage{memory_bytes={}, file_bytes={}}",
-                           memory_bytes,
-                           file_bytes);
+        return fmt::format(
+            "memory {} bytes ({:.2} GB), disk {} bytes ({:.2} GB)",
+            memory_bytes,
+            memory_bytes / 1024.0 / 1024.0 / 1024.0,
+            file_bytes,
+            file_bytes / 1024.0 / 1024.0 / 1024.0);
     }
 };
 
 inline std::ostream&
 operator<<(std::ostream& os, const ResourceUsage& usage) {
-    os << "ResourceUsage{memory_bytes=" << usage.memory_bytes
-       << ", file_bytes=" << usage.file_bytes << "}";
+    os << "memory=" << usage.memory_bytes << ", disk=" << usage.file_bytes;
     return os;
 }
 
@@ -138,6 +140,82 @@ operator-=(std::atomic<ResourceUsage>& atomic_lhs, const ResourceUsage& rhs) {
         new_value -= rhs;
     } while (!atomic_lhs.compare_exchange_weak(current, new_value));
 }
+
+// helper struct for ConfigureTieredStorage, so the list of arguments is not too long.
+struct CacheWarmupPolicies {
+    CacheWarmupPolicy scalarFieldCacheWarmupPolicy;
+    CacheWarmupPolicy vectorFieldCacheWarmupPolicy;
+    CacheWarmupPolicy scalarIndexCacheWarmupPolicy;
+    CacheWarmupPolicy vectorIndexCacheWarmupPolicy;
+
+    CacheWarmupPolicies()
+        : scalarFieldCacheWarmupPolicy(
+              CacheWarmupPolicy::CacheWarmupPolicy_Sync),
+          vectorFieldCacheWarmupPolicy(
+              CacheWarmupPolicy::CacheWarmupPolicy_Disable),
+          scalarIndexCacheWarmupPolicy(
+              CacheWarmupPolicy::CacheWarmupPolicy_Sync),
+          vectorIndexCacheWarmupPolicy(
+              CacheWarmupPolicy::CacheWarmupPolicy_Sync) {
+    }
+
+    CacheWarmupPolicies(CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
+                        CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
+                        CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
+                        CacheWarmupPolicy vectorIndexCacheWarmupPolicy)
+        : scalarFieldCacheWarmupPolicy(scalarFieldCacheWarmupPolicy),
+          vectorFieldCacheWarmupPolicy(vectorFieldCacheWarmupPolicy),
+          scalarIndexCacheWarmupPolicy(scalarIndexCacheWarmupPolicy),
+          vectorIndexCacheWarmupPolicy(vectorIndexCacheWarmupPolicy) {
+    }
+};
+
+struct CacheLimit {
+    int64_t memory_low_watermark_bytes;
+    int64_t memory_high_watermark_bytes;
+    int64_t memory_max_bytes;
+    int64_t disk_low_watermark_bytes;
+    int64_t disk_high_watermark_bytes;
+    int64_t disk_max_bytes;
+    CacheLimit()
+        : memory_low_watermark_bytes(0),
+          memory_high_watermark_bytes(0),
+          memory_max_bytes(0),
+          disk_low_watermark_bytes(0),
+          disk_high_watermark_bytes(0),
+          disk_max_bytes(0) {
+    }
+
+    CacheLimit(int64_t memory_low_watermark_bytes,
+               int64_t memory_high_watermark_bytes,
+               int64_t memory_max_bytes,
+               int64_t disk_low_watermark_bytes,
+               int64_t disk_high_watermark_bytes,
+               int64_t disk_max_bytes)
+        : memory_low_watermark_bytes(memory_low_watermark_bytes),
+          memory_high_watermark_bytes(memory_high_watermark_bytes),
+          memory_max_bytes(memory_max_bytes),
+          disk_low_watermark_bytes(disk_low_watermark_bytes),
+          disk_high_watermark_bytes(disk_high_watermark_bytes),
+          disk_max_bytes(disk_max_bytes) {
+    }
+};
+
+struct EvictionConfig {
+    // Touch a node means to move it to the head of the list, which requires locking the entire list.
+    // Use cache_touch_window_ms to reduce the frequency of touching and reduce contention.
+    std::chrono::milliseconds cache_touch_window;
+    std::chrono::milliseconds eviction_interval;
+    EvictionConfig()
+        : cache_touch_window(std::chrono::milliseconds(0)),
+          eviction_interval(std::chrono::milliseconds(0)) {
+    }
+
+    EvictionConfig(int64_t cache_touch_window_ms, int64_t eviction_interval_ms)
+        : cache_touch_window(std::chrono::milliseconds(cache_touch_window_ms)),
+          eviction_interval(std::chrono::milliseconds(eviction_interval_ms)) {
+    }
+};
 
 namespace internal {
 

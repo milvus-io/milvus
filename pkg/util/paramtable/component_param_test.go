@@ -412,7 +412,6 @@ func TestComponentParam(t *testing.T) {
 
 		// chunk cache
 		assert.Equal(t, "willneed", Params.ReadAheadPolicy.GetValue())
-		assert.Equal(t, "disable", Params.ChunkCacheWarmingUp.GetValue())
 
 		// test small indexNlist/NProbe default
 		params.Remove("queryNode.segcore.smallIndex.nlist")
@@ -485,7 +484,6 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 
-		assert.Equal(t, true, Params.MmapChunkCache.GetAsBool())
 		assert.Equal(t, 60*time.Second, Params.DiskSizeFetchInterval.GetAsDuration(time.Second))
 	})
 
