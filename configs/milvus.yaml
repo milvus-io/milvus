@@ -669,9 +669,9 @@ dataCoord:
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:
-    clusteringCompactionUsage: 16 # slot usage of clustering compaction job.
-    mixCompactionUsage: 8 # slot usage of mix compaction job.
-    l0DeleteCompactionUsage: 8 # slot usage of l0 compaction job.
+    clusteringCompactionUsage: 65536 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
+    mixCompactionUsage: 4 # slot usage of mix compaction task.
+    l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task

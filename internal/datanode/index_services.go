@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// CreateJob is CreateIndex
 func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("clusterID", req.GetClusterID()),
@@ -141,9 +142,9 @@ func (node *DataNode) QueryJobs(ctx context.Context, req *workerpb.QueryJobsRequ
 	ret := &workerpb.QueryJobsResponse{
 		Status:     merr.Success(),
 		ClusterID:  req.GetClusterID(),
-		IndexInfos: make([]*workerpb.IndexTaskInfo, 0, len(req.GetBuildIDs())),
+		IndexInfos: make([]*workerpb.IndexTaskInfo, 0, len(req.GetTaskIDs())),
 	}
-	for i, buildID := range req.GetBuildIDs() {
+	for i, buildID := range req.GetTaskIDs() {
 		ret.IndexInfos = append(ret.IndexInfos, &workerpb.IndexTaskInfo{
 			BuildID:        buildID,
 			State:          commonpb.IndexState_IndexStateNone,
@@ -171,16 +172,16 @@ func (node *DataNode) QueryJobs(ctx context.Context, req *workerpb.QueryJobsRequ
 func (node *DataNode) DropJobs(ctx context.Context, req *workerpb.DropJobsRequest) (*commonpb.Status, error) {
 	log.Ctx(ctx).Info("drop index build jobs",
 		zap.String("clusterID", req.ClusterID),
-		zap.Int64s("indexBuildIDs", req.BuildIDs),
+		zap.Int64s("indexBuildIDs", req.GetTaskIDs()),
 	)
 	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
 		log.Ctx(ctx).Warn("index node not ready", zap.Error(err), zap.String("clusterID", req.ClusterID))
 		return merr.Status(err), nil
 	}
 	defer node.lifetime.Done()
-	keys := make([]index.Key, 0, len(req.GetBuildIDs()))
-	for _, buildID := range req.GetBuildIDs() {
-		keys = append(keys, index.Key{ClusterID: req.GetClusterID(), TaskID: buildID})
+	keys := make([]index.Key, 0, len(req.GetTaskIDs()))
+	for _, taskID := range req.GetTaskIDs() {
+		keys = append(keys, index.Key{ClusterID: req.GetClusterID(), TaskID: taskID})
 	}
 	infos := node.taskManager.DeleteIndexTaskInfos(ctx, keys)
 	for _, info := range infos {
@@ -189,7 +190,7 @@ func (node *DataNode) DropJobs(ctx context.Context, req *workerpb.DropJobsReques
 		}
 	}
 	log.Ctx(ctx).Info("drop index build jobs success", zap.String("clusterID", req.GetClusterID()),
-		zap.Int64s("indexBuildIDs", req.GetBuildIDs()))
+		zap.Int64s("indexBuildIDs", req.GetTaskIDs()))
 	return merr.Success(), nil
 }
 
@@ -202,21 +203,31 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 		}, nil
 	}
 	defer node.lifetime.Done()
-	unissued, active := node.taskScheduler.TaskQueue.GetTaskNum()
 
-	slots := node.totalSlot - node.taskScheduler.TaskQueue.GetUsingSlot()
-	log.Ctx(ctx).Info("Get Index Job Stats",
-		zap.Int("unissued", unissued),
-		zap.Int("active", active),
-		zap.Int64("slots", slots),
+	var (
+		totalSlots     = node.totalSlot
+		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
+		compactionUsed = node.compactionExecutor.Slots()
+		importUsed     = node.importScheduler.Slots()
 	)
+
+	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
+	if availableSlots < 0 {
+		availableSlots = 0
+	}
+
+	log.Ctx(ctx).Info("query slots done",
+		zap.Int64("totalSlots", totalSlots),
+		zap.Int64("availableSlots", availableSlots),
+		zap.Int64("indexStatsUsed", indexStatsUsed),
+		zap.Int64("compactionUsed", compactionUsed),
+		zap.Int64("importUsed", importUsed),
+	)
+
 	return &workerpb.GetJobStatsResponse{
-		Status:           merr.Success(),
-		TotalJobNum:      int64(active) + int64(unissued),
-		InProgressJobNum: int64(active),
-		EnqueueJobNum:    int64(unissued),
-		TotalSlots:       node.totalSlot,
-		AvailableSlots:   slots,
+		Status:         merr.Success(),
+		TotalSlots:     node.totalSlot,
+		AvailableSlots: availableSlots,
 	}, nil
 }
 
@@ -495,6 +506,139 @@ func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2
 			Status: merr.Status(errors.New("DataNode receive querying unknown type jobs")),
 		}, nil
 	}
+}
+
+func (node *DataNode) queryIndexTask(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsV2Response, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("clusterID", req.GetClusterID()), zap.Int64s("taskIDs", req.GetTaskIDs()),
+	).WithRateGroup("QueryResult", 1, 60)
+
+	infos := make(map[typeutil.UniqueID]*index.IndexTaskInfo)
+	node.taskManager.ForeachIndexTaskInfo(func(ClusterID string, buildID typeutil.UniqueID, info *index.IndexTaskInfo) {
+		if ClusterID == req.GetClusterID() {
+			infos[buildID] = &index.IndexTaskInfo{
+				State:                     info.State,
+				FileKeys:                  common.CloneStringList(info.FileKeys),
+				SerializedSize:            info.SerializedSize,
+				MemSize:                   info.MemSize,
+				FailReason:                info.FailReason,
+				CurrentIndexVersion:       info.CurrentIndexVersion,
+				IndexStoreVersion:         info.IndexStoreVersion,
+				CurrentScalarIndexVersion: info.CurrentScalarIndexVersion,
+			}
+		}
+	})
+	results := make([]*workerpb.IndexTaskInfo, 0, len(req.GetTaskIDs()))
+	for i, buildID := range req.GetTaskIDs() {
+		if info, ok := infos[buildID]; ok {
+			results = append(results, &workerpb.IndexTaskInfo{
+				BuildID:        buildID,
+				State:          commonpb.IndexState_IndexStateNone,
+				IndexFileKeys:  nil,
+				SerializedSize: 0,
+			})
+			results[i].State = info.State
+			results[i].IndexFileKeys = info.FileKeys
+			results[i].SerializedSize = info.SerializedSize
+			results[i].MemSize = info.MemSize
+			results[i].FailReason = info.FailReason
+			results[i].CurrentIndexVersion = info.CurrentIndexVersion
+			results[i].IndexStoreVersion = info.IndexStoreVersion
+			results[i].CurrentScalarIndexVersion = info.CurrentScalarIndexVersion
+		}
+	}
+	log.Debug("query index jobs result success", zap.Any("results", results))
+	if len(results) == 0 {
+		return &workerpb.QueryJobsV2Response{
+			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
+		}, nil
+	}
+	return &workerpb.QueryJobsV2Response{
+		Status:    merr.Success(),
+		ClusterID: req.GetClusterID(),
+		Result: &workerpb.QueryJobsV2Response_IndexJobResults{
+			IndexJobResults: &workerpb.IndexJobResults{
+				Results: results,
+			},
+		},
+	}, nil
+}
+
+func (node *DataNode) queryStatsTask(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsV2Response, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("clusterID", req.GetClusterID()), zap.Int64s("taskIDs", req.GetTaskIDs()),
+	).WithRateGroup("QueryResult", 1, 60)
+
+	results := make([]*workerpb.StatsResult, 0, len(req.GetTaskIDs()))
+	for _, taskID := range req.GetTaskIDs() {
+		info := node.taskManager.GetStatsTaskInfo(req.GetClusterID(), taskID)
+		if info != nil {
+			results = append(results, &workerpb.StatsResult{
+				TaskID:           taskID,
+				State:            info.State,
+				FailReason:       info.FailReason,
+				CollectionID:     info.CollID,
+				PartitionID:      info.PartID,
+				SegmentID:        info.SegID,
+				Channel:          info.InsertChannel,
+				InsertLogs:       info.InsertLogs,
+				StatsLogs:        info.StatsLogs,
+				TextStatsLogs:    info.TextStatsLogs,
+				Bm25Logs:         info.Bm25Logs,
+				NumRows:          info.NumRows,
+				JsonKeyStatsLogs: info.JSONKeyStatsLogs,
+			})
+		}
+	}
+	log.Debug("query stats job result success", zap.Any("results", results))
+	if len(results) == 0 {
+		return &workerpb.QueryJobsV2Response{
+			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
+		}, nil
+	}
+	return &workerpb.QueryJobsV2Response{
+		Status:    merr.Success(),
+		ClusterID: req.GetClusterID(),
+		Result: &workerpb.QueryJobsV2Response_StatsJobResults{
+			StatsJobResults: &workerpb.StatsResults{
+				Results: results,
+			},
+		},
+	}, nil
+}
+
+func (node *DataNode) queryAnalyzeTask(ctx context.Context, req *workerpb.QueryJobsRequest) (*workerpb.QueryJobsV2Response, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("clusterID", req.GetClusterID()), zap.Int64s("taskIDs", req.GetTaskIDs()),
+	).WithRateGroup("QueryResult", 1, 60)
+
+	results := make([]*workerpb.AnalyzeResult, 0, len(req.GetTaskIDs()))
+	for _, taskID := range req.GetTaskIDs() {
+		info := node.taskManager.GetAnalyzeTaskInfo(req.GetClusterID(), taskID)
+		if info != nil {
+			results = append(results, &workerpb.AnalyzeResult{
+				TaskID:        taskID,
+				State:         info.State,
+				FailReason:    info.FailReason,
+				CentroidsFile: info.CentroidsFile,
+			})
+		}
+	}
+	log.Debug("query analyze jobs result success", zap.Any("results", results))
+	if len(results) == 0 {
+		return &workerpb.QueryJobsV2Response{
+			Status: merr.Status(fmt.Errorf("tasks '%v' not found", req.GetTaskIDs())),
+		}, nil
+	}
+	return &workerpb.QueryJobsV2Response{
+		Status:    merr.Success(),
+		ClusterID: req.GetClusterID(),
+		Result: &workerpb.QueryJobsV2Response_AnalyzeJobResults{
+			AnalyzeJobResults: &workerpb.AnalyzeResults{
+				Results: results,
+			},
+		},
+	}, nil
 }
 
 func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Request) (*commonpb.Status, error) {

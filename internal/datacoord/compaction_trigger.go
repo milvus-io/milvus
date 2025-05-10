@@ -116,15 +116,15 @@ func (cs *compactionSignal) Notify(result error) {
 var _ trigger = (*compactionTrigger)(nil)
 
 type compactionTrigger struct {
-	handler           Handler
-	meta              *meta
-	allocator         allocator.Allocator
-	signals           chan *compactionSignal
-	manualSignals     chan *compactionSignal
-	compactionHandler compactionPlanContext
-	globalTrigger     *time.Ticker
-	closeCh           lifetime.SafeChan
-	closeWaiter       sync.WaitGroup
+	handler       Handler
+	meta          *meta
+	allocator     allocator.Allocator
+	signals       chan *compactionSignal
+	manualSignals chan *compactionSignal
+	inspector     CompactionInspector
+	globalTrigger *time.Ticker
+	closeCh       lifetime.SafeChan
+	closeWaiter   sync.WaitGroup
 
 	indexEngineVersionManager IndexEngineVersionManager
 
@@ -137,7 +137,7 @@ type compactionTrigger struct {
 
 func newCompactionTrigger(
 	meta *meta,
-	compactionHandler compactionPlanContext,
+	inspector CompactionInspector,
 	allocator allocator.Allocator,
 	handler Handler,
 	indexVersionManager IndexEngineVersionManager,
@@ -147,7 +147,7 @@ func newCompactionTrigger(
 		allocator:                    allocator,
 		signals:                      make(chan *compactionSignal, 100),
 		manualSignals:                make(chan *compactionSignal, 100),
-		compactionHandler:            compactionHandler,
+		inspector:                    inspector,
 		indexEngineVersionManager:    indexVersionManager,
 		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
@@ -328,7 +328,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		zap.Int64("signal.partitionID", signal.partitionID),
 		zap.Int64s("signal.segmentIDs", signal.segmentIDs))
 
-	if !signal.isForce && t.compactionHandler.isFull() {
+	if !signal.isForce && t.inspector.isFull() {
 		log.Warn("skip to generate compaction plan due to handler full")
 		return merr.WrapErrServiceQuotaExceeded("compaction handler full")
 	}
@@ -350,7 +350,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			zap.String("group.channel", group.channelName),
 		)
 
-		if !signal.isForce && t.compactionHandler.isFull() {
+		if !signal.isForce && t.inspector.isFull() {
 			log.Warn("skip to generate compaction plan due to handler full")
 			return merr.WrapErrServiceQuotaExceeded("compaction handler full")
 		}
@@ -379,7 +379,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		expectedSize := getExpectedSegmentSize(t.meta, coll)
 		plans := t.generatePlans(group.segments, signal, ct, expectedSize)
 		for _, plan := range plans {
-			if !signal.isForce && t.compactionHandler.isFull() {
+			if !signal.isForce && t.inspector.isFull() {
 				log.Warn("skip to generate compaction plan due to handler full")
 				return merr.WrapErrServiceQuotaExceeded("compaction handler full")
 			}
@@ -414,7 +414,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 					End:   endID,
 				},
 			}
-			err = t.compactionHandler.enqueueCompaction(task)
+			err = t.inspector.enqueueCompaction(task)
 			if err != nil {
 				log.Warn("failed to execute compaction task",
 					zap.Int64("planID", task.GetPlanID()),

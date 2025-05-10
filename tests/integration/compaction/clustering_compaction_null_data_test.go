@@ -33,7 +33,7 @@ func (s *ClusteringCompactionNullDataSuite) SetupSuite() {
 	paramtable.Init()
 
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TaskCheckInterval.Key, "1")
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexTaskSchedulerInterval.Key, "100")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TaskScheduleInterval.Key, "100")
 
 	s.Require().NoError(s.SetupEmbedEtcd())
 }
@@ -294,7 +294,7 @@ func (s *ClusteringCompactionNullDataSuite) TestClusteringCompactionNullData() {
 		for {
 			select {
 			case <-timeoutCtx.Done():
-				s.Fail("check query segment info timeout")
+				s.FailNow("check query segment info timeout")
 				return
 			default:
 				if checkQuerySegmentInfo() {

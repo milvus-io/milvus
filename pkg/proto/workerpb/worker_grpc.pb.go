@@ -27,19 +27,32 @@ const (
 	IndexNode_CreateJobV2_FullMethodName = "/milvus.proto.index.IndexNode/CreateJobV2"
 	IndexNode_QueryJobsV2_FullMethodName = "/milvus.proto.index.IndexNode/QueryJobsV2"
 	IndexNode_DropJobsV2_FullMethodName  = "/milvus.proto.index.IndexNode/DropJobsV2"
+	IndexNode_CreateTask_FullMethodName  = "/milvus.proto.index.IndexNode/CreateTask"
+	IndexNode_QueryTask_FullMethodName   = "/milvus.proto.index.IndexNode/QueryTask"
+	IndexNode_DropTask_FullMethodName    = "/milvus.proto.index.IndexNode/DropTask"
 )
 
 // IndexNodeClient is the client API for IndexNode service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type IndexNodeClient interface {
+	// Deprecated
 	CreateJob(ctx context.Context, in *CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Deprecated
 	QueryJobs(ctx context.Context, in *QueryJobsRequest, opts ...grpc.CallOption) (*QueryJobsResponse, error)
+	// Deprecated
 	DropJobs(ctx context.Context, in *DropJobsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Deprecated
 	GetJobStats(ctx context.Context, in *GetJobStatsRequest, opts ...grpc.CallOption) (*GetJobStatsResponse, error)
+	// Deprecated
 	CreateJobV2(ctx context.Context, in *CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Deprecated
 	QueryJobsV2(ctx context.Context, in *QueryJobsV2Request, opts ...grpc.CallOption) (*QueryJobsV2Response, error)
+	// Deprecated
 	DropJobsV2(ctx context.Context, in *DropJobsV2Request, opts ...grpc.CallOption) (*commonpb.Status, error)
+	CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	QueryTask(ctx context.Context, in *QueryTaskRequest, opts ...grpc.CallOption) (*QueryTaskResponse, error)
+	DropTask(ctx context.Context, in *DropTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type indexNodeClient struct {
@@ -113,17 +126,54 @@ func (c *indexNodeClient) DropJobsV2(ctx context.Context, in *DropJobsV2Request,
 	return out, nil
 }
 
+func (c *indexNodeClient) CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, IndexNode_CreateTask_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *indexNodeClient) QueryTask(ctx context.Context, in *QueryTaskRequest, opts ...grpc.CallOption) (*QueryTaskResponse, error) {
+	out := new(QueryTaskResponse)
+	err := c.cc.Invoke(ctx, IndexNode_QueryTask_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *indexNodeClient) DropTask(ctx context.Context, in *DropTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, IndexNode_DropTask_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IndexNodeServer is the server API for IndexNode service.
 // All implementations should embed UnimplementedIndexNodeServer
 // for forward compatibility
 type IndexNodeServer interface {
+	// Deprecated
 	CreateJob(context.Context, *CreateJobRequest) (*commonpb.Status, error)
+	// Deprecated
 	QueryJobs(context.Context, *QueryJobsRequest) (*QueryJobsResponse, error)
+	// Deprecated
 	DropJobs(context.Context, *DropJobsRequest) (*commonpb.Status, error)
+	// Deprecated
 	GetJobStats(context.Context, *GetJobStatsRequest) (*GetJobStatsResponse, error)
+	// Deprecated
 	CreateJobV2(context.Context, *CreateJobV2Request) (*commonpb.Status, error)
+	// Deprecated
 	QueryJobsV2(context.Context, *QueryJobsV2Request) (*QueryJobsV2Response, error)
+	// Deprecated
 	DropJobsV2(context.Context, *DropJobsV2Request) (*commonpb.Status, error)
+	CreateTask(context.Context, *CreateTaskRequest) (*commonpb.Status, error)
+	QueryTask(context.Context, *QueryTaskRequest) (*QueryTaskResponse, error)
+	DropTask(context.Context, *DropTaskRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedIndexNodeServer should be embedded to have forward compatible implementations.
@@ -150,6 +200,15 @@ func (UnimplementedIndexNodeServer) QueryJobsV2(context.Context, *QueryJobsV2Req
 }
 func (UnimplementedIndexNodeServer) DropJobsV2(context.Context, *DropJobsV2Request) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropJobsV2 not implemented")
+}
+func (UnimplementedIndexNodeServer) CreateTask(context.Context, *CreateTaskRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateTask not implemented")
+}
+func (UnimplementedIndexNodeServer) QueryTask(context.Context, *QueryTaskRequest) (*QueryTaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method QueryTask not implemented")
+}
+func (UnimplementedIndexNodeServer) DropTask(context.Context, *DropTaskRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DropTask not implemented")
 }
 
 // UnsafeIndexNodeServer may be embedded to opt out of forward compatibility for this service.
@@ -289,6 +348,60 @@ func _IndexNode_DropJobsV2_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IndexNode_CreateTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IndexNodeServer).CreateTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IndexNode_CreateTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IndexNodeServer).CreateTask(ctx, req.(*CreateTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IndexNode_QueryTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IndexNodeServer).QueryTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IndexNode_QueryTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IndexNodeServer).QueryTask(ctx, req.(*QueryTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IndexNode_DropTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DropTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IndexNodeServer).DropTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IndexNode_DropTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IndexNodeServer).DropTask(ctx, req.(*DropTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IndexNode_ServiceDesc is the grpc.ServiceDesc for IndexNode service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -323,6 +436,18 @@ var IndexNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DropJobsV2",
 			Handler:    _IndexNode_DropJobsV2_Handler,
+		},
+		{
+			MethodName: "CreateTask",
+			Handler:    _IndexNode_CreateTask_Handler,
+		},
+		{
+			MethodName: "QueryTask",
+			Handler:    _IndexNode_QueryTask_Handler,
+		},
+		{
+			MethodName: "DropTask",
+			Handler:    _IndexNode_DropTask_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

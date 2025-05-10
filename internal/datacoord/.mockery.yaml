@@ -11,9 +11,9 @@ packages:
       trigger:
         config:
           mockname: MockTrigger
-      compactionPlanContext:
+      CompactionInspector:
         config:
-          mockname: MockCompactionPlanContext
+          mockname: MockCompactionInspector
       Handler:
         config:
           mockname: NMockHandler
@@ -42,4 +42,9 @@ packages:
     interfaces:
       DataNodeManager:
       WorkerManager:
-      
+      Cluster:
+      NodeManager:
+  github.com/milvus-io/milvus/internal/datacoord/task:
+    interfaces:
+      GlobalScheduler:
+      Task:

@@ -232,16 +232,6 @@ func (s *Server) getSystemInfoMetrics(
 		clusterTopology.ConnectedDataNodes = append(clusterTopology.ConnectedDataNodes, infos)
 	}
 
-	indexNodes := s.indexNodeManager.GetAllClients()
-	for _, node := range indexNodes {
-		infos, err := s.getIndexNodeMetrics(ctx, req, node)
-		if err != nil {
-			log.Warn("fails to get IndexNode metrics", zap.Error(err))
-			continue
-		}
-		clusterTopology.ConnectedDataNodes = append(clusterTopology.ConnectedDataNodes, infos)
-	}
-
 	// compose topolgoy struct
 	coordTopology := metricsinfo.DataCoordTopology{
 		Cluster: clusterTopology,
