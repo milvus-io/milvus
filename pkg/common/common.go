@@ -166,6 +166,7 @@ const (
 const (
 	CollectionTTLConfigKey      = "collection.ttl.seconds"
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
+	CollectionDescription       = "collection.description"
 
 	// rate limit
 	CollectionInsertRateMaxKey   = "collection.insertRate.max.mb"
