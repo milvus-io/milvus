@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -239,23 +238,22 @@ func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, errors.Wrap(err, "failed to alloc growing segment at datacoord")
 	}
+
+	// Getnerate growing segment limitation.
+	limitation := policy.GetSegmentLimitationPolicy().GenerateLimitation()
 	msg, err := message.NewCreateSegmentMessageBuilderV2().
 		WithVChannel(pendingSegment.GetVChannel()).
 		WithHeader(&message.CreateSegmentMessageHeader{
 			CollectionId: pendingSegment.GetCollectionID(),
-			SegmentIds:   []int64{pendingSegment.GetSegmentID()},
+			// We only execute one segment creation operation at a time.
+			// But in future, we need to modify the segment creation operation to support batch creation.
+			// Because the partition-key based collection may create huge amount of segments at the same time.
+			PartitionId:    pendingSegment.GetPartitionID(),
+			SegmentId:      pendingSegment.GetSegmentID(),
+			StorageVersion: pendingSegment.GetStorageVersion(),
+			MaxSegmentSize: limitation.SegmentSize,
 		}).
-		WithBody(&message.CreateSegmentMessageBody{
-			CollectionId: pendingSegment.GetCollectionID(),
-			Segments: []*messagespb.CreateSegmentInfo{{
-				// We only execute one segment creation operation at a time.
-				// But in future, we need to modify the segment creation operation to support batch creation.
-				// Because the partition-key based collection may create huge amount of segments at the same time.
-				PartitionId:    pendingSegment.GetPartitionID(),
-				SegmentId:      pendingSegment.GetSegmentID(),
-				StorageVersion: pendingSegment.GetStorageVersion(),
-			}},
-		}).BuildMutable()
+		WithBody(&message.CreateSegmentMessageBody{}).BuildMutable()
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create new segment message, segmentID: %d", pendingSegment.GetSegmentID())
 	}
@@ -264,9 +262,6 @@ func (m *partitionSegmentManager) allocNewGrowingSegment(ctx context.Context) (*
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to send create segment message into wal, segmentID: %d", pendingSegment.GetSegmentID())
 	}
-
-	// Getnerate growing segment limitation.
-	limitation := policy.GetSegmentLimitationPolicy().GenerateLimitation()
 
 	// Commit it into streaming node meta.
 	// growing segment can be assigned now.

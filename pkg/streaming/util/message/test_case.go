@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 )
 
 func CreateTestInsertMessage(t *testing.T, segmentID int64, totalRows int, timetick uint64, messageID MessageID) MutableMessage {
@@ -171,17 +170,15 @@ func CreateTestCreateCollectionMessage(t *testing.T, collectionID int64, timetic
 }
 
 func CreateTestCreateSegmentMessage(t *testing.T, collectionID int64, timetick uint64, messageID MessageID) MutableMessage {
-	payload := &CreateSegmentMessageBody{
-		CollectionId: collectionID,
-		Segments: []*messagespb.CreateSegmentInfo{
-			{
-				PartitionId: 1,
-				SegmentId:   1,
-			},
-		},
-	}
+	payload := &CreateSegmentMessageBody{}
 	msg, err := NewCreateSegmentMessageBuilderV2().
-		WithHeader(&CreateSegmentMessageHeader{}).
+		WithHeader(&CreateSegmentMessageHeader{
+			CollectionId:   collectionID,
+			PartitionId:    1,
+			SegmentId:      1,
+			StorageVersion: 1,
+			MaxSegmentSize: 1024,
+		}).
 		WithBody(payload).
 		WithVChannel("v1").
 		BuildMutable()

@@ -173,7 +173,7 @@ func (_c *MockClientStream_Header_Call) RunAndReturn(run func() (metadata.MD, er
 }
 
 // RecvMsg provides a mock function with given fields: m
-func (_m *MockClientStream) RecvMsg(m interface{}) error {
+func (_m *MockClientStream) RecvMsg(m any) error {
 	ret := _m.Called(m)
 
 	if len(ret) == 0 {
@@ -181,7 +181,7 @@ func (_m *MockClientStream) RecvMsg(m interface{}) error {
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
+	if rf, ok := ret.Get(0).(func(any) error); ok {
 		r0 = rf(m)
 	} else {
 		r0 = ret.Error(0)
@@ -196,14 +196,14 @@ type MockClientStream_RecvMsg_Call struct {
 }
 
 // RecvMsg is a helper method to define mock.On call
-//   - m interface{}
+//   - m any
 func (_e *MockClientStream_Expecter) RecvMsg(m interface{}) *MockClientStream_RecvMsg_Call {
 	return &MockClientStream_RecvMsg_Call{Call: _e.mock.On("RecvMsg", m)}
 }
 
-func (_c *MockClientStream_RecvMsg_Call) Run(run func(m interface{})) *MockClientStream_RecvMsg_Call {
+func (_c *MockClientStream_RecvMsg_Call) Run(run func(m any)) *MockClientStream_RecvMsg_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(interface{}))
+		run(args[0].(any))
 	})
 	return _c
 }
@@ -213,13 +213,13 @@ func (_c *MockClientStream_RecvMsg_Call) Return(_a0 error) *MockClientStream_Rec
 	return _c
 }
 
-func (_c *MockClientStream_RecvMsg_Call) RunAndReturn(run func(interface{}) error) *MockClientStream_RecvMsg_Call {
+func (_c *MockClientStream_RecvMsg_Call) RunAndReturn(run func(any) error) *MockClientStream_RecvMsg_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // SendMsg provides a mock function with given fields: m
-func (_m *MockClientStream) SendMsg(m interface{}) error {
+func (_m *MockClientStream) SendMsg(m any) error {
 	ret := _m.Called(m)
 
 	if len(ret) == 0 {
@@ -227,7 +227,7 @@ func (_m *MockClientStream) SendMsg(m interface{}) error {
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
+	if rf, ok := ret.Get(0).(func(any) error); ok {
 		r0 = rf(m)
 	} else {
 		r0 = ret.Error(0)
@@ -242,14 +242,14 @@ type MockClientStream_SendMsg_Call struct {
 }
 
 // SendMsg is a helper method to define mock.On call
-//   - m interface{}
+//   - m any
 func (_e *MockClientStream_Expecter) SendMsg(m interface{}) *MockClientStream_SendMsg_Call {
 	return &MockClientStream_SendMsg_Call{Call: _e.mock.On("SendMsg", m)}
 }
 
-func (_c *MockClientStream_SendMsg_Call) Run(run func(m interface{})) *MockClientStream_SendMsg_Call {
+func (_c *MockClientStream_SendMsg_Call) Run(run func(m any)) *MockClientStream_SendMsg_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(interface{}))
+		run(args[0].(any))
 	})
 	return _c
 }
@@ -259,7 +259,7 @@ func (_c *MockClientStream_SendMsg_Call) Return(_a0 error) *MockClientStream_Sen
 	return _c
 }
 
-func (_c *MockClientStream_SendMsg_Call) RunAndReturn(run func(interface{}) error) *MockClientStream_SendMsg_Call {
+func (_c *MockClientStream_SendMsg_Call) RunAndReturn(run func(any) error) *MockClientStream_SendMsg_Call {
 	_c.Call.Return(run)
 	return _c
 }
