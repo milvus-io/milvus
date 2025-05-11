@@ -3,9 +3,13 @@
 #include <boost/filesystem.hpp>
 #include <optional>
 
-#include "exec/expression/Expr.h"
 #include "index/InvertedIndexTantivy.h"
-#include "segcore/SegmentInterface.h"
+
+namespace milvus {
+namespace exec {
+class SegmentExpr;
+}
+}
 
 namespace milvus::index {
 class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {

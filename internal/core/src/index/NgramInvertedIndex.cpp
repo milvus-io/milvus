@@ -1,4 +1,5 @@
 #include "index/NgramInvertedIndex.h"
+#include "exec/expression/Expr.h"
 
 namespace milvus::index {
 constexpr const char* TMP_NGRAM_INVERTED_LOG_PREFIX =

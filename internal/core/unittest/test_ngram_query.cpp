@@ -248,7 +248,7 @@ TEST(NgramIndex, TestPerfNgram) {
                 8192,
                 0);
 
-            auto bitset2 = index->InnerMatchQuery(literal, &segment_expr);
+            auto bitset2 = index->InnerMatchQuery(literal, &segment_expr).value();
             std::cout << "literal: " << literal
                       << " matched count: " << bitset2.count() << std::endl;
         }
@@ -258,21 +258,23 @@ TEST(NgramIndex, TestPerfNgram) {
         std::cout << "Execution time: " << duration.count() / 1000.f << "ms"
                   << std::endl;
 
-        std::string operand = "%story%";
-        auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
-        auto column_info = test::GenColumnInfo(
-            field_id.get(), proto::schema::DataType::VarChar, false, false);
-        unary_range_expr->set_allocated_column_info(column_info);
-        auto expr = test::GenExpr();
-        expr->set_allocated_unary_range_expr(unary_range_expr);
-        auto parser = ProtoParser(*schema);
-        auto typed_expr = parser.ParseExprs(*expr);
-        auto parsed = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, typed_expr);
-        BitsetType final;
-        final = ExecuteQueryExpr(parsed, segment.get(), nb, MAX_TIMESTAMP);
-        std::cout << "literal: " << operand
-                  << " matched count: " << final.count() << std::endl;
+        for (auto &literal : test_data) {
+            std::string operand = "%" + literal + "%";
+            auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
+            auto column_info = test::GenColumnInfo(
+                field_id.get(), proto::schema::DataType::VarChar, false, false);
+            unary_range_expr->set_allocated_column_info(column_info);
+            auto expr = test::GenExpr();
+            expr->set_allocated_unary_range_expr(unary_range_expr);
+            auto parser = ProtoParser(*schema);
+            auto typed_expr = parser.ParseExprs(*expr);
+            auto parsed = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, typed_expr);
+            BitsetType final;
+            final = ExecuteQueryExpr(parsed, segment.get(), nb, MAX_TIMESTAMP);
+            std::cout << "literal: " << operand
+                    << " matched count: " << final.count() << std::endl;
+        }
     }
 }
 

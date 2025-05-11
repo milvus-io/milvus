@@ -39,6 +39,7 @@
 #include "mmap/Column.h"
 #include "index/TextMatchIndex.h"
 #include "index/JsonKeyStatsInvertedIndex.h"
+#include "index/NgramInvertedIndex.h"
 
 namespace milvus::segcore {
 
@@ -147,6 +148,9 @@ class SegmentInterface {
 
     virtual std::pair<std::string_view, bool>
     GetJsonData(FieldId field_id, size_t offset) const = 0;
+
+    virtual index::NgramInvertedIndex*
+    GetNgramIndex(FieldId field_id) const = 0;
 };
 
 // internal API for DSL calculation
@@ -337,6 +341,9 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual index::JsonKeyStatsInvertedIndex*
     GetJsonKeyIndex(FieldId field_id) const override;
+
+    virtual index::NgramInvertedIndex*
+    GetNgramIndex(FieldId field_id) const override;
 
  public:
     virtual void

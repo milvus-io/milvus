@@ -540,4 +540,11 @@ SegmentInternalInterface::GetJsonKeyIndex(FieldId field_id) const {
     }
     return iter->second.get();
 }
+
+index::NgramInvertedIndex*
+SegmentInternalInterface::GetNgramIndex(FieldId field_id) const {
+    return nullptr;
+}
+
+
 }  // namespace milvus::segcore

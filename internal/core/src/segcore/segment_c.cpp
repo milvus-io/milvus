@@ -580,11 +580,11 @@ LoadNgramIndex(CTraceContext c_trace,
             field_meta, index_meta, remote_chunk_manager);
 
         auto index = std::make_unique<milvus::index::NgramInvertedIndex>(
-            ctx, info_proto->min_gram(), info_proto->max_gram());
+            file_ctx, info_proto->min_gram(), info_proto->max_gram());
         index->Load(ctx, config);
 
         segment->LoadNgramIndex(
-            milvus::FieldId(info_proto->fieldid(), std::move(index)));
+            milvus::FieldId(info_proto->fieldid()), std::move(index));
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

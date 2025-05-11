@@ -1250,7 +1250,7 @@ class SegmentExpr : public Expr {
     bool
     CanUseNgramIndex(FieldId field_id) const {
         return segment_->type() == SegmentType::Sealed &&
-               segment_->GetNgramIndex(field_id) != nullptr;
+               dynamic_cast<const segcore::SegmentSealed*>(segment_)->GetNgramIndex(field_id) != nullptr;
     }
 
  protected:
