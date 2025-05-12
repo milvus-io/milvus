@@ -1878,7 +1878,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	resp.ImportedRows = importedRows
 	resp.TotalRows = totalRows
 	resp.TaskProgresses = GetTaskProgresses(jobID, s.importMeta, s.meta)
-	log.Info("GetImportProgress done", zap.Any("resp", resp))
+	log.Info("GetImportProgress done", zap.String("jobState", job.GetState().String()), zap.Any("resp", resp))
 	return resp, nil
 }
 

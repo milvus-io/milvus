@@ -369,7 +369,10 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		targetSegmentIDs = originSegmentIDs
 	}
 
-	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
+	healthySegments := c.meta.GetSegments(targetSegmentIDs, func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment)
+	})
+	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
 	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !importutilv2.IsL0Import(job.GetOptions()) {
 		for _, segmentID := range unindexed {
 			select {

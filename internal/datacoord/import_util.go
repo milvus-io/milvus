@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
@@ -125,6 +126,11 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 }
 
 func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta) ([]int64, error) {
+	pkField, err := typeutil.GetPrimaryFieldSchema(job.GetSchema())
+	if err != nil {
+		return nil, err
+	}
+
 	// merge hashed sizes
 	hashedDataSize := make(map[string]map[int64]int64) // vchannel->(partitionID->size)
 	for _, fileStats := range task.GetFileStats() {
@@ -168,6 +174,24 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 
 	for vchannel, partitionSizes := range hashedDataSize {
 		for partitionID, size := range partitionSizes {
+			if pkField.GetAutoID() && size == 0 {
+				// When autoID is enabled, the preimport and import phases use different primary keys,
+				// which can lead to inaccurate row distribution estimation across vchannels.
+				//
+				// Specifically:
+				// - In the *preimport* phase, the system simulates row distribution using dummy primary keys,
+				//  typically ranging from 0 to numRows.
+				// - In the *import* phase, real auto-generated primary keys (e.g., 457975852966809057) are used.
+				//
+				// This mismatch can result in slight estimation errors. For example:
+				//  Suppose we're importing a single row into two vchannels:
+				//    - Preimport uses pk = 0 → hashes to vchannel-0 → estimated count: vchannel-0 = 1, vchannel-1 = 0
+				//    - Import uses pk = 457975852966809057 → hashes to vchannel-1 → actual count: vchannel-0 = 0, vchannel-1 = 1
+				//
+				// To resolve such corner case, here we ensure that at least one segment is allocated
+				// for each vchannel during autoID-enabled imports.
+				size = 1
+			}
 			err := addSegment(vchannel, partitionID, size)
 			if err != nil {
 				return nil, err
