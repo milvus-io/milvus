@@ -28,6 +28,7 @@
 #include <string>
 #include <boost/algorithm/string.hpp>
 
+#include "common/Common.h"
 #include "common/Types.h"
 #include "common/FieldData.h"
 #include "common/QueryInfo.h"
@@ -35,6 +36,7 @@
 #include "index/IndexInfo.h"
 #include "storage/Types.h"
 #include "storage/DataCodec.h"
+#include "log/Log.h"
 
 namespace milvus::index {
 
@@ -83,26 +85,39 @@ void inline CheckParameter(Config& conf,
 template <typename T>
 inline std::optional<T>
 GetValueFromConfig(const Config& cfg, const std::string& key) {
-    if (cfg.contains(key)) {
-        if (cfg.at(key).is_null()) {
+    if (!cfg.contains(key)) {
+        return std::nullopt;
+    }
+
+    const auto& value = cfg.at(key);
+    if (value.is_null()) {
+        return std::nullopt;
+    }
+
+    try {
+        if constexpr (std::is_same_v<T, bool>) {
+            if (value.is_boolean()) {
+                return value.get<bool>();
+            }
+            // compatibility for boolean string
+            return boost::algorithm::to_lower_copy(value.get<std::string>()) ==
+                   "true";
+        }
+        return value.get<T>();
+    } catch (const nlohmann::json::type_error& e) {
+        if (!CONFIG_PARAM_TYPE_CHECK_ENABLED) {
+            LOG_WARN("config type mismatch for key {}: {}", key, e.what());
             return std::nullopt;
         }
-        try {
-            // compatibility for boolean string
-            if constexpr (std::is_same_v<T, bool>) {
-                if (cfg.at(key).is_boolean()) {
-                    return cfg.at(key).get<bool>();
-                }
-                return boost::algorithm::to_lower_copy(
-                           cfg.at(key).get<std::string>()) == "true";
-            }
-            return cfg.at(key).get<T>();
-        } catch (std::exception& e) {
-            PanicInfo(ErrorCode::UnexpectedError,
-                      "get value from config for key {} failed, error: {}",
-                      key,
-                      e.what());
-        }
+        PanicInfo(ErrorCode::UnexpectedError,
+                  "config type error for key {}: {}",
+                  key,
+                  e.what());
+    } catch (const std::exception& e) {
+        PanicInfo(ErrorCode::UnexpectedError,
+                  "Unexpected error for key {}: {}",
+                  key,
+                  e.what());
     }
     return std::nullopt;
 }

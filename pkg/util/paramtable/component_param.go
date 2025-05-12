@@ -302,6 +302,8 @@ type commonConfig struct {
 	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
 	EnabledJSONKeyStats               ParamItem `refreshable:"true"`
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"true"`
+
+	EnableConfigParamTypeCheck ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1030,6 +1032,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnabledGrowingSegmentJSONKeyStats.Init(base.mgr)
+
+	p.EnableConfigParamTypeCheck = ParamItem{
+		Key:          "common.enableConfigParamTypeCheck",
+		Version:      "2.5.5",
+		DefaultValue: "true",
+		Doc:          "Indicates whether to enable config param type check",
+		Export:       true,
+	}
+	p.EnableConfigParamTypeCheck.Init(base.mgr)
 }
 
 type gpuConfig struct {
