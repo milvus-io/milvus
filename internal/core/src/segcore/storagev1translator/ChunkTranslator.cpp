@@ -107,19 +107,21 @@ ChunkTranslator::load_chunk(milvus::cachinglayer::cid_t cid) {
         while (channel->pop(r)) {
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
-            auto chunk = create_chunk(field_meta_,
-                                IsVectorDataType(data_type) &&
-                                        !IsSparseFloatVectorDataType(data_type)
-                                    ? field_meta_.get_dim()
-                                    : 1,
-                                file,
-                                /*file_offset*/ 0,
-                                array_vec);
+            auto chunk =
+                create_chunk(field_meta_,
+                             IsVectorDataType(data_type) &&
+                                     !IsSparseFloatVectorDataType(data_type)
+                                 ? field_meta_.get_dim()
+                                 : 1,
+                             file,
+                             /*file_offset*/ 0,
+                             array_vec);
             auto ok = unlink(filepath.c_str());
-            AssertInfo(ok == 0,
-                    fmt::format("failed to unlink mmap data file {}, err: {}",
-                                filepath.c_str(),
-                                strerror(errno)));
+            AssertInfo(
+                ok == 0,
+                fmt::format("failed to unlink mmap data file {}, err: {}",
+                            filepath.c_str(),
+                            strerror(errno)));
             return chunk;
         }
     }

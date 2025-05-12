@@ -1463,10 +1463,10 @@ TEST(Expr, TestArrayContainsEmptyValues) {
         auto raw_data = DataGen(schema, N, iter);
         dummy_seg->PreInsert(N);
         dummy_seg->Insert(iter * N,
-                    N,
-                    raw_data.row_ids_.data(),
-                    raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                          N,
+                          raw_data.row_ids_.data(),
+                          raw_data.timestamps_.data(),
+                          raw_data.raw_);
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(dummy_seg.get());
@@ -1479,7 +1479,6 @@ TEST(Expr, TestArrayContainsEmptyValues) {
             proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
             true,
             empty_values);
-
 
         BitsetType final;
         auto plan =
