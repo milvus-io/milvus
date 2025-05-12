@@ -166,6 +166,25 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         });
     }
 
+    // Manually evicts the cell if it is not pinned.
+    // Returns true if the cell ends up in a state other than LOADED.
+    bool
+    ManualEvict(cid_t cid) {
+        return cells_[cid].manual_evict();
+    }
+
+    // Returns true if any cell is evicted.
+    bool
+    ManualEvictAll() {
+        bool evicted = false;
+        for (cid_t cid = 0; cid < cells_.size(); ++cid) {
+            if (cells_[cid].manual_evict()) {
+                evicted = true;
+            }
+        }
+        return evicted;
+    }
+
     size_t
     num_cells() const {
         return translator_->num_cells();

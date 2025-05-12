@@ -1829,11 +1829,16 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         insert_record_.seal_pks();
     }
 
-    generate_interim_index(field_id);
+    bool generated_interim_index = generate_interim_index(field_id);
 
     std::unique_lock lck(mutex_);
     set_bit(field_data_ready_bitset_, field_id, true);
     update_row_count(num_rows);
+    if (generated_interim_index) {
+        if (auto column = fields_.find(field_id); column != fields_.end()) {
+            column->second->ManualEvictCache();
+        }
+    }
 }
 
 void
