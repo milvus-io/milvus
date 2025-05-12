@@ -117,7 +117,6 @@ type writeBufferBase struct {
 
 	metaWriter       syncmgr.MetaWriter
 	allocator        allocator.Interface
-	collSchema       *schemapb.CollectionSchema
 	estSizePerRecord int
 	metaCache        metacache.MetaCache
 
@@ -153,7 +152,6 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 	wb := &writeBufferBase{
 		channelName:          channel,
 		collectionID:         metacache.Collection(),
-		collSchema:           schema,
 		estSizePerRecord:     estSize,
 		syncMgr:              syncMgr,
 		metaWriter:           option.metaWriter,
@@ -361,7 +359,7 @@ func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64) *segmentBuffer {
 	buffer, ok := wb.buffers[segmentID]
 	if !ok {
 		var err error
-		buffer, err = newSegmentBuffer(segmentID, wb.collSchema)
+		buffer, err = newSegmentBuffer(segmentID, wb.metaCache.Schema())
 		if err != nil {
 			// TODO avoid panic here
 			panic(err)
