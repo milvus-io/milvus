@@ -41,10 +41,17 @@ func RecoverRecoveryStorage(
 		return nil, nil, err
 	}
 	// recovery storage start work.
+	rs.metrics.ObserveStateChange(recoveryStorageStateWorking)
 	rs.SetLogger(resource.Resource().Logger().With(
 		log.FieldComponent(componentRecoveryStorage),
 		zap.String("channel", recoveryStreamBuilder.Channel().String()),
 		zap.String("state", recoveryStorageStateWorking)))
+	rs.truncator = newSamplingTruncator(
+		snapshot.Checkpoint.Clone(),
+		recoveryStreamBuilder.RWWALImpls(),
+		rs.metrics,
+	)
+	rs.truncator.SetLogger(rs.Logger())
 	go rs.backgroundTask()
 	return rs, snapshot, nil
 }
@@ -60,6 +67,7 @@ func newRecoveryStorage(channel types.PChannelInfo) *RecoveryStorage {
 		dirtyCounter:           0,
 		persistNotifier:        make(chan struct{}, 1),
 		gracefulClosed:         false,
+		metrics:                newRecoveryStorageMetrics(channel),
 	}
 }
 
@@ -78,6 +86,8 @@ type RecoveryStorage struct {
 	// used to trigger the recovery persist operation.
 	persistNotifier chan struct{}
 	gracefulClosed  bool
+	truncator       *samplingTruncator
+	metrics         *recoveryMetrics
 }
 
 // ObserveMessage is called when a new message is observed.
@@ -92,6 +102,9 @@ func (r *RecoveryStorage) ObserveMessage(msg message.ImmutableMessage) {
 func (r *RecoveryStorage) Close() {
 	r.backgroundTaskNotifier.Cancel()
 	r.backgroundTaskNotifier.BlockUntilFinish()
+	// Stop the truncator.
+	r.truncator.Close()
+	r.metrics.Close()
 }
 
 // notifyPersist notifies a persist operation.
@@ -154,6 +167,7 @@ func (r *RecoveryStorage) observeMessage(msg message.ImmutableMessage) {
 	checkpointUpdates := !r.checkpoint.MessageID.EQ(msg.LastConfirmedMessageID())
 	r.checkpoint.TimeTick = msg.TimeTick()
 	r.checkpoint.MessageID = msg.LastConfirmedMessageID()
+	r.metrics.ObServeInMemMetrics(r.checkpoint.TimeTick)
 
 	if checkpointUpdates {
 		// only count the dirty if last confirmed message id is updated.
@@ -375,4 +389,5 @@ func (r *RecoveryStorage) detectInconsistency(msg message.ImmutableMessage, reas
 	// The log is not fatal in some cases.
 	// because our meta is not atomic-updated, so these error may be logged if crashes when meta updated partially.
 	r.Logger().Warn("inconsistency detected", fields...)
+	r.metrics.ObserveInconsitentEvent()
 }

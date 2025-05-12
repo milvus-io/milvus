@@ -44,3 +44,35 @@ func (cfg *config) validate() error {
 	}
 	return nil
 }
+
+// newTruncatorConfig creates a new config for the truncator.
+func newTruncatorConfig() *truncatorConfig {
+	params := paramtable.Get()
+	samplerInterval := params.StreamingCfg.WALTruncateSampleInterval.GetAsDurationByParse()
+	retentionInterval := params.StreamingCfg.WALTruncateRetentionInterval.GetAsDurationByParse()
+	cfg := &truncatorConfig{
+		sampleInterval:    samplerInterval,
+		retentionInterval: retentionInterval,
+	}
+	if err := cfg.validate(); err != nil {
+		panic(err)
+	}
+	return cfg
+}
+
+// truncatorConfig is the configuration for the truncator.
+type truncatorConfig struct {
+	sampleInterval    time.Duration // the interval to sample the checkpoint
+	retentionInterval time.Duration // the retention interval to sample the checkpoint
+}
+
+// validate validates the truncator config.
+func (cfg *truncatorConfig) validate() error {
+	if cfg.sampleInterval <= 0 {
+		return errors.New("sampler interval must be greater than 0")
+	}
+	if cfg.retentionInterval <= 0 {
+		return errors.New("retention interval must be greater than 0")
+	}
+	return nil
+}
