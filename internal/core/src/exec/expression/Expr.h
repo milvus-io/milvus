@@ -774,6 +774,98 @@ class SegmentExpr : public Expr {
 
     template <typename T, typename FUNC, typename... ValTypes>
     int64_t
+    ProcessAllChunks(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        ValTypes... values) {
+        int64_t processed_size = 0;
+        size_t current_data_chunk = 0;
+        size_t current_data_chunk_pos = 0;
+        for (size_t i = 0; i < num_data_chunk_; i++) {
+            auto data_pos =
+                (i == current_data_chunk) ? current_data_chunk_pos : 0;
+
+            // if segment is chunked, type won't be growing
+            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+
+            size = std::min(size, batch_size_ - processed_size);
+
+            auto& skip_index = segment_->GetSkipIndex();
+            if (!skip_func || !skip_func(skip_index, field_id_, i)) {
+                bool is_seal = false;
+                if constexpr (std::is_same_v<T, std::string_view> ||
+                              std::is_same_v<T, Json> ||
+                              std::is_same_v<T, ArrayView>) {
+                    if (segment_->type() == SegmentType::Sealed) {
+                        // first is the raw data, second is valid_data
+                        // use valid_data to see if raw data is null
+                        auto [data_vec, valid_data] =
+                            segment_->get_batch_views<T>(
+                                field_id_, i, data_pos, size);
+                        func(data_vec.data(),
+                             valid_data.data(),
+                             nullptr,
+                             size,
+                             res + processed_size,
+                             valid_res + processed_size,
+                             values...);
+                        is_seal = true;
+                    }
+                }
+                if (!is_seal) {
+                    auto chunk = segment_->chunk_data<T>(field_id_, i);
+                    const T* data = chunk.data() + data_pos;
+                    const bool* valid_data = chunk.valid_data();
+                    if (valid_data != nullptr) {
+                        valid_data += data_pos;
+                    }
+                    func(data,
+                         valid_data,
+                         nullptr,
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                }
+            } else {
+                const bool* valid_data;
+                if constexpr (std::is_same_v<T, std::string_view> ||
+                              std::is_same_v<T, Json>) {
+                    auto batch_views = segment_->get_batch_views<T>(
+                        field_id_, i, data_pos, size);
+                    valid_data = batch_views.second.data();
+                    ApplyValidData(valid_data,
+                                   res + processed_size,
+                                   valid_res + processed_size,
+                                   size);
+                } else {
+                    auto chunk = segment_->chunk_data<T>(field_id_, i);
+                    valid_data = chunk.valid_data();
+                    if (valid_data != nullptr) {
+                        valid_data += data_pos;
+                    }
+                    ApplyValidData(valid_data,
+                                   res + processed_size,
+                                   valid_res + processed_size,
+                                   size);
+                }
+            }
+
+            processed_size += size;
+            if (processed_size >= batch_size_) {
+                current_data_chunk = i;
+                current_data_chunk_pos = data_pos + size;
+                break;
+            }
+        }
+
+        return processed_size;
+    }
+
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
     ProcessDataChunks(
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
@@ -1250,7 +1342,8 @@ class SegmentExpr : public Expr {
     bool
     CanUseNgramIndex(FieldId field_id) const {
         return segment_->type() == SegmentType::Sealed &&
-               dynamic_cast<const segcore::SegmentSealed*>(segment_)->GetNgramIndex(field_id) != nullptr;
+               dynamic_cast<const segcore::SegmentSealed*>(segment_)
+                       ->GetNgramIndex(field_id) != nullptr;
     }
 
  protected:
