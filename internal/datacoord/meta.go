@@ -2159,6 +2159,7 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 		TextStatsLogs:             result.GetTextStatsLogs(),
 		Bm25Statslogs:             result.GetBm25Logs(),
 		JsonKeyStats:              result.GetJsonKeyStatsLogs(),
+		NgramIndexStats:           result.GetNgramIndexStatsLogs(),
 		Deltalogs:                 nil,
 		CompactionFrom:            []int64{oldSegmentID},
 		IsSorted:                  true,

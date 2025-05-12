@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -566,6 +567,82 @@ func (suite *IndexCheckerSuite) TestCreateNewJsonIndex() {
 			{
 				ID:           2,
 				JsonKeyStats: mockJSONKeyStats,
+			},
+		}, nil).Maybe()
+	tasks := checker.Check(context.Background())
+	suite.Len(tasks, 1)
+	suite.Len(tasks[0].Actions(), 1)
+	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).Type(), task.ActionTypeStatsUpdate)
+}
+
+func (suite *IndexCheckerSuite) TestCreateNewNgramIndex() {
+	checker := suite.checker
+	ctx := context.Background()
+
+	// meta
+	coll := utils.CreateTestCollection(1, 1)
+	coll.FieldIndexID = map[int64]int64{101: 1000}
+	coll.LoadFields = []int64{101}
+	coll.Schema = &schemapb.CollectionSchema{
+		Name: "test_loadNgramIndex",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, DataType: schemapb.DataType_String, Name: "Ngram", TypeParams: []*commonpb.KeyValuePair{
+				{Key: "enable_ngram_index", Value: "true"},
+				{Key: "min_gram", Value: "2"},
+				{Key: "max_gram", Value: "3"},
+			}},
+		},
+	}
+	checker.meta.CollectionManager.PutCollection(ctx, coll)
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+
+	// dist
+	fieldIndexInfo := &querypb.FieldIndexInfo{
+		FieldID:     101,
+		IndexID:     1000,
+		EnableIndex: true,
+	}
+
+	indexInfo := make(map[int64]*querypb.FieldIndexInfo)
+	indexInfo[fieldIndexInfo.IndexID] = fieldIndexInfo
+	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")
+	segment.IndexInfo = indexInfo
+	checker.dist.SegmentDistManager.Update(1, segment)
+
+	// broker
+	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Call.Return(
+		func(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
+			return []*indexpb.IndexInfo{
+				{
+					FieldID: 101,
+					IndexID: 1000,
+				},
+			}, nil
+		},
+	)
+
+	mockNgramIndex := map[int64]*datapb.NgramIndexStats{
+		101: {
+			FieldID: 101,
+		},
+	}
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).
+		Return([]*datapb.SegmentInfo{
+			{
+				ID:              2,
+				NgramIndexStats: mockNgramIndex,
 			},
 		}, nil).Maybe()
 	tasks := checker.Check(context.Background())

@@ -312,19 +312,20 @@ func (m *TaskManager) WaitTaskFinish() {
 }
 
 type StatsTaskInfo struct {
-	Cancel           context.CancelFunc
-	State            indexpb.JobState
-	FailReason       string
-	CollID           typeutil.UniqueID
-	PartID           typeutil.UniqueID
-	SegID            typeutil.UniqueID
-	InsertChannel    string
-	NumRows          int64
-	InsertLogs       []*datapb.FieldBinlog
-	StatsLogs        []*datapb.FieldBinlog
-	TextStatsLogs    map[int64]*datapb.TextIndexStats
-	Bm25Logs         []*datapb.FieldBinlog
-	JSONKeyStatsLogs map[int64]*datapb.JsonKeyStats
+	Cancel              context.CancelFunc
+	State               indexpb.JobState
+	FailReason          string
+	CollID              typeutil.UniqueID
+	PartID              typeutil.UniqueID
+	SegID               typeutil.UniqueID
+	InsertChannel       string
+	NumRows             int64
+	InsertLogs          []*datapb.FieldBinlog
+	StatsLogs           []*datapb.FieldBinlog
+	TextStatsLogs       map[int64]*datapb.TextIndexStats
+	Bm25Logs            []*datapb.FieldBinlog
+	JSONKeyStatsLogs    map[int64]*datapb.JsonKeyStats
+	NgramIndexStatsLogs map[int64]*datapb.NgramIndexStats
 }
 
 func (m *TaskManager) LoadOrStoreStatsTask(clusterID string, taskID typeutil.UniqueID, info *StatsTaskInfo) *StatsTaskInfo {
@@ -432,25 +433,47 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 	}
 }
 
+func (m *TaskManager) StoreNgramIndexResult(
+	clusterID string,
+	taskID typeutil.UniqueID,
+	collID typeutil.UniqueID,
+	partID typeutil.UniqueID,
+	segID typeutil.UniqueID,
+	channel string,
+	ngramIndexStats map[int64]*datapb.NgramIndexStats,
+) {
+	key := Key{ClusterID: clusterID, TaskID: taskID}
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if info, ok := m.statsTasks[key]; ok {
+		info.NgramIndexStatsLogs = ngramIndexStats
+		info.SegID = segID
+		info.CollID = collID
+		info.PartID = partID
+		info.InsertChannel = channel
+	}
+}
+
 func (m *TaskManager) GetStatsTaskInfo(clusterID string, taskID typeutil.UniqueID) *StatsTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 
 	if info, ok := m.statsTasks[Key{ClusterID: clusterID, TaskID: taskID}]; ok {
 		return &StatsTaskInfo{
-			Cancel:           info.Cancel,
-			State:            info.State,
-			FailReason:       info.FailReason,
-			CollID:           info.CollID,
-			PartID:           info.PartID,
-			SegID:            info.SegID,
-			InsertChannel:    info.InsertChannel,
-			NumRows:          info.NumRows,
-			InsertLogs:       info.InsertLogs,
-			StatsLogs:        info.StatsLogs,
-			TextStatsLogs:    info.TextStatsLogs,
-			Bm25Logs:         info.Bm25Logs,
-			JSONKeyStatsLogs: info.JSONKeyStatsLogs,
+			Cancel:              info.Cancel,
+			State:               info.State,
+			FailReason:          info.FailReason,
+			CollID:              info.CollID,
+			PartID:              info.PartID,
+			SegID:               info.SegID,
+			InsertChannel:       info.InsertChannel,
+			NumRows:             info.NumRows,
+			InsertLogs:          info.InsertLogs,
+			StatsLogs:           info.StatsLogs,
+			TextStatsLogs:       info.TextStatsLogs,
+			Bm25Logs:            info.Bm25Logs,
+			JSONKeyStatsLogs:    info.JSONKeyStatsLogs,
+			NgramIndexStatsLogs: info.NgramIndexStatsLogs,
 		}
 	}
 	return nil

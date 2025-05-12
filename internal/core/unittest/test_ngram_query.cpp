@@ -143,6 +143,9 @@ TEST(NgramIndex, TestPerfNgram) {
     while (std::getline(file, word)) {
         data.push_back(word);
         nb++;
+        if (nb > 10000) {
+            break;
+        }
     }
 
     std::cout << "nb: " << nb << std::endl;

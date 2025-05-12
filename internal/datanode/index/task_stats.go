@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
@@ -336,6 +337,21 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		}
 	}
 
+	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort || st.req.GetSubJobType() == indexpb.StatsSubJob_NgramIndexJob {
+		err = st.createNgramIndex(ctx,
+			st.req.GetStorageConfig(),
+			st.req.GetCollectionID(),
+			st.req.GetPartitionID(),
+			st.req.GetTargetSegmentID(),
+			st.req.GetTaskVersion(),
+			st.req.GetTaskID(),
+			insertLogs)
+		if err != nil {
+			log.Warn("stats wrong, failed to create ngram index", zap.Error(err))
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -593,5 +609,109 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	log.Info("create json key index done",
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
 		zap.Duration("total elapse", totalElapse))
+	return nil
+}
+
+func (st *statsTask) createNgramIndex(ctx context.Context,
+	storageConfig *indexpb.StorageConfig,
+	collectionID int64,
+	partitionID int64,
+	segmentID int64,
+	version int64,
+	taskID int64,
+	insertBinlogs []*datapb.FieldBinlog,
+) error {
+	log := log.Ctx(ctx).With(
+		zap.String("clusterID", st.req.GetClusterID()),
+		zap.Int64("taskID", st.req.GetTaskID()),
+		zap.Int64("collectionID", st.req.GetCollectionID()),
+		zap.Int64("partitionID", st.req.GetPartitionID()),
+		zap.Int64("segmentID", st.req.GetSegmentID()),
+	)
+
+	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
+		return binlog.GetFieldID()
+	})
+
+	getInsertFiles := func(fieldID int64) ([]string, error) {
+		binlogs, ok := fieldBinlogs[fieldID]
+		if !ok {
+			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
+		}
+		result := make([]string, 0, len(binlogs))
+		for _, binlog := range binlogs {
+			for _, file := range binlog.GetBinlogs() {
+				result = append(result, metautil.BuildInsertLogPath(storageConfig.GetRootPath(), collectionID, partitionID, segmentID, fieldID, file.GetLogID()))
+			}
+		}
+		return result, nil
+	}
+
+	newStorageConfig, err := ParseStorageConfig(storageConfig)
+	if err != nil {
+		return err
+	}
+
+	ngramIndexStats := make(map[int64]*datapb.NgramIndexStats)
+	for _, field := range st.req.GetSchema().GetFields() {
+		h := typeutil.CreateFieldSchemaHelper(field)
+		if !h.EnableNgramIndex() {
+			continue
+		}
+		log.Info("field enable ngram index, ready to create ngram index", zap.Int64("field id", field.GetFieldID()))
+		files, err := getInsertFiles(field.GetFieldID())
+		if err != nil {
+			return err
+		}
+
+		minGram, maxGram, err := h.GetNgramParams()
+		if err != nil {
+			return err
+		}
+
+		typeParams := make([]*commonpb.KeyValuePair, 0)
+		typeParams = append(typeParams, &commonpb.KeyValuePair{Key: typeutil.MinGramKey, Value: strconv.FormatInt(minGram, 10)})
+		typeParams = append(typeParams, &commonpb.KeyValuePair{Key: typeutil.MaxGramKey, Value: strconv.FormatInt(maxGram, 10)})
+
+		buildIndexParams := &indexcgopb.BuildIndexInfo{
+			BuildID:       taskID,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			SegmentID:     segmentID,
+			IndexVersion:  version,
+			InsertFiles:   files,
+			FieldSchema:   field,
+			StorageConfig: newStorageConfig,
+			TypeParams:    typeParams,
+		}
+
+		uploaded, err := indexcgowrapper.CreateNgramIndex(ctx, buildIndexParams)
+		if err != nil {
+			return err
+		}
+		ngramIndexStats[field.GetFieldID()] = &datapb.NgramIndexStats{
+			FieldID: field.GetFieldID(),
+			Version: version,
+			BuildID: taskID,
+			Files:   lo.Keys(uploaded),
+			MinGram: minGram,
+			MaxGram: maxGram,
+		}
+		elapse := st.tr.RecordSpan()
+		log.Info("field enable ngram index, create ngram index done",
+			zap.Int64("targetSegmentID", st.req.GetTargetSegmentID()),
+			zap.Int64("field id", field.GetFieldID()),
+			zap.Strings("files", lo.Keys(uploaded)),
+			zap.Duration("elapse", elapse),
+		)
+	}
+
+	st.manager.StoreNgramIndexResult(st.req.GetClusterID(),
+		st.req.GetTaskID(),
+		st.req.GetCollectionID(),
+		st.req.GetPartitionID(),
+		st.req.GetTargetSegmentID(),
+		st.req.GetInsertChannel(),
+		ngramIndexStats)
 	return nil
 }

@@ -579,12 +579,21 @@ LoadNgramIndex(CTraceContext c_trace,
         milvus::storage::FileManagerContext file_ctx(
             field_meta, index_meta, remote_chunk_manager);
 
+        LOG_INFO("debug=== load min_gram {}, max_gram {}, index_files count {}",
+                 info_proto->min_gram(),
+                 info_proto->max_gram(),
+                 files.size());
+        for (auto& f : files) {
+            LOG_INFO("debug=== index_file: {}", f);
+        }
+
+        file_ctx.set_for_loading_index(true);
         auto index = std::make_unique<milvus::index::NgramInvertedIndex>(
             file_ctx, info_proto->min_gram(), info_proto->max_gram());
         index->Load(ctx, config);
 
-        segment->LoadNgramIndex(
-            milvus::FieldId(info_proto->fieldid()), std::move(index));
+        segment->LoadNgramIndex(milvus::FieldId(info_proto->fieldid()),
+                                std::move(index));
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

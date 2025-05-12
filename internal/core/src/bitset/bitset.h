@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <optional>
 #include <type_traits>
+#include <log/Log.h>
 
 #include "common.h"
 #include "detail/maybe_vector.h"
@@ -74,6 +75,9 @@ struct RangeChecker<true> {
     static inline void
     le(const SizeT a, const SizeT max) {
         // todo: replace
+        if (a > max) {
+            LOG_INFO("debug=== le, a: {}, max: {}", a, max);
+        }
         assert(a <= max);
     }
 

@@ -1,6 +1,7 @@
 use std::ffi::c_void;
 use std::ops::Bound;
 use std::sync::Arc;
+use log::info;
 
 use tantivy::query::{BooleanQuery, Query, RangeQuery, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption};
@@ -33,6 +34,8 @@ impl IndexReaderWrapper {
         init_log();
 
         let index = Index::open_in_dir(path)?;
+
+        info!("debug=== load index, path: {:?}, schema: {:?}", path, index.schema());
 
         IndexReaderWrapper::from_index(Arc::new(index), set_bitset)
     }
@@ -296,6 +299,8 @@ impl IndexReaderWrapper {
         max_gram: usize,
         bitset: *mut c_void,
     ) -> Result<()> {
+        info!("debug=== inner_match_ngram, literal: {:?}, min_gram: {}, max_gram: {}", literal, min_gram, max_gram);
+
         if literal.len() < min_gram {
             // forward to regex query.
             unimplemented!()
@@ -305,6 +310,7 @@ impl IndexReaderWrapper {
             return self.term_query_keyword(literal, bitset);
         }
 
+        let mut terms = vec![];
         // So, str length is larger than 'max_gram' parse 'str' by 'max_gram'-gram and search all of them with boolean intersection
         // nivers
         let mut term_queries: Vec<Box<dyn Query>> = vec![];
@@ -313,7 +319,9 @@ impl IndexReaderWrapper {
         token_stream.process(&mut |token| {
             let term = Term::from_field_text(self.field, &token.text);
             term_queries.push(Box::new(TermQuery::new(term, IndexRecordOption::Basic)));
+            terms.push(token.text.clone());
         });
+        info!("debug=== terms: {:?}", terms);
         let query = BooleanQuery::intersection(term_queries);
         self.search(&query, bitset)
     }

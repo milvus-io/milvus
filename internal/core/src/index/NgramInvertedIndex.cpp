@@ -16,8 +16,9 @@ NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
 
     if (ctx.for_loading_index) {
         path_ = disk_file_manager_->GetLocalNgramIndexPrefix();
+        LOG_INFO("debug=== load ngram index, path: {}", path_);
     } else {
-        auto prefix = disk_file_manager_->GetTextIndexIdentifier();
+        auto prefix = disk_file_manager_->GetNgramIndexIdentifier();
         path_ = std::string(TMP_NGRAM_INVERTED_LOG_PREFIX) + prefix;
         boost::filesystem::create_directories(path_);
         d_type_ = TantivyDataType::Keyword;
@@ -63,11 +64,20 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(path_.c_str(),
                                                      milvus::index::SetBitset);
+    LOG_INFO(
+        "load ngram index done for field id:{} with dir:{}", field_id_, path_);
 }
 
 std::optional<TargetBitmap>
 NgramInvertedIndex::InnerMatchQuery(const std::string& literal,
                                     exec::SegmentExpr* segment) {
+    LOG_INFO(
+        "debug=== InnerMatchQuery, literal: {}, min_gram: {}, max_gram: {}, "
+        "Count {}",
+        literal,
+        min_gram_,
+        max_gram_,
+        Count());
     if (literal.length() < min_gram_) {
         return std::nullopt;
     }
@@ -78,6 +88,9 @@ NgramInvertedIndex::InnerMatchQuery(const std::string& literal,
     // Post filtering: if the literal length is larger than the max_gram
     // we need to filter out the bitset
     if (literal.length() > max_gram_) {
+        LOG_INFO("debug=== post filtering, literal length: {}, max_gram: {}",
+                 literal.length(),
+                 max_gram_);
         auto bitset_off = 0;
         TargetBitmapView res(bitset);
         TargetBitmap valid(res.size(), true);

@@ -1426,6 +1426,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         // If nullopt is returned, it means the query cannot be
         // optimized by ngram index. Forward it to the normal path.
         if (res.has_value()) {
+            LOG_INFO("debug=== ngram index ExecRangeVisitorImpl");
             return res.value();
         }
     }
@@ -1842,7 +1843,6 @@ convert_to_ngram_literal(const std::string& pattern) {
             if (c == '\\') {
                 escape_mode = true;
             } else if (c == '%') {
-                r += "[\\s\\S]*";
             } else if (c == '_') {
                 // todo: now not support '_'
                 return std::nullopt;
@@ -1876,6 +1876,10 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     if (cached_ngram_match_res_ == nullptr) {
         auto index = segment_->GetNgramIndex(field_id_);
         auto res_opt = index->InnerMatchQuery(ngram_literal.value(), this);
+        LOG_INFO("debug=== ngram index, res_opt: {}", res_opt.has_value());
+        if (res_opt.has_value()) {
+            LOG_INFO("debug=== ngram index, res_opt: {}", res_opt.value().count());
+        }
         if (!res_opt.has_value()) {
             return std::nullopt;
         }

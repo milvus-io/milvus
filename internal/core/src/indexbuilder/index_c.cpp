@@ -35,6 +35,7 @@
 #include "storage/Util.h"
 #include "index/Meta.h"
 #include "index/JsonKeyStatsInvertedIndex.h"
+#include "index/NgramInvertedIndex.h"
 
 using namespace milvus;
 CStatus
@@ -364,6 +365,89 @@ BuildTextIndex(ProtoLayoutInterface result,
         auto create_index_result = index->Upload(config);
         create_index_result->SerializeAt(
             reinterpret_cast<milvus::ProtoLayout*>(result));
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+BuildNgramIndex(ProtoLayoutInterface result,
+                const uint8_t* serialized_build_index_info,
+                const uint64_t len) {
+    try {
+        auto build_index_info =
+            std::make_unique<milvus::proto::indexcgo::BuildIndexInfo>();
+        auto res =
+            build_index_info->ParseFromArray(serialized_build_index_info, len);
+        AssertInfo(res, "Unmarshal build index info failed");
+
+        auto field_type =
+            static_cast<DataType>(build_index_info->field_schema().data_type());
+
+        auto storage_config =
+            get_storage_config(build_index_info->storage_config());
+        auto config = get_config(build_index_info);
+
+        // init file manager
+        milvus::storage::FieldDataMeta field_meta{
+            build_index_info->collectionid(),
+            build_index_info->partitionid(),
+            build_index_info->segmentid(),
+            build_index_info->field_schema().fieldid(),
+            build_index_info->field_schema()};
+
+        milvus::storage::IndexMeta index_meta{
+            build_index_info->segmentid(),
+            build_index_info->field_schema().fieldid(),
+            build_index_info->buildid(),
+            build_index_info->index_version(),
+            "",
+            build_index_info->field_schema().name(),
+            field_type,
+            build_index_info->dim(),
+        };
+
+        auto chunk_manager =
+            milvus::storage::CreateChunkManager(storage_config);
+
+        milvus::storage::FileManagerContext fileManagerContext(
+            field_meta, index_meta, chunk_manager);
+
+        auto field_schema =
+            FieldMeta::ParseFrom(build_index_info->field_schema());
+
+        uintptr_t min_gram =
+            std::stoul(milvus::index::GetValueFromConfig<std::string>(
+                           config, milvus::index::MIN_NGRAM)
+                           .value());
+        uintptr_t max_gram =
+            std::stoul(milvus::index::GetValueFromConfig<std::string>(
+                           config, milvus::index::MAX_NGRAM)
+                           .value());
+
+        LOG_INFO("debug=== str min_gram {}, max_gram {}", config[milvus::index::MIN_NGRAM], config[milvus::index::MAX_NGRAM]);
+        LOG_INFO("debug=== min_gram {}, max_gram {}", min_gram, max_gram);
+
+        auto index = std::make_unique<index::NgramInvertedIndex>(
+            fileManagerContext, min_gram, max_gram);
+        index->Build(config);
+        auto create_index_result = index->Upload(config);
+
+        create_index_result->SerializeAt(
+            reinterpret_cast<milvus::ProtoLayout*>(result));
+
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";

@@ -198,6 +198,7 @@ message StatsResult {
   int64 num_rows = 11;
   repeated data.FieldBinlog bm25_logs = 12;
   map<int64, data.JsonKeyStats> json_key_stats_logs = 13;
+  map<int64, data.NgramIndexStats> ngram_index_stats_logs = 14;
 }
 
 message StatsResults {

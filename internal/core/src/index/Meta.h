@@ -51,6 +51,8 @@ constexpr const char* SCALAR_INDEX_ENGINE_VERSION =
 constexpr const char* TANTIVY_INDEX_VERSION = "tantivy_index_version";
 constexpr uint32_t TANTIVY_INDEX_LATEST_VERSION = 7;
 constexpr const char* INDEX_NON_ENCODING = "index.nonEncoding";
+constexpr const char* MIN_NGRAM = "min_gram";
+constexpr const char* MAX_NGRAM = "max_gram";
 
 // index meta
 constexpr const char* COLLECTION_ID = "collection_id";

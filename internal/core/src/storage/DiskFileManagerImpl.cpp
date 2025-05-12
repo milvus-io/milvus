@@ -647,6 +647,14 @@ DiskFileManagerImpl::GetJsonKeyIndexIdentifier() {
 }
 
 std::string
+DiskFileManagerImpl::GetNgramIndexIdentifier() {
+    return GenNgramIndexPathIdentifier(index_meta_.build_id,
+                                       index_meta_.index_version,
+                                       field_meta_.segment_id,
+                                       field_meta_.field_id);
+}
+
+std::string
 DiskFileManagerImpl::GetLocalJsonKeyIndexPrefix() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();

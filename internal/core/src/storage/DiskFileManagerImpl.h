@@ -92,6 +92,10 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetLocalNgramIndexPrefix();
 
+    // Used for loading index, using this index prefix dir to store index.
+    std::string
+    GetNgramIndexIdentifier();
+
     std::string
     GetLocalRawDataObjectPrefix();
 

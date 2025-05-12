@@ -55,6 +55,18 @@ func SetJsonKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) Segmen
 	}
 }
 
+func SetNgramIndexLogs(ngramIndexLogs map[int64]*datapb.NgramIndexStats) SegmentOperator {
+	return func(segment *SegmentInfo) bool {
+		if segment.NgramIndexStats == nil {
+			segment.NgramIndexStats = make(map[int64]*datapb.NgramIndexStats)
+		}
+		for field, logs := range ngramIndexLogs {
+			segment.NgramIndexStats[field] = logs
+		}
+		return true
+	}
+}
+
 type segmentCriterion struct {
 	collectionID int64
 	channel      string

@@ -182,6 +182,11 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 					segmentsStatsToUpdate.Insert(segmentInfo.ID)
 				}
 			}
+			for field := range segmentInfo.GetNgramIndexStats() {
+				if missingFields.Contain(field) {
+					segmentsStatsToUpdate.Insert(segmentInfo.ID)
+				}
+			}
 		}
 	}
 
@@ -262,6 +267,27 @@ func (c *IndexChecker) checkSegmentStats(segment *meta.Segment, schema *schemapb
 			}
 		}
 	}
+
+	// todo(SpddeA): optimize this
+	loadFieldMap := make(map[int64]struct{})
+	for _, v := range loadField {
+		loadFieldMap[v] = struct{}{}
+	}
+	ngramStatsFieldMap := make(map[int64]struct{})
+	for _, v := range segment.NgramIndexStats {
+		ngramStatsFieldMap[v.FieldID] = struct{}{}
+	}
+	for _, field := range schema.GetFields() {
+		h := typeutil.CreateFieldSchemaHelper(field)
+		if h.EnableNgramIndex() {
+			if _, ok := loadFieldMap[field.FieldID]; ok {
+				if _, ok := ngramStatsFieldMap[field.FieldID]; !ok {
+					result = append(result, field.FieldID)
+				}
+			}
+		}
+	}
+
 	return result
 }
 
