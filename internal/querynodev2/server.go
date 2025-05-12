@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
@@ -628,6 +629,8 @@ func (node *QueryNode) initHook() error {
 	}
 	log.Info("start to load plugin", zap.String("path", path))
 
+	hookutil.LockHookInit()
+	defer hookutil.UnlockHookInit()
 	p, err := plugin.Open(path)
 	if err != nil {
 		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())
