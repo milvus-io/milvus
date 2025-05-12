@@ -180,7 +180,7 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 				//
 				// Specifically:
 				// - In the *preimport* phase, the system simulates row distribution using dummy primary keys,
-				//  typically ranging from 0 to numRows.
+				//   typically ranging from 0 to numRows.
 				// - In the *import* phase, real auto-generated primary keys (e.g., 457975852966809057) are used.
 				//
 				// This mismatch can result in slight estimation errors. For example:
