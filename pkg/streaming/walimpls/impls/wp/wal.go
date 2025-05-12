@@ -3,6 +3,8 @@ package wp
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+	"github.com/zilliztech/woodpecker/common/werr"
 	wp "github.com/zilliztech/woodpecker/woodpecker/log"
 	"go.uber.org/zap"
 
@@ -37,6 +39,10 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 		},
 	)
 	if r.Err != nil {
+		if werr.ErrWriterLockLost.Is(r.Err) {
+			w.Log().RatedWarn(1, "wp writer fenced", zap.Error(r.Err))
+			return nil, errors.Mark(r.Err, walimpls.ErrFenced)
+		}
 		w.Log().RatedWarn(1, "write message to woodpecker failed", zap.Error(r.Err))
 		return nil, r.Err
 	}

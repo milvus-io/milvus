@@ -729,7 +729,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SegmentRollingMaxSize = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
 		Version:      "2.6.0",
-		DefaultValue: "2000000000", // 1 GB
+		DefaultValue: "2GB",
 		Doc:          "Maximum entries count of a segment, default is 2GB",
 		Export:       true,
 	}
@@ -738,8 +738,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SegmentRollingMaxTime = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxInterval",
 		Version:      "2.6.0",
-		DefaultValue: "600",
-		Doc:          "Maximum interval between two segments in seconds, default is 10 minutes.",
+		DefaultValue: "10m",
+		Doc:          "Maximum interval between two segments, default is 10 minutes.",
 		Export:       true,
 	}
 	p.SegmentRollingMaxTime.Init(base.mgr)
@@ -747,8 +747,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.AuditorMaxInterval = ParamItem{
 		Key:          "woodpecker.client.auditor.maxInterval",
 		Version:      "2.6.0",
-		DefaultValue: "10",
-		Doc:          "Maximum interval between two auditing operations in seconds, default is 10 seconds.",
+		DefaultValue: "10s",
+		Doc:          "Maximum interval between two auditing operations, default is 10 seconds.",
 		Export:       true,
 	}
 	p.AuditorMaxInterval.Init(base.mgr)
@@ -756,8 +756,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SyncMaxInterval = ParamItem{
 		Key:          "woodpecker.logstore.logFileSyncPolicy.maxInterval",
 		Version:      "2.6.0",
-		DefaultValue: "1000",
-		Doc:          "Maximum interval between two sync operations in milliseconds.",
+		DefaultValue: "200ms",
+		Doc:          "Maximum interval between two sync operations, default is 200 milliseconds.",
 		Export:       true,
 	}
 	p.SyncMaxInterval.Init(base.mgr)
@@ -774,7 +774,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SyncMaxBytes = ParamItem{
 		Key:          "woodpecker.logstore.logFileSyncPolicy.maxBytes",
 		Version:      "2.6.0",
-		DefaultValue: "64000000",
+		DefaultValue: "64M",
 		Doc:          "Maximum size of write buffer in bytes.",
 		Export:       true,
 	}
@@ -792,7 +792,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FlushMaxSize = ParamItem{
 		Key:          "woodpecker.logstore.logFileSyncPolicy.maxFlushSize",
 		Version:      "2.6.0",
-		DefaultValue: "8000000",
+		DefaultValue: "8M",
 		Doc:          "Maximum size of a fragment in bytes to flush, default is 8M.",
 		Export:       true,
 	}
@@ -801,8 +801,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.RetryInterval = ParamItem{
 		Key:          "woodpecker.logstore.logFileSyncPolicy.retryInterval",
 		Version:      "2.6.0",
-		DefaultValue: "1000",
-		Doc:          "Maximum interval between two retries in milliseconds.",
+		DefaultValue: "1000ms",
+		Doc:          "Maximum interval between two retries. default is 1000 milliseconds.",
 		Export:       true,
 	}
 	p.RetryInterval.Init(base.mgr)
@@ -819,7 +819,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FragmentCachedMaxBytes = ParamItem{
 		Key:          "woodpecker.logstore.fragmentManager.maxBytes",
 		Version:      "2.6.0",
-		DefaultValue: "1000000000",
+		DefaultValue: "512M",
 		Doc:          "Maximum size of fragment cached data in bytes.",
 		Export:       true,
 	}
@@ -828,8 +828,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FragmentCachedInterval = ParamItem{
 		Key:          "woodpecker.logstore.fragmentManager.maxInterval",
 		Version:      "2.6.0",
-		DefaultValue: "1000",
-		Doc:          "Maximum interval between two fragment evicts in milliseconds.",
+		DefaultValue: "1s",
+		Doc:          "Maximum interval between two fragment evicts. default is 1 second",
 		Export:       true,
 	}
 	p.FragmentCachedInterval.Init(base.mgr)
@@ -838,7 +838,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Key:          "woodpecker.storage.type",
 		Version:      "2.6.0",
 		DefaultValue: "minio",
-		Doc:          "The Type of the storage provider. Valid values: [default, minio, local, service], default is minio.",
+		Doc:          "The Type of the storage provider. Valid values: [minio, local]",
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)
