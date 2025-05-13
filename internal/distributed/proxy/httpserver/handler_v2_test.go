@@ -2135,7 +2135,7 @@ func TestDML(t *testing.T) {
 		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Times(6)
+	}, nil).Times(7)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil).Times(4)
 	mp.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
 		if matchCountRule(req.OutputFields) {
@@ -2180,6 +2180,18 @@ func TestDML(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "book", "filter": "", "outputFields": ["count(*)"], "limit": 10}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        QueryAction,
+		requestBody: []byte(`{"collectionName": "book", "filter": "", "outputFields":  ["book_id",  "word_count", "book_intro"], "limit": 10, "consistencyLevel": "AAA"}`),
+		errMsg:      "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded",
+		errCode:     1100, // ErrParameterInvalid
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        GetAction,
+		requestBody: []byte(`{"collectionName": "book", "id": [2, 4, 6, 8], "outputFields": ["book_id",  "word_count", "book_intro"], "consistencyLevel": "AAA"}`),
+		errMsg:      "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded",
+		errCode:     1100, // ErrParameterInvalid
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        InsertAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [{"book_id": 0, "word_count": 0, "book_intro": [0.11825, 0.6]}]}`),
 	})
@@ -2207,11 +2219,11 @@ func TestDML(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        GetAction,
-		requestBody: []byte(`{"collectionName": "book", "id" : [2, 4, 6, 8, 0], "outputFields": ["book_id",  "word_count", "book_intro"]}`),
+		requestBody: []byte(`{"collectionName": "book", "id": [2, 4, 6, 8, 0], "outputFields": ["book_id",  "word_count", "book_intro"]}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        GetAction,
-		requestBody: []byte(`{"collectionName": "book", "id" : [2, 4, 6, 8, 0], "outputFields": ["book_id",  "word_count", "book_intro"]}`),
+		requestBody: []byte(`{"collectionName": "book", "id": [2, 4, 6, 8, "0"], "outputFields": ["book_id",  "word_count", "book_intro"]}`),
 		errMsg:      "",
 		errCode:     65535,
 	})
