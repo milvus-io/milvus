@@ -113,7 +113,16 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
         "Before setting field_bit for field index, fieldID:{}. segmentID:{}, ",
         info.field_id,
         id_);
-    if (get_bit(field_data_ready_bitset_, field_id)) {
+    auto& field_meta = schema_->operator[](field_id);
+    LoadResourceRequest request =
+        milvus::index::IndexFactory::GetInstance().VecIndexLoadResource(
+            field_meta.get_data_type(),
+            info.index_engine_version,
+            info.index_size,
+            info.index_params,
+            info.enable_mmap);
+
+    if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
     } else if (get_bit(binlog_index_bitset_, field_id)) {
@@ -1813,20 +1822,11 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         insert_record_.seal_pks();
     }
 
-    if (generate_interim_index(field_id)) {
-        std::unique_lock lck(mutex_);
-        // mmap_fields is useless, no change
-        fields_.erase(field_id);
-        set_bit(field_data_ready_bitset_, field_id, false);
-    } else {
-        std::unique_lock lck(mutex_);
-        set_bit(field_data_ready_bitset_, field_id, true);
-    }
+    generate_interim_index(field_id);
 
-    {
-        std::unique_lock lck(mutex_);
-        update_row_count(num_rows);
-    }
+    std::unique_lock lck(mutex_);
+    set_bit(field_data_ready_bitset_, field_id, true);
+    update_row_count(num_rows);
 }
 
 void
