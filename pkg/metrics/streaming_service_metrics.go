@@ -34,7 +34,6 @@ const (
 	WALStateLabelName                 = "state"
 	WALChannelLabelName               = channelNameLabelName
 	WALSegmentSealPolicyNameLabelName = "policy"
-	WALSegmentAllocStateLabelName     = "state"
 	WALMessageTypeLabelName           = "message_type"
 	WALChannelTermLabelName           = "term"
 	WALNameLabelName                  = "wal_name"
@@ -251,12 +250,18 @@ var (
 	WALSegmentAllocTotal = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "segment_assign_segment_alloc_total",
 		Help: "Total of segment alloc on wal",
-	}, WALChannelLabelName, WALSegmentAllocStateLabelName)
+	}, WALChannelLabelName)
 
 	WALSegmentFlushedTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "segment_assign_flushed_segment_total",
 		Help: "Total of segment sealed on wal",
 	}, WALChannelLabelName, WALSegmentSealPolicyNameLabelName)
+
+	WALSegmentRowsTotal = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "segment_assign_segment_rows_total",
+		Help:    "Total rows of segment alloc on wal",
+		Buckets: prometheus.ExponentialBucketsRange(128, 1048576, 10), // 5MB -> 1024MB
+	}, WALChannelLabelName)
 
 	WALSegmentBytes = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "segment_assign_segment_bytes",
@@ -485,6 +490,7 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALGrowingSegmentLWMBytes)
 	registry.MustRegister(WALSegmentAllocTotal)
 	registry.MustRegister(WALSegmentFlushedTotal)
+	registry.MustRegister(WALSegmentRowsTotal)
 	registry.MustRegister(WALSegmentBytes)
 	registry.MustRegister(WALPartitionTotal)
 	registry.MustRegister(WALCollectionTotal)

@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
@@ -27,6 +28,7 @@ func newPartitionSegmentManager(
 	segments map[int64]*segmentAllocManager,
 	txnManager TxnManager,
 	fencedAssignTimeTick uint64,
+	metrics *metricsutil.SegmentAssignMetrics,
 ) *partitionManager {
 	for _, segment := range segments {
 		if segment.CreateSegmentTimeTick() > fencedAssignTimeTick {
@@ -44,6 +46,7 @@ func newPartitionSegmentManager(
 		onAllocating:         nil,
 		segments:             segments,
 		fencedAssignTimeTick: fencedAssignTimeTick,
+		metrics:              metrics,
 	}
 	m.SetLogger(logger.With(zap.String("vchannel", vchannel), zap.Int64("collectionID", collectionID), zap.Int64("partitionID", paritionID)))
 	return m
@@ -63,6 +66,7 @@ type partitionManager struct {
 	onAllocating         chan struct{}                  // indicates that if the partition manager is on-allocating a new segment.
 	segments             map[int64]*segmentAllocManager // there will be very few segments in this list.
 	fencedAssignTimeTick uint64                         // the time tick that the assign operation is fenced.
+	metrics              *metricsutil.SegmentAssignMetrics
 }
 
 // AddSegment adds a segment to the partition segment manager.
@@ -76,6 +80,7 @@ func (m *partitionManager) AddSegment(s *segmentAllocManager) {
 		panic("critical bug: create segment time tick is less than fenced assign time tick")
 	}
 	m.segments[s.GetSegmentID()] = s
+	m.metrics.ObserveCreateSegment()
 }
 
 // GetSegmentManager returns the segment manager of the given segment ID.
@@ -117,6 +122,11 @@ func (m *partitionManager) FlushAndDropPartition(policy policy.SealPolicy) []int
 	segmentIDs := make([]int64, 0, len(m.segments))
 	for _, segment := range m.segments {
 		segment.Flush(policy)
+		m.metrics.ObserveSegmentFlushed(
+			string(segment.SealPolicy().Policy),
+			int64(segment.GetFlushedStat().Insert.Rows),
+			int64(segment.GetFlushedStat().Insert.BinarySize),
+		)
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
 	m.segments = make(map[int64]*segmentAllocManager)
@@ -134,6 +144,11 @@ func (m *partitionManager) FlushAndFenceSegmentUntil(timeTick uint64) []int64 {
 	segmentIDs := make([]int64, 0, len(m.segments))
 	for _, segment := range m.segments {
 		segment.Flush(policy.PolicyFenced(timeTick))
+		m.metrics.ObserveSegmentFlushed(
+			string(segment.SealPolicy().Policy),
+			int64(segment.GetFlushedStat().Insert.Rows),
+			int64(segment.GetFlushedStat().Insert.BinarySize),
+		)
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
 	m.segments = make(map[int64]*segmentAllocManager)
@@ -157,6 +172,11 @@ func (m *partitionManager) AsyncFlushSegment(signal utils.SealSegmentSignal) err
 
 	if !sm.IsFlushed() {
 		sm.Flush(signal.SealPolicy)
+		m.metrics.ObserveSegmentFlushed(
+			string(sm.SealPolicy().Policy),
+			int64(sm.GetFlushedStat().Insert.Rows),
+			int64(sm.GetFlushedStat().Insert.BinarySize),
+		)
 		m.asyncFlushSegment(m.ctx, sm)
 	}
 	return nil
@@ -190,7 +210,7 @@ func (m *partitionManager) assignSegment(req *AssignSegmentRequest) (*AssignSegm
 	}
 
 	// There is no segment can be allocated for the insert request.
-	// Ask a new peding segment to insert.
+	// Ask a new pending segment to insert.
 	m.asyncAllocSegment()
 	return nil, ErrWaitForNewSegment
 }

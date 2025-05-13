@@ -62,12 +62,13 @@ func (t *samplingTruncator) SampleCheckpoint(checkpoint *WALCheckpoint) {
 
 // background starts the background task of the sampling truncator.
 func (t *samplingTruncator) background() {
+	ticker := time.NewTicker(t.cfg.sampleInterval / 2)
 	defer func() {
+		ticker.Stop()
 		t.notifier.Finish(struct{}{})
 		t.Logger().Info("sampling truncator background task exit")
 	}()
 
-	ticker := time.NewTicker(t.cfg.sampleInterval / 2)
 	for {
 		select {
 		case <-t.notifier.Context().Done():

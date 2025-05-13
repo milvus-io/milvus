@@ -47,7 +47,7 @@ func (m *ShardManager) checkIfSegmentCanBeCreated(collectionID int64, partitionI
 		return err
 	}
 
-	if m := m.managers[partitionID].GetSegmentManager(segmentID); m != nil {
+	if m := m.partitionManagers[partitionID].GetSegmentManager(segmentID); m != nil {
 		return ErrSegmentExists
 	}
 	return nil
@@ -69,7 +69,7 @@ func (m *ShardManager) checkIfSegmentCanBeFlushed(collecionID int64, partitionID
 
 	// segment can be flushed only if the segment exists, and its state is flushed.
 	// pm must exists, because we have checked the partition exists.
-	pm := m.managers[partitionID]
+	pm := m.partitionManagers[partitionID]
 	sm := pm.GetSegmentManager(segmentID)
 	if sm == nil {
 		return ErrSegmentNotFound
@@ -92,7 +92,7 @@ func (m *ShardManager) CreateSegment(msg message.ImmutableCreateSegmentMessageV2
 	}
 
 	s := newSegmentAllocManager(m.pchannel, msg)
-	pm, ok := m.managers[s.GetPartitionID()]
+	pm, ok := m.partitionManagers[s.GetPartitionID()]
 	if !ok {
 		panic("critical error: partition manager not found when a segment is created")
 	}
@@ -113,7 +113,7 @@ func (m *ShardManager) FlushSegment(msg message.ImmutableFlushMessageV2) {
 		return
 	}
 
-	pm := m.managers[partitionID]
+	pm := m.partitionManagers[partitionID]
 	pm.MustRemoveFlushedSegment(segmentID)
 }
 
@@ -122,7 +122,7 @@ func (m *ShardManager) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentR
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if pm, ok := m.managers[req.PartitionID]; ok {
+	if pm, ok := m.partitionManagers[req.PartitionID]; ok {
 		return pm.AssignSegment(req)
 	} else {
 		return nil, ErrPartitionNotFound
@@ -137,7 +137,7 @@ func (m *ShardManager) WaitUntilGrowingSegmentReady(collectionID int64, partiton
 	if err := m.checkIfPartitionExists(collectionID, partitonID); err != nil {
 		return nil, err
 	}
-	return m.managers[partitonID].WaitPendingGrowingSegmentReady(), nil
+	return m.partitionManagers[partitonID].WaitPendingGrowingSegmentReady(), nil
 }
 
 // FlushAndFenceSegmentAllocUntil flush all segment that contains the message which timetick is less than the incoming timetick.
@@ -159,7 +159,7 @@ func (m *ShardManager) FlushAndFenceSegmentAllocUntil(collectionID int64, timeti
 	// collect all partitions
 	for partitionID := range collectionInfo.PartitionIDs {
 		// Seal all segments and fence assign to the partition manager.
-		pm, ok := m.managers[partitionID]
+		pm, ok := m.partitionManagers[partitionID]
 		if !ok {
 			logger.Warn("partition not found when FlushAndFenceSegmentAllocUntil", zap.Int64("partitionID", partitionID))
 			continue
@@ -181,9 +181,10 @@ func (m *ShardManager) AsyncFlushSegment(signal utils.SealSegmentSignal) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	pm, ok := m.managers[signal.SegmentBelongs.PartitionID]
+	pm, ok := m.partitionManagers[signal.SegmentBelongs.PartitionID]
 	if !ok {
 		logger.Warn("partition not found when AsyncMustSeal, may be already dropped")
+		return
 	}
 	if err := pm.AsyncFlushSegment(signal); err != nil {
 		logger.Warn("segment not found when AsyncMustSeal, may be already sealed", zap.Error(err))
