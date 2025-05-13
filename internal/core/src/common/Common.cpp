@@ -32,6 +32,7 @@ int64_t EXEC_EVAL_EXPR_BATCH_SIZE = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
 int64_t JSON_KEY_STATS_COMMIT_INTERVAL = DEFAULT_JSON_KEY_STATS_COMMIT_INTERVAL;
 bool OPTIMIZE_EXPR_ENABLED = DEFAULT_OPTIMIZE_EXPR_ENABLED;
 bool GROWING_JSON_KEY_STATS_ENABLED = DEFAULT_GROWING_JSON_KEY_STATS_ENABLED;
+bool CONFIG_PARAM_TYPE_CHECK_ENABLED = DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED;
 
 void
 SetIndexSliceSize(const int64_t size) {
@@ -91,4 +92,10 @@ SetDefaultOptimizeExprEnable(bool val) {
     LOG_INFO("set default optimize expr enabled: {}", OPTIMIZE_EXPR_ENABLED);
 }
 
+void
+SetDefaultConfigParamTypeCheck(bool val) {
+    CONFIG_PARAM_TYPE_CHECK_ENABLED = val;
+    LOG_INFO("set default config param type check enabled: {}",
+             CONFIG_PARAM_TYPE_CHECK_ENABLED);
+}
 }  // namespace milvus

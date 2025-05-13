@@ -87,3 +87,16 @@ const bool DEFAULT_OPTIMIZE_EXPR_ENABLED = true;
 const bool DEFAULT_GROWING_JSON_KEY_STATS_ENABLED = false;
 const int64_t DEFAULT_JSON_KEY_STATS_COMMIT_INTERVAL = 200;
 const int64_t DEFAULT_CONVERT_OR_TO_IN_NUMERIC_LIMIT = 150;
+const bool DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED = true;
+
+// index config related
+const std::string SEGMENT_INSERT_FILES_KEY = "segment_insert_files";
+const std::string INSERT_FILES_KEY = "insert_files";
+const std::string PARTITION_KEY_ISOLATION_KEY = "partition_key_isolation";
+const std::string STORAGE_VERSION_KEY = "storage_version";
+const std::string DIM_KEY = "dim";
+const std::string DATA_TYPE_KEY = "data_type";
+
+// storage version
+const int64_t STORAGE_V1 = 1;
+const int64_t STORAGE_V2 = 2;
