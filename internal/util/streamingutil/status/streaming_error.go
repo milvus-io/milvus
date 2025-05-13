@@ -33,8 +33,12 @@ func (e *StreamingError) AsPBError() *streamingpb.StreamingError {
 // Client for producing and consuming should report these error to coord and block until new assignment term coming.
 func (e *StreamingError) IsWrongStreamingNode() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNMATCHED_CHANNEL_TERM || // channel term not match
-		e.Code == streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_NOT_EXIST || // channel do not exist on streamingnode
-		e.Code == streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_FENCED // channel fenced on these node.
+		e.Code == streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_NOT_EXIST // channel do not exist on streamingnode
+}
+
+// IsFenced returns true if the error is caused by fenced channel.
+func (e *StreamingError) IsFenced() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_FENCED
 }
 
 // IsSkippedOperation returns true if the operation is ignored or skipped.
@@ -81,7 +85,6 @@ func NewInvalidRequestSeq(format string, args ...interface{}) *StreamingError {
 }
 
 // NewChannelFenced creates a new StreamingError with code STREAMING_CODE_CHANNEL_FENCED.
-// TODO: Unused by now, add it after enable wal fence.
 func NewChannelFenced(channel string) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_CHANNEL_FENCED, "%s fenced", channel)
 }
