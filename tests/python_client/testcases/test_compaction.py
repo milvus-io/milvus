@@ -1051,8 +1051,9 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
         expr_1 = f'{ct.default_int64_field_name} in {[1]}'
-        collection_w.query(expr_1, check_task=CheckTasks.check_query_results, check_items={
-                           'exp_res': [{'int64': 1}]})
+        collection_w.query(expr_1, check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': [{'int64': 1}],
+                                        "pk_name": collection_w.primary_field.name,})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_cross_shards(self):

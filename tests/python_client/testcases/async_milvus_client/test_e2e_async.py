@@ -62,7 +62,8 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                    check_task=CheckTasks.check_search_results,
                                                                    check_items={"enable_milvus_client_api": True,
                                                                                 "nq": ct.default_nq,
-                                                                                "limit": ct.default_limit})
+                                                                                "limit": ct.default_limit,
+                                                                                "pk_name": default_pk_name})
         tasks.append(default_search_task)
 
         # search with filter & search_params
@@ -73,7 +74,8 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                          check_task=CheckTasks.check_search_results,
                                                                          check_items={"enable_milvus_client_api": True,
                                                                                       "nq": ct.default_nq,
-                                                                                      "limit": ct.default_limit})
+                                                                                      "limit": ct.default_limit,
+                                                                                      "pk_name": default_pk_name})
         tasks.append(filter_params_search_task)
 
         # search output fields
@@ -82,7 +84,8 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                   check_task=CheckTasks.check_search_results,
                                                                   check_items={"enable_milvus_client_api": True,
                                                                                "nq": ct.default_nq,
-                                                                               "limit": ct.default_limit})
+                                                                               "limit": ct.default_limit,
+                                                                               "pk_name": default_pk_name})
         tasks.append(output_search_task)
 
         # query with filter and default output "*"
@@ -92,7 +95,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                 output_fields=[default_pk_name],
                                                                 check_task=CheckTasks.check_query_results,
                                                                 check_items={"exp_res": exp_query_res,
-                                                                             "primary_field": default_pk_name})
+                                                                             "pk_name": default_pk_name})
         tasks.append(filter_query_task)
         # query with ids and output all fields
         ids_query_task = self.async_milvus_client_wrap.query(c_name,
@@ -101,7 +104,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                              check_task=CheckTasks.check_query_results,
                                                              check_items={"exp_res": rows[:ct.default_limit],
                                                                           "with_vec": True,
-                                                                          "primary_field": default_pk_name})
+                                                                          "pk_name": default_pk_name})
         tasks.append(ids_query_task)
         # get with ids
         get_task = self.async_milvus_client_wrap.get(c_name,
@@ -109,7 +112,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                      output_fields=[default_pk_name, default_vector_name],
                                                      check_task=CheckTasks.check_query_results,
                                                      check_items={"exp_res": rows[:2], "with_vec": True,
-                                                                  "primary_field": default_pk_name})
+                                                                  "pk_name": default_pk_name})
         tasks.append(get_task)
         await asyncio.gather(*tasks)
 
@@ -158,7 +161,8 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                    check_task=CheckTasks.check_search_results,
                                                                    check_items={"enable_milvus_client_api": True,
                                                                                 "nq": ct.default_nq,
-                                                                                "limit": ct.default_limit})
+                                                                                "limit": ct.default_limit,
+                                                                                "pk_name": default_pk_name})
         tasks.append(default_search_task)
 
         # search with filter & search_params
@@ -170,7 +174,8 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                          check_task=CheckTasks.check_search_results,
                                                                          check_items={"enable_milvus_client_api": True,
                                                                                       "nq": ct.default_nq,
-                                                                                      "limit": ct.default_limit})
+                                                                                      "limit": ct.default_limit,
+                                                                                      "pk_name": default_pk_name})
         tasks.append(filter_params_search_task)
 
         # search output fields
@@ -180,7 +185,8 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                   check_task=CheckTasks.check_search_results,
                                                                   check_items={"enable_milvus_client_api": True,
                                                                                "nq": ct.default_nq,
-                                                                               "limit": ct.default_limit})
+                                                                               "limit": ct.default_limit,
+                                                                               "pk_name": default_pk_name})
         tasks.append(output_search_task)
 
         # query with filter and default output "*"
@@ -191,7 +197,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                 partition_names=[p_name],
                                                                 check_task=CheckTasks.check_query_results,
                                                                 check_items={"exp_res": exp_query_res,
-                                                                             "primary_field": default_pk_name})
+                                                                             "pk_name": default_pk_name})
         tasks.append(filter_query_task)
         # query with ids and output all fields
         ids_query_task = self.async_milvus_client_wrap.query(c_name,
@@ -201,7 +207,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                              check_task=CheckTasks.check_query_results,
                                                              check_items={"exp_res": rows[:ct.default_limit],
                                                                           "with_vec": True,
-                                                                          "primary_field": default_pk_name})
+                                                                          "pk_name": default_pk_name})
         tasks.append(ids_query_task)
         # get with ids
         get_task = self.async_milvus_client_wrap.get(c_name,
@@ -209,7 +215,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                      output_fields=[default_pk_name, default_vector_name],
                                                      check_task=CheckTasks.check_query_results,
                                                      check_items={"exp_res": rows[:2], "with_vec": True,
-                                                                  "primary_field": default_pk_name})
+                                                                  "pk_name": default_pk_name})
         tasks.append(get_task)
         await asyncio.gather(*tasks)
 
@@ -283,7 +289,8 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                    check_task=CheckTasks.check_search_results,
                                                                    check_items={"enable_milvus_client_api": True,
                                                                                 "nq": ct.default_nq,
-                                                                                "limit": ct.default_limit})
+                                                                                "limit": ct.default_limit,
+                                                                                "pk_name": default_pk_name})
         tasks.append(default_search_task)
 
         # hybrid_search
@@ -309,7 +316,8 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                                 check_items={
                                                                                     "enable_milvus_client_api": True,
                                                                                     "nq": ct.default_nq,
-                                                                                    "limit": 5})
+                                                                                    "limit": 5,
+                                                                                    "pk_name": default_pk_name})
         tasks.append(filter_params_search_task)
 
         # get with ids
@@ -416,7 +424,8 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                    check_task=CheckTasks.check_search_results,
                                                                    check_items={"enable_milvus_client_api": True,
                                                                                 "nq": ct.default_nq,
-                                                                                "limit": ct.default_limit})
+                                                                                "limit": ct.default_limit,
+                                                                                "pk_name": default_pk_name})
         tasks.append(default_search_task)
 
         # query with filter and default output "*"
@@ -426,7 +435,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                 output_fields=[default_pk_name],
                                                                 check_task=CheckTasks.check_query_results,
                                                                 check_items={"exp_res": exp_query_res,
-                                                                             "primary_field": default_pk_name})
+                                                                             "pk_name": default_pk_name})
         tasks.append(filter_query_task)
 
         # get with ids
@@ -435,7 +444,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                      output_fields=[default_pk_name, default_vector_name],
                                                      check_task=CheckTasks.check_query_results,
                                                      check_items={"exp_res": rows[:2], "with_vec": True,
-                                                                  "primary_field": default_pk_name})
+                                                                  "pk_name": default_pk_name})
         tasks.append(get_task)
         await asyncio.gather(*tasks)
 
@@ -495,7 +504,8 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                    check_task=CheckTasks.check_search_results,
                                                                    check_items={"enable_milvus_client_api": True,
                                                                                 "nq": ct.default_nq,
-                                                                                "limit": ct.default_limit})
+                                                                                "limit": ct.default_limit,
+                                                                                "pk_name": default_pk_name})
         tasks.append(default_search_task)
 
         # query with filter and default output "*"
@@ -505,6 +515,6 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
                                                                 output_fields=[default_pk_name],
                                                                 check_task=CheckTasks.check_query_results,
                                                                 check_items={"exp_res": exp_query_res,
-                                                                             "primary_field": default_pk_name})
+                                                                             "pk_name": default_pk_name})
         tasks.append(filter_query_task)
         await asyncio.gather(*tasks)

@@ -11,25 +11,36 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
 
 #include <folly/futures/Future.h>
 #include <folly/futures/SharedPromise.h>
 
 #include "cachinglayer/lrucache/ListNode.h"
+#include "cachinglayer/Utils.h"
 
 namespace milvus::cachinglayer::internal {
 
 class DList {
  public:
-    // Touch a node means to move it to the head of the list, which requires locking the entire list.
-    // Use TouchConfig to reduce the frequency of touching and reduce contention.
-    struct TouchConfig {
-        std::chrono::seconds refresh_window = std::chrono::seconds(10);
-    };
+    DList(ResourceUsage max_memory,
+          ResourceUsage low_watermark,
+          ResourceUsage high_watermark,
+          EvictionConfig eviction_config)
+        : max_memory_(max_memory),
+          low_watermark_(low_watermark),
+          high_watermark_(high_watermark),
+          eviction_config_(eviction_config) {
+        eviction_thread_ = std::thread(&DList::evictionLoop, this);
+    }
 
-    DList(ResourceUsage max_memory, TouchConfig touch_config)
-        : max_memory_(max_memory), touch_config_(touch_config) {
+    ~DList() {
+        stop_eviction_loop_ = true;
+        eviction_thread_cv_.notify_all();
+        if (eviction_thread_.joinable()) {
+            eviction_thread_.join();
+        }
     }
 
     // If after evicting all unpinned items, the used_memory_ is still larger than new_limit, false will be returned
@@ -37,6 +48,13 @@ class DList {
     // Will throw if new_limit is negative.
     bool
     UpdateLimit(const ResourceUsage& new_limit);
+
+    // Update low/high watermark does not trigger eviction, thus will not fail.
+    void
+    UpdateLowWatermark(const ResourceUsage& new_low_watermark);
+
+    void
+    UpdateHighWatermark(const ResourceUsage& new_high_watermark);
 
     // True if no nodes in the list.
     bool
@@ -66,19 +84,24 @@ class DList {
     void
     removeItem(ListNode* list_node, ResourceUsage size);
 
-    const TouchConfig&
-    touch_config() const {
-        return touch_config_;
+    const EvictionConfig&
+    eviction_config() const {
+        return eviction_config_;
     }
 
  private:
     friend class DListTestFriend;
 
-    // Try to evict some items so that the evicted items are larger than expected_eviction.
-    // If we cannot achieve the goal, nothing will be evicted and false will be returned.
+    void
+    evictionLoop();
+
+    // Try to evict some items so that the resources of evicted items are larger than expected_eviction.
+    // If we cannot achieve the goal, but we can evict min_eviction, we will still perform eviction.
+    // If we cannot even evict min_eviction, nothing will be evicted and false will be returned.
     // Must be called under the lock of list_mtx_.
     bool
-    tryEvict(const ResourceUsage& expected_eviction);
+    tryEvict(const ResourceUsage& expected_eviction,
+             const ResourceUsage& min_eviction);
 
     // Must be called under the lock of list_mtx_ and list_node->mtx_.
     // ListNode is guaranteed to be not in the list.
@@ -91,6 +114,9 @@ class DList {
     bool
     popItem(ListNode* list_node);
 
+    std::string
+    usageInfo(const ResourceUsage& actively_pinned) const;
+
     // head_ is the most recently used item, tail_ is the least recently used item.
     // tail_ -> next -> ... -> head_
     // tail_ <- prev <- ... <- head_
@@ -101,8 +127,14 @@ class DList {
     mutable std::mutex list_mtx_;
     // access to used_memory_ and max_memory_ must be done under the lock of list_mtx_
     std::atomic<ResourceUsage> used_memory_{};
+    ResourceUsage low_watermark_;
+    ResourceUsage high_watermark_;
     ResourceUsage max_memory_;
-    const TouchConfig touch_config_;
+    const EvictionConfig eviction_config_;
+
+    std::thread eviction_thread_;
+    std::condition_variable eviction_thread_cv_;
+    std::atomic<bool> stop_eviction_loop_{false};
 };
 
 }  // namespace milvus::cachinglayer::internal

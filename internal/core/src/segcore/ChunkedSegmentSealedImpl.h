@@ -122,14 +122,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // TODO(tiered storage 1): should return a PinWrapper
     std::pair<milvus::Json, bool>
     GetJsonData(FieldId field_id, size_t offset) const override {
-        auto column =
-            std::dynamic_pointer_cast<ChunkedVariableColumn<milvus::Json>>(
-                fields_.at(field_id));
+        auto column = fields_.at(field_id);
         bool is_valid = column->IsValid(offset);
         if (!is_valid) {
             return std::make_pair(milvus::Json(), false);
         }
-        return std::make_pair(milvus::Json(column->RawAt(offset)), is_valid);
+        return std::make_pair(column->RawJsonAt(offset), is_valid);
     }
 
     void
@@ -307,12 +305,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         int64_t count,
                         T* dst_raw);
 
-    template <typename S, typename T = S>
+    template <typename S>
     static void
-    bulk_subscript_ptr_impl(ChunkedColumnInterface* field,
-                            const int64_t* seg_offsets,
-                            int64_t count,
-                            google::protobuf::RepeatedPtrField<T>* dst_raw);
+    bulk_subscript_ptr_impl(
+        ChunkedColumnInterface* field,
+        const int64_t* seg_offsets,
+        int64_t count,
+        google::protobuf::RepeatedPtrField<std::string>* dst_raw);
 
     template <typename T>
     static void

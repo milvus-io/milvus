@@ -106,6 +106,7 @@ class TestMilvusClientV2AliasOperation(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_search_results,
                    check_items={"enable_milvus_client_api": True,
                               "nq": len(search_vectors),
+                              "pk_name": default_primary_key_field_name,
                               "limit": default_limit})
         
         # 6. create collection2 with index and load
@@ -135,6 +136,7 @@ class TestMilvusClientV2AliasOperation(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_search_results,
                    check_items={"enable_milvus_client_api": True,
                               "nq": len(search_vectors),
+                              "pk_name": default_primary_key_field_name,
                               "limit": default_limit})
         
         # 11. verify operations on collection1 still work

@@ -1294,7 +1294,7 @@ class TestCollectionDataframe(TestcaseBase):
         df = pd.DataFrame(data=mix_data, columns=list("ABC"))
         error = {ct.err_code: 1,
                  ct.err_msg: "The Input data type is inconsistent with defined schema, "
-                             "{C} field should be a float_vector, but got a {<class 'list'>} instead."}
+                             "{C} field should be a FLOAT_VECTOR, but got a {<class 'list'>} instead."}
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field='A', check_task=CheckTasks.err_res,
                                                       check_items=error)
 
@@ -4725,7 +4725,7 @@ class TestCollectionDefaultValueValid(TestcaseBase):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="issue 36457")
+    # @pytest.mark.skip(reason="issue 36457")
     def test_create_collection_default_value_twice(self):
         """
         target: test create collection with set default value twice
@@ -4740,7 +4740,7 @@ class TestCollectionDefaultValueValid(TestcaseBase):
         int_fields.append(cf.gen_float_field(default_value=numpy.float32(10.0)))
         int_fields.append(cf.gen_float_vec_field())
         schema = cf.gen_collection_schema(fields=int_fields)
-        self.collection_wrap.init_collection(c_name, schema=schema)
+        c=self.collection_wrap.init_collection(c_name, schema=schema)[0]
         self.collection_wrap.init_collection(c_name, schema=schema)
 
     @pytest.mark.tags(CaseLabel.L1)

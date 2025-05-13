@@ -408,13 +408,14 @@ class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 5. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         # 6. drop action
         self.drop_collection(client, collection_name)
         self.drop_database(client, db_name)
@@ -463,13 +464,14 @@ class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 5. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         # 6. drop action
         self.drop_collection(client, collection_name)
         self.drop_database(client, db_name)

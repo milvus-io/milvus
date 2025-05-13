@@ -5,11 +5,21 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 )
 
 var (
-	ErrNotEnoughSpace = errors.New("not enough space")
-	ErrTooLargeInsert = errors.New("insert too large")
+	ErrNotEnoughSpace       = errors.New("not enough space")
+	ErrTooLargeInsert       = errors.New("insert too large")
+	NewSegmentStatFromProto = utils.NewSegmentStatFromProto
+	NewProtoFromSegmentStat = utils.NewProtoFromSegmentStat
+)
+
+type (
+	SegmentStats         = utils.SegmentStats
+	InsertMetrics        = utils.InsertMetrics
+	SyncOperationMetrics = utils.SyncOperationMetrics
 )
 
 // StatsManager is the manager of stats.
@@ -225,22 +235,4 @@ func (m *StatsManager) SealByTotalGrowingSegmentsSize(vchannelThreshold uint64) 
 		}
 	}
 	return nil
-}
-
-// InsertOpeatationMetrics is the metrics of insert operation.
-type InsertMetrics struct {
-	Rows       uint64
-	BinarySize uint64
-}
-
-// Collect collects other metrics.
-func (m *InsertMetrics) Collect(other InsertMetrics) {
-	m.Rows += other.Rows
-	m.BinarySize += other.BinarySize
-}
-
-// Subtract subtract by other metrics.
-func (m *InsertMetrics) Subtract(other InsertMetrics) {
-	m.Rows -= other.Rows
-	m.BinarySize -= other.BinarySize
 }

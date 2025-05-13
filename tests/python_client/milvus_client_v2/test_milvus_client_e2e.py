@@ -173,6 +173,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_search_results,
             check_items={"enable_milvus_client_api": True,
                 "nq": len(vectors_to_search),
+                "pk_name": "id",
                 "limit": default_limit
             }
         )
@@ -194,7 +195,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": bool_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -210,7 +211,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": int8_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -226,7 +227,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": int16_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -242,7 +243,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": int32_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -258,7 +259,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": int64_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -274,7 +275,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": float_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -290,7 +291,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": double_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -306,7 +307,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": varchar_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -322,7 +323,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": varchar_null_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -338,7 +339,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": json_null_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -354,7 +355,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": array_null_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -370,7 +371,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": multi_null_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -386,7 +387,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": mix_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -403,7 +404,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": int8_not_null_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -419,7 +420,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": int16_not_null_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -435,7 +436,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": float_not_null_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -451,7 +452,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": double_not_null_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -467,7 +468,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": varchar_not_null_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -483,7 +484,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": json_not_null_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -499,7 +500,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": array_not_null_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -515,7 +516,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": multi_not_null_expected,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -534,7 +535,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": complex_mix_expected1,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -552,7 +553,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": complex_mix_expected2,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 
@@ -570,7 +571,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_items={
                 "exp_res": complex_mix_expected3,
                 "with_vec": True,
-                "primary_field": "id"
+                "pk_name": "id"
             }
         )
 

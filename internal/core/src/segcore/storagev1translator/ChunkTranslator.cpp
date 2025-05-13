@@ -27,105 +27,107 @@
 
 namespace milvus::segcore::storagev1translator {
 
-ChunkTranslator::ChunkTranslator(int64_t segment_id,
-                                 FieldMeta field_meta,
-                                 FieldDataInfo field_data_info,
-                                 std::vector<std::string> insert_files,
-                                 bool use_mmap)
+ChunkTranslator::ChunkTranslator(
+    int64_t segment_id,
+    FieldMeta field_meta,
+    FieldDataInfo field_data_info,
+    std::vector<std::pair<std::string, int64_t>>&& files_and_rows,
+    bool use_mmap)
     : segment_id_(segment_id),
-      key_(fmt::format("seg_{}_f_{}", segment_id, field_data_info.field_id)),
+      field_id_(field_data_info.field_id),
+      field_meta_(field_meta),
+      key_(fmt::format("seg_{}_f_{}", segment_id, field_meta.get_id().get())),
       use_mmap_(use_mmap),
+      files_and_rows_(std::move(files_and_rows)),
+      mmap_dir_path_(field_data_info.mmap_dir_path),
       meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
-                     : milvus::cachinglayer::StorageType::MEMORY) {
-    chunks_.resize(insert_files.size());
-    AssertInfo(
-        !SystemProperty::Instance().IsSystem(FieldId(field_data_info.field_id)),
-        "ChunkTranslator not supported for system field");
-
-    auto parallel_degree =
-        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    pool.Submit(LoadArrowReaderFromRemote,
-                insert_files,
-                field_data_info.arrow_reader_channel);
-    LOG_INFO("segment {} submits load field {} task to thread pool",
-             segment_id_,
-             field_data_info.field_id);
-
-    auto data_type = field_meta.get_data_type();
-    auto cid = 0;
-    auto row_count = 0;
+                     : milvus::cachinglayer::StorageType::MEMORY,
+            milvus::segcore::getCacheWarmupPolicy(
+                IsVectorDataType(field_meta.get_data_type()),
+                /* is_index */ false),
+            /* support_eviction */ false) {
+    AssertInfo(!SystemProperty::Instance().IsSystem(FieldId(field_id_)),
+               "ChunkTranslator not supported for system field");
     meta_.num_rows_until_chunk_.push_back(0);
+    for (auto& [file, rows] : files_and_rows_) {
+        meta_.num_rows_until_chunk_.push_back(
+            meta_.num_rows_until_chunk_.back() + rows);
+    }
+    AssertInfo(meta_.num_rows_until_chunk_.back() == field_data_info.row_count,
+               fmt::format("data lost while loading column {}: found "
+                           "num rows {} but expected {}",
+                           field_data_info.field_id,
+                           meta_.num_rows_until_chunk_.back(),
+                           field_data_info.row_count));
+}
+
+std::unique_ptr<milvus::Chunk>
+ChunkTranslator::load_chunk(milvus::cachinglayer::cid_t cid) {
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    auto channel = std::make_shared<ArrowReaderChannel>();
+    pool.Submit(LoadArrowReaderFromRemote,
+                std::vector<std::string>{files_and_rows_[cid].first},
+                channel);
+    LOG_DEBUG("segment {} submits load field {} chunk {} task to thread pool",
+              segment_id_,
+              field_id_,
+              cid);
+
+    auto data_type = field_meta_.get_data_type();
+
     if (!use_mmap_) {
         std::shared_ptr<milvus::ArrowDataWrapper> r;
-        while (field_data_info.arrow_reader_channel->pop(r)) {
+        while (channel->pop(r)) {
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
-            auto chunk =
-                create_chunk(field_meta,
-                             IsVectorDataType(data_type) &&
-                                     !IsSparseFloatVectorDataType(data_type)
-                                 ? field_meta.get_dim()
-                                 : 1,
-                             array_vec)
-                    .release();
-            chunks_[cid] = chunk;
-            row_count += chunk->RowNums();
-            meta_.num_rows_until_chunk_.push_back(row_count);
-            cid++;
+            return create_chunk(field_meta_,
+                                IsVectorDataType(data_type) &&
+                                        !IsSparseFloatVectorDataType(data_type)
+                                    ? field_meta_.get_dim()
+                                    : 1,
+                                array_vec);
         }
     } else {
-        auto filepath = std::filesystem::path(field_data_info.mmap_dir_path) /
+        // we don't know the resulting file size beforehand, thus using a separate file for each chunk.
+        auto filepath = std::filesystem::path(mmap_dir_path_) /
                         std::to_string(segment_id_) /
-                        std::to_string(field_data_info.field_id);
-        auto dir = filepath.parent_path();
-        std::filesystem::create_directories(dir);
+                        std::to_string(field_id_) / std::to_string(cid);
+
+        LOG_INFO("segment {} mmaping field {} chunk {} to path {}",
+                 segment_id_,
+                 field_id_,
+                 cid,
+                 filepath.string());
+
+        std::filesystem::create_directories(filepath.parent_path());
 
         auto file = File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
 
         std::shared_ptr<milvus::ArrowDataWrapper> r;
-        size_t file_offset = 0;
-        std::vector<std::shared_ptr<Chunk>> chunks;
-        while (field_data_info.arrow_reader_channel->pop(r)) {
+        while (channel->pop(r)) {
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
-            auto chunk =
-                create_chunk(field_meta,
-                             IsVectorDataType(data_type) &&
-                                     !IsSparseFloatVectorDataType(data_type)
-                                 ? field_meta.get_dim()
-                                 : 1,
-                             file,
-                             file_offset,
-                             array_vec)
-                    .release();
-            chunks_[cid] = chunk;
-            row_count += chunk->RowNums();
-            meta_.num_rows_until_chunk_.push_back(row_count);
-            cid++;
-            file_offset += chunk->Size();
-        }
-    }
-    AssertInfo(row_count == field_data_info.row_count,
-               fmt::format("data lost while loading column {}: loaded "
-                           "num rows {} but expected {}",
-                           field_data_info.field_id,
-                           row_count,
-                           field_data_info.row_count));
-}
-
-ChunkTranslator::~ChunkTranslator() {
-    for (auto chunk : chunks_) {
-        if (chunk != nullptr) {
-            // let the Chunk to be deleted by the unique_ptr
-            auto chunk_ptr = std::unique_ptr<Chunk>(chunk);
+            auto chunk = create_chunk(field_meta_,
+                                IsVectorDataType(data_type) &&
+                                        !IsSparseFloatVectorDataType(data_type)
+                                    ? field_meta_.get_dim()
+                                    : 1,
+                                file,
+                                /*file_offset*/ 0,
+                                array_vec);
+            auto ok = unlink(filepath.c_str());
+            AssertInfo(ok == 0,
+                    fmt::format("failed to unlink mmap data file {}, err: {}",
+                                filepath.c_str(),
+                                strerror(errno)));
+            return chunk;
         }
     }
 }
 
 size_t
 ChunkTranslator::num_cells() const {
-    return chunks_.size();
+    return files_and_rows_.size();
 }
 
 milvus::cachinglayer::cid_t
@@ -151,14 +153,9 @@ ChunkTranslator::get_cells(
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
         cells;
+    cells.reserve(cids.size());
     for (auto cid : cids) {
-        AssertInfo(chunks_[cid] != nullptr,
-                   "ChunkTranslator::get_cells called again on cell {} of "
-                   "CacheSlot {}.",
-                   cid,
-                   key_);
-        cells.emplace_back(cid, std::unique_ptr<milvus::Chunk>(chunks_[cid]));
-        chunks_[cid] = nullptr;
+        cells.emplace_back(cid, load_chunk(cid));
     }
     return cells;
 }

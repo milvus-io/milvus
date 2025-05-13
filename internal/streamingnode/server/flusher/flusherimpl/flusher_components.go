@@ -28,18 +28,12 @@ import (
 
 // flusherComponents is the components of the flusher.
 type flusherComponents struct {
-	wal               wal.WAL
-	broker            broker.Broker
-	cpUpdater         *util.ChannelCheckpointUpdater
-	chunkManager      storage.ChunkManager
-	dataServices      map[string]*dataSyncServiceWrapper
-	checkpointManager *pchannelCheckpointManager
-	logger            *log.MLogger
-}
-
-// StartMessageID returns the start message id of the flusher after recovering.
-func (impl *flusherComponents) StartMessageID() message.MessageID {
-	return impl.checkpointManager.StartMessageID()
+	wal          wal.WAL
+	broker       broker.Broker
+	cpUpdater    *util.ChannelCheckpointUpdater
+	chunkManager storage.ChunkManager
+	dataServices map[string]*dataSyncServiceWrapper
+	logger       *log.MLogger
 }
 
 // WhenCreateCollection handles the create collection message.
@@ -109,7 +103,6 @@ func (impl *flusherComponents) WhenDropCollection(vchannel string) {
 		delete(impl.dataServices, vchannel)
 		impl.logger.Info("drop data sync service", zap.String("vchannel", vchannel))
 	}
-	impl.checkpointManager.DropVChannel(vchannel)
 }
 
 // HandleMessage handles the plain message.
@@ -140,7 +133,6 @@ func (impl *flusherComponents) addNewDataSyncService(
 	input chan<- *msgstream.MsgPack,
 	ds *pipeline.DataSyncService,
 ) {
-	impl.checkpointManager.AddVChannel(createCollectionMsg.VChannel(), createCollectionMsg.LastConfirmedMessageID())
 	newDS := newDataSyncServiceWrapper(createCollectionMsg.VChannel(), input, ds)
 	newDS.Start()
 	impl.dataServices[createCollectionMsg.VChannel()] = newDS
@@ -154,7 +146,6 @@ func (impl *flusherComponents) Close() {
 		impl.logger.Info("data sync service closed for flusher closing", zap.String("vchannel", vchannel))
 	}
 	impl.cpUpdater.Close()
-	impl.checkpointManager.Close()
 }
 
 // recover recover the components of the flusher.
@@ -168,12 +159,23 @@ func (impl *flusherComponents) recover(ctx context.Context, recoverInfos map[str
 		futures[vchannel] = future
 	}
 	dataServices := make(map[string]*dataSyncServiceWrapper, len(futures))
+	var lastErr error
 	for vchannel, future := range futures {
 		ds, err := future.Await()
 		if err != nil {
-			return err
+			lastErr = err
+			continue
 		}
 		dataServices[vchannel] = ds.(*dataSyncServiceWrapper)
+	}
+	if lastErr != nil {
+		// release all the data sync services if operation is canceled.
+		// otherwise, the write buffer will leak.
+		for _, ds := range dataServices {
+			ds.Close()
+		}
+		impl.logger.Warn("failed to build data sync service, may be canceled when recovering", zap.Error(lastErr))
+		return lastErr
 	}
 	impl.dataServices = dataServices
 	for vchannel, ds := range dataServices {
@@ -188,16 +190,15 @@ func (impl *flusherComponents) buildDataSyncServiceWithRetry(ctx context.Context
 	// Flush all the growing segment that is not created by streaming.
 	segmentIDs := make([]int64, 0, len(recoverInfo.GetInfo().UnflushedSegments))
 	for _, segment := range recoverInfo.GetInfo().UnflushedSegments {
-		if !segment.IsCreatedByStreaming {
-			segmentIDs = append(segmentIDs, segment.ID)
+		if segment.IsCreatedByStreaming {
+			continue
 		}
-	}
-	if len(segmentIDs) > 0 {
 		msg := message.NewFlushMessageBuilderV2().
 			WithVChannel(recoverInfo.GetInfo().GetChannelName()).
 			WithHeader(&message.FlushMessageHeader{
 				CollectionId: recoverInfo.GetInfo().GetCollectionID(),
-				SegmentIds:   segmentIDs,
+				PartitionId:  segment.PartitionID,
+				SegmentId:    segment.ID,
 			}).
 			WithBody(&message.FlushMessageBody{}).MustBuildMutable()
 		if err := retry.Do(ctx, func() error {

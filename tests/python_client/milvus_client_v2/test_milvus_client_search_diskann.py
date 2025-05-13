@@ -144,6 +144,7 @@ class TestSearchDiskann(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": default_limit,
+                                         "pk_name": ct.default_int64_field_name,
                                          "_async": _async}
                             )
 
@@ -177,7 +178,8 @@ class TestSearchDiskann(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": limit,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_invalid_params_with_diskann_B(self):
@@ -245,7 +247,8 @@ class TestSearchDiskann(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit}
+                                         "limit": default_limit,
+                                         "pk_name": ct.default_int64_field_name}
                             )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -294,7 +297,8 @@ class TestSearchDiskann(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": ids,
                                          "limit": default_limit,
-                                         "_async": _async}
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name}
                             )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -345,7 +349,8 @@ class TestSearchDiskann(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": ids,
                                          "limit": default_limit,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_scalar_field(self, _async):
@@ -390,7 +395,8 @@ class TestSearchDiskann(TestcaseBase):
                                          check_items={"nq": default_nq,
                                                       "ids": ids,
                                                       "limit": limit,
-                                                      "_async": _async})
+                                                      "_async": _async,
+                                                      "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [10, 100, 1000])
@@ -431,7 +437,8 @@ class TestSearchDiskann(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": limit,
-                                         "_async": _async}
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name}
                             )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -472,4 +479,5 @@ class TestSearchDiskann(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": default_limit,
-                                         "_async": _async})
+                                         "_async": _async,
+                                         "pk_name": ct.default_int64_field_name})

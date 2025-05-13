@@ -1,6 +1,7 @@
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "index/IndexFactory.h"
 #include "segcore/load_index_c.h"
+#include "segcore/Utils.h"
 #include <utility>
 
 namespace milvus::segcore::storagev1translator {
@@ -27,8 +28,13 @@ SealedIndexTranslator::SealedIndexTranslator(
                         std::to_string(load_index_info->index_id),
                         std::to_string(load_index_info->segment_id),
                         std::to_string(load_index_info->field_id)}),
-      // TODO : how to express a index use both memory and disk
-      meta_(milvus::cachinglayer::StorageType::MEMORY) {
+      meta_(load_index_info->enable_mmap
+                ? milvus::cachinglayer::StorageType::DISK
+                : milvus::cachinglayer::StorageType::MEMORY,
+            milvus::segcore::getCacheWarmupPolicy(
+                IsVectorDataType(load_index_info->field_type),
+                /* is_index */ true),
+            /* support_eviction */ false) {
 }
 
 size_t

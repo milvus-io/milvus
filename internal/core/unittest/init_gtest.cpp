@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "folly/init/Init.h"
+#include "common/type_c.h"
 #include "test_utils/Constants.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -28,8 +29,16 @@ main(int argc, char** argv) {
         get_default_local_storage_config());
     milvus::storage::MmapManager::GetInstance().Init(get_default_mmap_config());
 
+    static const int64_t mb = 1024 * 1024;
+
     milvus::cachinglayer::Manager::ConfigureTieredStorage(
-        true, 1024 * 1024 * 1024, 1024 * 1024 * 1024);
+        {CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+         CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+         CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+         CacheWarmupPolicy::CacheWarmupPolicy_Disable},
+        {1024 * mb, 1024 * mb, 1024 * mb, 1024 * mb, 1024 * mb, 1024 * mb},
+        true,
+        {10, 30});
 
     return RUN_ALL_TESTS();
 }

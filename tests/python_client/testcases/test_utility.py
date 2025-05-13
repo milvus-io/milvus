@@ -1804,7 +1804,8 @@ class TestUtilityAdvanced(TestcaseBase):
         term_expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:10]}'
         res = df.iloc[:10, :1].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': res})
+                           check_items={'exp_res': res,
+                                        "pk_name": collection_w.primary_field.name})
         search_res_before, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
                                                    ct.default_float_vec_field_name,
                                                    ct.default_search_params, ct.default_limit)
@@ -1822,7 +1823,8 @@ class TestUtilityAdvanced(TestcaseBase):
 
         # query and search from handoff segments
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': res})
+                           check_items={'exp_res': res,
+                                        "pk_name": collection_w.primary_field.name})
         search_res_after, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
                                                   ct.default_float_vec_field_name,
                                                   ct.default_search_params, ct.default_limit)

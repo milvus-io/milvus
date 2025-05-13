@@ -29,8 +29,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"strings"
-	"sync"
 	"time"
 	"unsafe"
 
@@ -296,7 +294,6 @@ type LocalSegment struct {
 	lastDeltaTimestamp *atomic.Uint64
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
-	warmupDispatcher   *AsyncWarmupDispatcher
 	fieldJSONStats     []int64
 }
 
@@ -305,7 +302,6 @@ func NewSegment(ctx context.Context,
 	segmentType SegmentType,
 	version int64,
 	loadInfo *querypb.SegmentLoadInfo,
-	warmupDispatcher *AsyncWarmupDispatcher,
 ) (Segment, error) {
 	log := log.Ctx(ctx)
 	/*
@@ -364,10 +360,9 @@ func NewSegment(ctx context.Context,
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 
-		memSize:          atomic.NewInt64(-1),
-		rowNum:           atomic.NewInt64(-1),
-		insertCount:      atomic.NewInt64(0),
-		warmupDispatcher: warmupDispatcher,
+		memSize:     atomic.NewInt64(-1),
+		rowNum:      atomic.NewInt64(-1),
+		insertCount: atomic.NewInt64(0),
 	}
 
 	if err := segment.initializeSegment(); err != nil {
@@ -1090,15 +1085,10 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 				return nil
 			}
 
-			// 4.
-			mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
-			s.WarmupChunkCache(ctx, indexInfo.GetFieldID(), mmapChunkCache)
-			warmupChunkCacheSpan := tr.RecordSpan()
 			log.Info("Finish loading index",
 				zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
 				zap.Duration("appendLoadIndexInfoSpan", appendLoadIndexInfoSpan),
 				zap.Duration("updateIndexInfoSpan", updateIndexInfoSpan),
-				zap.Duration("warmupChunkCacheSpan", warmupChunkCacheSpan),
 			)
 			return nil
 		})
@@ -1222,62 +1212,6 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 	})
 	log.Info("updateSegmentIndex done")
 	return nil
-}
-
-func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64, mmapEnabled bool) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.Int64("fieldID", fieldID),
-		zap.Bool("mmapEnabled", mmapEnabled),
-	)
-	if !s.ptrLock.PinIf(state.IsNotReleased) {
-		return
-	}
-	defer s.ptrLock.Unpin()
-
-	var status C.CStatus
-
-	warmingUp := strings.ToLower(paramtable.Get().QueryNodeCfg.ChunkCacheWarmingUp.GetValue())
-	switch warmingUp {
-	case "sync":
-		GetWarmupPool().Submit(func() (any, error) {
-			cFieldID := C.int64_t(fieldID)
-			cMmapEnabled := C.bool(mmapEnabled)
-			status = C.WarmupChunkCache(s.ptr, cFieldID, cMmapEnabled)
-			if err := HandleCStatus(ctx, &status, "warming up chunk cache failed"); err != nil {
-				log.Warn("warming up chunk cache synchronously failed", zap.Error(err))
-				return nil, err
-			}
-			log.Info("warming up chunk cache synchronously done")
-			return nil, nil
-		}).Await()
-	case "async":
-		task := func() (any, error) {
-			// failed to wait for state update, return directly
-			if !s.ptrLock.BlockUntilDataLoadedOrReleased() {
-				return nil, nil
-			}
-			if s.PinIfNotReleased() != nil {
-				return nil, nil
-			}
-			defer s.Unpin()
-
-			cFieldID := C.int64_t(fieldID)
-			cMmapEnabled := C.bool(mmapEnabled)
-			status = C.WarmupChunkCache(s.ptr, cFieldID, cMmapEnabled)
-			if err := HandleCStatus(ctx, &status, ""); err != nil {
-				log.Warn("warming up chunk cache asynchronously failed", zap.Error(err))
-				return nil, err
-			}
-			log.Info("warming up chunk cache asynchronously done")
-			return nil, nil
-		}
-		s.warmupDispatcher.AddTask(task)
-	default:
-		// no warming up
-	}
 }
 
 func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64, fieldBinlog *datapb.FieldBinlog) error {
@@ -1443,58 +1377,6 @@ func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, i
 		return false, err
 	}
 	return !typeutil.IsVectorType(fieldSchema.DataType) && s.HasRawData(indexInfo.IndexInfo.FieldID), nil
-}
-
-type (
-	WarmupTask            = func() (any, error)
-	AsyncWarmupDispatcher struct {
-		mu     sync.RWMutex
-		tasks  []WarmupTask
-		notify chan struct{}
-	}
-)
-
-func NewWarmupDispatcher() *AsyncWarmupDispatcher {
-	return &AsyncWarmupDispatcher{
-		notify: make(chan struct{}, 1),
-	}
-}
-
-func (d *AsyncWarmupDispatcher) AddTask(task func() (any, error)) {
-	d.mu.Lock()
-	d.tasks = append(d.tasks, task)
-	d.mu.Unlock()
-	select {
-	case d.notify <- struct{}{}:
-	default:
-	}
-}
-
-func (d *AsyncWarmupDispatcher) Run(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-d.notify:
-			d.mu.RLock()
-			tasks := make([]WarmupTask, len(d.tasks))
-			copy(tasks, d.tasks)
-			d.mu.RUnlock()
-
-			for _, task := range tasks {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					GetWarmupPool().Submit(task)
-				}
-			}
-
-			d.mu.Lock()
-			d.tasks = d.tasks[len(tasks):]
-			d.mu.Unlock()
-		}
-	}
 }
 
 func (s *LocalSegment) GetFieldJSONIndexStats() []int64 {

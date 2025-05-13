@@ -175,6 +175,7 @@ class TestAsyncMilvusClientCollectionValid(TestMilvusClientV2Base):
                                           check_task=CheckTasks.check_search_results,
                                           check_items={"enable_milvus_client_api": True,
                                                         "nq": len(vectors_to_search),
+                                                        "pk_name": default_primary_key_field_name,
                                                         "limit": default_limit})
         tasks.append(search_task)
         # 5. query
@@ -182,7 +183,7 @@ class TestAsyncMilvusClientCollectionValid(TestMilvusClientV2Base):
                                         check_task=CheckTasks.check_query_results,
                                         check_items={"exp_res": rows,
                                                     "with_vec": True,
-                                                    "primary_field": default_primary_key_field_name})
+                                                    "pk_name": default_primary_key_field_name})
         tasks.append(query_task)
         res = await asyncio.gather(*tasks)
 
@@ -204,13 +205,14 @@ class TestAsyncMilvusClientCollectionValid(TestMilvusClientV2Base):
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"enable_milvus_client_api": True,
                                                "nq": len(vectors_to_search),
-                                               "limit": default_limit})
+                                               "limit": default_limit,
+                                               "pk_name": default_primary_key_field_name})
         # 11. query
         await async_client.query(collection_name, filter=default_search_exp,
                                  check_task=CheckTasks.check_query_results,
                                  check_items={"exp_res": rows,
                                               "with_vec": True,
-                                              "primary_field": default_primary_key_field_name})
+                                              "pk_name": default_primary_key_field_name})
 
         # 12. drop action
         if self.has_partition(client, collection_name, partition_name)[0]:

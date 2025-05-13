@@ -16,6 +16,8 @@
 #pragma once
 
 #include "common/Array.h"
+#include "common/VectorTrait.h"
+#include "common/Utils.h"
 #include "storage/MmapManager.h"
 
 namespace milvus {

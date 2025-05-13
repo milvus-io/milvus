@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
@@ -64,7 +65,7 @@ func (m *AppendMetrics) StartAppendGuard() *AppendMetricsGuard {
 // IntoLogFields convert the metrics to log fields.
 func (m *AppendMetrics) IntoLogFields() []zap.Field {
 	fields := []zap.Field{
-		zap.Object("message", m.msg),
+		log.FieldMessage(m.msg),
 		zap.Duration("append_duration", m.appendDuration),
 		zap.Duration("impl_append_duration", m.implAppendDuration),
 	}

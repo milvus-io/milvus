@@ -644,14 +644,21 @@ func TestTranslateOutputFields(t *testing.T) {
 		assert.ElementsMatch(t, []string{"A"}, userDynamicFields)
 		assert.True(t, requestedPK)
 
-		// Test invalid dynamic field expressions
-		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[\"A\"]"}, schema, true)
-		assert.Error(t, err)
+		outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"$meta[\"A\"]", idFieldName}, schema, true)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []string{common.MetaFieldName}, outputFields)
+		assert.ElementsMatch(t, []string{"$meta[\"A\"]"}, userOutputFields)
+		assert.ElementsMatch(t, []string{"A"}, userDynamicFields)
+		assert.True(t, requestedPK)
 
-		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[]"}, schema, true)
+		// Test invalid dynamic field expressions
+		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, `$meta["A"]["B"]`}, schema, true)
 		assert.Error(t, err)
 
 		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[\"\"]"}, schema, true)
+		assert.Error(t, err)
+
+		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[]"}, schema, true)
 		assert.Error(t, err)
 
 		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta["}, schema, true)

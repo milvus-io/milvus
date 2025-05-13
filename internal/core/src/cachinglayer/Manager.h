@@ -14,8 +14,10 @@
 #include <memory>
 
 #include "cachinglayer/CacheSlot.h"
-#include "cachinglayer/Translator.h"
 #include "cachinglayer/lrucache/DList.h"
+#include "cachinglayer/Translator.h"
+#include "cachinglayer/Utils.h"
+#include "common/type_c.h"
 
 namespace milvus::cachinglayer {
 
@@ -24,12 +26,14 @@ class Manager {
     static Manager&
     GetInstance();
 
-    // This function is not thread safe, must be called before any CacheSlot is created.
+    // This function is not thread safe, must be called exactly once before any CacheSlot is created,
+    // and before any Manager instance method is called.
     // TODO(tiered storage 4): support dynamic update.
-    static bool
-    ConfigureTieredStorage(bool enabled_globally,
-                           int64_t memory_limit_bytes,
-                           int64_t disk_limit_bytes);
+    static void
+    ConfigureTieredStorage(CacheWarmupPolicies warmup_policies,
+                           CacheLimit cache_limit,
+                           bool evictionEnabled,
+                           EvictionConfig eviction_config);
 
     Manager(const Manager&) = delete;
     Manager&
@@ -43,24 +47,59 @@ class Manager {
     template <typename CellT>
     std::shared_ptr<CacheSlot<CellT>>
     CreateCacheSlot(std::unique_ptr<Translator<CellT>> translator) {
-        return std::make_shared<CacheSlot<CellT>>(std::move(translator),
-                                                  dlist_.get());
+        // if eviction is disabled, pass nullptr dlist to CacheSlot, so pinned cells
+        // in this CacheSlot will not be evicted.
+        auto dlist = (translator->meta()->support_eviction && evictionEnabled_)
+                         ? dlist_.get()
+                         : nullptr;
+        auto cache_slot =
+            std::make_shared<CacheSlot<CellT>>(std::move(translator), dlist);
+        cache_slot->Warmup();
+        return cache_slot;
     }
 
     // memory overhead for managing all cache slots/cells/translators/policies.
     size_t
     memory_overhead() const;
 
+    CacheWarmupPolicy
+    getScalarFieldCacheWarmupPolicy() const {
+        return warmup_policies_.scalarFieldCacheWarmupPolicy;
+    }
+
+    CacheWarmupPolicy
+    getVectorFieldCacheWarmupPolicy() const {
+        return warmup_policies_.vectorFieldCacheWarmupPolicy;
+    }
+
+    CacheWarmupPolicy
+    getScalarIndexCacheWarmupPolicy() const {
+        return warmup_policies_.scalarIndexCacheWarmupPolicy;
+    }
+
+    CacheWarmupPolicy
+    getVectorIndexCacheWarmupPolicy() const {
+        return warmup_policies_.vectorIndexCacheWarmupPolicy;
+    }
+
+    bool
+    isEvictionEnabled() const {
+        return evictionEnabled_;
+    }
+
  private:
     friend void
-    ConfigureTieredStorage(bool enabled_globally,
-                           int64_t memory_limit_bytes,
-                           int64_t disk_limit_bytes);
+    ConfigureTieredStorage(CacheWarmupPolicies warmup_policies,
+                           CacheLimit cache_limit,
+                           bool evictionEnabled,
+                           EvictionConfig eviction_config);
 
     Manager() = default;  // Private constructor
 
     std::unique_ptr<internal::DList> dlist_{nullptr};
-    bool enable_global_tiered_storage_{false};
+    CacheWarmupPolicies warmup_policies_{};
+    bool evictionEnabled_{false};
+    CacheLimit cache_limit_{};
 };  // class Manager
 
 }  // namespace milvus::cachinglayer

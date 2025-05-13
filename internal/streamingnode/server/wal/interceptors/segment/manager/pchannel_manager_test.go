@@ -285,11 +285,11 @@ func TestCreateAndDropCollection(t *testing.T) {
 
 func newStat(insertedBinarySize uint64, maxBinarySize uint64) *streamingpb.SegmentAssignmentStat {
 	return &streamingpb.SegmentAssignmentStat{
-		MaxBinarySize:                    maxBinarySize,
-		InsertedRows:                     insertedBinarySize,
-		InsertedBinarySize:               insertedBinarySize,
-		CreateTimestampNanoseconds:       time.Now().UnixNano(),
-		LastModifiedTimestampNanoseconds: time.Now().UnixNano(),
+		MaxBinarySize:         maxBinarySize,
+		InsertedRows:          insertedBinarySize,
+		InsertedBinarySize:    insertedBinarySize,
+		CreateTimestamp:       time.Now().Unix(),
+		LastModifiedTimestamp: time.Now().Unix(),
 	}
 }
 

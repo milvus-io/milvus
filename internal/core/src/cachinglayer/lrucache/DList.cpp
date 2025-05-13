@@ -19,6 +19,7 @@
 #include "cachinglayer/Utils.h"
 #include "cachinglayer/lrucache/ListNode.h"
 #include "monitor/prometheus_client.h"
+#include "log/Log.h"
 
 namespace milvus::cachinglayer::internal {
 
@@ -30,15 +31,79 @@ DList::reserveMemory(const ResourceUsage& size) {
         used_memory_ += size;
         return true;
     }
-    if (tryEvict(used + size - max_memory_)) {
+
+    // try to evict so that used + size <= low watermark, but if that is not possible,
+    // evict enough for the current reservation.
+    if (tryEvict(used + size - low_watermark_, used + size - max_memory_)) {
         used_memory_ += size;
         return true;
     }
     return false;
 }
 
+void
+DList::evictionLoop() {
+    while (true) {
+        std::unique_lock<std::mutex> lock(list_mtx_);
+        if (eviction_thread_cv_.wait_for(
+                lock, eviction_config_.eviction_interval, [this] {
+                    return stop_eviction_loop_.load();
+                })) {
+            break;
+        }
+        auto used = used_memory_.load();
+        // if usage is above high watermark, evict until low watermark is reached.
+        if (used.memory_bytes >= high_watermark_.memory_bytes ||
+            used.file_bytes >= high_watermark_.file_bytes) {
+            tryEvict(
+                {
+                    used.memory_bytes >= high_watermark_.memory_bytes
+                        ? used.memory_bytes - low_watermark_.memory_bytes
+                        : 0,
+                    used.file_bytes >= high_watermark_.file_bytes
+                        ? used.file_bytes - low_watermark_.file_bytes
+                        : 0,
+                },
+                // in eviction loop, we always evict as much as possible until low watermark.
+                {0, 0});
+        }
+    }
+}
+
+std::string
+DList::usageInfo(const ResourceUsage& actively_pinned) const {
+    auto used = used_memory_.load();
+    static double precision = 100.0;
+    return fmt::format(
+        "low_watermark_: {}, "
+        "high_watermark_: {} , "
+        "max_memory_: {} , "
+        "used_memory_: {} {:.2}% of max, {:.2}% of "
+        "high_watermark memory, {:.2}% of max, {:.2}% of "
+        "high_watermark disk, "
+        "actively_pinned: {} {:.2}% of used memory, {:.2}% of used disk",
+        low_watermark_.ToString(),
+        high_watermark_.ToString(),
+        max_memory_.ToString(),
+        used.ToString(),
+        static_cast<double>(used.memory_bytes) / max_memory_.memory_bytes *
+            precision,
+        static_cast<double>(used.memory_bytes) / high_watermark_.memory_bytes *
+            precision,
+        static_cast<double>(used.file_bytes) / max_memory_.file_bytes *
+            precision,
+        static_cast<double>(used.file_bytes) / high_watermark_.file_bytes *
+            precision,
+        actively_pinned.ToString(),
+        static_cast<double>(actively_pinned.memory_bytes) / used.memory_bytes *
+            precision,
+        static_cast<double>(actively_pinned.file_bytes) / used.file_bytes *
+            precision);
+}
+
 bool
-DList::tryEvict(const ResourceUsage& expected_eviction) {
+DList::tryEvict(const ResourceUsage& expected_eviction,
+                const ResourceUsage& min_eviction) {
     std::vector<ListNode*> to_evict;
     // items are evicted because they are not used for a while, thus it should be ok to lock them
     // a little bit longer.
@@ -55,6 +120,9 @@ DList::tryEvict(const ResourceUsage& expected_eviction) {
                (need_disk && size.file_bytes > 0);
     };
 
+    ResourceUsage actively_pinned{0, 0};
+
+    // accumulate victims using expected_eviction.
     for (auto it = tail_; it != nullptr; it = it->next_) {
         if (!would_help(it->size())) {
             continue;
@@ -72,11 +140,26 @@ DList::tryEvict(const ResourceUsage& expected_eviction) {
             // if we grabbed the lock only to find that the ListNode is pinned; or if we failed to lock
             // the ListNode, we do not evict this ListNode.
             item_locks.pop_back();
+            actively_pinned += it->size();
         }
     }
     if (!size_to_evict.CanHold(expected_eviction)) {
-        return false;
+        if (!size_to_evict.CanHold(min_eviction)) {
+            LOG_WARN(
+                "Milvus Caching Layer: cannot evict even min_eviction {}, "
+                "giving up eviction. Current usage: {}",
+                min_eviction.ToString(),
+                usageInfo(actively_pinned));
+            return false;
+        }
+        LOG_INFO(
+            "Milvus Caching Layer: cannot evict expected_eviction {}, "
+            "evicting as much({}) as possible. Current usage: {}",
+            expected_eviction.ToString(),
+            size_to_evict.ToString(),
+            usageInfo(actively_pinned));
     }
+
     for (auto* list_node : to_evict) {
         auto size = list_node->size();
         internal::cache_eviction_count(size.storage_type()).Increment();
@@ -108,17 +191,17 @@ DList::tryEvict(const ResourceUsage& expected_eviction) {
 
 bool
 DList::UpdateLimit(const ResourceUsage& new_limit) {
-    if (!new_limit.GEZero()) {
-        throw std::invalid_argument(
-            "Milvus Caching Layer: memory and disk usage limit must be greater "
-            "than 0");
-    }
+    AssertInfo(new_limit.GEZero(),
+               "Milvus Caching Layer: memory and disk usage limit must be "
+               "greater than 0");
     std::unique_lock<std::mutex> list_lock(list_mtx_);
     auto used = used_memory_.load();
     if (!new_limit.CanHold(used)) {
         // positive means amount owed
         auto deficit = used - new_limit;
-        if (!tryEvict(deficit)) {
+        // deficit is the hard limit of eviction, if we cannot evict deficit, we give
+        // up the limit change.
+        if (!tryEvict(deficit, deficit)) {
             return false;
         }
     }
@@ -128,6 +211,22 @@ DList::UpdateLimit(const ResourceUsage& new_limit) {
     milvus::monitor::internal_cache_capacity_bytes_disk.Set(
         max_memory_.file_bytes);
     return true;
+}
+
+void
+DList::UpdateLowWatermark(const ResourceUsage& new_low_watermark) {
+    std::unique_lock<std::mutex> list_lock(list_mtx_);
+    AssertInfo(new_low_watermark.GEZero(),
+               "Milvus Caching Layer: low watermark must be greater than 0");
+    low_watermark_ = new_low_watermark;
+}
+
+void
+DList::UpdateHighWatermark(const ResourceUsage& new_high_watermark) {
+    std::unique_lock<std::mutex> list_lock(list_mtx_);
+    AssertInfo(new_high_watermark.GEZero(),
+               "Milvus Caching Layer: high watermark must be greater than 0");
+    high_watermark_ = new_high_watermark;
 }
 
 void

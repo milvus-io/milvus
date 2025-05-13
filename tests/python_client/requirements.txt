@@ -31,7 +31,6 @@ pytest-random-order
 pymilvus==2.6.0rc119
 pymilvus[bulk_writer]==2.6.0rc119
 
-
 # for customize config test
 python-benedict==0.24.3
 timeout-decorator==0.5.0

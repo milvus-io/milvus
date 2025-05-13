@@ -34,8 +34,14 @@ class ChunkedColumnInterface {
     virtual bool
     IsValid(size_t offset) const = 0;
 
-    virtual bool
-    IsValid(int64_t chunk_id, int64_t offset) const = 0;
+    // fn: (bool is_valid, size_t offset) -> void
+    // If offsets is nullptr, this function will iterate over all rows.
+    // Only BulkRawStringAt and BulkIsValid allow offsets to be nullptr.
+    // Other Bulk* methods can also support nullptr offsets, but not added at this moment.
+    virtual void
+    BulkIsValid(std::function<void(bool, size_t)> fn,
+                const int64_t* offsets = nullptr,
+                int64_t count = 0) const = 0;
 
     // Check if the column can contain null values
     virtual bool
@@ -90,22 +96,37 @@ class ChunkedColumnInterface {
     virtual const std::vector<int64_t>&
     GetNumRowsUntilChunk() const = 0;
 
-    virtual const char*
-    ValueAt(int64_t offset) = 0;
+    virtual void
+    BulkValueAt(std::function<void(const char*, size_t)> fn,
+                const int64_t* offsets,
+                int64_t count) = 0;
 
-    // Get raw value at given offset for variable length types (string/json)
-    template <typename T>
-    T
-    RawAt(size_t offset) const {
+    // fn: (std::string_view value, size_t offset, bool is_valid) -> void
+    // If offsets is nullptr, this function will iterate over all rows.
+    // Only BulkRawStringAt and BulkIsValid allow offsets to be nullptr.
+    // Other Bulk* methods can also support nullptr offsets, but not added at this moment.
+    virtual void
+    BulkRawStringAt(std::function<void(std::string_view, size_t, bool)> fn,
+                    const int64_t* offsets = nullptr,
+                    int64_t count = 0) const {
         PanicInfo(ErrorCode::Unsupported,
-                  "RawAt only supported for ChunkedVariableColumn");
+                  "BulkRawStringAt only supported for ChunkColumnInterface of "
+                  "variable length type");
     }
 
-    // Get raw value at given offset for array type
-    virtual ScalarArray
-    PrimitivieRawAt(int offset) const {
+    virtual Json
+    RawJsonAt(size_t offset) const {
+        PanicInfo(
+            ErrorCode::Unsupported,
+            "RawJsonAt only supported for ChunkColumnInterface of Json type");
+    }
+
+    virtual void
+    BulkArrayAt(std::function<void(ScalarArray&&, size_t)> fn,
+                const int64_t* offsets,
+                int64_t count) const {
         PanicInfo(ErrorCode::Unsupported,
-                  "PrimitivieRawAt only supported for ChunkedArrayColumn");
+                  "BulkArrayAt only supported for ChunkedArrayColumn");
     }
 
     static bool
@@ -124,6 +145,23 @@ class ChunkedColumnInterface {
     IsChunkedColumnDataType(DataType data_type) {
         return !IsChunkedVariableColumnDataType(data_type) &&
                !IsChunkedArrayColumnDataType(data_type);
+    }
+
+ protected:
+    std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
+    ToChunkIdAndOffset(const int64_t* offsets, int64_t count) const {
+        AssertInfo(offsets != nullptr, "Offsets cannot be nullptr");
+        std::vector<milvus::cachinglayer::cid_t> cids;
+        cids.reserve(count);
+        std::vector<int64_t> offsets_in_chunk;
+        offsets_in_chunk.reserve(count);
+
+        for (int64_t i = 0; i < count; i++) {
+            auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(offsets[i]);
+            cids.push_back(chunk_id);
+            offsets_in_chunk.push_back(offset_in_chunk);
+        }
+        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
     }
 };
 
