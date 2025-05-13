@@ -63,7 +63,6 @@ NewSegment(CCollection collection,
                     col->get_index_meta(),
                     segment_id,
                     milvus::segcore::SegcoreConfig::default_config(),
-                    false,
                     is_sorted_by_pk);
                 break;
 
