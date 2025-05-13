@@ -1,4 +1,4 @@
-package stats
+package utils
 
 import (
 	"testing"
@@ -34,6 +34,33 @@ func TestStatsConvention(t *testing.T) {
 	assert.Equal(t, stat.CreateTime.Unix(), stat2.CreateTime.Unix())
 	assert.Equal(t, stat.LastModifiedTime.Unix(), stat2.LastModifiedTime.Unix())
 	assert.Equal(t, stat.BinLogCounter, stat2.BinLogCounter)
+
+	stat3 := stat2.Copy()
+	stat3.Insert.Subtract(InsertMetrics{
+		Rows:       1,
+		BinarySize: 2,
+	})
+	assert.Equal(t, stat3.Insert.Rows, stat2.Insert.Rows-1)
+	assert.Equal(t, stat3.Insert.BinarySize, stat2.Insert.BinarySize-2)
+	assert.Equal(t, stat.Insert.Rows, stat2.Insert.Rows)
+	assert.Equal(t, stat.Insert.BinarySize, stat2.Insert.BinarySize)
+	assert.Panics(t, func() {
+		stat3.Insert.Rows = 0
+		stat3.Insert.Subtract(InsertMetrics{
+			Rows:       1,
+			BinarySize: 0,
+		})
+	})
+	assert.Panics(t, func() {
+		stat3.Insert.BinarySize = 0
+		stat3.Insert.Subtract(InsertMetrics{
+			Rows:       0,
+			BinarySize: 1,
+		})
+	})
+
+	stat4 := NewSegmentStatFromProto(nil)
+	assert.Nil(t, stat4)
 }
 
 func TestSegmentStats(t *testing.T) {

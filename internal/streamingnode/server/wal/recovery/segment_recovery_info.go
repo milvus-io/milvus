@@ -24,29 +24,34 @@ func newSegmentRecoveryInfoFromSegmentAssignmentMeta(metas []*streamingpb.Segmen
 
 // newSegmentRecoveryInfoFromCreateSegmentMessage creates a new segment recovery info from a create segment message.
 func newSegmentRecoveryInfoFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMessageV2) *segmentRecoveryInfo {
-	header := msg.Header()
-	now := tsoutil.PhysicalTime(msg.TimeTick()).Unix()
 	return &segmentRecoveryInfo{
-		meta: &streamingpb.SegmentAssignmentMeta{
-			CollectionId:       header.CollectionId,
-			PartitionId:        header.PartitionId,
-			SegmentId:          header.SegmentId,
-			Vchannel:           msg.VChannel(),
-			State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
-			StorageVersion:     header.StorageVersion,
-			CheckpointTimeTick: msg.TimeTick(),
-			Stat: &streamingpb.SegmentAssignmentStat{
-				MaxBinarySize:         header.MaxSegmentSize,
-				InsertedRows:          0,
-				InsertedBinarySize:    0,
-				CreateTimestamp:       now,
-				LastModifiedTimestamp: now,
-				BinlogCounter:         0,
-				CreateSegmentTimeTick: msg.TimeTick(),
-			},
-		},
+		meta: NewSegmentAssignmentMetaFromCreateSegmentMessage(msg),
 		// a new incoming create segment request is always dirty until it is flushed.
 		dirty: true,
+	}
+}
+
+// NewStreamingSegmentAssignmentMetaFromCreateSegmentMessage creates a new segment assignment meta from a create segment message.
+func NewSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMessageV2) *streamingpb.SegmentAssignmentMeta {
+	header := msg.Header()
+	now := tsoutil.PhysicalTime(msg.TimeTick()).Unix()
+	return &streamingpb.SegmentAssignmentMeta{
+		CollectionId:       header.CollectionId,
+		PartitionId:        header.PartitionId,
+		SegmentId:          header.SegmentId,
+		Vchannel:           msg.VChannel(),
+		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+		StorageVersion:     header.StorageVersion,
+		CheckpointTimeTick: msg.TimeTick(),
+		Stat: &streamingpb.SegmentAssignmentStat{
+			MaxBinarySize:         header.MaxSegmentSize,
+			InsertedRows:          0,
+			InsertedBinarySize:    0,
+			CreateTimestamp:       now,
+			LastModifiedTimestamp: now,
+			BinlogCounter:         0,
+			CreateSegmentTimeTick: msg.TimeTick(),
+		},
 	}
 }
 

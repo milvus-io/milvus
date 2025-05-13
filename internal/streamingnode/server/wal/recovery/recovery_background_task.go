@@ -12,7 +12,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // TODO: !!! all recovery persist operation should be a compare-and-swap operation to
@@ -22,9 +27,7 @@ import (
 func (rs *RecoveryStorage) backgroundTask() {
 	ticker := time.NewTicker(rs.cfg.persistInterval)
 	defer func() {
-		rs.Logger().Info("recovery storage background task on exit...")
 		ticker.Stop()
-		rs.persistDritySnapshotWhenClosing()
 		rs.backgroundTaskNotifier.Finish(struct{}{})
 		rs.Logger().Info("recovery storage background task exit")
 	}()
@@ -32,6 +35,11 @@ func (rs *RecoveryStorage) backgroundTask() {
 	for {
 		select {
 		case <-rs.backgroundTaskNotifier.Context().Done():
+			// If the background task is exiting when on-operating persist operation,
+			// We can try to do a graceful exit.
+			rs.Logger().Info("recovery storage background task, perform a graceful exit...")
+			rs.persistDritySnapshotWhenClosing()
+			rs.gracefulClosed = true
 			return // exit the background task
 		case <-rs.persistNotifier:
 		case <-ticker.C:
@@ -68,6 +76,11 @@ func (rs *RecoveryStorage) persistDirtySnapshot(ctx context.Context, snapshot *R
 		logger.Log(lvl, "persist dirty snapshot")
 	}()
 
+	if err := rs.dropAllVirtualChannel(ctx, snapshot.VChannels); err != nil {
+		logger.Warn("failed to drop all virtual channels", zap.Error(err))
+		return err
+	}
+
 	futures := make([]*conc.Future[struct{}], 0, 2)
 	if len(snapshot.SegmentAssignments) > 0 {
 		future := conc.Go(func() (struct{}, error) {
@@ -100,6 +113,43 @@ func (rs *RecoveryStorage) persistDirtySnapshot(ctx context.Context, snapshot *R
 		return resource.Resource().StreamingNodeCatalog().
 			SaveConsumeCheckpoint(ctx, rs.channel.Name, snapshot.Checkpoint.IntoProto())
 	})
+}
+
+// dropAllVirtualChannel drops all virtual channels that are in the dropped state.
+// TODO: DropVirtualChannel will be called twice here,
+// call it in recovery storage is used to promise the drop virtual channel must be called after recovery.
+// In future, the flowgraph will be deprecated, all message operation will be implement here.
+// So the DropVirtualChannel will only be called once after that.
+func (rs *RecoveryStorage) dropAllVirtualChannel(ctx context.Context, vcs map[string]*streamingpb.VChannelMeta) error {
+	channels := make([]string, 0, len(vcs))
+	for channelName, vc := range vcs {
+		if vc.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+			channels = append(channels, channelName)
+		}
+	}
+	if len(channels) == 0 {
+		return nil
+	}
+
+	mixCoordClient, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, channelName := range channels {
+		if err := rs.retryOperationWithBackoff(ctx, rs.Logger().With(zap.String("op", "dropAllVirtualChannel")), func(ctx context.Context) error {
+			resp, err := mixCoordClient.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				),
+				ChannelName: channelName,
+			})
+			return merr.CheckRPCCall(resp, err)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // retryOperationWithBackoff retries the operation with exponential backoff.
