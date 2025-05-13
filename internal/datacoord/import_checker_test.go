@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -97,6 +98,16 @@ func (s *ImportCheckerSuite) SetupTest() {
 			State:        internalpb.ImportJobState_Pending,
 			TimeoutTs:    1000,
 			CleanupTs:    tsoutil.GetCurrentTime(),
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+					},
+				},
+			},
 			Files: []*internalpb.ImportFile{
 				{
 					Id:    1,

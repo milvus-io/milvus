@@ -175,21 +175,21 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 	for vchannel, partitionSizes := range hashedDataSize {
 		for partitionID, size := range partitionSizes {
 			if pkField.GetAutoID() && size == 0 {
-				// When autoID is enabled, the preimport and import phases use different primary keys,
-				// which can lead to inaccurate row distribution estimation across vchannels.
+				// When autoID is enabled, the preimport task estimates row distribution by
+				// evenly dividing the total row count (numRows) across all vchannels:
+				// `estimatedCount = numRows / vchannelNum`.
 				//
-				// Specifically:
-				// - In the *preimport* phase, the system simulates row distribution using dummy primary keys,
-				//   typically ranging from 0 to numRows.
-				// - In the *import* phase, real auto-generated primary keys (e.g., 457975852966809057) are used.
+				// However, the actual import task hashes real auto-generated IDs to determine
+				// the target vchannel. This mismatch can lead to inaccurate row distribution estimation
+				// in such corner cases:
 				//
-				// This mismatch can result in slight estimation errors. For example:
-				//  Suppose we're importing a single row into two vchannels:
-				//    - Preimport uses pk = 0 → hashes to vchannel-0 → estimated count: vchannel-0 = 1, vchannel-1 = 0
-				//    - Import uses pk = 457975852966809057 → hashes to vchannel-1 → actual count: vchannel-0 = 0, vchannel-1 = 1
+				// - Importing 1 row into 2 vchannels:
+				//     • Preimport: 1 / 2 = 0 → both v0 and v1 are estimated to have 0 rows
+				//     • Import: real autoID (e.g., 457975852966809057) hashes to v1
+				//       → actual result: v0 = 0, v1 = 1
 				//
-				// To resolve such corner case, here we ensure that at least one segment is allocated
-				// for each vchannel during autoID-enabled imports.
+				// To avoid such inconsistencies, we ensure that at least one segment is
+				// allocated for each vchannel when autoID is enabled.
 				size = 1
 			}
 			err := addSegment(vchannel, partitionID, size)
