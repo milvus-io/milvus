@@ -244,6 +244,11 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+			CollectionID: 1,
+			Name:         "test coll",
+			DBID:         1,
+		}, nil).Once()
 		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return([]*milvuspb.UserResult{
 				{
@@ -271,6 +276,11 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+			CollectionID: 1,
+			Name:         "test coll",
+			DBID:         1,
+		}, nil).Once()
 		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock error: select user")).Once()
 
@@ -287,6 +297,11 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+			CollectionID: 1,
+			Name:         "test coll",
+			DBID:         1,
+		}, nil).Once()
 		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return([]*milvuspb.UserResult{}, nil).Once()
 
@@ -344,6 +359,11 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
 
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
+			CollectionID: 1,
+			Name:         "test coll",
+			DBID:         1,
+		}, nil).Once()
 		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return([]*milvuspb.UserResult{
 				{
