@@ -57,6 +57,9 @@ InitDefaultGrowingJSONKeyStatsEnable(bool val);
 void
 InitDefaultOptimizeExprEnable(bool val);
 
+void
+InitDefaultConfigParamTypeCheck(bool val);
+
 #ifdef __cplusplus
 };
 #endif
