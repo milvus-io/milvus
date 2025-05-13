@@ -21,7 +21,6 @@
 #include <cstdint>
 #include <optional>
 #include <type_traits>
-#include <log/Log.h>
 
 #include "common.h"
 #include "detail/maybe_vector.h"
