@@ -60,7 +60,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -1067,23 +1066,6 @@ func (s *LocalSegment) innerLoadIndex(ctx context.Context,
 				return err
 			}
 			updateIndexInfoSpan := tr.RecordSpan()
-			// Skip warnup chunk cache when
-			// . scalar data
-			// . index has row data
-			// . vector was bm25 function output
-
-			if !typeutil.IsVectorType(fieldType) || s.HasRawData(indexInfo.GetFieldID()) {
-				return nil
-			}
-
-			metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, indexInfo.IndexParams)
-			if err != nil {
-				return errors.New("metric type not exist in index params")
-			}
-
-			if metricType == metric.BM25 {
-				return nil
-			}
 
 			log.Info("Finish loading index",
 				zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
