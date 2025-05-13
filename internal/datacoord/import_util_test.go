@@ -171,7 +171,21 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 		},
 	}
 	job := &importJob{
-		ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 2, DataTs: 100},
+		ImportJob: &datapb.ImportJob{
+			JobID:        1,
+			CollectionID: 2,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+					},
+				},
+			},
+			DataTs: 100,
+		},
 	}
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
