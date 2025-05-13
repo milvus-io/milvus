@@ -134,6 +134,7 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
         metric_type,
         std::move(const_cast<LoadIndexInfo&>(info).cache_index));
     set_bit(index_ready_bitset_, field_id, true);
+    index_has_raw_data_[field_id] = request.has_raw_data;
     LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, ",
              info.field_id,
              id_);
@@ -181,6 +182,7 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
             info.enable_mmap);
 
     set_bit(index_ready_bitset_, field_id, true);
+    index_has_raw_data_[field_id] = request.has_raw_data;
     // release field column if the index contains raw data
     // only release non-primary field when in pk sorted mode
     if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id) &&
@@ -1052,6 +1054,7 @@ ChunkedSegmentSealedImpl::ClearData() {
         field_data_ready_bitset_.reset();
         index_ready_bitset_.reset();
         binlog_index_bitset_.reset();
+        index_has_raw_data_.clear();
         system_ready_count_ = 0;
         num_rows_ = std::nullopt;
         scalar_indexings_.clear();
@@ -1458,19 +1461,22 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
             get_bit(binlog_index_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
                        "vector index is not ready");
-            auto accessor =
-                SemiInlineGet(vector_indexings_.get_field_indexing(fieldID)
-                                  ->indexing_->PinCells({0}));
-            auto vec_index = accessor->get_cell_of(0);
-            return vec_index->HasRawData();
+            AssertInfo(index_has_raw_data_.find(fieldID) !=
+                           index_has_raw_data_.end(),
+                       "index_has_raw_data_ is not set for fieldID: " +
+                           std::to_string(fieldID.get()));
+            return index_has_raw_data_.at(fieldID);
         }
     } else if (IsJsonDataType(field_meta.get_data_type())) {
         return get_bit(field_data_ready_bitset_, fieldID);
     } else {
         auto scalar_index = scalar_indexings_.find(fieldID);
         if (scalar_index != scalar_indexings_.end()) {
-            auto accessor = SemiInlineGet(scalar_index->second->PinCells({0}));
-            return accessor->get_cell_of(0)->HasRawData();
+            AssertInfo(index_has_raw_data_.find(fieldID) !=
+                           index_has_raw_data_.end(),
+                       "index_has_raw_data_ is not set for fieldID: " +
+                           std::to_string(fieldID.get()));
+            return index_has_raw_data_.at(fieldID);
         }
     }
     return true;
@@ -1731,6 +1737,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
 
             vec_binlog_config_[field_id] = std::move(field_binlog_config);
             set_bit(binlog_index_bitset_, field_id, true);
+            index_has_raw_data_[field_id] = true;
             LOG_INFO(
                 "replace binlog with binlog index in segment {}, field {}.",
                 this->get_segment_id(),
