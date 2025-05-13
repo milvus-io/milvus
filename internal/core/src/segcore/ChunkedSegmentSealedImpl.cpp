@@ -1766,29 +1766,13 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
     if (!enable_mmap) {
         stats_.mem_size += column->DataByteSize();
+        if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
+            LoadSkipIndex(field_id, data_type, column);
+        }
         if (IsVariableDataType(data_type)) {
-            if (IsStringDataType(data_type)) {
-                for (int i = 0; i < column->num_chunks(); ++i) {
-                    auto chunk_pw = column->GetChunk(i);
-                    auto* string_chunk = static_cast<StringChunk*>(chunk_pw.get());
-                    LoadStringSkipIndex(field_id, i, string_chunk);
-                }
-            }
             // update average row data size
             SegmentInternalInterface::set_field_avg_size(
                 field_id, num_rows, column->DataByteSize());
-        } else {
-            auto num_chunk = column->num_chunks();
-            for (int i = 0; i < num_chunk; ++i) {
-                auto pw = column->Span(i);
-                auto& span = pw.get();
-                LoadPrimitiveSkipIndex(field_id,
-                                        i,
-                                        data_type,
-                                        span.data(),
-                                        span.valid_data(),
-                                        span.row_count());
-            }
         }
     }
 
