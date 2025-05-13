@@ -140,3 +140,10 @@ func WithLevel(level datapb.SegmentLevel) SegmentFilter {
 		return segment.Level() == level
 	})
 }
+
+// to filter out all segment without L0
+func WithoutL0() SegmentFilter {
+	return SegmentFilterFunc(func(segment Segment) bool {
+		return segment.Level() != datapb.SegmentLevel_L0
+	})
+}
