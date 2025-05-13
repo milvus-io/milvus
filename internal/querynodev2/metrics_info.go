@@ -104,7 +104,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		).Set(float64(numEntities))
 	}
 
-	sealedSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed))
+	sealedSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed), segments.WithoutL0())
 	sealedGroupByCollection := lo.GroupBy(sealedSegments, func(seg segments.Segment) int64 {
 		return seg.Collection()
 	})
@@ -119,6 +119,9 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	sealedGroupByPartition := lo.GroupBy(sealedSegments, func(seg segments.Segment) int64 {
 		return seg.Partition()
 	})
+
+	// Notice: if l0 segment exists, then num_entities may be set to 0,
+	// because l0 segments are grouped by partition=-1, and the num_entities of l0 segments is 0.
 	for _, segs := range sealedGroupByPartition {
 		numEntities := lo.SumBy(segs, func(seg segments.Segment) int64 {
 			return seg.RowNum()
