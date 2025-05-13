@@ -437,9 +437,6 @@ BuildNgramIndex(ProtoLayoutInterface result,
                            config, milvus::index::MAX_NGRAM)
                            .value());
 
-        LOG_INFO("debug=== str min_gram {}, max_gram {}", config[milvus::index::MIN_NGRAM], config[milvus::index::MAX_NGRAM]);
-        LOG_INFO("debug=== min_gram {}, max_gram {}", min_gram, max_gram);
-
         auto index = std::make_unique<index::NgramInvertedIndex>(
             fileManagerContext, min_gram, max_gram);
         index->Build(config);

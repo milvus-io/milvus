@@ -1426,7 +1426,6 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         // If nullopt is returned, it means the query cannot be
         // optimized by ngram index. Forward it to the normal path.
         if (res.has_value()) {
-            LOG_INFO("debug=== ngram index ExecRangeVisitorImpl");
             return res.value();
         }
     }
@@ -1827,36 +1826,6 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
     return res;
 };
 
-std::optional<std::string>
-convert_to_ngram_literal(const std::string& pattern) {
-    std::string r;
-    r.reserve(2 * pattern.size());
-    bool escape_mode = false;
-    for (char c : pattern) {
-        if (escape_mode) {
-            if (is_special(c)) {
-                r += '\\';
-            }
-            r += c;
-            escape_mode = false;
-        } else {
-            if (c == '\\') {
-                escape_mode = true;
-            } else if (c == '%') {
-            } else if (c == '_') {
-                // todo: now not support '_'
-                return std::nullopt;
-            } else {
-                if (is_special(c)) {
-                    r += '\\';
-                }
-                r += c;
-            }
-        }
-    }
-    return std::optional<std::string>(r);
-}
-
 std::optional<VectorPtr>
 PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     if (!arg_inited_) {
@@ -1865,8 +1834,13 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     }
 
     auto pattern = value_arg_.GetValue<std::string>();
-    auto ngram_literal = convert_to_ngram_literal(pattern);
-    if (!ngram_literal.has_value()) {
+    auto parsed_result_opt = parse_ngram_pattern(pattern);
+    if (!parsed_result_opt.has_value()) {
+        return std::nullopt;
+    }
+    auto parsed_result = parsed_result_opt.value();
+    // Only support InnerMatch now
+    if (parsed_result.type != MatchType::InnerMatch) {
         return std::nullopt;
     }
 
@@ -1875,10 +1849,13 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
 
     if (cached_ngram_match_res_ == nullptr) {
         auto index = segment_->GetNgramIndex(field_id_);
-        auto res_opt = index->InnerMatchQuery(ngram_literal.value(), this);
-        LOG_INFO("debug=== ngram index, res_opt: {}", res_opt.has_value());
+        auto res_opt = index->InnerMatchQuery(parsed_result.literal, this);
+        LOG_INFO("debug=== ngram index, pattern {}, res_opt: {}",
+                 pattern,
+                 res_opt.has_value());
         if (res_opt.has_value()) {
-            LOG_INFO("debug=== ngram index, res_opt: {}", res_opt.value().count());
+            LOG_INFO("debug=== ngram index, res_opt: {}",
+                     res_opt.value().count());
         }
         if (!res_opt.has_value()) {
             return std::nullopt;

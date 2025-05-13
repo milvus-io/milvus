@@ -35,18 +35,7 @@ NgramInvertedIndex::BuildWithFieldData(const std::vector<FieldDataPtr>& datas) {
                    schema_.data_type() == proto::schema::DataType::VarChar,
                "schema data type is {}",
                schema_.data_type());
-    auto build_start_time = std::chrono::system_clock::now();
-
     InvertedIndexTantivy<std::string>::BuildWithFieldData(datas);
-
-    auto build_end_time = std::chrono::system_clock::now();
-    auto build_duration =
-        std::chrono::duration<double>(build_end_time - build_start_time)
-            .count();
-    LOG_INFO(
-        "build ngram inverted index done for field id:{}, build duration: {}s",
-        field_id_,
-        build_duration);
 }
 
 void
@@ -57,9 +46,28 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load ngram index");
 
-    // todo: handle null offset file
+    auto files_value = index_files.value();
+    auto it = std::find_if(
+        files_value.begin(), files_value.end(), [](const std::string& file) {
+            return file.substr(file.find_last_of('/') + 1) ==
+                   "index_null_offset";
+        });
+    if (it != files_value.end()) {
+        std::vector<std::string> file;
+        file.push_back(*it);
+        files_value.erase(it);
+        auto index_datas = mem_file_manager_->LoadIndexToMemory(file);
+        BinarySet binary_set;
+        AssembleIndexDatas(index_datas, binary_set);
+        auto index_valid_data = binary_set.GetByName("index_null_offset");
+        folly::SharedMutex::WriteHolder lock(mutex_);
+        null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
+        memcpy(null_offset_.data(),
+               index_valid_data->data.get(),
+               (size_t)index_valid_data->size);
+    }
 
-    disk_file_manager_->CacheNgramIndexToDisk(index_files.value());
+    disk_file_manager_->CacheNgramIndexToDisk(files_value);
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(path_.c_str(),

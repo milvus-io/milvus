@@ -118,22 +118,14 @@ TextMatchIndex::Upload(const Config& config) {
     auto remote_mem_path_to_size =
         mem_file_manager_->GetRemotePathsToFileSize();
 
-    LOG_INFO(
-        "debug=== upload text index, remote_paths_to_size.size(): {}, "
-        "remote_mem_path_to_size.size(): {}",
-        remote_paths_to_size.size(),
-        remote_mem_path_to_size.size());
-
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size() +
                         remote_mem_path_to_size.size());
     for (auto& file : remote_paths_to_size) {
         index_files.emplace_back(file.first, file.second);
-        LOG_INFO("debug=== index_file: {}, size {}", file.first, file.second);
     }
     for (auto& file : remote_mem_path_to_size) {
         index_files.emplace_back(file.first, file.second);
-        LOG_INFO("debug=== index_file: {}, size {}", file.first, file.second);
     }
     return IndexStats::New(mem_file_manager_->GetAddedTotalMemSize() +
                                disk_file_manager_->GetAddedTotalFileSize(),

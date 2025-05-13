@@ -1,7 +1,7 @@
+use log::info;
 use std::ffi::c_void;
 use std::ops::Bound;
 use std::sync::Arc;
-use log::info;
 
 use tantivy::query::{BooleanQuery, Query, RangeQuery, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption};
@@ -35,7 +35,11 @@ impl IndexReaderWrapper {
 
         let index = Index::open_in_dir(path)?;
 
-        info!("debug=== load index, path: {:?}, schema: {:?}", path, index.schema());
+        info!(
+            "debug=== load index, path: {:?}, schema: {:?}",
+            path,
+            index.schema()
+        );
 
         IndexReaderWrapper::from_index(Arc::new(index), set_bitset)
     }
@@ -299,11 +303,14 @@ impl IndexReaderWrapper {
         max_gram: usize,
         bitset: *mut c_void,
     ) -> Result<()> {
-        info!("debug=== inner_match_ngram, literal: {:?}, min_gram: {}, max_gram: {}", literal, min_gram, max_gram);
+        info!(
+            "debug=== inner_match_ngram, literal: {:?}, min_gram: {}, max_gram: {}",
+            literal, min_gram, max_gram
+        );
 
+        // literal length should be larger or equal to min_gram.
         if literal.len() < min_gram {
-            // forward to regex query.
-            unimplemented!()
+            unreachable!("literal length should be larger or equal to min_gram.");
         }
 
         if literal.len() <= max_gram {

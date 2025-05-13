@@ -36,15 +36,94 @@
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
+using namespace milvus::exec;
+
+TEST(ConvertToNgramLiteralTest, EmptyString) {
+    auto result = parse_ngram_pattern("");
+    ASSERT_FALSE(result.has_value());
+}
+
+TEST(ConvertToNgramLiteralTest, ExactMatchSimple) {
+    auto result = parse_ngram_pattern("abc");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->literal, "abc");
+    EXPECT_EQ(result->type, MatchType::ExactMatch);
+}
+
+TEST(ConvertToNgramLiteralTest, ExactMatchWithEscapedPercent) {
+    auto result = parse_ngram_pattern("ab\\%cd");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->literal, "ab%cd");
+    EXPECT_EQ(result->type, MatchType::ExactMatch);
+}
+
+TEST(ConvertToNgramLiteralTest, ExactMatchWithEscapedSpecialChar) {
+    auto result = parse_ngram_pattern("a.b");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->literal, "a\\.b");
+    EXPECT_EQ(result->type, MatchType::ExactMatch);
+}
+
+TEST(ConvertToNgramLiteralTest, PrefixMatchSimple) {
+    auto result = parse_ngram_pattern("%abc");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->literal, "abc");
+    EXPECT_EQ(result->type, MatchType::PrefixMatch);
+}
+
+TEST(ConvertToNgramLiteralTest, PostfixMatchSimple) {
+    auto result = parse_ngram_pattern("abc%");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->literal, "abc");
+    EXPECT_EQ(result->type, MatchType::PostfixMatch);
+}
+
+TEST(ConvertToNgramLiteralTest, InnerMatchSimple) {
+    auto result = parse_ngram_pattern("%abc%");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->literal, "abc");
+    EXPECT_EQ(result->type, MatchType::InnerMatch);
+}
+
+TEST(ConvertToNgramLiteralTest, MatchSinglePercentMiddle) {
+    auto result = parse_ngram_pattern("a%b");
+    ASSERT_FALSE(result.has_value());
+}
+
+TEST(ConvertToNgramLiteralTest, MatchTypeReturnsNullopt) {
+    EXPECT_FALSE(parse_ngram_pattern("%").has_value());
+    // %a%b (n=2, not %xxx%) -> Match -> nullopt
+    EXPECT_FALSE(parse_ngram_pattern("%a%b").has_value());
+    // a%b%c (n=2, not %xxx%) -> Match -> nullopt
+    EXPECT_FALSE(parse_ngram_pattern("a%b%c").has_value());
+    // %% (n=2, not %xxx% because length is not > 2) -> Match -> nullopt
+    EXPECT_FALSE(parse_ngram_pattern("%%").has_value());
+    // %a%b%c% (n=3) -> Match -> nullopt
+    EXPECT_FALSE(parse_ngram_pattern("%a%b%c%").has_value());
+}
+
+TEST(ConvertToNgramLiteralTest, UnescapedUnderscoreReturnsNullopt) {
+    EXPECT_FALSE(parse_ngram_pattern("a_b").has_value());
+    EXPECT_FALSE(parse_ngram_pattern("%a_b").has_value());
+    EXPECT_FALSE(parse_ngram_pattern("a_b%").has_value());
+    EXPECT_FALSE(parse_ngram_pattern("%a_b%").has_value());
+}
+
+TEST(ConvertToNgramLiteralTest, EscapedUnderscore) {
+    auto result = parse_ngram_pattern("a\\_b");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->literal, "a_b");
+    EXPECT_EQ(result->type, MatchType::ExactMatch);
+}
 
 auto
-gen_field_meta2(int64_t collection_id = 1,
-                int64_t partition_id = 2,
-                int64_t segment_id = 3,
-                int64_t field_id = 101,
-                DataType data_type = DataType::NONE,
-                DataType element_type = DataType::NONE,
-                bool nullable = false) -> storage::FieldDataMeta {
+generate_field_meta(int64_t collection_id = 1,
+                    int64_t partition_id = 2,
+                    int64_t segment_id = 3,
+                    int64_t field_id = 101,
+                    DataType data_type = DataType::NONE,
+                    DataType element_type = DataType::NONE,
+                    bool nullable = false) -> storage::FieldDataMeta {
     auto meta = storage::FieldDataMeta{
         .collection_id = collection_id,
         .partition_id = partition_id,
@@ -60,10 +139,10 @@ gen_field_meta2(int64_t collection_id = 1,
 }
 
 auto
-gen_index_meta2(int64_t segment_id = 3,
-                int64_t field_id = 101,
-                int64_t index_build_id = 1000,
-                int64_t index_version = 10000) -> storage::IndexMeta {
+generate_index_meta(int64_t segment_id = 3,
+                    int64_t field_id = 101,
+                    int64_t index_build_id = 1000,
+                    int64_t index_version = 10000) -> storage::IndexMeta {
     return storage::IndexMeta{
         .segment_id = segment_id,
         .field_id = field_id,
@@ -73,7 +152,7 @@ gen_index_meta2(int64_t segment_id = 3,
 }
 
 auto
-gen_local_storage_config2(const std::string& root_path)
+generate_local_storage_config(const std::string& root_path)
     -> storage::StorageConfig {
     auto ret = storage::StorageConfig{};
     ret.storage_type = "local";
@@ -113,18 +192,18 @@ TEST(NgramIndex, TestPerfNgram) {
     auto schema = std::make_shared<Schema>();
     auto field_id = schema->AddDebugField("ngram", DataType::VARCHAR);
 
-    auto field_meta = gen_field_meta2(collection_id,
-                                      partition_id,
-                                      segment_id,
-                                      field_id.get(),
-                                      DataType::VARCHAR,
-                                      DataType::NONE,
-                                      false);
-    auto index_meta = gen_index_meta2(
+    auto field_meta = generate_field_meta(collection_id,
+                                          partition_id,
+                                          segment_id,
+                                          field_id.get(),
+                                          DataType::VARCHAR,
+                                          DataType::NONE,
+                                          false);
+    auto index_meta = generate_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
 
     std::string root_path = "/tmp/test-inverted-index/";
-    auto storage_config = gen_local_storage_config2(root_path);
+    auto storage_config = generate_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
 
     std::random_device rd;
@@ -251,7 +330,8 @@ TEST(NgramIndex, TestPerfNgram) {
                 8192,
                 0);
 
-            auto bitset2 = index->InnerMatchQuery(literal, &segment_expr).value();
+            auto bitset2 =
+                index->InnerMatchQuery(literal, &segment_expr).value();
             std::cout << "literal: " << literal
                       << " matched count: " << bitset2.count() << std::endl;
         }
@@ -261,9 +341,10 @@ TEST(NgramIndex, TestPerfNgram) {
         std::cout << "Execution time: " << duration.count() / 1000.f << "ms"
                   << std::endl;
 
-        for (auto &literal : test_data) {
+        for (auto& literal : test_data) {
             std::string operand = "%" + literal + "%";
-            auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
+            auto unary_range_expr =
+                test::GenUnaryRangeExpr(OpType::Match, operand);
             auto column_info = test::GenColumnInfo(
                 field_id.get(), proto::schema::DataType::VarChar, false, false);
             unary_range_expr->set_allocated_column_info(column_info);
@@ -276,7 +357,7 @@ TEST(NgramIndex, TestPerfNgram) {
             BitsetType final;
             final = ExecuteQueryExpr(parsed, segment.get(), nb, MAX_TIMESTAMP);
             std::cout << "literal: " << operand
-                    << " matched count: " << final.count() << std::endl;
+                      << " matched count: " << final.count() << std::endl;
         }
     }
 }
@@ -289,18 +370,18 @@ TEST(NgramIndex, TestPerfNormal) {
     int64_t index_build_id = 4000;
     int64_t index_version = 4000;
 
-    auto field_meta = gen_field_meta2(collection_id,
-                                      partition_id,
-                                      segment_id,
-                                      field_id,
-                                      DataType::STRING,
-                                      DataType::NONE,
-                                      false);
-    auto index_meta =
-        gen_index_meta2(segment_id, field_id, index_build_id, index_version);
+    auto field_meta = generate_field_meta(collection_id,
+                                          partition_id,
+                                          segment_id,
+                                          field_id,
+                                          DataType::STRING,
+                                          DataType::NONE,
+                                          false);
+    auto index_meta = generate_index_meta(
+        segment_id, field_id, index_build_id, index_version);
 
     std::string root_path = "/tmp/test-inverted-index/";
-    auto storage_config = gen_local_storage_config2(root_path);
+    auto storage_config = generate_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
 
     std::random_device rd;

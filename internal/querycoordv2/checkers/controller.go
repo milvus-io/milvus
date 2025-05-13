@@ -163,9 +163,6 @@ func (controller *CheckerController) check(ctx context.Context, checkType utils.
 	tasks := checker.Check(ctx)
 
 	for _, task := range tasks {
-		log.Info("debug=== Add task",
-			zap.Any("task", task),
-		)
 		err := controller.scheduler.Add(task)
 		if err != nil {
 			task.Cancel(err)
