@@ -724,21 +724,28 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 // AppendFieldData appends fields data of specified index from src to dst
 func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int64) {
 	for i, fieldData := range src {
+		if dst[i] == nil {
+			dst[i] = &schemapb.FieldData{
+				Type:      fieldData.Type,
+				FieldName: fieldData.FieldName,
+				FieldId:   fieldData.FieldId,
+				IsDynamic: fieldData.IsDynamic,
+			}
+		}
+		// assign null data
+		if len(fieldData.GetValidData()) != 0 {
+			if dst[i].ValidData == nil {
+				dst[i].ValidData = make([]bool, 0)
+			}
+			valid := fieldData.ValidData[idx]
+			dst[i].ValidData = append(dst[i].ValidData, valid)
+		}
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
 			if dst[i] == nil || dst[i].GetScalars() == nil {
-				dst[i] = &schemapb.FieldData{
-					Type:      fieldData.Type,
-					FieldName: fieldData.FieldName,
-					FieldId:   fieldData.FieldId,
-					IsDynamic: fieldData.IsDynamic,
-					Field: &schemapb.FieldData_Scalars{
-						Scalars: &schemapb.ScalarField{},
-					},
+				dst[i].Field = &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{},
 				}
-			}
-			if len(fieldData.GetValidData()) != 0 {
-				dst[i].ValidData = append(dst[i].ValidData, fieldData.ValidData[idx])
 			}
 			dstScalar := dst[i].GetScalars()
 			switch srcScalar := fieldType.Scalars.Data.(type) {
@@ -1471,7 +1478,32 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 	return nil
 }
 
-func GetData(field *schemapb.FieldData, idx int) interface{} {
+func GetDataIterator(field *schemapb.FieldData) func(int) any {
+	if field.ValidData != nil {
+		// unpack valid data
+		idxs := make([]int, len(field.ValidData))
+		validCnt := 0
+		for i, valid := range field.ValidData {
+			if valid {
+				idxs[i] = validCnt
+				validCnt++
+			} else {
+				idxs[i] = -1
+			}
+		}
+		return func(idx int) any {
+			if idxs[idx] == -1 {
+				return nil
+			}
+			return getData(field, idxs[idx])
+		}
+	}
+	return func(idx int) any {
+		return getData(field, idx)
+	}
+}
+
+func getData(field *schemapb.FieldData, idx int) any {
 	switch field.GetType() {
 	case schemapb.DataType_Bool:
 		return field.GetScalars().GetBoolData().GetData()[idx]
@@ -1661,64 +1693,6 @@ func SelectMinPKWithTimestamp[T interface {
 	}
 
 	return sel, drainResult
-}
-
-func AppendGroupByValue(dstResData *schemapb.SearchResultData,
-	groupByVal interface{}, srcDataType schemapb.DataType,
-) error {
-	if dstResData.GroupByFieldValue == nil {
-		dstResData.GroupByFieldValue = &schemapb.FieldData{
-			Type: srcDataType,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{},
-			},
-		}
-	}
-	dstScalarField := dstResData.GroupByFieldValue.GetScalars()
-	switch srcDataType {
-	case schemapb.DataType_Bool:
-		if dstScalarField.GetBoolData() == nil {
-			dstScalarField.Data = &schemapb.ScalarField_BoolData{
-				BoolData: &schemapb.BoolArray{
-					Data: []bool{},
-				},
-			}
-		}
-		dstScalarField.GetBoolData().Data = append(dstScalarField.GetBoolData().Data, groupByVal.(bool))
-	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-		if dstScalarField.GetIntData() == nil {
-			dstScalarField.Data = &schemapb.ScalarField_IntData{
-				IntData: &schemapb.IntArray{
-					Data: []int32{},
-				},
-			}
-		}
-		dstScalarField.GetIntData().Data = append(dstScalarField.GetIntData().Data, groupByVal.(int32))
-	case schemapb.DataType_Int64:
-		if dstScalarField.GetLongData() == nil {
-			dstScalarField.Data = &schemapb.ScalarField_LongData{
-				LongData: &schemapb.LongArray{
-					Data: []int64{},
-				},
-			}
-		}
-		dstScalarField.GetLongData().Data = append(dstScalarField.GetLongData().Data, groupByVal.(int64))
-	case schemapb.DataType_VarChar:
-		if dstScalarField.GetStringData() == nil {
-			dstScalarField.Data = &schemapb.ScalarField_StringData{
-				StringData: &schemapb.StringArray{
-					Data: []string{},
-				},
-			}
-		}
-		dstScalarField.GetStringData().Data = append(dstScalarField.GetStringData().Data, groupByVal.(string))
-	default:
-		log.Error("Not supported field type from group_by value field", zap.String("field type",
-			srcDataType.String()))
-		return fmt.Errorf("not supported field type from group_by value field: %s",
-			srcDataType.String())
-	}
-	return nil
 }
 
 func appendSparseFloatArray(dst, src *schemapb.SparseFloatArray) {

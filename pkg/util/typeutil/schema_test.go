@@ -24,16 +24,15 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func TestSchema(t *testing.T) {
@@ -1724,21 +1723,21 @@ func TestGetDataAndGetDataSize(t *testing.T) {
 	})
 
 	t.Run("test GetData", func(t *testing.T) {
-		boolDataRes := GetData(boolData, 0)
-		int8DataRes := GetData(int8Data, 0)
-		int16DataRes := GetData(int16Data, 0)
-		int32DataRes := GetData(int32Data, 0)
-		int64DataRes := GetData(int64Data, 0)
-		floatDataRes := GetData(floatData, 0)
-		doubleDataRes := GetData(doubleData, 0)
-		varCharDataRes := GetData(varCharData, 0)
-		binVecDataRes := GetData(binVecData, 0)
-		floatVecDataRes := GetData(floatVecData, 0)
-		float16VecDataRes := GetData(float16VecData, 0)
-		bfloat16VecDataRes := GetData(bfloat16VecData, 0)
-		sparseFloatDataRes := GetData(sparseFloatData, 0)
-		int8VecDataRes := GetData(int8VecData, 0)
-		invalidDataRes := GetData(invalidData, 0)
+		boolDataRes := getData(boolData, 0)
+		int8DataRes := getData(int8Data, 0)
+		int16DataRes := getData(int16Data, 0)
+		int32DataRes := getData(int32Data, 0)
+		int64DataRes := getData(int64Data, 0)
+		floatDataRes := getData(floatData, 0)
+		doubleDataRes := getData(doubleData, 0)
+		varCharDataRes := getData(varCharData, 0)
+		binVecDataRes := getData(binVecData, 0)
+		floatVecDataRes := getData(floatVecData, 0)
+		float16VecDataRes := getData(float16VecData, 0)
+		bfloat16VecDataRes := getData(bfloat16VecData, 0)
+		sparseFloatDataRes := getData(sparseFloatData, 0)
+		int8VecDataRes := getData(int8VecData, 0)
+		invalidDataRes := getData(invalidData, 0)
 
 		assert.Equal(t, BoolArray[0], boolDataRes)
 		assert.Equal(t, int32(Int8Array[0]), int8DataRes)
@@ -2871,4 +2870,69 @@ func TestSparsePlaceholderGroupSize(t *testing.T) {
 	largeErrorRatio := (float64(casesWithLargeError) / float64(numCases)) * 100
 	// no more than 2% cases have large error ratio.
 	assert.Less(t, largeErrorRatio, 2.0)
+}
+
+func TestGetDataIterator(t *testing.T) {
+	tests := []struct {
+		name  string
+		field *schemapb.FieldData
+		want  []any
+	}{
+		{
+			name: "empty field",
+			field: &schemapb.FieldData{
+				Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{},
+						},
+					},
+				},
+			},
+			want: []any{},
+		},
+		{
+			name: "ints",
+			field: &schemapb.FieldData{
+				Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{1, 2, 3},
+							},
+						},
+					},
+				},
+			},
+			want: []any{int64(1), int64(2), int64(3)},
+		},
+		{
+			name: "ints with nulls",
+			field: &schemapb.FieldData{
+				Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{1, 2, 3},
+							},
+						},
+					},
+				},
+				ValidData: []bool{true, false, true, true},
+			},
+			want: []any{int64(1), nil, int64(2), int64(3)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			itr := GetDataIterator(tt.field)
+			for i, want := range tt.want {
+				got := itr(i)
+				assert.Equal(t, want, got)
+			}
+		})
+	}
 }

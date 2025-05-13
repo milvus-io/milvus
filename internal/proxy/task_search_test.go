@@ -2505,63 +2505,108 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 		{9, 7, 5, 3, 1, 9, 7, 5, 3, 1},
 	}
 
-	groupByValuesArr := [][][]int64{
-		{
-			{1, 2, 3, 4, 5, 1, 2, 3, 4, 5},
-			{1, 2, 3, 4, 5, 1, 2, 3, 4, 5},
-		}, // result2 has completely same group_by values, no result from result2 can be selected
-		{
-			{1, 2, 3, 4, 5, 1, 2, 3, 4, 5},
-			{6, 8, 3, 4, 5, 6, 8, 3, 4, 5},
-		}, // result2 will contribute group_by values 6 and 8
-	}
-	expectedIDs := [][]int64{
-		{1, 3, 5, 7, 9, 1, 3, 5, 7, 9},
-		{1, 2, 3, 4, 5, 1, 2, 3, 4, 5},
-	}
-	expectedScores := [][]float32{
-		{-10, -8, -6, -4, -2, -10, -8, -6, -4, -2},
-		{-10, -9, -8, -7, -6, -10, -9, -8, -7, -6},
-	}
-	expectedGroupByValues := [][]int64{
-		{1, 2, 3, 4, 5, 1, 2, 3, 4, 5},
-		{1, 6, 2, 8, 3, 1, 6, 2, 8, 3},
-	}
-
-	for i, groupByValues := range groupByValuesArr {
-		t.Run("Group By correctness", func(t *testing.T) {
-			var results []*schemapb.SearchResultData
-			for j := range ids {
-				result := getSearchResultData(nq, topK)
-				result.Ids.IdField = &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids[j]}}
-				result.Scores = scores[j]
-				result.Topks = []int64{topK, topK}
-				result.GroupByFieldValue = &schemapb.FieldData{
-					Type: schemapb.DataType_Int64,
-					Field: &schemapb.FieldData_Scalars{
-						Scalars: &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_LongData{
-								LongData: &schemapb.LongArray{
-									Data: groupByValues[j],
-								},
-							},
+	makePartialResult := func(ids []int64, scores []float32, groupByValues []int64, valids []bool) *schemapb.SearchResultData {
+		result := getSearchResultData(nq, topK)
+		result.Ids.IdField = &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}
+		result.Scores = scores
+		result.Topks = []int64{topK, topK}
+		result.GroupByFieldValue = &schemapb.FieldData{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: groupByValues,
 						},
 					},
-				}
-				results = append(results, result)
-			}
+				},
+			},
+			ValidData: valids,
+		}
+		return result
+	}
+
+	tests := []struct {
+		name                  string
+		inputs                []*schemapb.SearchResultData
+		expectedIDs           []int64
+		expectedScores        []float32
+		expectedGroupByValues *schemapb.FieldData
+	}{
+		{
+			name: "same group_by values",
+			inputs: []*schemapb.SearchResultData{
+				makePartialResult(ids[0], scores[0], []int64{1, 2, 3, 4, 5, 1, 2, 3, 4, 5}, nil),
+				makePartialResult(ids[1], scores[1], []int64{1, 2, 3, 4, 5, 1, 2, 3, 4, 5}, nil),
+			},
+			expectedIDs:    []int64{1, 3, 5, 7, 9, 1, 3, 5, 7, 9},
+			expectedScores: []float32{-10, -8, -6, -4, -2, -10, -8, -6, -4, -2},
+			expectedGroupByValues: &schemapb.FieldData{
+				Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 1, 2, 3, 4, 5}}},
+					},
+				},
+			},
+		},
+		{
+			name: "different group_by values",
+			inputs: []*schemapb.SearchResultData{
+				makePartialResult(ids[0], scores[0], []int64{1, 2, 3, 4, 5, 1, 2, 3, 4, 5}, nil),
+				makePartialResult(ids[1], scores[1], []int64{6, 8, 3, 4, 5, 6, 8, 3, 4, 5}, nil),
+			},
+			expectedIDs:    []int64{1, 2, 3, 4, 5, 1, 2, 3, 4, 5},
+			expectedScores: []float32{-10, -9, -8, -7, -6, -10, -9, -8, -7, -6},
+			expectedGroupByValues: &schemapb.FieldData{
+				Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 6, 2, 8, 3, 1, 6, 2, 8, 3}}},
+					},
+				},
+			},
+		},
+		{
+			name: "nullable group_by values",
+			inputs: []*schemapb.SearchResultData{
+				makePartialResult(ids[0], scores[0], []int64{1, 2, 3, 4, 1, 2, 3, 4}, []bool{true, true, true, true, false, true, true, true, true, false}),
+				makePartialResult(ids[1], scores[1], []int64{1, 2, 3, 4, 1, 2, 3, 4}, []bool{true, true, true, true, false, true, true, true, true, false}),
+			},
+			expectedIDs:    []int64{1, 3, 5, 7, 9, 1, 3, 5, 7, 9},
+			expectedScores: []float32{-10, -8, -6, -4, -2, -10, -8, -6, -4, -2},
+			expectedGroupByValues: &schemapb.FieldData{
+				Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 0, 1, 2, 3, 4, 0}},
+						},
+					},
+				},
+				ValidData: []bool{true, true, true, true, false, true, true, true, true, false},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			queryInfo := &planpb.QueryInfo{
 				GroupByFieldId: 1,
 				GroupSize:      1,
 			}
-			reduced, err := reduceSearchResult(context.TODO(), results,
-				reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metric.L2).WithPkType(schemapb.DataType_Int64).WithGroupByField(queryInfo.GetGroupByFieldId()).WithGroupSize(queryInfo.GetGroupSize()))
+			reduced, err := reduceSearchResult(context.TODO(), tt.inputs,
+				reduce.NewReduceSearchResultInfo(nq, topK).
+					WithMetricType(metric.L2).
+					WithPkType(schemapb.DataType_Int64).
+					WithGroupByField(queryInfo.GetGroupByFieldId()).
+					WithGroupSize(queryInfo.GetGroupSize()))
 			resultIDs := reduced.GetResults().GetIds().GetIntId().Data
 			resultScores := reduced.GetResults().GetScores()
-			resultGroupByValues := reduced.GetResults().GetGroupByFieldValue().GetScalars().GetLongData().GetData()
-			assert.EqualValues(t, expectedIDs[i], resultIDs)
-			assert.EqualValues(t, expectedScores[i], resultScores)
-			assert.EqualValues(t, expectedGroupByValues[i], resultGroupByValues)
+			resultGroupByValues := reduced.GetResults().GetGroupByFieldValue()
+			assert.EqualValues(t, tt.expectedIDs, resultIDs)
+			assert.EqualValues(t, tt.expectedScores, resultScores)
+			assert.EqualValues(t, tt.expectedGroupByValues, resultGroupByValues)
 			assert.NoError(t, err)
 		})
 	}
@@ -3078,8 +3123,8 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				searchInfo := parseSearchInfo(test.validParams, nil, nil)
-				assert.NoError(t, searchInfo.parseError)
+				searchInfo, err := parseSearchInfo(test.validParams, nil, nil)
+				assert.NoError(t, err)
 				assert.NotNil(t, searchInfo.planInfo)
 				if test.description == "offsetParam" {
 					assert.Equal(t, targetOffset, searchInfo.offset)
@@ -3099,8 +3144,8 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			limit: externalLimit,
 		}
 
-		searchInfo := parseSearchInfo(offsetParam, nil, rank)
-		assert.NoError(t, searchInfo.parseError)
+		searchInfo, err := parseSearchInfo(offsetParam, nil, rank)
+		assert.NoError(t, err)
 		assert.NotNil(t, searchInfo.planInfo)
 		assert.Equal(t, int64(10), searchInfo.planInfo.GetTopk())
 		assert.Equal(t, int64(0), searchInfo.offset)
@@ -3152,8 +3197,8 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			Value: "true",
 		})
 
-		searchInfo := parseSearchInfo(params, schema, testRankParams)
-		assert.NoError(t, searchInfo.parseError)
+		searchInfo, err := parseSearchInfo(params, schema, testRankParams)
+		assert.NoError(t, err)
 		assert.NotNil(t, searchInfo.planInfo)
 
 		// all group_by related parameters should be aligned to parameters
@@ -3242,12 +3287,11 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				searchInfo := parseSearchInfo(test.invalidParams, nil, nil)
-				assert.Error(t, searchInfo.parseError)
-				assert.Nil(t, searchInfo.planInfo)
-				assert.Zero(t, searchInfo.offset)
+				searchInfo, err := parseSearchInfo(test.invalidParams, nil, nil)
+				assert.Error(t, err)
+				assert.Nil(t, searchInfo)
 
-				t.Logf("err=%s", searchInfo.parseError)
+				t.Logf("err=%s", err)
 			})
 		}
 	})
@@ -3269,9 +3313,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		searchInfo := parseSearchInfo(normalParam, schema, nil)
-		assert.Nil(t, searchInfo.planInfo)
-		assert.ErrorIs(t, searchInfo.parseError, merr.ErrParameterInvalid)
+		searchInfo, err := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 	t.Run("check range-search and groupBy", func(t *testing.T) {
 		normalParam := getValidSearchParams()
@@ -3288,9 +3332,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		searchInfo := parseSearchInfo(normalParam, schema, nil)
-		assert.Nil(t, searchInfo.planInfo)
-		assert.ErrorIs(t, searchInfo.parseError, merr.ErrParameterInvalid)
+		searchInfo, err := parseSearchInfo(normalParam, schema, nil)
+		assert.Nil(t, searchInfo)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 	t.Run("check nullable and groupBy", func(t *testing.T) {
 		normalParam := getValidSearchParams()
@@ -3307,9 +3351,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		searchInfo := parseSearchInfo(normalParam, schema, nil)
-		assert.NotNil(t, searchInfo.planInfo)
-		assert.NoError(t, searchInfo.parseError)
+		searchInfo, err := parseSearchInfo(normalParam, schema, nil)
+		assert.NotNil(t, searchInfo)
+		assert.NoError(t, err)
 	})
 	t.Run("check iterator and topK", func(t *testing.T) {
 		normalParam := getValidSearchParams()
@@ -3326,9 +3370,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		searchInfo := parseSearchInfo(normalParam, schema, nil)
-		assert.NotNil(t, searchInfo.planInfo)
-		assert.NoError(t, searchInfo.parseError)
+		searchInfo, err := parseSearchInfo(normalParam, schema, nil)
+		assert.NotNil(t, searchInfo)
+		assert.NoError(t, err)
 		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), searchInfo.planInfo.GetTopk())
 	})
 
@@ -3346,26 +3390,26 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		searchInfo := parseSearchInfo(normalParam, schema, nil)
-		assert.Error(t, searchInfo.parseError)
-		assert.True(t, strings.Contains(searchInfo.parseError.Error(), "exceeds configured max group size"))
+		searchInfo, err := parseSearchInfo(normalParam, schema, nil)
+		assert.Error(t, err)
+		assert.True(t, strings.Contains(err.Error(), "exceeds configured max group size"))
 		{
 			resetSearchParamsValue(normalParam, GroupSizeKey, `10`)
-			searchInfo = parseSearchInfo(normalParam, schema, nil)
-			assert.NoError(t, searchInfo.parseError)
+			searchInfo, err = parseSearchInfo(normalParam, schema, nil)
+			assert.NoError(t, err)
 			assert.Equal(t, int64(10), searchInfo.planInfo.GroupSize)
 		}
 		{
 			resetSearchParamsValue(normalParam, GroupSizeKey, `-1`)
-			searchInfo = parseSearchInfo(normalParam, schema, nil)
-			assert.Error(t, searchInfo.parseError)
-			assert.True(t, strings.Contains(searchInfo.parseError.Error(), "is negative"))
+			searchInfo, err = parseSearchInfo(normalParam, schema, nil)
+			assert.Error(t, err)
+			assert.True(t, strings.Contains(err.Error(), "is negative"))
 		}
 		{
 			resetSearchParamsValue(normalParam, GroupSizeKey, `xxx`)
-			searchInfo = parseSearchInfo(normalParam, schema, nil)
-			assert.Error(t, searchInfo.parseError)
-			assert.True(t, strings.Contains(searchInfo.parseError.Error(), "failed to parse input group size"))
+			searchInfo, err = parseSearchInfo(normalParam, schema, nil)
+			assert.Error(t, err)
+			assert.True(t, strings.Contains(err.Error(), "failed to parse input group size"))
 		}
 	})
 
@@ -3391,8 +3435,8 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		t.Run("iteratorV2 normal", func(t *testing.T) {
 			param := generateValidParamsForSearchIteratorV2()
-			searchInfo := parseSearchInfo(param, nil, nil)
-			assert.NoError(t, searchInfo.parseError)
+			searchInfo, err := parseSearchInfo(param, nil, nil)
+			assert.NoError(t, err)
 			assert.NotNil(t, searchInfo.planInfo)
 			assert.NotEmpty(t, searchInfo.planInfo.SearchIteratorV2Info.Token)
 			assert.Equal(t, kBatchSize, searchInfo.planInfo.SearchIteratorV2Info.BatchSize)
@@ -3403,9 +3447,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		t.Run("iteratorV2 without isIterator", func(t *testing.T) {
 			param := generateValidParamsForSearchIteratorV2()
 			resetSearchParamsValue(param, IteratorField, "False")
-			searchInfo := parseSearchInfo(param, nil, nil)
-			assert.Error(t, searchInfo.parseError)
-			assert.ErrorContains(t, searchInfo.parseError, "both")
+			_, err := parseSearchInfo(param, nil, nil)
+			assert.Error(t, err)
+			assert.ErrorContains(t, err, "both")
 		})
 
 		t.Run("iteratorV2 with groupBy", func(t *testing.T) {
@@ -3422,9 +3466,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			schema := &schemapb.CollectionSchema{
 				Fields: fields,
 			}
-			searchInfo := parseSearchInfo(param, schema, nil)
-			assert.Error(t, searchInfo.parseError)
-			assert.ErrorContains(t, searchInfo.parseError, "roupBy")
+			_, err := parseSearchInfo(param, schema, nil)
+			assert.Error(t, err)
+			assert.ErrorContains(t, err, "roupBy")
 		})
 
 		t.Run("iteratorV2 with offset", func(t *testing.T) {
@@ -3433,9 +3477,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 				Key:   OffsetKey,
 				Value: "10",
 			})
-			searchInfo := parseSearchInfo(param, nil, nil)
-			assert.Error(t, searchInfo.parseError)
-			assert.ErrorContains(t, searchInfo.parseError, "offset")
+			_, err := parseSearchInfo(param, nil, nil)
+			assert.Error(t, err)
+			assert.ErrorContains(t, err, "offset")
 		})
 
 		t.Run("iteratorV2 invalid token", func(t *testing.T) {
@@ -3444,9 +3488,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 				Key:   SearchIterIdKey,
 				Value: "invalid_token",
 			})
-			searchInfo := parseSearchInfo(param, nil, nil)
-			assert.Error(t, searchInfo.parseError)
-			assert.ErrorContains(t, searchInfo.parseError, "invalid token format")
+			_, err := parseSearchInfo(param, nil, nil)
+			assert.Error(t, err)
+			assert.ErrorContains(t, err, "invalid token format")
 		})
 
 		t.Run("iteratorV2 passed token must be same", func(t *testing.T) {
@@ -3457,8 +3501,8 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 				Key:   SearchIterIdKey,
 				Value: token.String(),
 			})
-			searchInfo := parseSearchInfo(param, nil, nil)
-			assert.NoError(t, searchInfo.parseError)
+			searchInfo, err := parseSearchInfo(param, nil, nil)
+			assert.NoError(t, err)
 			assert.NotEmpty(t, searchInfo.planInfo.SearchIteratorV2Info.Token)
 			assert.Equal(t, token.String(), searchInfo.planInfo.SearchIteratorV2Info.Token)
 		})
@@ -3466,33 +3510,33 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		t.Run("iteratorV2 batch size", func(t *testing.T) {
 			param := generateValidParamsForSearchIteratorV2()
 			resetSearchParamsValue(param, SearchIterBatchSizeKey, "1.123")
-			searchInfo := parseSearchInfo(param, nil, nil)
-			assert.Error(t, searchInfo.parseError)
-			assert.ErrorContains(t, searchInfo.parseError, "batch size is invalid")
+			_, err := parseSearchInfo(param, nil, nil)
+			assert.Error(t, err)
+			assert.ErrorContains(t, err, "batch size is invalid")
 		})
 
 		t.Run("iteratorV2 batch size", func(t *testing.T) {
 			param := generateValidParamsForSearchIteratorV2()
 			resetSearchParamsValue(param, SearchIterBatchSizeKey, "")
-			searchInfo := parseSearchInfo(param, nil, nil)
-			assert.Error(t, searchInfo.parseError)
-			assert.ErrorContains(t, searchInfo.parseError, "batch size is required")
+			_, err := parseSearchInfo(param, nil, nil)
+			assert.Error(t, err)
+			assert.ErrorContains(t, err, "batch size is required")
 		})
 
 		t.Run("iteratorV2 batch size negative", func(t *testing.T) {
 			param := generateValidParamsForSearchIteratorV2()
 			resetSearchParamsValue(param, SearchIterBatchSizeKey, "-1")
-			searchInfo := parseSearchInfo(param, nil, nil)
-			assert.Error(t, searchInfo.parseError)
-			assert.ErrorContains(t, searchInfo.parseError, "batch size is invalid")
+			_, err := parseSearchInfo(param, nil, nil)
+			assert.Error(t, err)
+			assert.ErrorContains(t, err, "batch size is invalid")
 		})
 
 		t.Run("iteratorV2 batch size too large", func(t *testing.T) {
 			param := generateValidParamsForSearchIteratorV2()
 			resetSearchParamsValue(param, SearchIterBatchSizeKey, fmt.Sprintf("%d", Params.QuotaConfig.TopKLimit.GetAsInt64()+1))
-			searchInfo := parseSearchInfo(param, nil, nil)
-			assert.Error(t, searchInfo.parseError)
-			assert.ErrorContains(t, searchInfo.parseError, "batch size is invalid")
+			_, err := parseSearchInfo(param, nil, nil)
+			assert.Error(t, err)
+			assert.ErrorContains(t, err, "batch size is invalid")
 		})
 
 		t.Run("iteratorV2 last bound", func(t *testing.T) {
@@ -3502,8 +3546,8 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 				Key:   SearchIterLastBoundKey,
 				Value: fmt.Sprintf("%f", kLastBound),
 			})
-			searchInfo := parseSearchInfo(param, nil, nil)
-			assert.NoError(t, searchInfo.parseError)
+			searchInfo, err := parseSearchInfo(param, nil, nil)
+			assert.NoError(t, err)
 			assert.NotNil(t, searchInfo.planInfo)
 			assert.Equal(t, kLastBound, *searchInfo.planInfo.SearchIteratorV2Info.LastBound)
 		})
@@ -3514,9 +3558,9 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 				Key:   SearchIterLastBoundKey,
 				Value: "xxx",
 			})
-			searchInfo := parseSearchInfo(param, nil, nil)
-			assert.Error(t, searchInfo.parseError)
-			assert.ErrorContains(t, searchInfo.parseError, "failed to parse input last bound")
+			_, err := parseSearchInfo(param, nil, nil)
+			assert.Error(t, err)
+			assert.ErrorContains(t, err, "failed to parse input last bound")
 		})
 	})
 }
