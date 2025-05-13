@@ -118,7 +118,7 @@ NgramInvertedIndex::InnerMatchQuery(const std::string& literal,
             bitset_off += size;
         };
 
-        segment->ProcessAllChunks<std::string_view>(
+        segment->ProcessAllDataChunkWithoutFootprint<std::string_view>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res);
     }
 
