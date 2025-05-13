@@ -102,7 +102,7 @@ func (m *managerImpl) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, erro
 	defer m.lifetime.Done()
 
 	l := m.getWALLifetime(channel.Name).GetWAL()
-	if l == nil {
+	if l == nil || !l.IsAvailable() {
 		return nil, status.NewChannelNotExist(channel.Name)
 	}
 
