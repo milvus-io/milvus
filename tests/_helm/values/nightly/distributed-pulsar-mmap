@@ -71,6 +71,13 @@ extraConfigFiles:
         interval: 1800
         missingTolerance: 1800
         dropTolerance: 1800
+    queryNode:
+      mmap:
+        vectorField: true
+        vectorIndex: true
+        scalarField: true
+        scalarIndex: true
+        growingMmapEnabled: true
 metrics:
   serviceMonitor:
     enabled: true
@@ -99,35 +106,98 @@ etcd:
   - effect: NoSchedule
     key: node-role.kubernetes.io/e2e
     operator: Exists
-kafka:
-  affinity:
-    nodeAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-      - preference:
-          matchExpressions:
-          - key: node-role.kubernetes.io/e2e
-            operator: Exists
-        weight: 1
-  resources:
-    requests:
-      cpu: "0.2"
-      memory: 512Mi
-    limits:
-      cpu: "0.5"
-      memory: 4Gi
-  tolerations:
-  - effect: NoSchedule
-    key: node-role.kubernetes.io/e2e
-    operator: Exists
-  zookeeper:
-    replicaCount: 1
+pulsarv3:
+  bookkeeper:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - preference:
+            matchExpressions:
+            - key: node-role.kubernetes.io/e2e
+              operator: Exists
+          weight: 1
     resources:
       requests:
-        cpu: "0.2"
-        memory: 512Mi
+        cpu: "0.1"
+        memory: 256Mi
       limits:
         cpu: "0.5"
         memory: 2Gi
+    tolerations:
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/e2e
+      operator: Exists
+  broker:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - preference:
+            matchExpressions:
+            - key: node-role.kubernetes.io/e2e
+              operator: Exists
+          weight: 1
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: "0.1"
+        memory: 256Mi
+      limits:
+        cpu: "0.5"
+        memory: 4Gi
+    tolerations:
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/e2e
+      operator: Exists
+  components:
+    autorecovery: false
+  proxy:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - preference:
+            matchExpressions:
+            - key: node-role.kubernetes.io/e2e
+              operator: Exists
+          weight: 1
+    resources:
+      requests:
+        cpu: "0.1"
+        memory: 256Mi
+      limits:
+        cpu: "0.5"
+        memory: 2Gi
+    tolerations:
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/e2e
+      operator: Exists
+    wsResources:
+      requests:
+        cpu: "0.1"
+        memory: 256Mi
+      limits:
+        cpu: "0.5"
+        memory: 2Gi
+  zookeeper:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - preference:
+            matchExpressions:
+            - key: node-role.kubernetes.io/e2e
+              operator: Exists
+          weight: 1
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: "0.1"
+        memory: 256Mi
+      limits:
+        cpu: "0.5"
+        memory: 2Gi
+    tolerations:
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/e2e
+      operator: Exists
 minio:
   affinity:
     nodeAffinity:
