@@ -110,7 +110,7 @@ func (w *segmentAllocWorker) generateNewGrowingSegmentMessage() error {
 		storageVersion = storage.StorageV2
 	}
 	// Getnerate growing segment limitation.
-	limitation := GetSegmentLimitationPolicy().GenerateLimitation()
+	limitation := getSegmentLimitationPolicy().GenerateLimitation()
 	// Create a new segment by sending a create segment message into wal directly.
 	w.msg = message.NewCreateSegmentMessageBuilderV2().
 		WithVChannel(w.vchannel).

@@ -45,7 +45,7 @@ type ShardManagerRecoverParam struct {
 }
 
 // RecoverShardManager recovers the segment assignment manager from the recovery snapshot.
-func RecoverShardManager(param *ShardManagerRecoverParam) *ShardManager {
+func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 	// recover the collection infos
 	collections := newCollectionInfos(param.InitialRecoverSnapshot)
 	// recover the segment assignment infos
@@ -83,7 +83,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) *ShardManager {
 			segmentTotal += len(segmentManagers)
 		}
 	}
-	m := &ShardManager{
+	m := &shardManagerImpl{
 		mu:                sync.Mutex{},
 		ctx:               ctx,
 		cancel:            cancel,
@@ -159,10 +159,10 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 	return collectionInfoMap
 }
 
-// ShardManager manages the all shard info of collection on current pchannel.
+// shardManagerImpl manages the all shard info of collection on current pchannel.
 // It's a in-memory data structure, and will be recovered from recovery stroage of wal and wal itself.
 // !!! Don't add any block operation (such as rpc or meta opration) in this module.
-type ShardManager struct {
+type shardManagerImpl struct {
 	log.Binder
 
 	mu                sync.Mutex
@@ -181,12 +181,12 @@ type CollectionInfo struct {
 	PartitionIDs map[int64]struct{}
 }
 
-func (m *ShardManager) Channel() types.PChannelInfo {
+func (m *shardManagerImpl) Channel() types.PChannelInfo {
 	return m.pchannel
 }
 
 // Close try to persist all stats and invalid the manager.
-func (m *ShardManager) Close() {
+func (m *shardManagerImpl) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -196,7 +196,7 @@ func (m *ShardManager) Close() {
 	m.metrics.Close()
 }
 
-func (m *ShardManager) updateMetrics() {
+func (m *shardManagerImpl) updateMetrics() {
 	m.metrics.UpdatePartitionCount(len(m.partitionManagers))
 	m.metrics.UpdateCollectionCount(len(m.collections))
 }

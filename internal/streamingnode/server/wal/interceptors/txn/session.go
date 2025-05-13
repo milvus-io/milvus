@@ -27,7 +27,7 @@ func newTxnSession(
 		lastTimetick:  timetick,
 		txnContext:    txnContext,
 		inFlightCount: 0,
-		state:         message.TxnStateBegin,
+		state:         message.TxnStateInFlight,
 		doneWait:      nil,
 		rollback:      false,
 		metricsGuard:  metricsGuard,
@@ -57,30 +57,6 @@ func (s *TxnSession) VChannel() string {
 // TxnContext returns the txn context of the session.
 func (s *TxnSession) TxnContext() message.TxnContext {
 	return s.txnContext
-}
-
-// BeginDone marks the transaction as in flight.
-func (s *TxnSession) BeginDone() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.state != message.TxnStateBegin {
-		// unreachable code here.
-		panic("invalid state for in flight")
-	}
-	s.state = message.TxnStateInFlight
-}
-
-// BeginRollback marks the transaction as rollbacked at begin state.
-func (s *TxnSession) BeginRollback() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.state != message.TxnStateBegin {
-		// unreachable code here.
-		panic("invalid state for rollback")
-	}
-	s.state = message.TxnStateRollbacked
 }
 
 // AddNewMessage adds a new message to the session.

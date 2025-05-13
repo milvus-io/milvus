@@ -2,16 +2,22 @@ package adaptor
 
 import (
 	"context"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -56,10 +62,32 @@ func adaptImplsToWAL(
 		// if the wal is read-only, return it directly.
 		return roWAL, nil
 	}
+
+	// recover the wal state.
 	param, err := buildInterceptorParams(ctx, basicWAL)
 	if err != nil {
 		return nil, err
 	}
+	rs, snapshot, err := recovery.RecoverRecoveryStorage(ctx, newRecoveryStreamBuilder(roWAL, basicWAL), param.LastTimeTickMessage)
+	if err != nil {
+		return nil, err
+	}
+	param.InitialRecoverSnapshot = snapshot
+	param.TxnManager = txn.NewTxnManager(param.ChannelInfo, snapshot.TxnBuffer.GetUncommittedMessageBuilder())
+	param.ShardManager = shards.RecoverShardManager(&shards.ShardManagerRecoverParam{
+		ChannelInfo:            param.ChannelInfo,
+		WAL:                    param.WAL,
+		InitialRecoverSnapshot: snapshot,
+		TxnManager:             param.TxnManager,
+	})
+
+	// start the flusher to flush and generate recovery info.
+	flusher := flusherimpl.RecoverWALFlusher(&flusherimpl.RecoverWALFlusherParam{
+		WAL:              param.WAL,
+		RecoveryStorage:  rs,
+		ChannelInfo:      basicWAL.Channel(),
+		RecoverySnapshot: snapshot,
+	})
 
 	// build append interceptor for a wal.
 	wal := &walAdaptorImpl{
@@ -69,9 +97,11 @@ func adaptImplsToWAL(
 		appendExecutionPool:    conc.NewPool[struct{}](0),
 		param:                  param,
 		interceptorBuildResult: buildInterceptor(builders, param),
+		flusher:                flusher,
 		writeMetrics:           metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
 		isFenced:               atomic.NewBool(false),
 	}
+	wal.writeMetrics.SetLogger(logger)
 	param.WAL.Set(wal)
 	return wal, nil
 }
@@ -84,6 +114,7 @@ type walAdaptorImpl struct {
 	appendExecutionPool    *conc.Pool[struct{}]
 	param                  *interceptors.InterceptorBuildParam
 	interceptorBuildResult interceptorBuildResult
+	flusher                *flusherimpl.WALFlusherImpl
 	writeMetrics           *metricsutil.WriteMetrics
 	isFenced               *atomic.Bool
 }
@@ -123,6 +154,9 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	case <-w.interceptorBuildResult.Interceptor.Ready():
 	}
 
+	// Clone the message to avoid modifying the original message.
+	msg = message.CloneMutableMessage(msg)
+
 	// Setup the term of wal.
 	msg = msg.WithWALTerm(w.Channel().Term)
 
@@ -142,7 +176,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 				return notPersistHint.MessageID, nil
 			}
 			metricsGuard.StartWALImplAppend()
-			msgID, err := w.rwWALImpls.Append(ctx, msg)
+			msgID, err := w.retryAppendWhenRecoverableError(ctx, msg)
 			metricsGuard.FinishWALImplAppend()
 			return msgID, err
 		})
@@ -178,6 +212,36 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	return r, nil
 }
 
+// retryAppendWhenRecoverableError retries the append operation when recoverable error occurs.
+func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+	backoff := backoff.NewExponentialBackOff()
+	backoff.InitialInterval = 10 * time.Millisecond
+	backoff.MaxInterval = 5 * time.Second
+	backoff.MaxElapsedTime = 0
+
+	// An append operation should be retried until it succeeds or some unrecoverable error occurs.
+	for i := 0; ; i++ {
+		msgID, err := w.rwWALImpls.Append(ctx, msg)
+		if err == nil {
+			return msgID, nil
+		}
+		if errors.IsAny(context.Canceled, context.DeadlineExceeded, walimpls.ErrFenced) {
+			return nil, err
+		}
+		w.writeMetrics.ObserveRetry()
+		nextInterval := backoff.NextBackOff()
+		w.Logger().Warn("append message into wal impls failed, retrying...", zap.Int("retry", i), zap.Error(err), zap.Duration("nextInterval", nextInterval))
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-w.available.CloseCh():
+			return nil, status.NewOnShutdownError("wal is on shutdown")
+		case <-time.After(nextInterval):
+		}
+	}
+}
+
 // AppendAsync writes a record to the log asynchronously.
 func (w *walAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMessage, cb func(*wal.AppendResult, error)) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -207,6 +271,10 @@ func (w *walAdaptorImpl) Close() {
 	w.available.Close()
 	w.lifetime.Wait()
 
+	// close the flusher.
+	w.Logger().Info("wal begin to close flusher...")
+	w.flusher.Close()
+
 	w.Logger().Info("wal begin to close scanners...")
 
 	// close all wal instances.
@@ -225,6 +293,9 @@ func (w *walAdaptorImpl) Close() {
 
 	w.Logger().Info("close the write ahead buffer...")
 	w.param.WriteAheadBuffer.Close()
+
+	w.Logger().Info("close the segment assignment manager...")
+	w.param.ShardManager.Close()
 
 	w.Logger().Info("call wal cleanup function...")
 	w.cleanup()

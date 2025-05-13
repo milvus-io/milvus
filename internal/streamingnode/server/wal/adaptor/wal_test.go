@@ -20,7 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
@@ -51,7 +51,7 @@ func TestWAL(t *testing.T) {
 		// TODO: current flusher interceptor cannot work well with the walimplstest.
 		// flusher.NewInterceptorBuilder(),
 		timetick.NewInterceptorBuilder(),
-		segment.NewInterceptorBuilder(),
+		shard.NewInterceptorBuilder(),
 	)
 	f := &walTestFramework{
 		b:            b,
