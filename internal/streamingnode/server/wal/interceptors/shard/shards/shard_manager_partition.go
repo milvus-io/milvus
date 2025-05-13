@@ -64,11 +64,11 @@ func (m *ShardManager) CreatePartition(msg message.ImmutableCreatePartitionMessa
 	}
 
 	m.collections[collectionID].PartitionIDs[partitionID] = struct{}{}
-	if _, ok := m.managers[partitionID]; ok {
+	if _, ok := m.partitionManagers[partitionID]; ok {
 		logger.Warn("partition manager already exists")
 		return
 	}
-	m.managers[partitionID] = newPartitionSegmentManager(
+	m.partitionManagers[partitionID] = newPartitionSegmentManager(
 		m.ctx,
 		m.Logger(),
 		m.wal,
@@ -79,6 +79,7 @@ func (m *ShardManager) CreatePartition(msg message.ImmutableCreatePartitionMessa
 		make(map[int64]*segmentAllocManager),
 		m.txnManager,
 		tiemtick,
+		m.metrics,
 	)
 	m.Logger().Info("partition created")
 	m.updateMetrics()
@@ -100,13 +101,13 @@ func (m *ShardManager) DropPartition(msg message.ImmutableDropPartitionMessageV1
 	}
 	delete(m.collections[collectionID].PartitionIDs, partitionID)
 
-	pm, ok := m.managers[partitionID]
+	pm, ok := m.partitionManagers[partitionID]
 	if !ok {
 		logger.Warn("partition not exists", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
 		return
 	}
 
-	delete(m.managers, partitionID)
+	delete(m.partitionManagers, partitionID)
 	segmentIDs := pm.FlushAndDropPartition(policy.PolicyPartitionRemoved())
 	m.Logger().Info("partition removed", zap.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()

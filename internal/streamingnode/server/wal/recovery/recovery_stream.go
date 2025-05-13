@@ -19,6 +19,8 @@ func (r *RecoveryStorage) recoverFromStream(
 	recoveryStreamBuilder RecoveryStreamBuilder,
 	lastTimeTickMessage message.ImmutableMessage,
 ) (snapshot *RecoverySnapshot, err error) {
+	r.metrics.ObserveStateChange(recoveryStorageStateStreamRecovering)
+	r.metrics.ObServePersistedMetrics(r.checkpoint.TimeTick)
 	r.SetLogger(resource.Resource().Logger().With(
 		log.FieldComponent(componentRecoveryStorage),
 		zap.String("channel", recoveryStreamBuilder.Channel().String()),

@@ -19,6 +19,7 @@ import (
 
 // recoverRecoveryInfoFromMeta retrieves the recovery info for the given channel.
 func (r *RecoveryStorage) recoverRecoveryInfoFromMeta(ctx context.Context, walName string, channelInfo types.PChannelInfo, lastTimeTickMessage message.ImmutableMessage) error {
+	r.metrics.ObserveStateChange(recoveryStorageStatePersistRecovering)
 	r.SetLogger(resource.Resource().Logger().With(
 		log.FieldComponent(componentRecoveryStorage),
 		zap.String("channel", channelInfo.String()),

@@ -127,9 +127,6 @@ func (q *sealQueue) tryToSealSegments(ctx context.Context, segments ...*segmentA
 					undone = append(undone, segment)
 					continue
 				}
-				q.metrics.ObserveSegmentFlushed(
-					string(segment.SealPolicy()),
-					int64(segment.GetStat().Insert.BinarySize))
 				q.logger.Info("segment has been flushed",
 					zap.Int64("collectionID", segment.GetCollectionID()),
 					zap.Int64("partitionID", segment.GetPartitionID()),

@@ -60,11 +60,11 @@ func (m *ShardManager) CreateCollection(msg message.ImmutableCreateCollectionMes
 
 	m.collections[collectionID] = newCollectionInfo(vchannel, partitionIDs)
 	for _, partitionID := range partitionIDs {
-		if _, ok := m.managers[partitionID]; ok {
+		if _, ok := m.partitionManagers[partitionID]; ok {
 			logger.Warn("partition already exists", zap.Int64("partitionID", partitionID))
 			continue
 		}
-		m.managers[partitionID] = newPartitionSegmentManager(
+		m.partitionManagers[partitionID] = newPartitionSegmentManager(
 			m.ctx,
 			m.Logger(),
 			m.wal,
@@ -75,6 +75,7 @@ func (m *ShardManager) CreateCollection(msg message.ImmutableCreateCollectionMes
 			make(map[int64]*segmentAllocManager),
 			m.txnManager,
 			timetick,
+			m.metrics,
 		)
 	}
 	logger.Info("collection created in segment assignment service", zap.Int64s("partitionIDs", partitionIDs))
@@ -102,7 +103,7 @@ func (m *ShardManager) DropCollection(msg message.ImmutableDropCollectionMessage
 	partitionIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
 	segmentIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
 	for partitionID := range collectionInfo.PartitionIDs {
-		pm, ok := m.managers[partitionID]
+		pm, ok := m.partitionManagers[partitionID]
 		if !ok {
 			logger.Warn("partition not exists", zap.Int64("partitionID", partitionID))
 			continue
@@ -111,7 +112,7 @@ func (m *ShardManager) DropCollection(msg message.ImmutableDropCollectionMessage
 		segments := pm.FlushAndDropPartition(policy.PolicyCollectionRemoved())
 		partitionIDs = append(partitionIDs, partitionID)
 		segmentIDs = append(segmentIDs, segments...)
-		delete(m.managers, partitionID)
+		delete(m.partitionManagers, partitionID)
 	}
 	logger.Info("collection removed", zap.Int64s("partitionIDs", partitionIDs), zap.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()
