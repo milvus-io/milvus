@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // describeCollectionTask describe collection request task
@@ -40,6 +41,19 @@ func (t *describeCollectionTask) Prepare(ctx context.Context) error {
 
 // Execute task execution
 func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
+	// if collecction name is not empty, check if the collection is visible to the current user
+	if t.Req.GetCollectionName() != "" {
+		visibleCollections, err := t.core.getCurrentUserVisibleCollections(ctx, t.Req.GetDbName())
+		if err != nil {
+			t.Rsp.Status = merr.Status(err)
+			return err
+		}
+		if !isVisibleCollectionForCurUser(t.Req.GetCollectionName(), visibleCollections) {
+			err = merr.WrapErrPrivilegeNotPermitted("not allowed to access collection, collection name: %s", t.Req.GetCollectionName())
+			t.Rsp.Status = merr.Status(err)
+			return err
+		}
+	}
 	coll, err := t.core.describeCollection(ctx, t.Req, t.allowUnavailable)
 	if err != nil {
 		return err

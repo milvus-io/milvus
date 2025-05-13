@@ -392,6 +392,7 @@ func (t *describeDatabaseTask) Execute(ctx context.Context) error {
 		Base:   t.DescribeDatabaseRequest.GetBase(),
 		DbName: t.DescribeDatabaseRequest.GetDbName(),
 	}
+	ctx = AppendUserInfoForRPC(ctx)
 	ret, err := t.rootCoord.DescribeDatabase(ctx, req)
 	if err != nil {
 		log.Ctx(ctx).Warn("DescribeDatabase failed", zap.Error(err))
