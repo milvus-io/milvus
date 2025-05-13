@@ -259,6 +259,9 @@ func (node *QueryNode) InitSegcore() error {
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
 
+	cEnableConfigParamTypeCheck := C.bool(paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.GetAsBool())
+	C.InitDefaultConfigParamTypeCheck(cEnableConfigParamTypeCheck)
+
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
 

@@ -12,15 +12,20 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestRecoveryStorage(t *testing.T) {
@@ -84,8 +89,14 @@ func TestRecoveryStorage(t *testing.T) {
 		cp = checkpoint
 		return nil
 	})
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
+		Status: merr.Success(),
+	}, nil)
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	f.Set(mixCoord)
 
-	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog))
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog), resource.OptMixCoordClient(f))
 	b := &streamBuilder{
 		channel:                types.PChannelInfo{Name: "test_channel"},
 		lastConfirmedMessageID: 1,
@@ -138,14 +149,18 @@ func TestRecoveryStorage(t *testing.T) {
 		assert.Equal(t, partitionNum, b.partitionNum())
 		assert.Equal(t, collectionNum, b.collectionNum())
 		assert.Equal(t, segmentNum, b.segmentNum())
+
+		if rs.gracefulClosed {
+			// only available when graceful closing
+			assert.Equal(t, b.collectionNum(), len(vchannelMetas))
+			partitionNum := 0
+			for _, v := range vchannelMetas {
+				partitionNum += len(v.CollectionInfo.Partitions)
+			}
+			assert.Equal(t, b.partitionNum(), partitionNum)
+			assert.Equal(t, b.segmentNum(), len(segmentMetas))
+		}
 	}
-	assert.Equal(t, b.collectionNum(), len(vchannelMetas))
-	partitionNum := 0
-	for _, v := range vchannelMetas {
-		partitionNum += len(v.CollectionInfo.Partitions)
-	}
-	assert.Equal(t, b.partitionNum(), partitionNum)
-	assert.Equal(t, b.segmentNum(), len(segmentMetas))
 }
 
 type streamBuilder struct {

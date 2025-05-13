@@ -86,6 +86,7 @@ const int64_t DEFAULT_CONVERT_OR_TO_IN_NUMERIC_LIMIT = 150;
 const int64_t DEFAULT_JSON_INDEX_MEMORY_BUDGET = 16777216;  // bytes, 16MB
 const bool DEFAULT_GROWING_JSON_KEY_STATS_ENABLED = false;
 const int64_t DEFAULT_JSON_KEY_STATS_COMMIT_INTERVAL = 200;
+const bool DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED = true;
 
 // index config related
 const std::string SEGMENT_INSERT_FILES_KEY = "segment_insert_files";

@@ -25,7 +25,8 @@
 #include "common/Tracer.h"
 #include "log/Log.h"
 
-std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7, flag8, flag9;
+std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7, flag8, flag9,
+    flag10;
 std::once_flag traceFlag;
 
 void
@@ -99,6 +100,14 @@ InitDefaultGrowingJSONKeyStatsEnable(bool val) {
     std::call_once(
         flag9,
         [](bool val) { milvus::SetDefaultGrowingJSONKeyStatsEnable(val); },
+        val);
+}
+
+void
+InitDefaultConfigParamTypeCheck(bool val) {
+    std::call_once(
+        flag10,
+        [](bool val) { milvus::SetDefaultConfigParamTypeCheck(val); },
         val);
 }
 

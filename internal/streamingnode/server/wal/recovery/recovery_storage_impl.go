@@ -59,6 +59,7 @@ func newRecoveryStorage(channel types.PChannelInfo) *RecoveryStorage {
 		channel:                channel,
 		dirtyCounter:           0,
 		persistNotifier:        make(chan struct{}, 1),
+		gracefulClosed:         false,
 	}
 }
 
@@ -76,6 +77,7 @@ type RecoveryStorage struct {
 	dirtyCounter           int // records the message count since last persist snapshot.
 	// used to trigger the recovery persist operation.
 	persistNotifier chan struct{}
+	gracefulClosed  bool
 }
 
 // ObserveMessage is called when a new message is observed.
