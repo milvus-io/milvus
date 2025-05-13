@@ -101,8 +101,18 @@ func (c *Client) getRootCoordAddr() (string, error) {
 	}
 	ms, ok := msess[key]
 	if !ok {
-		log.Warn("RootCoordClient mess key not exist", zap.Any("key", key))
-		return "", errors.New("find no available rootcoord, check rootcoord state")
+		msess, _, err = c.sess.GetSessions(typeutil.MixCoordRole)
+		if err != nil {
+			log.Debug("RootCoordClient getSessions failed", zap.Any("key", typeutil.MixCoordRole), zap.Error(err))
+			return "", errors.New("find no available rootcoord, check rootcoord state")
+		}
+		ms, ok = msess[typeutil.MixCoordRole]
+		if !ok {
+			log.Warn("RootCoordClient mess key not exist", zap.Any("key", key))
+			return "", errors.New("find no available rootcoord, check rootcoord state")
+		} else {
+			log.Debug("RootCoordClient GetSessions use MixCoord", zap.Any("key", key))
+		}
 	}
 	log.Debug("RootCoordClient GetSessions success",
 		zap.String("address", ms.Address),
