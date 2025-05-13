@@ -1768,7 +1768,11 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         stats_.mem_size += column->DataByteSize();
         if (IsVariableDataType(data_type)) {
             if (IsStringDataType(data_type)) {
-                LoadStringSkipIndex(field_id, 0, *column);
+                for (int i = 0; i < column->num_chunks(); ++i) {
+                    auto chunk_pw = column->GetChunk(i);
+                    auto* string_chunk = static_cast<StringChunk*>(chunk_pw.get());
+                    LoadStringSkipIndex(field_id, i, string_chunk);
+                }
             }
             // update average row data size
             SegmentInternalInterface::set_field_avg_size(
@@ -1776,31 +1780,14 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         } else {
             auto num_chunk = column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
-                if (!is_proxy_column) {
-                    auto primitive_column =
-                        std::dynamic_pointer_cast<ChunkedColumn>(column);
-                    AssertInfo(primitive_column != nullptr,
-                               "column is not of primitive type");
-                    auto pw = primitive_column->Span(i);
-                    LoadPrimitiveSkipIndex(field_id,
-                                           i,
-                                           data_type,
-                                           pw.get().data(),
-                                           pw.get().valid_data(),
-                                           pw.get().row_count());
-                } else {
-                    auto proxy_column =
-                        std::dynamic_pointer_cast<ProxyChunkColumn>(column);
-                    AssertInfo(proxy_column != nullptr,
-                               "column is not of proxy type");
-                    auto pw = proxy_column->Span(i);
-                    LoadPrimitiveSkipIndex(field_id,
-                                           i,
-                                           data_type,
-                                           pw.get().data(),
-                                           pw.get().valid_data(),
-                                           pw.get().row_count());
-                }
+                auto pw = column->Span(i);
+                auto& span = pw.get();
+                LoadPrimitiveSkipIndex(field_id,
+                                        i,
+                                        data_type,
+                                        span.data(),
+                                        span.valid_data(),
+                                        span.row_count());
             }
         }
     }

@@ -13,6 +13,7 @@
 
 #include <unordered_map>
 
+#include "common/Chunk.h"
 #include "common/Types.h"
 #include "mmap/ChunkedColumnInterface.h"
 
@@ -102,11 +103,11 @@ class SkipIndex {
     void
     LoadString(milvus::FieldId field_id,
                int64_t chunk_id,
-               const ChunkedColumnInterface& var_column) {
-        int num_rows = var_column.NumRows();
+               const StringChunk* chunk) {
+        int num_rows = chunk->RowNums();
         auto chunkMetrics = std::make_unique<FieldChunkMetrics>();
         if (num_rows > 0) {
-            auto info = ProcessStringFieldMetrics(var_column);
+            auto info = ProcessStringFieldMetrics(chunk);
             chunkMetrics->min_ = Metrics(info.min_);
             chunkMetrics->max_ = Metrics(info.max_);
             chunkMetrics->null_count_ = info.null_count_;
@@ -254,7 +255,7 @@ class SkipIndex {
     template <typename T>
     metricInfo<T>
     ProcessFieldMetrics(const T* data, const bool* valid_data, int64_t count) {
-        //double check to avoid crush
+        //double check to avoid crash
         if (data == nullptr || count == 0) {
             return {T(), T()};
         }
@@ -290,32 +291,35 @@ class SkipIndex {
     }
 
     metricInfo<std::string>
-    ProcessStringFieldMetrics(const ChunkedColumnInterface& var_column) {
+    ProcessStringFieldMetrics(const StringChunk* chunk) {
         // all captured by reference
         bool has_first_valid = false;
         std::string_view min_string;
         std::string_view max_string;
         int64_t null_count = 0;
 
-        var_column.BulkRawStringAt(
-            [&](std::string_view value, size_t offset, bool is_valid) {
-                if (!is_valid) {
-                    null_count++;
-                    return;
-                }
-                if (!has_first_valid) {
+        auto row_count = chunk->RowNums();
+
+        for (int64_t i = 0; i < row_count; ++i) {
+            bool is_valid = chunk->isValid(i);
+            if (!is_valid) {
+                null_count++;
+                continue;
+            }
+            auto value = chunk->operator[](i);
+            if (!has_first_valid) {
+                min_string = value;
+                max_string = value;
+                has_first_valid = true;
+            } else {
+                if (value < min_string) {
                     min_string = value;
-                    max_string = value;
-                    has_first_valid = true;
-                } else {
-                    if (value < min_string) {
-                        min_string = value;
-                    }
-                    if (value > max_string) {
-                        max_string = value;
-                    }
                 }
-            });
+                if (value > max_string) {
+                    max_string = value;
+                }
+            }
+        }
         // The field data may later be released, so we need to copy the string to avoid invalid memory access.
         return {std::string(min_string), std::string(max_string), null_count};
     }

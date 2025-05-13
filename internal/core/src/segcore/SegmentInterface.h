@@ -338,8 +338,8 @@ class SegmentInternalInterface : public SegmentInterface {
     void
     LoadStringSkipIndex(FieldId field_id,
                         int64_t chunk_id,
-                        const ChunkedColumnInterface& column) {
-        skip_index_.LoadString(field_id, chunk_id, column);
+                        StringChunk* chunk) {
+        skip_index_.LoadString(field_id, chunk_id, chunk);
     }
 
     virtual DataType
