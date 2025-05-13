@@ -673,10 +673,11 @@ like the old password verification when updating the credential`,
 	p.SuperUsers.Init(base.mgr)
 
 	p.DefaultRootPassword = ParamItem{
-		Key:          "common.security.defaultRootPassword",
-		Version:      "2.4.7",
-		Doc:          "default password for root user. The maximum length is 72 characters, and double quotes are required.",
-		DefaultValue: "\"Milvus\"",
+		Key:     "common.security.defaultRootPassword",
+		Version: "2.4.7",
+		Doc: `default password for root user. The maximum length is 72 characters. 
+Large numeric passwords require double quotes to avoid yaml parsing precision issues.`,
+		DefaultValue: "Milvus",
 		Export:       true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)

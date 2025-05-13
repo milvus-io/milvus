@@ -851,7 +851,9 @@ common:
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
-    defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
+    # default password for root user. The maximum length is 72 characters. 
+    # Large numeric passwords require double quotes to avoid yaml parsing precision issues.
+    defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
     rbac:
