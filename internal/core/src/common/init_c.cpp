@@ -20,7 +20,7 @@
 #include "common/Tracer.h"
 
 std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7, flag8, flag9,
-    flag10;
+    flag10, flag11;
 std::once_flag traceFlag;
 
 void
@@ -92,6 +92,14 @@ InitDefaultOptimizeExprEnable(bool val) {
     std::call_once(
         flag10,
         [](bool val) { milvus::SetDefaultOptimizeExprEnable(val); },
+        val);
+}
+
+void
+InitDefaultConfigParamTypeCheck(bool val) {
+    std::call_once(
+        flag11,
+        [](bool val) { milvus::SetDefaultConfigParamTypeCheck(val); },
         val);
 }
 
