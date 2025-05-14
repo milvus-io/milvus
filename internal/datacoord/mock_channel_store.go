@@ -566,9 +566,9 @@ func (_c *MockRWChannelStore_Update_Call) RunAndReturn(run func(*ChannelOpSet) e
 	return _c
 }
 
-// UpdateState provides a mock function with given fields: isSuccessful, nodeID, channel, opID
-func (_m *MockRWChannelStore) UpdateState(isSuccessful bool, nodeID int64, channel RWChannel, opID int64) {
-	_m.Called(isSuccessful, nodeID, channel, opID)
+// UpdateState provides a mock function with given fields: action, nodeID, channel, opID
+func (_m *MockRWChannelStore) UpdateState(action Action, nodeID int64, channel RWChannel, opID int64) {
+	_m.Called(action, nodeID, channel, opID)
 }
 
 // MockRWChannelStore_UpdateState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateState'
@@ -577,17 +577,17 @@ type MockRWChannelStore_UpdateState_Call struct {
 }
 
 // UpdateState is a helper method to define mock.On call
-//   - isSuccessful bool
+//   - action Action
 //   - nodeID int64
 //   - channel RWChannel
 //   - opID int64
-func (_e *MockRWChannelStore_Expecter) UpdateState(isSuccessful interface{}, nodeID interface{}, channel interface{}, opID interface{}) *MockRWChannelStore_UpdateState_Call {
-	return &MockRWChannelStore_UpdateState_Call{Call: _e.mock.On("UpdateState", isSuccessful, nodeID, channel, opID)}
+func (_e *MockRWChannelStore_Expecter) UpdateState(action interface{}, nodeID interface{}, channel interface{}, opID interface{}) *MockRWChannelStore_UpdateState_Call {
+	return &MockRWChannelStore_UpdateState_Call{Call: _e.mock.On("UpdateState", action, nodeID, channel, opID)}
 }
 
-func (_c *MockRWChannelStore_UpdateState_Call) Run(run func(isSuccessful bool, nodeID int64, channel RWChannel, opID int64)) *MockRWChannelStore_UpdateState_Call {
+func (_c *MockRWChannelStore_UpdateState_Call) Run(run func(action Action, nodeID int64, channel RWChannel, opID int64)) *MockRWChannelStore_UpdateState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(bool), args[1].(int64), args[2].(RWChannel), args[3].(int64))
+		run(args[0].(Action), args[1].(int64), args[2].(RWChannel), args[3].(int64))
 	})
 	return _c
 }
@@ -597,7 +597,7 @@ func (_c *MockRWChannelStore_UpdateState_Call) Return() *MockRWChannelStore_Upda
 	return _c
 }
 
-func (_c *MockRWChannelStore_UpdateState_Call) RunAndReturn(run func(bool, int64, RWChannel, int64)) *MockRWChannelStore_UpdateState_Call {
+func (_c *MockRWChannelStore_UpdateState_Call) RunAndReturn(run func(Action, int64, RWChannel, int64)) *MockRWChannelStore_UpdateState_Call {
 	_c.Run(run)
 	return _c
 }
