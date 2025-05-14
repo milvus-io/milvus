@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -40,10 +41,10 @@ type reader struct {
 
 	fileSize   *atomic.Int64
 	deleteData map[any]typeutil.Timestamp // pk2ts
-	insertLogs map[int64][]string         // fieldID -> binlogs
+	insertLogs map[int64][]string         // fieldID (or fieldGroupID if storage v2) -> binlogs
 
-	readIdx int
 	filters []Filter
+	dr      storage.DeserializeReader[*storage.Value]
 }
 
 func NewReader(ctx context.Context,
@@ -53,7 +54,16 @@ func NewReader(ctx context.Context,
 	tsStart,
 	tsEnd uint64,
 ) (*reader, error) {
-	schema = typeutil.AppendSystemFields(schema)
+	systemFieldsAbsent := true
+	for _, field := range schema.Fields {
+		if field.GetFieldID() < 100 {
+			systemFieldsAbsent = false
+			break
+		}
+	}
+	if systemFieldsAbsent {
+		schema = typeutil.AppendSystemFields(schema)
+	}
 	r := &reader{
 		ctx:      ctx,
 		cm:       cm,
@@ -87,6 +97,33 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		return err
 	}
 	r.insertLogs = insertLogs
+
+	binlogs := lo.Map(r.schema.Fields, func(field *schemapb.FieldSchema, _ int) *datapb.FieldBinlog {
+		id := field.GetFieldID()
+		return &datapb.FieldBinlog{
+			FieldID: id,
+			Binlogs: lo.Map(r.insertLogs[id], func(path string, _ int) *datapb.Binlog {
+				return &datapb.Binlog{
+					LogPath: path,
+				}
+			}),
+		}
+	})
+
+	storageVersion := storage.GuessStorageVersion(binlogs, r.schema)
+	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema,
+		storage.WithVersion(storageVersion),
+		storage.WithBufferSize(32*1024*1024),
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return r.cm.MultiRead(ctx, paths)
+		}),
+	)
+	if err != nil {
+		return err
+	}
+	r.dr = storage.NewDeserializeReader(rr, func(record storage.Record, v []*storage.Value) error {
+		return storage.ValueDeserializer(record, v, r.schema.Fields)
+	})
 
 	if len(paths) < 2 {
 		return nil
@@ -152,35 +189,36 @@ func (r *reader) Read() (*storage.InsertData, error) {
 	if err != nil {
 		return nil, err
 	}
-	if r.readIdx == len(r.insertLogs[0]) {
-		// In the binlog import scenario, all data may be filtered out
-		// due to time range or deletions. Therefore, we use io.EOF as
-		// the indicator of the read end, instead of InsertData with 0 rows.
-		return nil, io.EOF
-	}
-	for fieldID, binlogs := range r.insertLogs {
-		field := typeutil.GetField(r.schema, fieldID)
-		if field == nil {
-			return nil, merr.WrapErrFieldNotFound(fieldID)
+
+	for range 4096 {
+		v, err := r.dr.NextValue()
+		if err == io.EOF {
+			break
 		}
-		path := binlogs[r.readIdx]
-		fr, err := newFieldReader(r.ctx, r.cm, field, path)
 		if err != nil {
 			return nil, err
 		}
-		fieldData, err := fr.Next()
-		if err != nil {
-			fr.Close()
-			return nil, err
+		// convert record to fieldData
+		for _, field := range r.schema.Fields {
+			fieldData := insertData.Data[field.GetFieldID()]
+			if fieldData == nil {
+				fieldData, err = storage.NewFieldData(field.GetDataType(), field, 1024)
+				if err != nil {
+					return nil, err
+				}
+				insertData.Data[field.GetFieldID()] = fieldData
+			}
+
+			err := fieldData.AppendRow((*v).Value.(map[int64]any)[field.GetFieldID()])
+			if err != nil {
+				return nil, err
+			}
 		}
-		fr.Close()
-		insertData.Data[field.GetFieldID()] = fieldData
 	}
 	insertData, err = r.filter(insertData)
 	if err != nil {
 		return nil, err
 	}
-	r.readIdx++
 	return insertData, nil
 }
 

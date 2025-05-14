@@ -396,7 +396,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 	}
 
-	m[schemapb.DataType_Array] = byteEntry
+	m[schemapb.DataType_Array] = eagerArrayEntry
 	m[schemapb.DataType_JSON] = byteEntry
 
 	fixedSizeDeserializer := func(a arrow.Array, i int) (any, bool) {
@@ -447,7 +447,21 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		func(i int) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: i}
 		},
-		fixedSizeDeserializer,
+		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
+			if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
+				// convert to []int8
+				bytes := arr.Value(i)
+				int8s := make([]int8, len(bytes))
+				for i, b := range bytes {
+					int8s[i] = int8(b)
+				}
+				return int8s, true
+			}
+			return nil, false
+		},
 		fixedSizeSerializer,
 	}
 	m[schemapb.DataType_FloatVector] = serdeEntry{
