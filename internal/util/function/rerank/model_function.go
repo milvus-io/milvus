@@ -296,7 +296,7 @@ type ModelFunction[T PKType] struct {
 }
 
 func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
-	base, err := newRerankBase(collSchema, funcSchema, decayFunctionName, false)
+	base, err := newRerankBase(collSchema, funcSchema, decayFunctionName, true)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +333,7 @@ func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 	}
 }
 
-func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchParams *SearchParams, query string, cols []*columns) (*IDScores[T], error) {
+func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchParams *SearchParams, query string, cols []*columns, idGroup map[any]any) (*IDScores[T], error) {
 	uniqueData := make(map[T]string)
 	for _, col := range cols {
 		texts := col.data[0].([]string)
@@ -359,6 +359,9 @@ func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchP
 	for idx, id := range ids {
 		rerankScores[id] = scores[idx]
 	}
+	if searchParams.isGrouping() {
+		return newGroupingIDScores(rerankScores, searchParams, idGroup)
+	}
 	return newIDScores(rerankScores, searchParams), nil
 }
 
@@ -368,7 +371,7 @@ func (model *ModelFunction[T]) Process(ctx context.Context, searchParams *Search
 	}
 	outputs := newRerankOutputs(searchParams)
 	for idx, cols := range inputs.data {
-		idScore, err := model.processOneSearchData(ctx, searchParams, model.queries[idx], cols)
+		idScore, err := model.processOneSearchData(ctx, searchParams, model.queries[idx], cols, inputs.idGroupValue)
 		if err != nil {
 			return nil, err
 		}
