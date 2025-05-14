@@ -188,10 +188,14 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     switch (load_info.storage_version) {
         case 2:
             load_column_group_data_internal(load_info);
-            if (fields_.find(TimestampFieldID) != fields_.end()) {
+            // TODO check timestamp_index ready instead of check system_ready_count_
+            if (fields_.find(TimestampFieldID) != fields_.end() &&
+                system_ready_count_ == 0) {
                 auto timestamp_proxy_column = fields_.at(TimestampFieldID);
-                auto num_rows =
-                    load_info.field_infos.at(TimestampFieldID.get()).row_count;
+                int64_t num_rows;
+                for (auto& [_, info] : load_info.field_infos) {
+                    num_rows = info.row_count;
+                }
                 std::vector<Timestamp> timestamps(num_rows);
                 int64_t offset = 0;
                 for (int i = 0; i < timestamp_proxy_column->num_chunks(); i++) {
@@ -254,7 +258,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 column_group_id.get());
         std::vector<FieldId> milvus_field_ids;
         for (int i = 0; i < field_id_list.size(); ++i) {
-            milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
+            milvus_field_ids.emplace_back(field_id_list.Get(i));
         }
 
         auto column_group_info = FieldDataInfo(
