@@ -578,6 +578,16 @@ func TestImportCheckerCompaction(t *testing.T) {
 			State:          internalpb.ImportJobState_Pending,
 			TimeoutTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour), 0),
 			CleanupTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour), 0),
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+					},
+				},
+			},
 			Files: []*internalpb.ImportFile{
 				{
 					Id:    1,
@@ -616,6 +626,16 @@ func TestImportCheckerCompaction(t *testing.T) {
 			State:          internalpb.ImportJobState_Pending,
 			TimeoutTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour), 0),
 			CleanupTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour), 0),
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+					},
+				},
+			},
 			Files: []*internalpb.ImportFile{
 				{
 					Id:    1,
