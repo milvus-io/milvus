@@ -226,11 +226,9 @@ func (c *StateChannel) TransitionOnFailure(opID int64) {
 		return
 	}
 	switch c.currentState {
-	case Watching:
+	case Watching, Releasing, ToWatch:
 		c.setState(Standby)
-	case Releasing:
-		c.setState(Standby)
-	case Standby, ToWatch, Watched, ToRelease:
+	case Standby, Watched, ToRelease:
 		// Stay original state
 	}
 }
