@@ -72,7 +72,7 @@ type RWChannelStore interface {
 	Update(op *ChannelOpSet) error
 
 	// UpdateState is used by StateChannelStore only
-	UpdateState(isSuccessful bool, nodeID int64, channel RWChannel, opID int64)
+	UpdateState(action Action, nodeID int64, channel RWChannel, opID int64)
 	// SegLegacyChannelByNode is used by StateChannelStore only
 	SetLegacyChannelByNode(nodeIDs ...int64)
 
@@ -339,6 +339,8 @@ func (c *StateChannelStore) Reload() error {
 	if err != nil {
 		return err
 	}
+
+	dupChannel := []*StateChannel{}
 	for i := 0; i < len(keys); i++ {
 		k := keys[i]
 		v := values[i]
@@ -353,13 +355,35 @@ func (c *StateChannelStore) Reload() error {
 		}
 		reviseVChannelInfo(info.GetVchan())
 
-		c.AddNode(nodeID)
-
+		channelName := info.GetVchan().GetChannelName()
 		channel := NewStateChannelByWatchInfo(nodeID, info)
+
+		if c.HasChannel(channelName) {
+			dupChannel = append(dupChannel, channel)
+			log.Warn("channel store detects duplicated channel, skip recovering it",
+				zap.Int64("nodeID", nodeID),
+				zap.String("channel", channelName))
+			continue
+		}
+
+		c.AddNode(nodeID)
 		c.channelsInfo[nodeID].AddChannel(channel)
-		log.Info("channel store reload channel",
-			zap.Int64("nodeID", nodeID), zap.String("channel", channel.Name))
+		log.Info("channel store reloads channel from meta",
+			zap.Int64("nodeID", nodeID),
+			zap.String("channel", channelName))
 		metrics.DataCoordDmlChannelNum.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(len(c.channelsInfo[nodeID].Channels)))
+	}
+
+	for _, channel := range dupChannel {
+		log.Warn("channel store clearing duplicated channel",
+			zap.String("channel", channel.GetName()), zap.Int64("nodeID", channel.assignedNode))
+		chOp := NewChannelOpSet(NewChannelOp(channel.assignedNode, Delete, channel))
+		if err := c.Update(chOp); err != nil {
+			log.Warn("channel store failed to remove duplicated channel, will retry later",
+				zap.String("channel", channel.GetName()),
+				zap.Int64("nodeID", channel.assignedNode),
+				zap.Error(err))
+		}
 	}
 	log.Info("channel store reload done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
@@ -375,14 +399,39 @@ func (c *StateChannelStore) AddNode(nodeID int64) {
 	}
 }
 
-func (c *StateChannelStore) UpdateState(isSuccessful bool, nodeID int64, channel RWChannel, opID int64) {
+func (c *StateChannelStore) SetState(targetState ChannelState, nodeID int64, channel RWChannel, opID int64) {
 	channelName := channel.GetName()
 	if cInfo, ok := c.channelsInfo[nodeID]; ok {
 		if stateChannel, ok := cInfo.Channels[channelName]; ok {
-			if isSuccessful {
+			stateChannel.(*StateChannel).setState(targetState)
+		}
+	}
+}
+
+type Action string
+
+const (
+	OnSuccess         Action = "OnSuccess"
+	OnFailure         Action = "OnFailure"
+	OnNotifyDuplicate Action = "OnNotifyDuplicate" // notify ToWatch to DataNode already subscribed to the channel
+)
+
+func (c *StateChannelStore) UpdateState(action Action, nodeID int64, channel RWChannel, opID int64) {
+	channelName := channel.GetName()
+	if cInfo, ok := c.channelsInfo[nodeID]; ok {
+		if stateChannel, ok := cInfo.Channels[channelName]; ok {
+			switch action {
+			case OnSuccess:
 				stateChannel.(*StateChannel).TransitionOnSuccess(opID)
-			} else {
+			case OnFailure:
 				stateChannel.(*StateChannel).TransitionOnFailure(opID)
+			case OnNotifyDuplicate:
+				stateChannel.(*StateChannel).setState(ToRelease)
+			default:
+				log.Warn("unknown action", zap.Any("action", action),
+					zap.Int64("nodeID", nodeID),
+					zap.String("channel", channelName),
+					zap.Int64("opID", opID))
 			}
 		}
 	}

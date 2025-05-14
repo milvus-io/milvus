@@ -421,12 +421,18 @@ func (s *StateChannelStoreSuite) TestUpdateState() {
 	tests := []struct {
 		description string
 
-		inSuccess       bool
+		inAction        Action
 		inChannelState  ChannelState
 		outChannelState ChannelState
 	}{
-		{"input standby, fail", false, Standby, Standby},
-		{"input standby, success", true, Standby, ToWatch},
+		{"input standby fail", OnFailure, Standby, Standby},
+		{"input standby success", OnSuccess, Standby, ToWatch},
+		{"input towatch duplicate", OnNotifyDuplicate, ToWatch, ToRelease},
+		{"input towatch fail", OnFailure, ToWatch, Standby},
+		{"input towatch success", OnSuccess, ToWatch, Watching},
+		{"input torelease duplicate", OnNotifyDuplicate, ToRelease, ToRelease},
+		{"input torelease fail", OnFailure, ToRelease, ToRelease},
+		{"input torelease success", OnSuccess, ToRelease, Releasing},
 	}
 
 	for _, test := range tests {
@@ -443,10 +449,43 @@ func (s *StateChannelStoreSuite) TestUpdateState() {
 				},
 			}
 
-			store.UpdateState(test.inSuccess, bufferID, channel, 0)
+			store.UpdateState(test.inAction, bufferID, channel, 0)
 			s.Equal(test.outChannelState, channel.currentState)
 		})
 	}
+}
+
+func (s *StateChannelStoreSuite) TestReloadDupCh() {
+	s.mockTxn.ExpectedCalls = nil
+
+	tests := []struct {
+		channelName string
+		nodeID      int64
+	}{
+		{"ch1", 1},
+		{"ch1", bufferID},
+		{"ch1", 2},
+	}
+
+	var keys, values []string
+	for _, test := range tests {
+		keys = append(keys, fmt.Sprintf("channel_store/%d/%s", test.nodeID, test.channelName))
+		info := generateWatchInfo(test.channelName, datapb.ChannelWatchState_WatchSuccess)
+		bs, err := proto.Marshal(info)
+		s.Require().NoError(err)
+		values = append(values, string(bs))
+	}
+	s.mockTxn.EXPECT().LoadWithPrefix(mock.Anything, mock.AnythingOfType("string")).Return(keys, values, nil)
+	s.mockTxn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	store := NewStateChannelStore(s.mockTxn)
+	err := store.Reload()
+	s.Require().NoError(err)
+
+	s.True(store.HasChannel("ch1"))
+	s.ElementsMatch([]int64{1}, store.GetNodes())
+	s.EqualValues(1, store.GetNodeChannelCount(1))
+	s.EqualValues(0, store.GetNodeChannelCount(2))
 }
 
 func (s *StateChannelStoreSuite) TestReload() {
