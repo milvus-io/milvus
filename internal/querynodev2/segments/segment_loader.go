@@ -245,12 +245,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		return nil, nil
 	}
 	coll := loader.manager.Collection.Get(collectionID)
-	// filter field schema which need to be loaded
-	for _, info := range segments {
-		info.BinlogPaths = lo.Filter(info.GetBinlogPaths(), func(fbl *datapb.FieldBinlog, _ int) bool {
-			return coll.loadFields.Contain(fbl.GetFieldID()) || common.IsSystemField(fbl.GetFieldID())
-		})
-	}
 
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)
