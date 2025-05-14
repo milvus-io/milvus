@@ -16,7 +16,6 @@ NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
 
     if (ctx.for_loading_index) {
         path_ = disk_file_manager_->GetLocalNgramIndexPrefix();
-        LOG_INFO("debug=== load ngram index, path: {}", path_);
     } else {
         auto prefix = disk_file_manager_->GetNgramIndexIdentifier();
         path_ = std::string(TMP_NGRAM_INVERTED_LOG_PREFIX) + prefix;

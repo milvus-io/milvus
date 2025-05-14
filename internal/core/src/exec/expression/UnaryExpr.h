@@ -265,6 +265,7 @@ struct UnaryIndexFuncForMatch {
             PanicInfo(Unsupported, "regex query is only supported on string");
         } else {
             if (index->SupportRegexQuery()) {
+                LOG_INFO("debug=== inverted index for match, {}", val);
                 return index->PatternMatch(val);
             }
             if (!index->HasRawData()) {

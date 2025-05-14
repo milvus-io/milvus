@@ -1,3 +1,4 @@
+use log::info;
 use std::ffi::{c_char, c_void, CStr};
 
 use crate::{
@@ -239,11 +240,21 @@ pub extern "C" fn tantivy_inner_match_ngram(
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     let literal = cstr_to_str!(literal);
-    unsafe {
+
+    let now = std::time::Instant::now();
+    let res = unsafe {
         (*real)
             .inner_match_ngram(literal, min_gram, max_gram, bitset)
             .into()
-    }
+    };
+
+    let duration = now.elapsed();
+    info!(
+        "debug=== tantivy_inner_match_ngram, duration: {:?}",
+        duration
+    );
+
+    res
 }
 
 #[no_mangle]

@@ -166,6 +166,20 @@ func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	return false
 }
 
+func needDoNgramIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
+	if !(isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		segment.GetIsSorted()) {
+		return false
+	}
+
+	for _, fieldID := range fieldIDs {
+		if segment.GetNgramIndexStats()[fieldID] == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	// TODO: docking bm25 stats task
 	return false
@@ -227,6 +241,30 @@ func (jm *statsJobManager) triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger
 		}
 	}
 	return lastJSONStatsLastTrigger, maxJSONStatsTaskCount
+}
+
+func (jm *statsJobManager) triggerNgramIndexStatsTask() {
+	collections := jm.mt.GetCollections()
+	for _, collection := range collections {
+		needTriggerFieldIDs := make([]UniqueID, 0)
+		for _, field := range collection.Schema.GetFields() {
+			h := typeutil.CreateFieldSchemaHelper(field)
+			if h.EnableNgramIndex() {
+				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
+			}
+		}
+		segments := jm.mt.SelectSegments(jm.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
+			return seg.GetIsSorted() && needDoNgramIndex(seg, needTriggerFieldIDs)
+		}))
+
+		for _, segment := range segments {
+			if err := jm.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_NgramIndexJob, true); err != nil {
+				log.Warn("create stats task with ngram index for segment failed, wait for retry",
+					zap.Int64("segmentID", segment.GetID()), zap.Error(err))
+				continue
+			}
+		}
+	}
 }
 
 func (jm *statsJobManager) triggerBM25StatsTask() {

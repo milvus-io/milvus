@@ -1848,6 +1848,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     TargetBitmap valid_result;
 
     if (cached_ngram_match_res_ == nullptr) {
+        auto now = std::chrono::steady_clock::now();
         auto index = segment_->GetNgramIndex(field_id_);
         auto res_opt = index->InnerMatchQuery(parsed_result.literal, this);
         LOG_INFO("debug=== ngram index, pattern {}, res_opt: {}",
@@ -1861,6 +1862,10 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
             return std::nullopt;
         }
         auto valid_res = index->IsNotNull();
+        auto duration = std::chrono::steady_clock::now() - now;
+        LOG_INFO("debug=== ngram index query, duration: {}",
+                 std::chrono::duration_cast<std::chrono::microseconds>(duration)
+                     .count());
         cached_ngram_match_res_ =
             std::make_shared<TargetBitmap>(std::move(res_opt.value()));
         cached_index_chunk_valid_res_ = std::move(valid_res);
