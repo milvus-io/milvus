@@ -252,6 +252,7 @@ queryNode:
       cpu: "0.5"
       memory: 512Mi
 streamingNode:
+  replicas: 2
   resources:
     limits:
       cpu: "2"

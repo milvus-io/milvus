@@ -245,18 +245,16 @@ message TxnContext {
 enum TxnState {
     // should never be used.
     TxnUnknown = 0;
-    // the transaction begin.
-    TxnBegin = 1;
     // the transaction is in flight.
-    TxnInFlight = 2;
+    TxnInFlight = 1;
     // the transaction is on commit.
-    TxnOnCommit = 3;
+    TxnOnCommit = 2;
     // the transaction is committed.
-    TxnCommitted = 4;
+    TxnCommitted = 3;
     // the transaction is on rollback.
-    TxnOnRollback = 5;
+    TxnOnRollback = 4;
     // the transaction is rollbacked.
-    TxnRollbacked = 6;
+    TxnRollbacked = 5;
 }
 
 // RMQMessageLayout is the layout of message for RMQ.

@@ -8,8 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
-	shardstats "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
@@ -39,7 +38,6 @@ func InitForTest(t *testing.T, opts ...optResourceInit) {
 		r.timestampAllocator = idalloc.NewTSOAllocator(r.mixCoordClient)
 		r.idAllocator = idalloc.NewIDAllocator(r.mixCoordClient)
 	}
-	r.segmentAssignStatsManager = stats.NewStatsManager()
-	r.segmentStatsManager = shardstats.NewStatsManager()
+	r.segmentStatsManager = stats.NewStatsManager()
 	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()
 }

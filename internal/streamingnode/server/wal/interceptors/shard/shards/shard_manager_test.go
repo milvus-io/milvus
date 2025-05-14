@@ -112,7 +112,7 @@ func TestShardManager(t *testing.T) {
 			},
 		},
 		TxnManager: &mockedTxnManager{},
-	})
+	}).(*shardManagerImpl)
 	assert.Equal(t, channel, m.Channel())
 
 	// Test Checkers

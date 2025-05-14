@@ -154,6 +154,8 @@ func (p *ResumableProducer) createNewProducer() (producer.Producer, error) {
 	backoff.InitialInterval = 100 * time.Millisecond
 	backoff.MaxInterval = 10 * time.Second
 	backoff.MaxElapsedTime = 0
+	backoff.Reset()
+
 	for {
 		// Create a new producer.
 		// a underlying stream producer life time should be equal to the resumable producer.

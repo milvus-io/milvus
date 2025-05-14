@@ -10,7 +10,7 @@ import (
 
 // CheckIfCollectionCanBeCreated checks if a collection can be created.
 // It returns false if the collection cannot be created.
-func (m *ShardManager) CheckIfCollectionCanBeCreated(collectionID int64) error {
+func (m *shardManagerImpl) CheckIfCollectionCanBeCreated(collectionID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -18,7 +18,7 @@ func (m *ShardManager) CheckIfCollectionCanBeCreated(collectionID int64) error {
 }
 
 // checkIfCollectionCanBeCreated checks if a collection can be created.
-func (m *ShardManager) checkIfCollectionCanBeCreated(collectionID int64) error {
+func (m *shardManagerImpl) checkIfCollectionCanBeCreated(collectionID int64) error {
 	if _, ok := m.collections[collectionID]; ok {
 		return ErrCollectionExists
 	}
@@ -26,7 +26,7 @@ func (m *ShardManager) checkIfCollectionCanBeCreated(collectionID int64) error {
 }
 
 // CheckIfCollectionExists checks if a collection can be dropped.
-func (m *ShardManager) CheckIfCollectionExists(collectionID int64) error {
+func (m *shardManagerImpl) CheckIfCollectionExists(collectionID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -34,7 +34,7 @@ func (m *ShardManager) CheckIfCollectionExists(collectionID int64) error {
 }
 
 // checkIfCollectionExists checks if a collection exists.
-func (m *ShardManager) checkIfCollectionExists(collectionID int64) error {
+func (m *shardManagerImpl) checkIfCollectionExists(collectionID int64) error {
 	if _, ok := m.collections[collectionID]; !ok {
 		return ErrCollectionNotFound
 	}
@@ -43,7 +43,7 @@ func (m *ShardManager) checkIfCollectionExists(collectionID int64) error {
 
 // CreateCollection creates a new partition manager when create collection message is written into wal.
 // After CreateCollection is called, the ddl and dml on the collection can be applied.
-func (m *ShardManager) CreateCollection(msg message.ImmutableCreateCollectionMessageV1) {
+func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectionMessageV1) {
 	collectionID := msg.Header().CollectionId
 	partitionIDs := msg.Header().PartitionIds
 	vchannel := msg.VChannel()
@@ -85,7 +85,7 @@ func (m *ShardManager) CreateCollection(msg message.ImmutableCreateCollectionMes
 // DropCollection drops the collection and all the partitions and segments belong to it when drop collection message is written into wal.
 // After DropCollection is called, no more segments can be assigned to the collection.
 // Any dml and ddl for the collection will be rejected.
-func (m *ShardManager) DropCollection(msg message.ImmutableDropCollectionMessageV1) {
+func (m *shardManagerImpl) DropCollection(msg message.ImmutableDropCollectionMessageV1) {
 	collectionID := msg.Header().CollectionId
 	logger := m.Logger().With(log.FieldMessage(msg))
 

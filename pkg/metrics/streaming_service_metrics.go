@@ -303,6 +303,11 @@ var (
 		Buckets: secondsBuckets,
 	}, WALChannelLabelName, WALInterceptorLabelName)
 
+	WALImplsAppendRetryTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "impls_append_message_retry_total",
+		Help: "Total of append message retry",
+	}, WALChannelLabelName)
+
 	WALAppendMessageDurationSeconds = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "append_message_duration_seconds",
 		Help:    "Duration of wal append message",
@@ -498,6 +503,7 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALAppendMessageTotal)
 	registry.MustRegister(WALAppendMessageBeforeInterceptorDurationSeconds)
 	registry.MustRegister(WALAppendMessageAfterInterceptorDurationSeconds)
+	registry.MustRegister(WALImplsAppendRetryTotal)
 	registry.MustRegister(WALAppendMessageDurationSeconds)
 	registry.MustRegister(WALImplsAppendMessageDurationSeconds)
 	registry.MustRegister(WALWriteAheadBufferEntryTotal)
