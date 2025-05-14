@@ -165,6 +165,12 @@ func (eNode *embeddingNode) Operate(in []Msg) []Msg {
 	return []Msg{fgMsg}
 }
 
+func (eNode *embeddingNode) Close() {
+	for _, runner := range eNode.functionRunners {
+		runner.Close()
+	}
+}
+
 func BuildSparseFieldData(array *schemapb.SparseFloatArray) storage.FieldData {
 	return &storage.SparseFloatVectorFieldData{
 		SparseFloatArray: schemapb.SparseFloatArray{
