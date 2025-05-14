@@ -390,6 +390,15 @@ func (f *Field) WithAnalyzerParams(params map[string]any) *Field {
 	return f
 }
 
+func (f *Field) WithMultiAnalyzerParams(params map[string]any) *Field {
+	if f.TypeParams == nil {
+		f.TypeParams = make(map[string]string)
+	}
+	bs, _ := json.Marshal(params)
+	f.TypeParams["multi_analyzer_params"] = string(bs)
+	return f
+}
+
 func (f *Field) WithEnableMatch(enable bool) *Field {
 	if f.TypeParams == nil {
 		f.TypeParams = make(map[string]string)
