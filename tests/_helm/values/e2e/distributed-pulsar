@@ -107,35 +107,6 @@ image:
     pullPolicy: Always
     repository: harbor.milvus.io/milvus/milvus
     tag: PR-35426-20240812-46dadb120
-kafka:
-  affinity:
-    nodeAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-      - preference:
-          matchExpressions:
-          - key: node-role.kubernetes.io/e2e
-            operator: Exists
-        weight: 1
-  resources:
-    requests:
-      cpu: "0.2"
-      memory: 512Mi
-    limits:
-      cpu: "0.5"
-      memory: 4Gi
-  tolerations:
-  - effect: NoSchedule
-    key: node-role.kubernetes.io/e2e
-    operator: Exists
-  zookeeper:
-    replicaCount: 1
-    resources:
-      requests:
-        cpu: "0.2"
-        memory: 512Mi
-      limits:
-        cpu: "0.5"
-        memory: 2Gi
 minio:
   affinity:
     nodeAffinity:

@@ -108,7 +108,6 @@ kafka:
       limits:
         cpu: "0.5"
         memory: 2Gi
-
 minio:
   affinity:
     nodeAffinity:
@@ -130,8 +129,6 @@ minio:
   - effect: NoSchedule
     key: node-role.kubernetes.io/e2e
     operator: Exists
-
-
 tolerations:
 - effect: NoSchedule
   key: node-role.kubernetes.io/e2e
