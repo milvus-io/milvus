@@ -460,6 +460,8 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("jobID", req.GetJobID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
+		zap.Strings("vchannels", req.GetVchannels()),
 		zap.Any("segments", req.GetRequestSegments()),
 		zap.Any("files", req.GetFiles()))
 
