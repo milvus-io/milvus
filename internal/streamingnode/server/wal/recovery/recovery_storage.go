@@ -5,6 +5,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 )
 
 // RecoverySnapshot is the snapshot of the recovery info.
@@ -31,6 +32,9 @@ type RecoveryStreamBuilder interface {
 	// Build builds a recovery stream from the given channel info.
 	// The recovery stream will return the messages from the start checkpoint to the end time tick.
 	Build(param BuildRecoveryStreamParam) RecoveryStream
+
+	// Return the underlying walimpls.WALImpls.
+	RWWALImpls() walimpls.WALImpls
 }
 
 // RecoveryStream is an interface that is used to recover the recovery storage from the WAL.

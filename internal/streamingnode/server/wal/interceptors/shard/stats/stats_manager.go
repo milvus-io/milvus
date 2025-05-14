@@ -174,11 +174,11 @@ func (m *StatsManager) registerNewGrowingSegment(belongs SegmentBelongs, stats *
 // Must be called after RegisterGrowingSegment and before UnregisterGrowingSegment.
 func (m *StatsManager) AllocRows(segmentID int64, insert InsertMetrics) error {
 	shouldBeSealed, err := m.allocRows(segmentID, insert)
-	if err != nil {
-		return err
-	}
 	if shouldBeSealed {
 		m.worker.NotifySealSegment(segmentID, policy.PolicyCapacity())
+	}
+	if err != nil {
+		return err
 	}
 	m.notifyIfTotalGrowingBytesOverHWM()
 	return nil
@@ -215,7 +215,7 @@ func (m *StatsManager) allocRows(segmentID int64, insert InsertMetrics) (bool, e
 	if stat.IsEmpty() {
 		return false, ErrTooLargeInsert
 	}
-	return false, ErrNotEnoughSpace
+	return stat.ShouldBeSealed(), ErrNotEnoughSpace
 }
 
 // notifyIfTotalGrowingBytesOverHWM notifies if the total bytes is over the high water mark.

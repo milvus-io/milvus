@@ -46,7 +46,6 @@ func newSegmentAllocManagerFromProto(
 		}, inner.GetSegmentId(), stat)
 		stat = nil
 	}
-	metrics.UpdateGrowingSegmentState(streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_UNKNOWN, inner.GetState())
 	return &segmentAllocManager{
 		pchannel:      pchannel,
 		inner:         inner,
@@ -313,7 +312,6 @@ func (m *mutableSegmentAssignmentMeta) Commit(ctx context.Context) error {
 		// if the state transferred from growing into others, remove the stats from stats manager.
 		m.original.immutableStat = resource.Resource().SegmentAssignStatsManager().UnregisterSealedSegment(m.original.GetSegmentID())
 	}
-	m.original.metrics.UpdateGrowingSegmentState(m.original.GetState(), m.modifiedCopy.GetState())
 	m.original.inner = m.modifiedCopy
 	return nil
 }

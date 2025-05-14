@@ -39,6 +39,7 @@ func TestManager(t *testing.T) {
 			l := mock_wal.NewMockWAL(t)
 			l.EXPECT().Channel().Return(oo.Channel)
 			l.EXPECT().Close().Return()
+			l.EXPECT().IsAvailable().Return(true).Maybe()
 			return l, nil
 		})
 	opener.EXPECT().Close().Return()

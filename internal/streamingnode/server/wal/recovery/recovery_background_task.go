@@ -62,6 +62,7 @@ func (rs *RecoveryStorage) persistDritySnapshotWhenClosing() {
 
 // persistDirtySnapshot persists the dirty snapshot to the catalog.
 func (rs *RecoveryStorage) persistDirtySnapshot(ctx context.Context, snapshot *RecoverySnapshot, lvl zapcore.Level) (err error) {
+	rs.metrics.ObserveIsOnPersisting(true)
 	logger := rs.Logger().With(
 		zap.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
 		zap.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
@@ -74,6 +75,7 @@ func (rs *RecoveryStorage) persistDirtySnapshot(ctx context.Context, snapshot *R
 			return
 		}
 		logger.Log(lvl, "persist dirty snapshot")
+		defer rs.metrics.ObserveIsOnPersisting(false)
 	}()
 
 	if err := rs.dropAllVirtualChannel(ctx, snapshot.VChannels); err != nil {
@@ -109,10 +111,17 @@ func (rs *RecoveryStorage) persistDirtySnapshot(ctx context.Context, snapshot *R
 	}
 
 	// checkpoint updates should always be persisted after other updates success.
-	return rs.retryOperationWithBackoff(ctx, rs.Logger().With(zap.String("op", "persistCheckpoint")), func(ctx context.Context) error {
+	if err := rs.retryOperationWithBackoff(ctx, rs.Logger().With(zap.String("op", "persistCheckpoint")), func(ctx context.Context) error {
 		return resource.Resource().StreamingNodeCatalog().
 			SaveConsumeCheckpoint(ctx, rs.channel.Name, snapshot.Checkpoint.IntoProto())
-	})
+	}); err != nil {
+		return err
+	}
+
+	// sample the checkpoint for truncator to make wal truncation.
+	rs.metrics.ObServePersistedMetrics(snapshot.Checkpoint.TimeTick)
+	rs.truncator.SampleCheckpoint(snapshot.Checkpoint)
+	return
 }
 
 // dropAllVirtualChannel drops all virtual channels that are in the dropped state.

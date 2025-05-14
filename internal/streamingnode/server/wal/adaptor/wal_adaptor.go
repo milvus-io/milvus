@@ -3,6 +3,8 @@ package adaptor
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -38,7 +41,7 @@ func adaptImplsToWAL(
 	roWAL := &roWALAdaptorImpl{
 		roWALImpls:  basicWAL,
 		lifetime:    typeutil.NewLifetime(),
-		available:   make(chan struct{}),
+		available:   lifetime.NewSafeChan(),
 		idAllocator: typeutil.NewIDAllocator(),
 		scannerRegistry: scannerRegistry{
 			channel:     basicWAL.Channel(),
@@ -67,6 +70,7 @@ func adaptImplsToWAL(
 		param:                  param,
 		interceptorBuildResult: buildInterceptor(builders, param),
 		writeMetrics:           metricsutil.NewWriteMetrics(basicWAL.Channel(), basicWAL.WALName()),
+		isFenced:               atomic.NewBool(false),
 	}
 	param.WAL.Set(wal)
 	return wal, nil
@@ -81,6 +85,7 @@ type walAdaptorImpl struct {
 	param                  *interceptors.InterceptorBuildParam
 	interceptorBuildResult interceptorBuildResult
 	writeMetrics           *metricsutil.WriteMetrics
+	isFenced               *atomic.Bool
 }
 
 // GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
@@ -104,11 +109,16 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	}
 	defer w.lifetime.Done()
 
+	if w.isFenced.Load() {
+		// if the wal is fenced, we should reject all append operations.
+		return nil, status.NewChannelFenced(w.Channel().String())
+	}
+
 	// Check if interceptor is ready.
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-w.available:
+	case <-w.available.CloseCh():
 		return nil, status.NewOnShutdownError("wal is on shutdown")
 	case <-w.interceptorBuildResult.Interceptor.Ready():
 	}
@@ -139,6 +149,14 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	metricsGuard.FinishAppend()
 	if err != nil {
 		appendMetrics.Done(nil, err)
+		if errors.Is(err, walimpls.ErrFenced) {
+			// if the append operation of wal is fenced, we should report the error to the client.
+			if w.isFenced.CompareAndSwap(false, true) {
+				w.available.Close()
+				w.Logger().Warn("wal is fenced, mark as unavailable, all append opertions will be rejected", zap.Error(err))
+			}
+			return nil, status.NewChannelFenced(w.Channel().String())
+		}
 		return nil, err
 	}
 	var extra *anypb.Any
@@ -186,7 +204,7 @@ func (w *walAdaptorImpl) Close() {
 
 	// begin to close the wal.
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
-	close(w.available)
+	w.available.Close()
 	w.lifetime.Wait()
 
 	w.Logger().Info("wal begin to close scanners...")

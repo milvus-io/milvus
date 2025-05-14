@@ -5412,6 +5412,8 @@ type streamingConfig struct {
 	WALRecoveryPersistInterval      ParamItem `refreshable:"true"`
 	WALRecoveryMaxDirtyMessage      ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout ParamItem `refreshable:"true"`
+	WALTruncateSampleInterval       ParamItem `refreshable:"true"`
+	WALTruncateRetentionInterval    ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -5615,6 +5617,28 @@ If that persist operation exceeds this timeout, the wal recovery module will clo
 		Export:       true,
 	}
 	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
+
+	p.WALTruncateSampleInterval = ParamItem{
+		Key:     "streaming.walTruncate.sampleInterval",
+		Version: "2.6.0",
+		Doc: `The interval of sampling wal checkpoint when truncate, 1m by default.
+Every time the checkpoint is persisted, the checkpoint will be sampled and used to be a candidate of truncate checkpoint.
+More samples, more frequent truncate, more memory usage.`,
+		DefaultValue: "1m",
+		Export:       true,
+	}
+	p.WALTruncateSampleInterval.Init(base.mgr)
+
+	p.WALTruncateRetentionInterval = ParamItem{
+		Key:     "streaming.walTruncate.retentionInterval",
+		Version: "2.6.0",
+		Doc: `The retention interval of wal truncate, 5m by default.
+If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
+Greater the interval, more wal storage usage, more redundant data in wal`,
+		DefaultValue: "5m",
+		Export:       true,
+	}
+	p.WALTruncateRetentionInterval.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.
