@@ -54,6 +54,10 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
 VectorPtr
 PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
+    if (expr_->vals_.empty() || expr_->vals_[0].val_case() == proto::plan::GenericValue::VAL_NOT_SET) {
+        throw milvus::SegcoreError(DataTypeInvalid, "Empty values are not allowed in JsonContains expression.");
+    }
+
     auto data_type = expr_->column_.data_type_;
     switch (expr_->op_) {
         case proto::plan::JSONContainsExpr_JSONOp_Contains:
