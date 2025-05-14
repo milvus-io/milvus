@@ -839,6 +839,8 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 			PendingIndexRows:     indexInfo.GetPendingIndexRows(),
 			State:                indexInfo.GetState(),
 			IndexStateFailReason: indexInfo.GetIndexStateFailReason(),
+			MinIndexVersion:      indexInfo.GetMinIndexVersion(),
+			MaxIndexVersion:      indexInfo.GetMaxIndexVersion(),
 		}
 		dit.result.IndexDescriptions = append(dit.result.IndexDescriptions, desc)
 	}
@@ -948,6 +950,8 @@ func (dit *getIndexStatisticsTask) Execute(ctx context.Context) error {
 			TotalRows:            indexInfo.GetTotalRows(),
 			State:                indexInfo.GetState(),
 			IndexStateFailReason: indexInfo.GetIndexStateFailReason(),
+			MinIndexVersion:      indexInfo.GetMinIndexVersion(),
+			MaxIndexVersion:      indexInfo.GetMaxIndexVersion(),
 		}
 		dit.result.IndexDescriptions = append(dit.result.IndexDescriptions, desc)
 	}

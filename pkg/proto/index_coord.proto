@@ -54,6 +54,8 @@ message IndexInfo {
     bool is_auto_index = 11;
     repeated common.KeyValuePair user_index_params = 12;
     int64 pending_index_rows = 13;
+    int32 min_index_version = 14;
+    int32 max_index_version = 15;
 }
 
 message FieldIndex {
@@ -118,6 +120,7 @@ message SegmentIndexState {
     common.IndexState state = 2;
     string fail_reason = 3;
     string index_name = 4;
+    int32 index_version = 5;
 }
 
 message GetSegmentIndexStateResponse {
