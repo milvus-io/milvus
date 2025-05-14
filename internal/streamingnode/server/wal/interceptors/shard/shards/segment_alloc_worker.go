@@ -55,6 +55,8 @@ func (w *segmentAllocWorker) do() {
 	backoff.InitialInterval = 10 * time.Millisecond
 	backoff.MaxInterval = 1 * time.Second
 	backoff.MaxElapsedTime = 0
+	backoff.Reset()
+
 	for {
 		err := w.doOnce()
 		if err == nil {

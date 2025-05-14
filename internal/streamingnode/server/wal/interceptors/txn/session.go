@@ -246,13 +246,13 @@ func (s *TxnSession) getDoneChan(timetick uint64, state message.TxnState) (<-cha
 // checkIfExpired checks if the session is expired.
 func (s *TxnSession) checkIfExpired(tt uint64) error {
 	if s.expired {
-		return status.NewTransactionExpired("some message has been expired, expired at %d, current %d", s.expiredTimeTick(), tt)
+		return status.NewTransactionExpired("some message of txn %d has been expired, expired at %d, current %d", s.txnContext.TxnID, s.expiredTimeTick(), tt)
 	}
 	expiredTimeTick := s.expiredTimeTick()
 	if tt >= expiredTimeTick {
 		// once the session is expired, it will never be active again.
 		s.expired = true
-		return status.NewTransactionExpired("transaction expired at %d, current %d", expiredTimeTick, tt)
+		return status.NewTransactionExpired("txn %d expired at %d, current %d", s.txnContext.TxnID, expiredTimeTick, tt)
 	}
 	return nil
 }

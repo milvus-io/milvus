@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
@@ -24,6 +25,7 @@ func TestShardInterceptor(t *testing.T) {
 
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(log.With()).Maybe()
 	i := b.Build(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})

@@ -14,10 +14,10 @@ var (
 )
 
 // newRecoveryStreamBuilder creates a new recovery stream builder.
-func newRecoveryStreamBuilder(roWALImpls *roWALAdaptorImpl, basicWAL walimpls.WALImpls) *recoveryStreamBuilderImpl {
+func newRecoveryStreamBuilder(roWALImpls *roWALAdaptorImpl) *recoveryStreamBuilderImpl {
 	return &recoveryStreamBuilderImpl{
 		roWALAdaptorImpl: roWALImpls,
-		basicWAL:         basicWAL,
+		basicWAL:         roWALImpls.roWALImpls.(walimpls.WALImpls),
 	}
 }
 

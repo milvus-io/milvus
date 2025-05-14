@@ -31,6 +31,16 @@ type InterceptorBuildParam struct {
 	ShardManager           shards.ShardManager        // The shard manager for the wal, used to manage the shards, segment assignment, partition.
 }
 
+// Clear release the resources in the interceptor build param.
+func (p *InterceptorBuildParam) Clear() {
+	if p.WriteAheadBuffer != nil {
+		p.WriteAheadBuffer.Close()
+	}
+	if p.ShardManager != nil {
+		p.ShardManager.Close()
+	}
+}
+
 // InterceptorBuilder is the interface to build a interceptor.
 // 1. InterceptorBuilder is concurrent safe.
 // 2. InterceptorBuilder can used to build a interceptor with cross-wal shared resources.

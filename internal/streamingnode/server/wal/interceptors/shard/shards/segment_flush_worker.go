@@ -53,6 +53,7 @@ func (w *segmentFlushWorker) do() {
 	backoff.InitialInterval = 10 * time.Millisecond
 	backoff.MaxInterval = 1 * time.Second
 	backoff.MaxElapsedTime = 0
+	backoff.Reset()
 
 	// waitForTxnManagerRecoverReady waits for the txn manager to be ready for recovery.
 	// The segment assignment manager lost the txnSem for the recovered txn message,

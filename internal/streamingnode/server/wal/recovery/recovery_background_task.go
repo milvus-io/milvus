@@ -188,5 +188,7 @@ func (rs *recoveryStorageImpl) newBackoff() *backoff.ExponentialBackOff {
 	backoff.InitialInterval = 10 * time.Millisecond
 	backoff.MaxInterval = 1 * time.Second
 	backoff.MaxElapsedTime = 0
+	backoff.Reset()
+
 	return backoff
 }
