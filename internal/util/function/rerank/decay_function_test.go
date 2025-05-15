@@ -90,7 +90,7 @@ func (s *DecayFunctionSuite) TestNewDecayErrors() {
 	{
 		functionSchema.InputFieldNames = []string{"ts", "pk"}
 		_, err := newDecayFunction(schema, functionSchema)
-		s.ErrorContains(err, "Decay function only supoorts single input, but gets")
+		s.ErrorContains(err, "Decay function only supports single input, but gets")
 	}
 
 	{

@@ -70,7 +70,7 @@ func createTEIProvider(url string, schema *schemapb.FieldSchema, providerName st
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: credentialParamKey, Value: "mock"},
-			{Key: endpointParamKey, Value: url},
+			{Key: EndpointParamKey, Value: url},
 			{Key: ingestionPromptParamKey, Value: "doc:"},
 			{Key: searchPromptParamKey, Value: "query:"},
 		},
@@ -154,8 +154,8 @@ func (s *TEITextEmbeddingProviderSuite) TestCreateTEIEmbeddingClient() {
 	_, err = createTEIEmbeddingClient("", "http://mymock.com")
 	s.NoError(err)
 
-	os.Setenv(enableTeiEnvStr, "false")
-	defer os.Unsetenv(enableTeiEnvStr)
+	os.Setenv(EnableTeiEnvStr, "false")
+	defer os.Unsetenv(EnableTeiEnvStr)
 	_, err = createTEIEmbeddingClient("", "http://mymock.com")
 	s.Error(err)
 }
@@ -170,7 +170,7 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: credentialParamKey, Value: "mock"},
-			{Key: endpointParamKey, Value: "http://mymock.com"},
+			{Key: EndpointParamKey, Value: "http://mymock.com"},
 		},
 	}
 	provider, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))

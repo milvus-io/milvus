@@ -51,7 +51,12 @@ type RerankBase struct {
 	searchParams *searchParams
 }
 
-func newRerankBase(coll *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, rerankerName string, isSupportGroup bool, pkType schemapb.DataType) (*RerankBase, error) {
+func newRerankBase(coll *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, rerankerName string, isSupportGroup bool) (*RerankBase, error) {
+	pkType, err := getPKType(coll)
+	if err != nil {
+		return nil, err
+	}
+
 	base := RerankBase{
 		inputFieldNames: funcSchema.InputFieldNames,
 		rerankerName:    rerankerName,
