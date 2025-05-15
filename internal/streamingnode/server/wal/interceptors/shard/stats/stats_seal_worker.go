@@ -21,7 +21,7 @@ var (
 func newSealWorker(statsManager *StatsManager) *sealWorker {
 	w := &sealWorker{
 		statsManager:         statsManager,
-		sealNotifier:         make(chan sealSegmentIDWithPolicy, 1),
+		sealNotifier:         make(chan sealSegmentIDWithPolicy, 100),
 		growingBytesNotifier: syncutil.NewCooldownNotifier[uint64](growingBytesNotifyCooldown, 100),
 	}
 	return w
