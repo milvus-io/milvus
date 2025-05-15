@@ -9,7 +9,7 @@ import (
 )
 
 // CheckIfPartitionCanBeCreated checks if a partition can be created.
-func (m *ShardManager) CheckIfPartitionCanBeCreated(collectionID int64, partitionID int64) error {
+func (m *shardManagerImpl) CheckIfPartitionCanBeCreated(collectionID int64, partitionID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -17,7 +17,7 @@ func (m *ShardManager) CheckIfPartitionCanBeCreated(collectionID int64, partitio
 }
 
 // checkIfPartitionCanBeCreated checks if a partition can be created.
-func (m *ShardManager) checkIfPartitionCanBeCreated(collectionID int64, partitionID int64) error {
+func (m *shardManagerImpl) checkIfPartitionCanBeCreated(collectionID int64, partitionID int64) error {
 	if _, ok := m.collections[collectionID]; !ok {
 		return ErrCollectionNotFound
 	}
@@ -29,7 +29,7 @@ func (m *ShardManager) checkIfPartitionCanBeCreated(collectionID int64, partitio
 }
 
 // CheckIfPartitionExists checks if a partition can be dropped.
-func (m *ShardManager) CheckIfPartitionExists(collectionID int64, partitionID int64) error {
+func (m *shardManagerImpl) CheckIfPartitionExists(collectionID int64, partitionID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -37,7 +37,7 @@ func (m *ShardManager) CheckIfPartitionExists(collectionID int64, partitionID in
 }
 
 // checkIfPartitionExists checks if a partition can be dropped.
-func (m *ShardManager) checkIfPartitionExists(collectionID int64, partitionID int64) error {
+func (m *shardManagerImpl) checkIfPartitionExists(collectionID int64, partitionID int64) error {
 	if _, ok := m.collections[collectionID]; !ok {
 		return ErrCollectionNotFound
 	}
@@ -49,7 +49,7 @@ func (m *ShardManager) checkIfPartitionExists(collectionID int64, partitionID in
 
 // CreatePartition creates a new partition manager when create partition message is written into wal.
 // After CreatePartition is called, the dml on the partition can be applied.
-func (m *ShardManager) CreatePartition(msg message.ImmutableCreatePartitionMessageV1) {
+func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionMessageV1) {
 	collectionID := msg.Header().CollectionId
 	partitionID := msg.Header().PartitionId
 	tiemtick := msg.TimeTick()
@@ -64,11 +64,11 @@ func (m *ShardManager) CreatePartition(msg message.ImmutableCreatePartitionMessa
 	}
 
 	m.collections[collectionID].PartitionIDs[partitionID] = struct{}{}
-	if _, ok := m.managers[partitionID]; ok {
+	if _, ok := m.partitionManagers[partitionID]; ok {
 		logger.Warn("partition manager already exists")
 		return
 	}
-	m.managers[partitionID] = newPartitionSegmentManager(
+	m.partitionManagers[partitionID] = newPartitionSegmentManager(
 		m.ctx,
 		m.Logger(),
 		m.wal,
@@ -79,6 +79,7 @@ func (m *ShardManager) CreatePartition(msg message.ImmutableCreatePartitionMessa
 		make(map[int64]*segmentAllocManager),
 		m.txnManager,
 		tiemtick,
+		m.metrics,
 	)
 	m.Logger().Info("partition created")
 	m.updateMetrics()
@@ -86,7 +87,7 @@ func (m *ShardManager) CreatePartition(msg message.ImmutableCreatePartitionMessa
 
 // DropPartition drops a partition manager when drop partition message is written into wal.
 // After DropPartition is called, the dml on the partition can not be applied.
-func (m *ShardManager) DropPartition(msg message.ImmutableDropPartitionMessageV1) {
+func (m *shardManagerImpl) DropPartition(msg message.ImmutableDropPartitionMessageV1) {
 	collectionID := msg.Header().CollectionId
 	partitionID := msg.Header().PartitionId
 	logger := m.Logger().With(log.FieldMessage(msg))
@@ -100,13 +101,13 @@ func (m *ShardManager) DropPartition(msg message.ImmutableDropPartitionMessageV1
 	}
 	delete(m.collections[collectionID].PartitionIDs, partitionID)
 
-	pm, ok := m.managers[partitionID]
+	pm, ok := m.partitionManagers[partitionID]
 	if !ok {
 		logger.Warn("partition not exists", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
 		return
 	}
 
-	delete(m.managers, partitionID)
+	delete(m.partitionManagers, partitionID)
 	segmentIDs := pm.FlushAndDropPartition(policy.PolicyPartitionRemoved())
 	m.Logger().Info("partition removed", zap.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()

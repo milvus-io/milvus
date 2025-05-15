@@ -209,25 +209,27 @@ type JobIDReq struct {
 func (req *JobIDReq) GetJobID() string { return req.JobID }
 
 type QueryReqV2 struct {
-	DbName         string                 `json:"dbName"`
-	CollectionName string                 `json:"collectionName" binding:"required"`
-	PartitionNames []string               `json:"partitionNames"`
-	OutputFields   []string               `json:"outputFields"`
-	Filter         string                 `json:"filter"`
-	Limit          int32                  `json:"limit"`
-	Offset         int32                  `json:"offset"`
-	ExprParams     map[string]interface{} `json:"exprParams"`
+	DbName           string                 `json:"dbName"`
+	CollectionName   string                 `json:"collectionName" binding:"required"`
+	PartitionNames   []string               `json:"partitionNames"`
+	OutputFields     []string               `json:"outputFields"`
+	Filter           string                 `json:"filter"`
+	Limit            int32                  `json:"limit"`
+	Offset           int32                  `json:"offset"`
+	ExprParams       map[string]interface{} `json:"exprParams"`
+	ConsistencyLevel string                 `json:"consistencyLevel"`
 }
 
 func (req *QueryReqV2) GetDbName() string { return req.DbName }
 
 type CollectionIDReq struct {
-	DbName         string      `json:"dbName"`
-	CollectionName string      `json:"collectionName" binding:"required"`
-	PartitionName  string      `json:"partitionName"`
-	PartitionNames []string    `json:"partitionNames"`
-	OutputFields   []string    `json:"outputFields"`
-	ID             interface{} `json:"id" binding:"required"`
+	DbName           string      `json:"dbName"`
+	CollectionName   string      `json:"collectionName" binding:"required"`
+	PartitionName    string      `json:"partitionName"`
+	PartitionNames   []string    `json:"partitionNames"`
+	OutputFields     []string    `json:"outputFields"`
+	ID               interface{} `json:"id" binding:"required"`
+	ConsistencyLevel string      `json:"consistencyLevel"`
 }
 
 func (req *CollectionIDReq) GetDbName() string { return req.DbName }

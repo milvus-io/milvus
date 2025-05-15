@@ -165,7 +165,7 @@ func (m *TxnManager) GetSessionOfTxn(id message.TxnID) (*TxnSession, error) {
 
 	session, ok := m.sessions[id]
 	if !ok {
-		return nil, status.NewTransactionExpired("not found in manager")
+		return nil, status.NewTransactionExpired("txn %d not found in manager", id)
 	}
 	return session, nil
 }

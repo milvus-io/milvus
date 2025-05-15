@@ -10,8 +10,8 @@ import (
 var _ InterceptorWithReady = (*chainedInterceptor)(nil)
 
 type (
-	// appendInterceptorCall is the common function to execute the append interceptor.
-	appendInterceptorCall = func(ctx context.Context, msg message.MutableMessage, append Append) (message.MessageID, error)
+	// AppendInterceptorCall is the common function to execute the append interceptor.
+	AppendInterceptorCall = func(ctx context.Context, msg message.MutableMessage, append Append) (message.MessageID, error)
 )
 
 // NewChainedInterceptor creates a new chained interceptor.
@@ -27,7 +27,7 @@ func NewChainedInterceptor(interceptors ...Interceptor) InterceptorWithReady {
 type chainedInterceptor struct {
 	closed       chan struct{}
 	interceptors []Interceptor
-	appendCall   appendInterceptorCall
+	appendCall   AppendInterceptorCall
 }
 
 // Ready wait all interceptors to be ready.
@@ -63,7 +63,7 @@ func (c *chainedInterceptor) Close() {
 }
 
 // chainAppendInterceptors chains all unary client interceptors into one.
-func chainAppendInterceptors(interceptors []Interceptor) appendInterceptorCall {
+func chainAppendInterceptors(interceptors []Interceptor) AppendInterceptorCall {
 	if len(interceptors) == 0 {
 		// Do nothing if no interceptors.
 		return func(ctx context.Context, msg message.MutableMessage, append Append) (message.MessageID, error) {
@@ -100,7 +100,7 @@ func getChainAppendInvoker(interceptors []Interceptor, idx int, finalInvoker App
 }
 
 // adaptAppendWithMetricCollecting adapts the append interceptor with metric collecting.
-func adaptAppendWithMetricCollecting(name string, append appendInterceptorCall) appendInterceptorCall {
+func adaptAppendWithMetricCollecting(name string, append AppendInterceptorCall) AppendInterceptorCall {
 	return func(ctx context.Context, msg message.MutableMessage, invoker Append) (message.MessageID, error) {
 		c := utility.MustGetAppendMetrics(ctx).StartInterceptorCollector(name)
 		msgID, err := append(ctx, msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {

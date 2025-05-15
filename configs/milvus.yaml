@@ -875,7 +875,9 @@ common:
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
-    defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
+    # default password for root user. The maximum length is 72 characters. 
+    # Large numeric passwords require double quotes to avoid yaml parsing precision issues.
+    defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
     rbac:
@@ -1242,6 +1244,15 @@ streaming:
     # When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
     # If that persist operation exceeds this timeout, the wal recovery module will close right now.
     gracefulCloseTimeout: 3s
+  walTruncate:
+    # The interval of sampling wal checkpoint when truncate, 1m by default.
+    # Every time the checkpoint is persisted, the checkpoint will be sampled and used to be a candidate of truncate checkpoint.
+    # More samples, more frequent truncate, more memory usage.
+    sampleInterval: 1m
+    # The retention interval of wal truncate, 5m by default.
+    # If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
+    # Greater the interval, more wal storage usage, more redundant data in wal
+    retentionInterval: 5m
 
 # Any configuration related to the knowhere vector search engine
 knowhere:

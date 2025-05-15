@@ -15,7 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -84,7 +84,7 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 			}
 			if tt, ok := t.(*syncmgr.SyncTask); ok {
 				insertLogs, _, _, _ := tt.Binlogs()
-				resource.Resource().SegmentAssignStatsManager().UpdateOnSync(tt.SegmentID(), stats.SyncOperationMetrics{
+				resource.Resource().SegmentStatsManager().UpdateOnSync(tt.SegmentID(), stats.SyncOperationMetrics{
 					BinLogCounterIncr:     1,
 					BinLogFileCounterIncr: uint64(len(insertLogs)),
 				})
@@ -258,7 +258,7 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 			}
 			if tt, ok := t.(*syncmgr.SyncTask); ok {
 				insertLogs, _, _, _ := tt.Binlogs()
-				resource.Resource().SegmentAssignStatsManager().UpdateOnSync(tt.SegmentID(), stats.SyncOperationMetrics{
+				resource.Resource().SegmentStatsManager().UpdateOnSync(tt.SegmentID(), stats.SyncOperationMetrics{
 					BinLogCounterIncr:     1,
 					BinLogFileCounterIncr: uint64(len(insertLogs)),
 				})

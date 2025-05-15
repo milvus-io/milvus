@@ -3,9 +3,13 @@ package walimpls
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
+
+var ErrFenced = errors.New("fenced")
 
 // ROWALImpls is the underlying implementation for a read-only wal.
 type ROWALImpls interface {
@@ -29,6 +33,8 @@ type WALImpls interface {
 
 	// Append writes a record to the log.
 	// Can be only called when the wal is in read-write mode.
+	// If ErrFenced is returned, the wal write operation is fenced forever and cannot recover.
+	// The caller should close the wal and recreate a new wal instance to recover the write operation.
 	Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)
 
 	// Truncate truncates the wal to the given id (inclusive).

@@ -741,8 +741,9 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	)
 
 	req := &segcore.LoadFieldDataRequest{
-		MMapDir:  paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
-		RowCount: rowCount,
+		MMapDir:        paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
+		RowCount:       rowCount,
+		StorageVersion: loadInfo.StorageVersion,
 	}
 	for _, field := range fields {
 		req.Fields = append(req.Fields, segcore.LoadFieldDataInfo{
@@ -803,7 +804,8 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 			Field:      field,
 			EnableMMap: mmapEnabled,
 		}},
-		RowCount: rowCount,
+		RowCount:       rowCount,
+		StorageVersion: s.LoadInfo().GetStorageVersion(),
 	}
 
 	GetLoadPool().Submit(func() (any, error) {

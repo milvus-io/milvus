@@ -7,9 +7,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/flusher"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -27,9 +27,9 @@ func OpenManager() (Manager, error) {
 	resource.Resource().Logger().Info("open wal manager", zap.String("walName", walName))
 	opener, err := registry.MustGetBuilder(walName,
 		redo.NewInterceptorBuilder(),
-		flusher.NewInterceptorBuilder(),
+		lock.NewInterceptorBuilder(),
 		timetick.NewInterceptorBuilder(),
-		segment.NewInterceptorBuilder(),
+		shard.NewInterceptorBuilder(),
 	).Build()
 	if err != nil {
 		return nil, err
@@ -102,7 +102,7 @@ func (m *managerImpl) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, erro
 	defer m.lifetime.Done()
 
 	l := m.getWALLifetime(channel.Name).GetWAL()
-	if l == nil {
+	if l == nil || !l.IsAvailable() {
 		return nil, status.NewChannelNotExist(channel.Name)
 	}
 

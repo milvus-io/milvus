@@ -43,6 +43,7 @@ func NewWriteMetrics(pchannel types.PChannelInfo, walName string) *WriteMetrics 
 		bytes:                        metrics.WALAppendMessageBytes.MustCurryWith(constLabel),
 		total:                        metrics.WALAppendMessageTotal.MustCurryWith(constLabel),
 		walDuration:                  metrics.WALAppendMessageDurationSeconds.MustCurryWith(constLabel),
+		walimplsRetryTotal:           metrics.WALImplsAppendRetryTotal.With(constLabel),
 		walimplsDuration:             metrics.WALImplsAppendMessageDurationSeconds.MustCurryWith(constLabel),
 		walBeforeInterceptorDuration: metrics.WALAppendMessageBeforeInterceptorDurationSeconds.MustCurryWith(constLabel),
 		walAfterInterceptorDuration:  metrics.WALAppendMessageAfterInterceptorDurationSeconds.MustCurryWith(constLabel),
@@ -59,6 +60,7 @@ type WriteMetrics struct {
 	bytes                        prometheus.ObserverVec
 	total                        *prometheus.CounterVec
 	walDuration                  prometheus.ObserverVec
+	walimplsRetryTotal           prometheus.Counter
 	walimplsDuration             prometheus.ObserverVec
 	walBeforeInterceptorDuration prometheus.ObserverVec
 	walAfterInterceptorDuration  prometheus.ObserverVec
@@ -81,7 +83,7 @@ func (m *WriteMetrics) done(appendMetrics *AppendMetrics) {
 	if appendMetrics.implAppendDuration != 0 {
 		m.walimplsDuration.WithLabelValues(status).Observe(appendMetrics.implAppendDuration.Seconds())
 	}
-	m.bytes.WithLabelValues(status).Observe(float64(appendMetrics.bytes))
+	m.bytes.WithLabelValues(status).Observe(float64(appendMetrics.msg.EstimateSize()))
 	m.total.WithLabelValues(appendMetrics.msg.MessageType().String(), status).Inc()
 	m.walDuration.WithLabelValues(status).Observe(appendMetrics.appendDuration.Seconds())
 	for name, ims := range appendMetrics.interceptors {
@@ -108,12 +110,18 @@ func (m *WriteMetrics) done(appendMetrics *AppendMetrics) {
 	}
 }
 
+// ObserveRetry observes the retry of the walimpls.
+func (m *WriteMetrics) ObserveRetry() {
+	m.walimplsRetryTotal.Inc()
+}
+
 func (m *WriteMetrics) Close() {
 	metrics.WALAppendMessageBeforeInterceptorDurationSeconds.DeletePartialMatch(m.constLabel)
 	metrics.WALAppendMessageAfterInterceptorDurationSeconds.DeletePartialMatch(m.constLabel)
 	metrics.WALAppendMessageBytes.DeletePartialMatch(m.constLabel)
 	metrics.WALAppendMessageTotal.DeletePartialMatch(m.constLabel)
 	metrics.WALAppendMessageDurationSeconds.DeletePartialMatch(m.constLabel)
+	metrics.WALImplsAppendRetryTotal.DeletePartialMatch(m.constLabel)
 	metrics.WALImplsAppendMessageDurationSeconds.DeletePartialMatch(m.constLabel)
 	metrics.WALInfo.DeleteLabelValues(
 		paramtable.GetStringNodeID(),

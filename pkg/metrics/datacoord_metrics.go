@@ -389,6 +389,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(IndexRequestCounter)
 	registry.MustRegister(IndexTaskNum)
 	registry.MustRegister(IndexNodeNum)
+	registry.MustRegister(ImportJobs)
 	registry.MustRegister(ImportTasks)
 	registry.MustRegister(GarbageCollectorFileScanDuration)
 	registry.MustRegister(GarbageCollectorRunCount)
