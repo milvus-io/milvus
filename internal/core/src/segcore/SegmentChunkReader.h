@@ -77,15 +77,18 @@ class SegmentChunkReader {
                 chunk_size = segment_->chunk_size(field_id, chunk_id);
             }
 
-            for (int64_t i = chunk_id == current_chunk_id ? current_chunk_pos
-                                                          : 0;
-                 i < chunk_size;
-                 ++i) {
-                if (++processed_rows >= batch_size) {
-                    current_chunk_id = chunk_id;
-                    current_chunk_pos = i + 1;
-                    return;
-                }
+            int64_t start_pos =
+                (chunk_id == current_chunk_id) ? current_chunk_pos : 0;
+            int64_t remaining = batch_size - processed_rows;
+            int64_t rows_in_chunk = chunk_size - start_pos;
+            // Process either full chunk or remaining rows needed
+            int64_t rows_to_process = std::min(rows_in_chunk, remaining);
+
+            processed_rows += rows_to_process;
+            current_chunk_id = chunk_id;
+            current_chunk_pos = start_pos + rows_to_process;
+            if (processed_rows >= batch_size) {
+                break;
             }
         }
     }
