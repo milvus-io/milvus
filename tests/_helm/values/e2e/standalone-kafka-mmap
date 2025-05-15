@@ -13,6 +13,7 @@ streaming:
 service:
   type: ClusterIP
 standalone:
+  messageQueue: kafka
   disk:
     enabled: true
   resources:
