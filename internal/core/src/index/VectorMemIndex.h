@@ -28,7 +28,9 @@
 #include "index/IndexInfo.h"
 
 namespace milvus::index {
-
+// TODO : growing index should be isolated from VectorMemIndex
+// For general index, it should not suppport AddWithDataset etc.
+// For growing index, it should suppport AddWithDataset etc.
 template <typename T>
 class VectorMemIndex : public VectorIndex {
  public:
@@ -36,6 +38,7 @@ class VectorMemIndex : public VectorIndex {
         const IndexType& index_type,
         const MetricType& metric_type,
         const IndexVersion& version,
+        bool use_knowhere_build_pool = true,
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
@@ -100,6 +103,7 @@ class VectorMemIndex : public VectorIndex {
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
 
     CreateIndexInfo create_index_info_;
+    bool use_knowhere_build_pool_;
 };
 
 template <typename T>
