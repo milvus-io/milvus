@@ -64,10 +64,19 @@ class SegmentChunkReader {
                                const FieldId field_id,
                                const int64_t num_chunk,
                                const int64_t batch_size) const {
+        int64_t segment_row_count = segment_->get_row_count();
         int64_t current_offset =
             segment_->num_rows_until_chunk(field_id, current_chunk_id) +
             current_chunk_pos;
         int64_t target_offset = current_offset + batch_size;
+
+        if (target_offset >= segment_row_count) {
+            current_chunk_id = num_chunk - 1;
+            current_chunk_pos =
+                segment_row_count -
+                segment_->num_rows_until_chunk(field_id, current_chunk_id);
+            return;
+        }
         auto [chunk_id, chunk_pos] =
             segment_->get_chunk_by_offset(field_id, target_offset);
         current_chunk_id = chunk_id;
