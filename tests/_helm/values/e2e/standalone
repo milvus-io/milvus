@@ -13,7 +13,7 @@ streaming:
 service:
   type: ClusterIP
 standalone:
-  messageQueue: rockmq
+  messageQueue: rocksmq
   disk:
     enabled: true
   resources:
