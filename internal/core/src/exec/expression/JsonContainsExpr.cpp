@@ -25,6 +25,31 @@ void
 PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
+
+    if (expr_->vals_.empty()) {
+        auto next_batch_size = GetNextBatchSize();
+        auto real_batch_size = has_offset_input_
+                                   ? context.get_offset_input()->size()
+                                   : next_batch_size;
+        if (real_batch_size == 0) {
+            result = nullptr;
+            return;
+        }
+        auto res_vec =
+            std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                           TargetBitmap(real_batch_size, true));
+
+        TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+
+        res.set();
+        valid_res.set();
+
+        result = res_vec;
+        current_data_chunk_pos_ += real_batch_size;
+        return;
+    }
+
     switch (expr_->column_.data_type_) {
         case DataType::ARRAY: {
             if (is_index_mode_ && !has_offset_input_) {

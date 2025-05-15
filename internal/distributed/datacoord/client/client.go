@@ -100,8 +100,18 @@ func (c *Client) getDataCoordAddr() (string, error) {
 	}
 	ms, ok := msess[key]
 	if !ok {
-		log.Debug("DataCoordClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
-		return "", errors.New("find no available datacoord, check datacoord state")
+		msess, _, err = c.sess.GetSessions(typeutil.MixCoordRole)
+		if err != nil {
+			log.Debug("DataCoordClient, getSessions failed", zap.Any("key", typeutil.MixCoordRole), zap.Error(err))
+			return "", errors.New("find no available datacoord, check datacoord state")
+		}
+		ms, ok = msess[typeutil.MixCoordRole]
+		if !ok {
+			log.Debug("DataCoordClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
+			return "", errors.New("find no available datacoord, check datacoord state")
+		} else {
+			log.Debug("DataCoordClient GetSessions use MixCoord", zap.Any("key", key))
+		}
 	}
 	log.Debug("DataCoordClient GetSessions success",
 		zap.String("address", ms.Address),

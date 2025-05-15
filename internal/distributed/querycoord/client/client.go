@@ -89,8 +89,18 @@ func (c *Client) getQueryCoordAddr() (string, error) {
 	}
 	ms, ok := msess[key]
 	if !ok {
-		log.Ctx(c.ctx).Debug("QueryCoordClient msess key not existed", zap.Any("key", key))
-		return "", errors.New("find no available querycoord, check querycoord state")
+		msess, _, err = c.sess.GetSessions(typeutil.MixCoordRole)
+		if err != nil {
+			log.Debug("QueryCoordClient getSessions failed", zap.Any("key", typeutil.MixCoordRole), zap.Error(err))
+			return "", errors.New("find no available querycoord, check querycoord state")
+		}
+		ms, ok = msess[typeutil.MixCoordRole]
+		if !ok {
+			log.Ctx(c.ctx).Debug("QueryCoordClient msess key not existed", zap.Any("key", key))
+			return "", errors.New("find no available querycoord, check querycoord state")
+		} else {
+			log.Debug("QueryCoordClient GetSessions use MixCoord", zap.Any("key", key))
+		}
 	}
 
 	log.Ctx(c.ctx).Debug("QueryCoordClient GetSessions success",

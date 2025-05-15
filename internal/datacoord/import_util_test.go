@@ -31,6 +31,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/json"
@@ -96,7 +97,20 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 		},
 	}
 	job := &importJob{
-		ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 2},
+		ImportJob: &datapb.ImportJob{
+			JobID:        1,
+			CollectionID: 2,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+					},
+				},
+			},
+		},
 	}
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
