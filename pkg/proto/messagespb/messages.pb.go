@@ -1115,7 +1115,7 @@ type ManualFlushMessageHeader struct {
 
 	CollectionId int64   `protobuf:"varint,1,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
 	FlushTs      uint64  `protobuf:"varint,2,opt,name=flush_ts,json=flushTs,proto3" json:"flush_ts,omitempty"`
-	SegmentIds   []int64 `protobuf:"varint,3,rep,packed,name=segment_ids,json=segmentIds,proto3" json:"segment_ids,omitempty"` // the segment ids to be flushed
+	SegmentIds   []int64 `protobuf:"varint,3,rep,packed,name=segment_ids,json=segmentIds,proto3" json:"segment_ids,omitempty"` // the segment ids to be flushed, will be filled by wal shard manager.
 }
 
 func (x *ManualFlushMessageHeader) Reset() {
@@ -1605,7 +1605,7 @@ type SchemaChangeMessageHeader struct {
 	unknownFields protoimpl.UnknownFields
 
 	CollectionId      int64   `protobuf:"varint,1,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
-	FlushedSegmentIds []int64 `protobuf:"varint,2,rep,packed,name=flushed_segment_ids,json=flushedSegmentIds,proto3" json:"flushed_segment_ids,omitempty"`
+	FlushedSegmentIds []int64 `protobuf:"varint,2,rep,packed,name=flushed_segment_ids,json=flushedSegmentIds,proto3" json:"flushed_segment_ids,omitempty"` // will be filled by wal shard manager.
 }
 
 func (x *SchemaChangeMessageHeader) Reset() {

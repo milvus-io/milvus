@@ -227,4 +227,23 @@ func TestShardInterceptor(t *testing.T) {
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
+
+	msg = message.NewSchemaChangeMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&messagespb.SchemaChangeMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&messagespb.SchemaChangeMessageBody{}).
+		MustBuildMutable().WithTimeTick(1)
+	shardManager.EXPECT().FlushAndFenceSegmentAllocUntil(mock.Anything, mock.Anything).Unset()
+	shardManager.EXPECT().FlushAndFenceSegmentAllocUntil(mock.Anything, mock.Anything).Return(nil, nil)
+	msgID, err = i.DoAppend(ctx, msg, appender)
+	assert.NoError(t, err)
+	assert.NotNil(t, msgID)
+
+	shardManager.EXPECT().FlushAndFenceSegmentAllocUntil(mock.Anything, mock.Anything).Unset()
+	shardManager.EXPECT().FlushAndFenceSegmentAllocUntil(mock.Anything, mock.Anything).Return(nil, mockErr)
+	msgID, err = i.DoAppend(ctx, msg, appender)
+	assert.Error(t, err)
+	assert.Nil(t, msgID)
 }

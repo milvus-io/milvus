@@ -263,6 +263,7 @@ func (b *streamBuilder) generateStreamMessage() []message.ImmutableMessage {
 		b.createTxn,
 		b.createTxn,
 		b.createManualFlush,
+		b.createSchemaChange,
 	}
 	msgs := make([]message.ImmutableMessage, 0)
 	for i := 0; i < int(rand.Int63n(1000)+1000); i++ {
@@ -522,13 +523,7 @@ func (b *streamBuilder) createManualFlush() message.ImmutableMessage {
 		}
 		segmentIDs := make([]int64, 0)
 		for partitionID := range collection {
-			if rand.Int31n(3) < 1 {
-				continue
-			}
 			for segmentID := range collection[partitionID] {
-				if rand.Int31n(4) < 2 {
-					continue
-				}
 				segmentIDs = append(segmentIDs, segmentID)
 				delete(collection[partitionID], segmentID)
 			}
@@ -544,6 +539,34 @@ func (b *streamBuilder) createManualFlush() message.ImmutableMessage {
 				SegmentIds:   segmentIDs,
 			}).
 			WithBody(&message.ManualFlushMessageBody{}).
+			MustBuildMutable().
+			WithTimeTick(b.timetick).
+			WithLastConfirmed(rmq.NewRmqID(b.lastConfirmedMessageID)).
+			IntoImmutableMessage(rmq.NewRmqID(b.messageID))
+	}
+	return nil
+}
+
+func (b *streamBuilder) createSchemaChange() message.ImmutableMessage {
+	for collectionID, collection := range b.collectionIDs {
+		if rand.Int31n(3) < 1 {
+			continue
+		}
+		segmentIDs := make([]int64, 0)
+		for partitionID := range collection {
+			for segmentID := range collection[partitionID] {
+				segmentIDs = append(segmentIDs, segmentID)
+				delete(collection[partitionID], segmentID)
+			}
+		}
+		b.nextMessage()
+		return message.NewSchemaChangeMessageBuilderV2().
+			WithVChannel(b.vchannels[collectionID]).
+			WithHeader(&message.SchemaChangeMessageHeader{
+				CollectionId:      collectionID,
+				FlushedSegmentIds: segmentIDs,
+			}).
+			WithBody(&message.SchemaChangeMessageBody{}).
 			MustBuildMutable().
 			WithTimeTick(b.timetick).
 			WithLastConfirmed(rmq.NewRmqID(b.lastConfirmedMessageID)).
