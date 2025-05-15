@@ -138,12 +138,17 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
 	header := insertMsg.Header()
 	for _, partition := range header.GetPartitions() {
+		if partition.BinarySize == 0 {
+			// binary size should be set at proxy with estimate, but we don't implement it right now.
+			// use payload size instead.
+			partition.BinarySize = uint64(len(msg.Payload()))
+		}
 		req := &shards.AssignSegmentRequest{
 			CollectionID: header.GetCollectionId(),
 			PartitionID:  partition.GetPartitionId(),
 			InsertMetrics: stats.InsertMetrics{
 				Rows:       partition.GetRows(),
-				BinarySize: uint64(msg.EstimateSize()), // TODO: Use parition.BinarySize in future when merge partitions together in one message.
+				BinarySize: partition.GetBinarySize(),
 			},
 			TimeTick: msg.TimeTick(),
 		}

@@ -111,6 +111,11 @@ func TestStatsManager(t *testing.T) {
 	err = m.AllocRows(7, InsertMetrics{Rows: 400, BinarySize: 400})
 	assert.ErrorIs(t, err, ErrTooLargeInsert)
 
+	assert.Panics(t, func() {
+		// alloc rows on a sealed segment should panic
+		m.AllocRows(1000, InsertMetrics{Rows: 0, BinarySize: 0})
+	})
+
 	m.UnregisterSealedSegment(3)
 	m.UnregisterSealedSegment(4)
 	m.UnregisterSealedSegment(5)
