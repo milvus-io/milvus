@@ -1604,24 +1604,32 @@ func (suite *JobSuite) updateChannelDist(ctx context.Context, collection int64, 
 	segments := lo.Flatten(lo.Values(suite.segments[collection]))
 
 	replicas := suite.meta.ReplicaManager.GetByCollection(ctx, collection)
+	targetVersion := suite.targetMgr.GetCollectionTargetVersion(ctx, collection, meta.CurrentTargetFirst)
 	for _, replica := range replicas {
 		if loaded {
 			i := 0
 			for _, node := range replica.GetNodes() {
-				suite.dist.ChannelDistManager.Update(node, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
-					CollectionID: collection,
-					ChannelName:  channels[i],
-				}))
-				suite.dist.LeaderViewManager.Update(node, &meta.LeaderView{
-					ID:           node,
-					CollectionID: collection,
-					Channel:      channels[i],
-					Segments: lo.SliceToMap(segments, func(segment int64) (int64, *querypb.SegmentDist) {
-						return segment, &querypb.SegmentDist{
-							NodeID:  node,
-							Version: time.Now().Unix(),
-						}
-					}),
+				suite.dist.ChannelDistManager.Update(node, &meta.DmChannel{
+					VchannelInfo: &datapb.VchannelInfo{
+						CollectionID: collection,
+						ChannelName:  channels[i],
+					},
+					Node: node,
+					View: &meta.LeaderView{
+						ID:           node,
+						CollectionID: collection,
+						Channel:      channels[i],
+						Segments: lo.SliceToMap(segments, func(segment int64) (int64, *querypb.SegmentDist) {
+							return segment, &querypb.SegmentDist{
+								NodeID:  node,
+								Version: time.Now().Unix(),
+							}
+						}),
+						TargetVersion: targetVersion,
+						Status: &querypb.LeaderViewStatus{
+							Serviceable: true,
+						},
+					},
 				})
 				i++
 				if i >= len(channels) {
@@ -1631,7 +1639,6 @@ func (suite *JobSuite) updateChannelDist(ctx context.Context, collection int64, 
 		} else {
 			for _, node := range replica.GetNodes() {
 				suite.dist.ChannelDistManager.Update(node)
-				suite.dist.LeaderViewManager.Update(node)
 			}
 		}
 	}

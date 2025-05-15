@@ -212,6 +212,7 @@ func (suite *ServiceSuite) TestGetStatistics_Normal() {
 	ctx := context.Background()
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
+	suite.syncDistribution(context.TODO())
 
 	req := &querypb.GetStatisticsRequest{
 		Req: &internalpb.GetStatisticsRequest{
@@ -1392,9 +1393,13 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	}
 
 	syncVersionAction := &querypb.SyncAction{
-		Type:           querypb.SyncType_UpdateVersion,
-		SealedInTarget: []int64{1, 2, 3},
-		TargetVersion:  time.Now().UnixMilli(),
+		Type: querypb.SyncType_UpdateVersion,
+		SealedSegmentRowCount: map[int64]int64{
+			1: 100,
+			2: 200,
+			3: 300,
+		},
+		TargetVersion: time.Now().UnixMilli(),
 	}
 
 	syncReq.Actions = []*querypb.SyncAction{syncVersionAction}

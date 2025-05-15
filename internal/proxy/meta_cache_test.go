@@ -1395,6 +1395,7 @@ func TestMetaCache_GetShards(t *testing.T) {
 						ChannelName: "channel-1",
 						NodeIds:     []int64{1, 2, 3},
 						NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+						Serviceable: []bool{true, true, true},
 					},
 				},
 			}, nil
@@ -1455,6 +1456,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 						ChannelName: "channel-1",
 						NodeIds:     []int64{1, 2, 3},
 						NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+						Serviceable: []bool{true, true, true},
 					},
 				},
 			}, nil
@@ -1836,6 +1838,7 @@ func TestMetaCache_InvalidateShardLeaderCache(t *testing.T) {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil

@@ -65,6 +65,7 @@ func (s *StatisticTaskSuite) SetupTest() {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil

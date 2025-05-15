@@ -1122,29 +1122,31 @@ type SearchRequest struct {
 	PartitionIDs []int64           `protobuf:"varint,5,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
 	Dsl          string            `protobuf:"bytes,6,opt,name=dsl,proto3" json:"dsl,omitempty"`
 	// serialized `PlaceholderGroup`
-	PlaceholderGroup   []byte                    `protobuf:"bytes,7,opt,name=placeholder_group,json=placeholderGroup,proto3" json:"placeholder_group,omitempty"`
-	DslType            commonpb.DslType          `protobuf:"varint,8,opt,name=dsl_type,json=dslType,proto3,enum=milvus.proto.common.DslType" json:"dsl_type,omitempty"`
-	SerializedExprPlan []byte                    `protobuf:"bytes,9,opt,name=serialized_expr_plan,json=serializedExprPlan,proto3" json:"serialized_expr_plan,omitempty"`
-	OutputFieldsId     []int64                   `protobuf:"varint,10,rep,packed,name=output_fields_id,json=outputFieldsId,proto3" json:"output_fields_id,omitempty"`
-	MvccTimestamp      uint64                    `protobuf:"varint,11,opt,name=mvcc_timestamp,json=mvccTimestamp,proto3" json:"mvcc_timestamp,omitempty"`
-	GuaranteeTimestamp uint64                    `protobuf:"varint,12,opt,name=guarantee_timestamp,json=guaranteeTimestamp,proto3" json:"guarantee_timestamp,omitempty"`
-	TimeoutTimestamp   uint64                    `protobuf:"varint,13,opt,name=timeout_timestamp,json=timeoutTimestamp,proto3" json:"timeout_timestamp,omitempty"`
-	Nq                 int64                     `protobuf:"varint,14,opt,name=nq,proto3" json:"nq,omitempty"`
-	Topk               int64                     `protobuf:"varint,15,opt,name=topk,proto3" json:"topk,omitempty"`
-	MetricType         string                    `protobuf:"bytes,16,opt,name=metricType,proto3" json:"metricType,omitempty"`
-	IgnoreGrowing      bool                      `protobuf:"varint,17,opt,name=ignoreGrowing,proto3" json:"ignoreGrowing,omitempty"` // Optional
-	Username           string                    `protobuf:"bytes,18,opt,name=username,proto3" json:"username,omitempty"`
-	SubReqs            []*SubSearchRequest       `protobuf:"bytes,19,rep,name=sub_reqs,json=subReqs,proto3" json:"sub_reqs,omitempty"`
-	IsAdvanced         bool                      `protobuf:"varint,20,opt,name=is_advanced,json=isAdvanced,proto3" json:"is_advanced,omitempty"`
-	Offset             int64                     `protobuf:"varint,21,opt,name=offset,proto3" json:"offset,omitempty"`
-	ConsistencyLevel   commonpb.ConsistencyLevel `protobuf:"varint,22,opt,name=consistency_level,json=consistencyLevel,proto3,enum=milvus.proto.common.ConsistencyLevel" json:"consistency_level,omitempty"`
-	GroupByFieldId     int64                     `protobuf:"varint,23,opt,name=group_by_field_id,json=groupByFieldId,proto3" json:"group_by_field_id,omitempty"`
-	GroupSize          int64                     `protobuf:"varint,24,opt,name=group_size,json=groupSize,proto3" json:"group_size,omitempty"`
-	FieldId            int64                     `protobuf:"varint,25,opt,name=field_id,json=fieldId,proto3" json:"field_id,omitempty"`
-	IsTopkReduce       bool                      `protobuf:"varint,26,opt,name=is_topk_reduce,json=isTopkReduce,proto3" json:"is_topk_reduce,omitempty"`
-	IsRecallEvaluation bool                      `protobuf:"varint,27,opt,name=is_recall_evaluation,json=isRecallEvaluation,proto3" json:"is_recall_evaluation,omitempty"`
-	IsIterator         bool                      `protobuf:"varint,28,opt,name=is_iterator,json=isIterator,proto3" json:"is_iterator,omitempty"`
-	AnalyzerName       string                    `protobuf:"bytes,29,opt,name=analyzer_name,json=analyzerName,proto3" json:"analyzer_name,omitempty"`
+	PlaceholderGroup               []byte                    `protobuf:"bytes,7,opt,name=placeholder_group,json=placeholderGroup,proto3" json:"placeholder_group,omitempty"`
+	DslType                        commonpb.DslType          `protobuf:"varint,8,opt,name=dsl_type,json=dslType,proto3,enum=milvus.proto.common.DslType" json:"dsl_type,omitempty"`
+	SerializedExprPlan             []byte                    `protobuf:"bytes,9,opt,name=serialized_expr_plan,json=serializedExprPlan,proto3" json:"serialized_expr_plan,omitempty"`
+	OutputFieldsId                 []int64                   `protobuf:"varint,10,rep,packed,name=output_fields_id,json=outputFieldsId,proto3" json:"output_fields_id,omitempty"`
+	MvccTimestamp                  uint64                    `protobuf:"varint,11,opt,name=mvcc_timestamp,json=mvccTimestamp,proto3" json:"mvcc_timestamp,omitempty"`
+	GuaranteeTimestamp             uint64                    `protobuf:"varint,12,opt,name=guarantee_timestamp,json=guaranteeTimestamp,proto3" json:"guarantee_timestamp,omitempty"`
+	TimeoutTimestamp               uint64                    `protobuf:"varint,13,opt,name=timeout_timestamp,json=timeoutTimestamp,proto3" json:"timeout_timestamp,omitempty"`
+	Nq                             int64                     `protobuf:"varint,14,opt,name=nq,proto3" json:"nq,omitempty"`
+	Topk                           int64                     `protobuf:"varint,15,opt,name=topk,proto3" json:"topk,omitempty"`
+	MetricType                     string                    `protobuf:"bytes,16,opt,name=metricType,proto3" json:"metricType,omitempty"`
+	IgnoreGrowing                  bool                      `protobuf:"varint,17,opt,name=ignoreGrowing,proto3" json:"ignoreGrowing,omitempty"` // Optional
+	Username                       string                    `protobuf:"bytes,18,opt,name=username,proto3" json:"username,omitempty"`
+	SubReqs                        []*SubSearchRequest       `protobuf:"bytes,19,rep,name=sub_reqs,json=subReqs,proto3" json:"sub_reqs,omitempty"`
+	IsAdvanced                     bool                      `protobuf:"varint,20,opt,name=is_advanced,json=isAdvanced,proto3" json:"is_advanced,omitempty"`
+	Offset                         int64                     `protobuf:"varint,21,opt,name=offset,proto3" json:"offset,omitempty"`
+	ConsistencyLevel               commonpb.ConsistencyLevel `protobuf:"varint,22,opt,name=consistency_level,json=consistencyLevel,proto3,enum=milvus.proto.common.ConsistencyLevel" json:"consistency_level,omitempty"`
+	GroupByFieldId                 int64                     `protobuf:"varint,23,opt,name=group_by_field_id,json=groupByFieldId,proto3" json:"group_by_field_id,omitempty"`
+	GroupSize                      int64                     `protobuf:"varint,24,opt,name=group_size,json=groupSize,proto3" json:"group_size,omitempty"`
+	FieldId                        int64                     `protobuf:"varint,25,opt,name=field_id,json=fieldId,proto3" json:"field_id,omitempty"`
+	IsTopkReduce                   bool                      `protobuf:"varint,26,opt,name=is_topk_reduce,json=isTopkReduce,proto3" json:"is_topk_reduce,omitempty"`
+	IsRecallEvaluation             bool                      `protobuf:"varint,27,opt,name=is_recall_evaluation,json=isRecallEvaluation,proto3" json:"is_recall_evaluation,omitempty"`
+	IsIterator                     bool                      `protobuf:"varint,28,opt,name=is_iterator,json=isIterator,proto3" json:"is_iterator,omitempty"`
+	AnalyzerName                   string                    `protobuf:"bytes,29,opt,name=analyzer_name,json=analyzerName,proto3" json:"analyzer_name,omitempty"`
+	PartialResultRequiredDataRatio float32                   `protobuf:"fixed32,30,opt,name=partial_result_required_data_ratio,json=partialResultRequiredDataRatio,proto3" json:"partial_result_required_data_ratio,omitempty"`
+	EnablePartialResult            bool                      `protobuf:"varint,31,opt,name=enable_partial_result,json=enablePartialResult,proto3" json:"enable_partial_result,omitempty"`
 }
 
 func (x *SearchRequest) Reset() {
@@ -1382,6 +1384,20 @@ func (x *SearchRequest) GetAnalyzerName() string {
 	return ""
 }
 
+func (x *SearchRequest) GetPartialResultRequiredDataRatio() float32 {
+	if x != nil {
+		return x.PartialResultRequiredDataRatio
+	}
+	return 0
+}
+
+func (x *SearchRequest) GetEnablePartialResult() bool {
+	if x != nil {
+		return x.EnablePartialResult
+	}
+	return false
+}
+
 type SubSearchResults struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1505,6 +1521,7 @@ type SearchResults struct {
 	AllSearchCount     int64               `protobuf:"varint,17,opt,name=all_search_count,json=allSearchCount,proto3" json:"all_search_count,omitempty"`
 	IsTopkReduce       bool                `protobuf:"varint,18,opt,name=is_topk_reduce,json=isTopkReduce,proto3" json:"is_topk_reduce,omitempty"`
 	IsRecallEvaluation bool                `protobuf:"varint,19,opt,name=is_recall_evaluation,json=isRecallEvaluation,proto3" json:"is_recall_evaluation,omitempty"`
+	AccessedDataRatio  float32             `protobuf:"fixed32,20,opt,name=accessed_data_ratio,json=accessedDataRatio,proto3" json:"accessed_data_ratio,omitempty"`
 }
 
 func (x *SearchResults) Reset() {
@@ -1672,6 +1689,13 @@ func (x *SearchResults) GetIsRecallEvaluation() bool {
 	return false
 }
 
+func (x *SearchResults) GetAccessedDataRatio() float32 {
+	if x != nil {
+		return x.AccessedDataRatio
+	}
+	return 0
+}
+
 type CostAggregation struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1748,25 +1772,27 @@ type RetrieveRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Base                         *commonpb.MsgBase         `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	ReqID                        int64                     `protobuf:"varint,2,opt,name=reqID,proto3" json:"reqID,omitempty"`
-	DbID                         int64                     `protobuf:"varint,3,opt,name=dbID,proto3" json:"dbID,omitempty"`
-	CollectionID                 int64                     `protobuf:"varint,4,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	PartitionIDs                 []int64                   `protobuf:"varint,5,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
-	SerializedExprPlan           []byte                    `protobuf:"bytes,6,opt,name=serialized_expr_plan,json=serializedExprPlan,proto3" json:"serialized_expr_plan,omitempty"`
-	OutputFieldsId               []int64                   `protobuf:"varint,7,rep,packed,name=output_fields_id,json=outputFieldsId,proto3" json:"output_fields_id,omitempty"`
-	MvccTimestamp                uint64                    `protobuf:"varint,8,opt,name=mvcc_timestamp,json=mvccTimestamp,proto3" json:"mvcc_timestamp,omitempty"`
-	GuaranteeTimestamp           uint64                    `protobuf:"varint,9,opt,name=guarantee_timestamp,json=guaranteeTimestamp,proto3" json:"guarantee_timestamp,omitempty"`
-	TimeoutTimestamp             uint64                    `protobuf:"varint,10,opt,name=timeout_timestamp,json=timeoutTimestamp,proto3" json:"timeout_timestamp,omitempty"`
-	Limit                        int64                     `protobuf:"varint,11,opt,name=limit,proto3" json:"limit,omitempty"` // Optional
-	IgnoreGrowing                bool                      `protobuf:"varint,12,opt,name=ignoreGrowing,proto3" json:"ignoreGrowing,omitempty"`
-	IsCount                      bool                      `protobuf:"varint,13,opt,name=is_count,json=isCount,proto3" json:"is_count,omitempty"`
-	IterationExtensionReduceRate int64                     `protobuf:"varint,14,opt,name=iteration_extension_reduce_rate,json=iterationExtensionReduceRate,proto3" json:"iteration_extension_reduce_rate,omitempty"`
-	Username                     string                    `protobuf:"bytes,15,opt,name=username,proto3" json:"username,omitempty"`
-	ReduceStopForBest            bool                      `protobuf:"varint,16,opt,name=reduce_stop_for_best,json=reduceStopForBest,proto3" json:"reduce_stop_for_best,omitempty"` //deprecated
-	ReduceType                   int32                     `protobuf:"varint,17,opt,name=reduce_type,json=reduceType,proto3" json:"reduce_type,omitempty"`
-	ConsistencyLevel             commonpb.ConsistencyLevel `protobuf:"varint,18,opt,name=consistency_level,json=consistencyLevel,proto3,enum=milvus.proto.common.ConsistencyLevel" json:"consistency_level,omitempty"`
-	IsIterator                   bool                      `protobuf:"varint,19,opt,name=is_iterator,json=isIterator,proto3" json:"is_iterator,omitempty"`
+	Base                           *commonpb.MsgBase         `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	ReqID                          int64                     `protobuf:"varint,2,opt,name=reqID,proto3" json:"reqID,omitempty"`
+	DbID                           int64                     `protobuf:"varint,3,opt,name=dbID,proto3" json:"dbID,omitempty"`
+	CollectionID                   int64                     `protobuf:"varint,4,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	PartitionIDs                   []int64                   `protobuf:"varint,5,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
+	SerializedExprPlan             []byte                    `protobuf:"bytes,6,opt,name=serialized_expr_plan,json=serializedExprPlan,proto3" json:"serialized_expr_plan,omitempty"`
+	OutputFieldsId                 []int64                   `protobuf:"varint,7,rep,packed,name=output_fields_id,json=outputFieldsId,proto3" json:"output_fields_id,omitempty"`
+	MvccTimestamp                  uint64                    `protobuf:"varint,8,opt,name=mvcc_timestamp,json=mvccTimestamp,proto3" json:"mvcc_timestamp,omitempty"`
+	GuaranteeTimestamp             uint64                    `protobuf:"varint,9,opt,name=guarantee_timestamp,json=guaranteeTimestamp,proto3" json:"guarantee_timestamp,omitempty"`
+	TimeoutTimestamp               uint64                    `protobuf:"varint,10,opt,name=timeout_timestamp,json=timeoutTimestamp,proto3" json:"timeout_timestamp,omitempty"`
+	Limit                          int64                     `protobuf:"varint,11,opt,name=limit,proto3" json:"limit,omitempty"` // Optional
+	IgnoreGrowing                  bool                      `protobuf:"varint,12,opt,name=ignoreGrowing,proto3" json:"ignoreGrowing,omitempty"`
+	IsCount                        bool                      `protobuf:"varint,13,opt,name=is_count,json=isCount,proto3" json:"is_count,omitempty"`
+	IterationExtensionReduceRate   int64                     `protobuf:"varint,14,opt,name=iteration_extension_reduce_rate,json=iterationExtensionReduceRate,proto3" json:"iteration_extension_reduce_rate,omitempty"`
+	Username                       string                    `protobuf:"bytes,15,opt,name=username,proto3" json:"username,omitempty"`
+	ReduceStopForBest              bool                      `protobuf:"varint,16,opt,name=reduce_stop_for_best,json=reduceStopForBest,proto3" json:"reduce_stop_for_best,omitempty"` //deprecated
+	ReduceType                     int32                     `protobuf:"varint,17,opt,name=reduce_type,json=reduceType,proto3" json:"reduce_type,omitempty"`
+	ConsistencyLevel               commonpb.ConsistencyLevel `protobuf:"varint,18,opt,name=consistency_level,json=consistencyLevel,proto3,enum=milvus.proto.common.ConsistencyLevel" json:"consistency_level,omitempty"`
+	IsIterator                     bool                      `protobuf:"varint,19,opt,name=is_iterator,json=isIterator,proto3" json:"is_iterator,omitempty"`
+	PartialResultRequiredDataRatio float32                   `protobuf:"fixed32,20,opt,name=partial_result_required_data_ratio,json=partialResultRequiredDataRatio,proto3" json:"partial_result_required_data_ratio,omitempty"`
+	EnablePartialResult            bool                      `protobuf:"varint,21,opt,name=enable_partial_result,json=enablePartialResult,proto3" json:"enable_partial_result,omitempty"`
 }
 
 func (x *RetrieveRequest) Reset() {
@@ -1934,6 +1960,20 @@ func (x *RetrieveRequest) GetIsIterator() bool {
 	return false
 }
 
+func (x *RetrieveRequest) GetPartialResultRequiredDataRatio() float32 {
+	if x != nil {
+		return x.PartialResultRequiredDataRatio
+	}
+	return 0
+}
+
+func (x *RetrieveRequest) GetEnablePartialResult() bool {
+	if x != nil {
+		return x.EnablePartialResult
+	}
+	return false
+}
+
 type RetrieveResults struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1948,9 +1988,10 @@ type RetrieveResults struct {
 	ChannelIDsRetrieved       []string              `protobuf:"bytes,7,rep,name=channelIDs_retrieved,json=channelIDsRetrieved,proto3" json:"channelIDs_retrieved,omitempty"`
 	GlobalSealedSegmentIDs    []int64               `protobuf:"varint,8,rep,packed,name=global_sealed_segmentIDs,json=globalSealedSegmentIDs,proto3" json:"global_sealed_segmentIDs,omitempty"`
 	// query request cost
-	CostAggregation  *CostAggregation `protobuf:"bytes,13,opt,name=costAggregation,proto3" json:"costAggregation,omitempty"`
-	AllRetrieveCount int64            `protobuf:"varint,14,opt,name=all_retrieve_count,json=allRetrieveCount,proto3" json:"all_retrieve_count,omitempty"`
-	HasMoreResult    bool             `protobuf:"varint,15,opt,name=has_more_result,json=hasMoreResult,proto3" json:"has_more_result,omitempty"`
+	CostAggregation   *CostAggregation `protobuf:"bytes,13,opt,name=costAggregation,proto3" json:"costAggregation,omitempty"`
+	AllRetrieveCount  int64            `protobuf:"varint,14,opt,name=all_retrieve_count,json=allRetrieveCount,proto3" json:"all_retrieve_count,omitempty"`
+	HasMoreResult     bool             `protobuf:"varint,15,opt,name=has_more_result,json=hasMoreResult,proto3" json:"has_more_result,omitempty"`
+	AccessedDataRatio float32          `protobuf:"fixed32,16,opt,name=accessed_data_ratio,json=accessedDataRatio,proto3" json:"accessed_data_ratio,omitempty"`
 }
 
 func (x *RetrieveResults) Reset() {
@@ -2060,6 +2101,13 @@ func (x *RetrieveResults) GetHasMoreResult() bool {
 		return x.HasMoreResult
 	}
 	return false
+}
+
+func (x *RetrieveResults) GetAccessedDataRatio() float32 {
+	if x != nil {
+		return x.AccessedDataRatio
+	}
+	return 0
 }
 
 type LoadIndex struct {
@@ -3998,7 +4046,7 @@ var file_internal_proto_rawDesc = []byte{
 	0x52, 0x07, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x49, 0x64, 0x12, 0x25, 0x0a, 0x0e, 0x69, 0x67, 0x6e,
 	0x6f, 0x72, 0x65, 0x5f, 0x67, 0x72, 0x6f, 0x77, 0x69, 0x6e, 0x67, 0x18, 0x0d, 0x20, 0x01, 0x28,
 	0x08, 0x52, 0x0d, 0x69, 0x67, 0x6e, 0x6f, 0x72, 0x65, 0x47, 0x72, 0x6f, 0x77, 0x69, 0x6e, 0x67,
-	0x22, 0xe6, 0x08, 0x0a, 0x0d, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x52, 0x65, 0x71, 0x75, 0x65,
+	0x22, 0xe6, 0x09, 0x0a, 0x0d, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x52, 0x65, 0x71, 0x75, 0x65,
 	0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b,
 	0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
 	0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73, 0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04,
@@ -4068,7 +4116,15 @@ var file_internal_proto_rawDesc = []byte{
 	0x6f, 0x72, 0x18, 0x1c, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0a, 0x69, 0x73, 0x49, 0x74, 0x65, 0x72,
 	0x61, 0x74, 0x6f, 0x72, 0x12, 0x23, 0x0a, 0x0d, 0x61, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72,
 	0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x1d, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x61, 0x6e, 0x61,
-	0x6c, 0x79, 0x7a, 0x65, 0x72, 0x4e, 0x61, 0x6d, 0x65, 0x22, 0xf6, 0x01, 0x0a, 0x10, 0x53, 0x75,
+	0x6c, 0x79, 0x7a, 0x65, 0x72, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x4a, 0x0a, 0x22, 0x70, 0x61, 0x72,
+	0x74, 0x69, 0x61, 0x6c, 0x5f, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x5f, 0x72, 0x65, 0x71, 0x75,
+	0x69, 0x72, 0x65, 0x64, 0x5f, 0x64, 0x61, 0x74, 0x61, 0x5f, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x18,
+	0x1e, 0x20, 0x01, 0x28, 0x02, 0x52, 0x1e, 0x70, 0x61, 0x72, 0x74, 0x69, 0x61, 0x6c, 0x52, 0x65,
+	0x73, 0x75, 0x6c, 0x74, 0x52, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x44, 0x61, 0x74, 0x61,
+	0x52, 0x61, 0x74, 0x69, 0x6f, 0x12, 0x32, 0x0a, 0x15, 0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x5f,
+	0x70, 0x61, 0x72, 0x74, 0x69, 0x61, 0x6c, 0x5f, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x18, 0x1f,
+	0x20, 0x01, 0x28, 0x08, 0x52, 0x13, 0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x50, 0x61, 0x72, 0x74,
+	0x69, 0x61, 0x6c, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x22, 0xf6, 0x01, 0x0a, 0x10, 0x53, 0x75,
 	0x62, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x12, 0x1f,
 	0x0a, 0x0b, 0x6d, 0x65, 0x74, 0x72, 0x69, 0x63, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x18, 0x01, 0x20,
 	0x01, 0x28, 0x09, 0x52, 0x0a, 0x6d, 0x65, 0x74, 0x72, 0x69, 0x63, 0x54, 0x79, 0x70, 0x65, 0x12,
@@ -4084,7 +4140,7 @@ var file_internal_proto_rawDesc = []byte{
 	0x74, 0x18, 0x06, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c, 0x73, 0x6c, 0x69, 0x63, 0x65, 0x64, 0x4f,
 	0x66, 0x66, 0x73, 0x65, 0x74, 0x12, 0x1b, 0x0a, 0x09, 0x72, 0x65, 0x71, 0x5f, 0x69, 0x6e, 0x64,
 	0x65, 0x78, 0x18, 0x07, 0x20, 0x01, 0x28, 0x03, 0x52, 0x08, 0x72, 0x65, 0x71, 0x49, 0x6e, 0x64,
-	0x65, 0x78, 0x22, 0xd9, 0x07, 0x0a, 0x0d, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x52, 0x65, 0x73,
+	0x65, 0x78, 0x22, 0x89, 0x08, 0x0a, 0x0d, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x52, 0x65, 0x73,
 	0x75, 0x6c, 0x74, 0x73, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01,
 	0x28, 0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
 	0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73, 0x67, 0x42, 0x61, 0x73, 0x65,
@@ -4141,7 +4197,10 @@ var file_internal_proto_rawDesc = []byte{
 	0x73, 0x54, 0x6f, 0x70, 0x6b, 0x52, 0x65, 0x64, 0x75, 0x63, 0x65, 0x12, 0x30, 0x0a, 0x14, 0x69,
 	0x73, 0x5f, 0x72, 0x65, 0x63, 0x61, 0x6c, 0x6c, 0x5f, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x61, 0x74,
 	0x69, 0x6f, 0x6e, 0x18, 0x13, 0x20, 0x01, 0x28, 0x08, 0x52, 0x12, 0x69, 0x73, 0x52, 0x65, 0x63,
-	0x61, 0x6c, 0x6c, 0x45, 0x76, 0x61, 0x6c, 0x75, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x1a, 0x3f, 0x0a,
+	0x61, 0x6c, 0x6c, 0x45, 0x76, 0x61, 0x6c, 0x75, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x2e, 0x0a,
+	0x13, 0x61, 0x63, 0x63, 0x65, 0x73, 0x73, 0x65, 0x64, 0x5f, 0x64, 0x61, 0x74, 0x61, 0x5f, 0x72,
+	0x61, 0x74, 0x69, 0x6f, 0x18, 0x14, 0x20, 0x01, 0x28, 0x02, 0x52, 0x11, 0x61, 0x63, 0x63, 0x65,
+	0x73, 0x73, 0x65, 0x64, 0x44, 0x61, 0x74, 0x61, 0x52, 0x61, 0x74, 0x69, 0x6f, 0x1a, 0x3f, 0x0a,
 	0x11, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x73, 0x4d, 0x76, 0x63, 0x63, 0x45, 0x6e, 0x74,
 	0x72, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52,
 	0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20,
@@ -4156,7 +4215,7 @@ var file_internal_proto_rawDesc = []byte{
 	0x4e, 0x51, 0x12, 0x32, 0x0a, 0x14, 0x74, 0x6f, 0x74, 0x61, 0x6c, 0x52, 0x65, 0x6c, 0x61, 0x74,
 	0x65, 0x64, 0x44, 0x61, 0x74, 0x61, 0x53, 0x69, 0x7a, 0x65, 0x18, 0x04, 0x20, 0x01, 0x28, 0x03,
 	0x52, 0x14, 0x74, 0x6f, 0x74, 0x61, 0x6c, 0x52, 0x65, 0x6c, 0x61, 0x74, 0x65, 0x64, 0x44, 0x61,
-	0x74, 0x61, 0x53, 0x69, 0x7a, 0x65, 0x22, 0x97, 0x06, 0x0a, 0x0f, 0x52, 0x65, 0x74, 0x72, 0x69,
+	0x74, 0x61, 0x53, 0x69, 0x7a, 0x65, 0x22, 0x97, 0x07, 0x0a, 0x0f, 0x52, 0x65, 0x74, 0x72, 0x69,
 	0x65, 0x76, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61,
 	0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
 	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d,
@@ -4206,7 +4265,15 @@ var file_internal_proto_rawDesc = []byte{
 	0x6f, 0x6e, 0x73, 0x69, 0x73, 0x74, 0x65, 0x6e, 0x63, 0x79, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x12,
 	0x1f, 0x0a, 0x0b, 0x69, 0x73, 0x5f, 0x69, 0x74, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x18, 0x13,
 	0x20, 0x01, 0x28, 0x08, 0x52, 0x0a, 0x69, 0x73, 0x49, 0x74, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72,
-	0x22, 0xd0, 0x04, 0x0a, 0x0f, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x52, 0x65, 0x73,
+	0x12, 0x4a, 0x0a, 0x22, 0x70, 0x61, 0x72, 0x74, 0x69, 0x61, 0x6c, 0x5f, 0x72, 0x65, 0x73, 0x75,
+	0x6c, 0x74, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x5f, 0x64, 0x61, 0x74, 0x61,
+	0x5f, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x18, 0x14, 0x20, 0x01, 0x28, 0x02, 0x52, 0x1e, 0x70, 0x61,
+	0x72, 0x74, 0x69, 0x61, 0x6c, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x52, 0x65, 0x71, 0x75, 0x69,
+	0x72, 0x65, 0x64, 0x44, 0x61, 0x74, 0x61, 0x52, 0x61, 0x74, 0x69, 0x6f, 0x12, 0x32, 0x0a, 0x15,
+	0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x5f, 0x70, 0x61, 0x72, 0x74, 0x69, 0x61, 0x6c, 0x5f, 0x72,
+	0x65, 0x73, 0x75, 0x6c, 0x74, 0x18, 0x15, 0x20, 0x01, 0x28, 0x08, 0x52, 0x13, 0x65, 0x6e, 0x61,
+	0x62, 0x6c, 0x65, 0x50, 0x61, 0x72, 0x74, 0x69, 0x61, 0x6c, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74,
+	0x22, 0x80, 0x05, 0x0a, 0x0f, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x52, 0x65, 0x73,
 	0x75, 0x6c, 0x74, 0x73, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01,
 	0x28, 0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
 	0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73, 0x67, 0x42, 0x61, 0x73, 0x65,
@@ -4243,7 +4310,10 @@ var file_internal_proto_rawDesc = []byte{
 	0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x43, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x26, 0x0a, 0x0f, 0x68,
 	0x61, 0x73, 0x5f, 0x6d, 0x6f, 0x72, 0x65, 0x5f, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x18, 0x0f,
 	0x20, 0x01, 0x28, 0x08, 0x52, 0x0d, 0x68, 0x61, 0x73, 0x4d, 0x6f, 0x72, 0x65, 0x52, 0x65, 0x73,
-	0x75, 0x6c, 0x74, 0x22, 0xfa, 0x01, 0x0a, 0x09, 0x4c, 0x6f, 0x61, 0x64, 0x49, 0x6e, 0x64, 0x65,
+	0x75, 0x6c, 0x74, 0x12, 0x2e, 0x0a, 0x13, 0x61, 0x63, 0x63, 0x65, 0x73, 0x73, 0x65, 0x64, 0x5f,
+	0x64, 0x61, 0x74, 0x61, 0x5f, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x18, 0x10, 0x20, 0x01, 0x28, 0x02,
+	0x52, 0x11, 0x61, 0x63, 0x63, 0x65, 0x73, 0x73, 0x65, 0x64, 0x44, 0x61, 0x74, 0x61, 0x52, 0x61,
+	0x74, 0x69, 0x6f, 0x22, 0xfa, 0x01, 0x0a, 0x09, 0x4c, 0x6f, 0x61, 0x64, 0x49, 0x6e, 0x64, 0x65,
 	0x78, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32,
 	0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63,
 	0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73, 0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04, 0x62,

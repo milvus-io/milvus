@@ -132,6 +132,8 @@ message SearchRequest {
   bool is_recall_evaluation = 27;
   bool is_iterator = 28;
   string analyzer_name = 29;
+  float partial_result_required_data_ratio = 30;
+  bool enable_partial_result = 31;
 }
 
 message SubSearchResults {
@@ -169,6 +171,7 @@ message SearchResults {
   int64 all_search_count = 17;
   bool is_topk_reduce = 18;
   bool is_recall_evaluation = 19;
+  float accessed_data_ratio = 20;
 }
 
 message CostAggregation {
@@ -198,6 +201,8 @@ message RetrieveRequest {
   int32 reduce_type = 17;
   common.ConsistencyLevel consistency_level = 18;
   bool is_iterator = 19;
+  float partial_result_required_data_ratio = 20;
+  bool enable_partial_result = 21;
 }
 
 
@@ -215,6 +220,7 @@ message RetrieveResults {
   CostAggregation costAggregation = 13;
   int64 all_retrieve_count = 14;
   bool has_more_result = 15;
+  float accessed_data_ratio = 16;
 }
 
 message LoadIndex {
