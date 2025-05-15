@@ -126,6 +126,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 		// no need to read nulls in DeleteEventType
 		rowsSet, _, err := readData(reader, storage.DeleteEventType)
 		if err != nil {
+			reader.Close()
 			return nil, err
 		}
 		for _, rows := range rowsSet {
@@ -133,6 +134,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 				dl := &storage.DeleteLog{}
 				err = dl.Parse(row)
 				if err != nil {
+					reader.Close()
 					return nil, err
 				}
 				if dl.Ts >= tsStart && dl.Ts <= tsEnd {
@@ -143,6 +145,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 				}
 			}
 		}
+		reader.Close()
 	}
 	return deleteData, nil
 }
