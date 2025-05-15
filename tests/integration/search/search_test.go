@@ -252,7 +252,7 @@ func (s *SearchSuite) run() {
 	for i := range results.NumQueries {
 		k := int(results.Topks[i])
 		itr := typeutil.GetDataIterator(results.GroupByFieldValue)
-		m := make(map[any]any) // test if the group by field values are unique
+		m := make(map[any]any, k) // test if the group by field values are unique
 		for j := 0; j < k; j++ {
 			gpbVal := itr(offset + j)
 			s.NotContains(m, gpbVal)
