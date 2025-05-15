@@ -133,6 +133,8 @@ func (rc *resumableConsumerImpl) createNewConsumer(opts *handler.ConsumerOptions
 	backoff.InitialInterval = 100 * time.Millisecond
 	backoff.MaxInterval = 10 * time.Second
 	backoff.MaxElapsedTime = 0
+	backoff.Reset()
+
 	for {
 		// Create a new consumer.
 		// a underlying stream consumer life time should be equal to the resumable producer.

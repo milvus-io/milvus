@@ -125,8 +125,6 @@ class Expr {
 
 using ExprPtr = std::shared_ptr<milvus::exec::Expr>;
 
-using SkipFunc = bool (*)(const milvus::SkipIndex&, FieldId, int);
-
 /*
  * The expr has only one column.
  */

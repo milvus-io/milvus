@@ -28,7 +28,7 @@ func RecoverRecoveryStorage(
 	ctx context.Context,
 	recoveryStreamBuilder RecoveryStreamBuilder,
 	lastTimeTickMessage message.ImmutableMessage,
-) (*RecoveryStorage, *RecoverySnapshot, error) {
+) (RecoveryStorage, *RecoverySnapshot, error) {
 	rs := newRecoveryStorage(recoveryStreamBuilder.Channel())
 	if err := rs.recoverRecoveryInfoFromMeta(ctx, recoveryStreamBuilder.WALName(), recoveryStreamBuilder.Channel(), lastTimeTickMessage); err != nil {
 		rs.Logger().Warn("recovery storage failed", zap.Error(err))
@@ -57,9 +57,9 @@ func RecoverRecoveryStorage(
 }
 
 // newRecoveryStorage creates a new recovery storage.
-func newRecoveryStorage(channel types.PChannelInfo) *RecoveryStorage {
+func newRecoveryStorage(channel types.PChannelInfo) *recoveryStorageImpl {
 	cfg := newConfig()
-	return &RecoveryStorage{
+	return &recoveryStorageImpl{
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		cfg:                    cfg,
 		mu:                     sync.Mutex{},
@@ -71,9 +71,9 @@ func newRecoveryStorage(channel types.PChannelInfo) *RecoveryStorage {
 	}
 }
 
-// RecoveryStorage is a component that manages the recovery info for the streaming service.
+// recoveryStorageImpl is a component that manages the recovery info for the streaming service.
 // It will consume the message from the wal, consume the message in wal, and update the checkpoint for it.
-type RecoveryStorage struct {
+type recoveryStorageImpl struct {
 	log.Binder
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}]
 	cfg                    *config
@@ -91,7 +91,7 @@ type RecoveryStorage struct {
 }
 
 // ObserveMessage is called when a new message is observed.
-func (r *RecoveryStorage) ObserveMessage(msg message.ImmutableMessage) {
+func (r *recoveryStorageImpl) ObserveMessage(msg message.ImmutableMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -99,7 +99,7 @@ func (r *RecoveryStorage) ObserveMessage(msg message.ImmutableMessage) {
 }
 
 // Close closes the recovery storage and wait the background task stop.
-func (r *RecoveryStorage) Close() {
+func (r *recoveryStorageImpl) Close() {
 	r.backgroundTaskNotifier.Cancel()
 	r.backgroundTaskNotifier.BlockUntilFinish()
 	// Stop the truncator.
@@ -108,7 +108,7 @@ func (r *RecoveryStorage) Close() {
 }
 
 // notifyPersist notifies a persist operation.
-func (r *RecoveryStorage) notifyPersist() {
+func (r *recoveryStorageImpl) notifyPersist() {
 	select {
 	case r.persistNotifier <- struct{}{}:
 	default:
@@ -117,7 +117,7 @@ func (r *RecoveryStorage) notifyPersist() {
 
 // consumeDirtySnapshot consumes the dirty state and returns a snapshot to persist.
 // A snapshot is always a consistent state (fully consume a message or a txn message) of the recovery storage.
-func (r *RecoveryStorage) consumeDirtySnapshot() *RecoverySnapshot {
+func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -151,7 +151,7 @@ func (r *RecoveryStorage) consumeDirtySnapshot() *RecoverySnapshot {
 }
 
 // observeMessage observes a message and update the recovery storage.
-func (r *RecoveryStorage) observeMessage(msg message.ImmutableMessage) {
+func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
 	if msg.TimeTick() <= r.checkpoint.TimeTick {
 		if r.Logger().Level().Enabled(zap.DebugLevel) {
 			r.Logger().Debug("skip the message before the checkpoint",
@@ -180,7 +180,7 @@ func (r *RecoveryStorage) observeMessage(msg message.ImmutableMessage) {
 }
 
 // The incoming message id is always sorted with timetick.
-func (r *RecoveryStorage) handleMessage(msg message.ImmutableMessage) {
+func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	if msg.VChannel() != "" && msg.MessageType() != message.MessageTypeCreateCollection &&
 		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil {
 		r.detectInconsistency(msg, "vchannel not found")
@@ -231,7 +231,7 @@ func (r *RecoveryStorage) handleMessage(msg message.ImmutableMessage) {
 }
 
 // handleInsert handles the insert message.
-func (r *RecoveryStorage) handleInsert(msg message.ImmutableInsertMessageV1) {
+func (r *recoveryStorageImpl) handleInsert(msg message.ImmutableInsertMessageV1) {
 	for _, partition := range msg.Header().GetPartitions() {
 		if segment, ok := r.segments[partition.SegmentAssignment.SegmentId]; ok && segment.IsGrowing() {
 			segment.ObserveInsert(msg.TimeTick(), partition)
@@ -245,7 +245,7 @@ func (r *RecoveryStorage) handleInsert(msg message.ImmutableInsertMessageV1) {
 }
 
 // handleDelete handles the delete message.
-func (r *RecoveryStorage) handleDelete(msg message.ImmutableDeleteMessageV1) {
+func (r *recoveryStorageImpl) handleDelete(msg message.ImmutableDeleteMessageV1) {
 	// nothing, current delete operation is managed by flowgraph, not recovery storage.
 	if r.Logger().Level().Enabled(zap.DebugLevel) {
 		r.Logger().Debug("delete entity", log.FieldMessage(msg))
@@ -253,14 +253,14 @@ func (r *RecoveryStorage) handleDelete(msg message.ImmutableDeleteMessageV1) {
 }
 
 // handleCreateSegment handles the create segment message.
-func (r *RecoveryStorage) handleCreateSegment(msg message.ImmutableCreateSegmentMessageV2) {
+func (r *recoveryStorageImpl) handleCreateSegment(msg message.ImmutableCreateSegmentMessageV2) {
 	segment := newSegmentRecoveryInfoFromCreateSegmentMessage(msg)
 	r.segments[segment.meta.SegmentId] = segment
 	r.Logger().Info("create segment", log.FieldMessage(msg))
 }
 
 // handleFlush handles the flush message.
-func (r *RecoveryStorage) handleFlush(msg message.ImmutableFlushMessageV2) {
+func (r *recoveryStorageImpl) handleFlush(msg message.ImmutableFlushMessageV2) {
 	header := msg.Header()
 	if segment, ok := r.segments[header.SegmentId]; ok {
 		segment.ObserveFlush(msg.TimeTick())
@@ -269,7 +269,7 @@ func (r *RecoveryStorage) handleFlush(msg message.ImmutableFlushMessageV2) {
 }
 
 // handleManualFlush handles the manual flush message.
-func (r *RecoveryStorage) handleManualFlush(msg message.ImmutableManualFlushMessageV2) {
+func (r *recoveryStorageImpl) handleManualFlush(msg message.ImmutableManualFlushMessageV2) {
 	segments := make(map[int64]struct{}, len(msg.Header().SegmentIds))
 	for _, segmentID := range msg.Header().SegmentIds {
 		segments[segmentID] = struct{}{}
@@ -278,7 +278,7 @@ func (r *RecoveryStorage) handleManualFlush(msg message.ImmutableManualFlushMess
 }
 
 // flushSegments flushes the segments in the recovery storage.
-func (r *RecoveryStorage) flushSegments(msg message.ImmutableMessage, sealSegmentIDs map[int64]struct{}) {
+func (r *recoveryStorageImpl) flushSegments(msg message.ImmutableMessage, sealSegmentIDs map[int64]struct{}) {
 	segmentIDs := make([]int64, 0)
 	rows := make([]uint64, 0)
 	binarySize := make([]uint64, 0)
@@ -297,7 +297,7 @@ func (r *RecoveryStorage) flushSegments(msg message.ImmutableMessage, sealSegmen
 }
 
 // handleCreateCollection handles the create collection message.
-func (r *RecoveryStorage) handleCreateCollection(msg message.ImmutableCreateCollectionMessageV1) {
+func (r *recoveryStorageImpl) handleCreateCollection(msg message.ImmutableCreateCollectionMessageV1) {
 	if _, ok := r.vchannels[msg.VChannel()]; ok {
 		return
 	}
@@ -306,7 +306,7 @@ func (r *RecoveryStorage) handleCreateCollection(msg message.ImmutableCreateColl
 }
 
 // handleDropCollection handles the drop collection message.
-func (r *RecoveryStorage) handleDropCollection(msg message.ImmutableDropCollectionMessageV1) {
+func (r *recoveryStorageImpl) handleDropCollection(msg message.ImmutableDropCollectionMessageV1) {
 	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; !ok || vchannelInfo.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
 		return
 	}
@@ -317,7 +317,7 @@ func (r *RecoveryStorage) handleDropCollection(msg message.ImmutableDropCollecti
 }
 
 // flushAllSegmentOfCollection flushes all segments of the collection.
-func (r *RecoveryStorage) flushAllSegmentOfCollection(msg message.ImmutableMessage, collectionID int64) {
+func (r *recoveryStorageImpl) flushAllSegmentOfCollection(msg message.ImmutableMessage, collectionID int64) {
 	segmentIDs := make([]int64, 0)
 	rows := make([]uint64, 0)
 	for _, segment := range r.segments {
@@ -331,7 +331,7 @@ func (r *RecoveryStorage) flushAllSegmentOfCollection(msg message.ImmutableMessa
 }
 
 // handleCreatePartition handles the create partition message.
-func (r *RecoveryStorage) handleCreatePartition(msg message.ImmutableCreatePartitionMessageV1) {
+func (r *recoveryStorageImpl) handleCreatePartition(msg message.ImmutableCreatePartitionMessageV1) {
 	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; !ok || vchannelInfo.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
 		return
 	}
@@ -340,7 +340,7 @@ func (r *RecoveryStorage) handleCreatePartition(msg message.ImmutableCreateParti
 }
 
 // handleDropPartition handles the drop partition message.
-func (r *RecoveryStorage) handleDropPartition(msg message.ImmutableDropPartitionMessageV1) {
+func (r *recoveryStorageImpl) handleDropPartition(msg message.ImmutableDropPartitionMessageV1) {
 	r.vchannels[msg.VChannel()].ObserveDropPartition(msg)
 	// flush all existing segments.
 	r.flushAllSegmentOfPartition(msg, msg.Header().CollectionId, msg.Header().PartitionId)
@@ -348,7 +348,7 @@ func (r *RecoveryStorage) handleDropPartition(msg message.ImmutableDropPartition
 }
 
 // flushAllSegmentOfPartition flushes all segments of the partition.
-func (r *RecoveryStorage) flushAllSegmentOfPartition(msg message.ImmutableMessage, collectionID int64, partitionID int64) {
+func (r *recoveryStorageImpl) flushAllSegmentOfPartition(msg message.ImmutableMessage, collectionID int64, partitionID int64) {
 	segmentIDs := make([]int64, 0)
 	rows := make([]uint64, 0)
 	for _, segment := range r.segments {
@@ -362,7 +362,7 @@ func (r *RecoveryStorage) flushAllSegmentOfPartition(msg message.ImmutableMessag
 }
 
 // handleTxn handles the txn message.
-func (r *RecoveryStorage) handleTxn(msg message.ImmutableTxnMessage) {
+func (r *recoveryStorageImpl) handleTxn(msg message.ImmutableTxnMessage) {
 	msg.RangeOver(func(im message.ImmutableMessage) error {
 		r.handleMessage(im)
 		return nil
@@ -370,11 +370,11 @@ func (r *RecoveryStorage) handleTxn(msg message.ImmutableTxnMessage) {
 }
 
 // handleImport handles the import message.
-func (r *RecoveryStorage) handleImport(_ message.ImmutableImportMessageV1) {
+func (r *recoveryStorageImpl) handleImport(_ message.ImmutableImportMessageV1) {
 }
 
 // handleSchemaChange handles the schema change message.
-func (r *RecoveryStorage) handleSchemaChange(msg message.ImmutableSchemaChangeMessageV2) {
+func (r *recoveryStorageImpl) handleSchemaChange(msg message.ImmutableSchemaChangeMessageV2) {
 	// when schema change happens, we need to flush all segments in the collection.
 	// TODO: add the flush segment list into schema change message.
 	// TODO: persist the schema change into recoveryinfo.
@@ -382,7 +382,7 @@ func (r *RecoveryStorage) handleSchemaChange(msg message.ImmutableSchemaChangeMe
 }
 
 // detectInconsistency detects the inconsistency in the recovery storage.
-func (r *RecoveryStorage) detectInconsistency(msg message.ImmutableMessage, reason string, extra ...zap.Field) {
+func (r *recoveryStorageImpl) detectInconsistency(msg message.ImmutableMessage, reason string, extra ...zap.Field) {
 	fields := make([]zap.Field, 0, len(extra)+2)
 	fields = append(fields, log.FieldMessage(msg), zap.String("reason", reason))
 	fields = append(fields, extra...)

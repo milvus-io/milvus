@@ -12,16 +12,13 @@
 #pragma once
 
 #include <atomic>
-#include <deque>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 #include <index/ScalarIndex.h>
 
-#include "FieldIndexing.h"
 #include "cachinglayer/CacheSlot.h"
-#include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Schema.h"
@@ -34,13 +31,12 @@
 #include "common/QueryInfo.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "query/Plan.h"
-#include "query/PlanNode.h"
-#include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
-#include "index/IndexInfo.h"
 #include "index/SkipIndex.h"
 #include "index/TextMatchIndex.h"
 #include "index/JsonKeyStatsInvertedIndex.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/InsertRecord.h"
 
 namespace milvus::segcore {
 
@@ -328,18 +324,10 @@ class SegmentInternalInterface : public SegmentInterface {
     GetSkipIndex() const;
 
     void
-    LoadPrimitiveSkipIndex(FieldId field_id,
-                           int64_t chunk_id,
-                           DataType data_type,
-                           const void* chunk_data,
-                           const bool* valid_data,
-                           int64_t count);
-
-    void
-    LoadStringSkipIndex(FieldId field_id,
-                        int64_t chunk_id,
-                        const ChunkedColumnInterface& column) {
-        skip_index_.LoadString(field_id, chunk_id, column);
+    LoadSkipIndex(FieldId field_id,
+                  DataType data_type,
+                  std::shared_ptr<ChunkedColumnInterface> column) {
+        skip_index_.LoadSkip(get_segment_id(), field_id, data_type, column);
     }
 
     virtual DataType

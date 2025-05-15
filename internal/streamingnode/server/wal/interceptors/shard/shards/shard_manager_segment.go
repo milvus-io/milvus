@@ -33,7 +33,7 @@ func (r *AssignSegmentResult) Ack() {
 }
 
 // CheckIfSegmentCanBeCreated checks if a segment can be created for the specified collection and partition.
-func (m *ShardManager) CheckIfSegmentCanBeCreated(collectionID int64, partitionID int64, segmentID int64) error {
+func (m *shardManagerImpl) CheckIfSegmentCanBeCreated(collectionID int64, partitionID int64, segmentID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -41,7 +41,7 @@ func (m *ShardManager) CheckIfSegmentCanBeCreated(collectionID int64, partitionI
 }
 
 // checkIfSegmentCanBeCreated checks if a segment can be created for the specified collection and partition.
-func (m *ShardManager) checkIfSegmentCanBeCreated(collectionID int64, partitionID int64, segmentID int64) error {
+func (m *shardManagerImpl) checkIfSegmentCanBeCreated(collectionID int64, partitionID int64, segmentID int64) error {
 	// segment can be created only if the collection and partition exists.
 	if err := m.checkIfPartitionExists(collectionID, partitionID); err != nil {
 		return err
@@ -54,7 +54,7 @@ func (m *ShardManager) checkIfSegmentCanBeCreated(collectionID int64, partitionI
 }
 
 // CheckIfSegmentCanBeDropped checks if a segment can be flushed.
-func (m *ShardManager) CheckIfSegmentCanBeFlushed(collecionID int64, partitionID int64, segmentID int64) error {
+func (m *shardManagerImpl) CheckIfSegmentCanBeFlushed(collecionID int64, partitionID int64, segmentID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -62,7 +62,7 @@ func (m *ShardManager) CheckIfSegmentCanBeFlushed(collecionID int64, partitionID
 }
 
 // checkIfSegmentCanBeFlushed checks if a segment can be flushed.
-func (m *ShardManager) checkIfSegmentCanBeFlushed(collecionID int64, partitionID int64, segmentID int64) error {
+func (m *shardManagerImpl) checkIfSegmentCanBeFlushed(collecionID int64, partitionID int64, segmentID int64) error {
 	if err := m.checkIfPartitionExists(collecionID, partitionID); err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func (m *ShardManager) checkIfSegmentCanBeFlushed(collecionID int64, partitionID
 }
 
 // CreateSegment creates a new segment manager when create segment message is written into wal.
-func (m *ShardManager) CreateSegment(msg message.ImmutableCreateSegmentMessageV2) {
+func (m *shardManagerImpl) CreateSegment(msg message.ImmutableCreateSegmentMessageV2) {
 	logger := m.Logger().With(log.FieldMessage(msg))
 
 	m.mu.Lock()
@@ -100,7 +100,7 @@ func (m *ShardManager) CreateSegment(msg message.ImmutableCreateSegmentMessageV2
 }
 
 // FlushSegment flushes the segment when flush message is written into wal.
-func (m *ShardManager) FlushSegment(msg message.ImmutableFlushMessageV2) {
+func (m *shardManagerImpl) FlushSegment(msg message.ImmutableFlushMessageV2) {
 	collectionID := msg.Header().CollectionId
 	partitionID := msg.Header().PartitionId
 	segmentID := msg.Header().SegmentId
@@ -118,7 +118,7 @@ func (m *ShardManager) FlushSegment(msg message.ImmutableFlushMessageV2) {
 }
 
 // AssignSegment assigns a segment for a assign segment request.
-func (m *ShardManager) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
+func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -130,7 +130,7 @@ func (m *ShardManager) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentR
 }
 
 // WaitUntilGrowingSegmentReady waits until the growing segment is ready.
-func (m *ShardManager) WaitUntilGrowingSegmentReady(collectionID int64, partitonID int64) (<-chan struct{}, error) {
+func (m *shardManagerImpl) WaitUntilGrowingSegmentReady(collectionID int64, partitonID int64) (<-chan struct{}, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -144,7 +144,7 @@ func (m *ShardManager) WaitUntilGrowingSegmentReady(collectionID int64, partiton
 // It will be used for message like ManualFlush, SchemaChange operations that want the exists segment to be flushed.
 // !!! The returned segmentIDs may be is on-flushing state(which is on-flushing, a segmentFlushWorker is running, but not send into wal yet)
 // !!! The caller should promise the returned segmentIDs to be flushed.
-func (m *ShardManager) FlushAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error) {
+func (m *shardManagerImpl) FlushAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error) {
 	logger := m.Logger().With(zap.Int64("collectionID", collectionID), zap.Uint64("timetick", timetick))
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -172,7 +172,7 @@ func (m *ShardManager) FlushAndFenceSegmentAllocUntil(collectionID int64, timeti
 }
 
 // AsyncFlushSegment triggers the segment to be flushed when flush message is written into wal.
-func (m *ShardManager) AsyncFlushSegment(signal utils.SealSegmentSignal) {
+func (m *shardManagerImpl) AsyncFlushSegment(signal utils.SealSegmentSignal) {
 	logger := m.Logger().With(
 		zap.Int64("collectionID", signal.SegmentBelongs.CollectionID),
 		zap.Int64("partitionID", signal.SegmentBelongs.PartitionID),

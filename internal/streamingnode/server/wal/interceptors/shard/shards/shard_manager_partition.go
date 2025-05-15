@@ -9,7 +9,7 @@ import (
 )
 
 // CheckIfPartitionCanBeCreated checks if a partition can be created.
-func (m *ShardManager) CheckIfPartitionCanBeCreated(collectionID int64, partitionID int64) error {
+func (m *shardManagerImpl) CheckIfPartitionCanBeCreated(collectionID int64, partitionID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -17,7 +17,7 @@ func (m *ShardManager) CheckIfPartitionCanBeCreated(collectionID int64, partitio
 }
 
 // checkIfPartitionCanBeCreated checks if a partition can be created.
-func (m *ShardManager) checkIfPartitionCanBeCreated(collectionID int64, partitionID int64) error {
+func (m *shardManagerImpl) checkIfPartitionCanBeCreated(collectionID int64, partitionID int64) error {
 	if _, ok := m.collections[collectionID]; !ok {
 		return ErrCollectionNotFound
 	}
@@ -29,7 +29,7 @@ func (m *ShardManager) checkIfPartitionCanBeCreated(collectionID int64, partitio
 }
 
 // CheckIfPartitionExists checks if a partition can be dropped.
-func (m *ShardManager) CheckIfPartitionExists(collectionID int64, partitionID int64) error {
+func (m *shardManagerImpl) CheckIfPartitionExists(collectionID int64, partitionID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -37,7 +37,7 @@ func (m *ShardManager) CheckIfPartitionExists(collectionID int64, partitionID in
 }
 
 // checkIfPartitionExists checks if a partition can be dropped.
-func (m *ShardManager) checkIfPartitionExists(collectionID int64, partitionID int64) error {
+func (m *shardManagerImpl) checkIfPartitionExists(collectionID int64, partitionID int64) error {
 	if _, ok := m.collections[collectionID]; !ok {
 		return ErrCollectionNotFound
 	}
@@ -49,7 +49,7 @@ func (m *ShardManager) checkIfPartitionExists(collectionID int64, partitionID in
 
 // CreatePartition creates a new partition manager when create partition message is written into wal.
 // After CreatePartition is called, the dml on the partition can be applied.
-func (m *ShardManager) CreatePartition(msg message.ImmutableCreatePartitionMessageV1) {
+func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionMessageV1) {
 	collectionID := msg.Header().CollectionId
 	partitionID := msg.Header().PartitionId
 	tiemtick := msg.TimeTick()
@@ -87,7 +87,7 @@ func (m *ShardManager) CreatePartition(msg message.ImmutableCreatePartitionMessa
 
 // DropPartition drops a partition manager when drop partition message is written into wal.
 // After DropPartition is called, the dml on the partition can not be applied.
-func (m *ShardManager) DropPartition(msg message.ImmutableDropPartitionMessageV1) {
+func (m *shardManagerImpl) DropPartition(msg message.ImmutableDropPartitionMessageV1) {
 	collectionID := msg.Header().CollectionId
 	partitionID := msg.Header().PartitionId
 	logger := m.Logger().With(log.FieldMessage(msg))

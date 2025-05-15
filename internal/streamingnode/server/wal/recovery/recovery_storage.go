@@ -55,3 +55,12 @@ type RecoveryStream interface {
 	// Close closes the recovery stream.
 	Close() error
 }
+
+// RecoveryStorage is an interface that is used to observe the messages from the WAL.
+type RecoveryStorage interface {
+	// ObserveMessage observes the message from the WAL.
+	ObserveMessage(msg message.ImmutableMessage)
+
+	// Close closes the recovery storage.
+	Close()
+}

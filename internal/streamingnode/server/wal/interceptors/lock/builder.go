@@ -6,7 +6,6 @@ import (
 )
 
 // NewInterceptorBuilder creates a new redo interceptor builder.
-// TODO: add it into wal after recovery storage is merged.
 func NewInterceptorBuilder() interceptors.InterceptorBuilder {
 	return &interceptorBuilder{}
 }
@@ -18,6 +17,6 @@ type interceptorBuilder struct{}
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	return &lockAppendInterceptor{
 		vchannelLocker: lock.NewKeyLock[string](),
-		// TODO: txnManager will be intiailized by param 		txnManager:     param.TxnManager,
+		txnManager:     param.TxnManager,
 	}
 }

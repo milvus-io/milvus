@@ -123,7 +123,8 @@ func TestRecoveryStorage(t *testing.T) {
 			// make sure the checkpoint is saved.
 			paramtable.Get().Save(paramtable.Get().StreamingCfg.WALRecoveryGracefulCloseTimeout.Key, "1000s")
 		}
-		rs, snapshot, err := RecoverRecoveryStorage(context.Background(), b, msg)
+		rsInterface, snapshot, err := RecoverRecoveryStorage(context.Background(), b, msg)
+		rs := rsInterface.(*recoveryStorageImpl)
 		assert.NoError(t, err)
 		assert.NotNil(t, rs)
 		assert.NotNil(t, snapshot)

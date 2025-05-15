@@ -378,7 +378,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
  private:
     std::shared_ptr<ChunkedColumnGroup> group_;
     FieldId field_id_;
-    const FieldMeta& field_meta_;
+    const FieldMeta field_meta_;
     DataType data_type_;
 };
 

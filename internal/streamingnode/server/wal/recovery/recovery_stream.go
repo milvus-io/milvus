@@ -14,7 +14,7 @@ import (
 )
 
 // recoverFromStream recovers the recovery storage from the recovery stream.
-func (r *RecoveryStorage) recoverFromStream(
+func (r *recoveryStorageImpl) recoverFromStream(
 	ctx context.Context,
 	recoveryStreamBuilder RecoveryStreamBuilder,
 	lastTimeTickMessage message.ImmutableMessage,
@@ -72,7 +72,7 @@ L:
 // getSnapshot returns the snapshot of the recovery storage.
 // Use this function to get the snapshot after recovery is finished,
 // and use the snapshot to recover all write ahead components.
-func (r *RecoveryStorage) getSnapshot() *RecoverySnapshot {
+func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(r.segments))
 	vchannels := make(map[string]*streamingpb.VChannelMeta, len(r.vchannels))
 	for segmentID, segment := range r.segments {

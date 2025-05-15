@@ -24,7 +24,7 @@ import (
 // promise there's only one consumer of wal.
 // But currently, we don't implement the CAS operation of meta interface.
 // Should be fixed in future.
-func (rs *RecoveryStorage) backgroundTask() {
+func (rs *recoveryStorageImpl) backgroundTask() {
 	ticker := time.NewTicker(rs.cfg.persistInterval)
 	defer func() {
 		ticker.Stop()
@@ -52,7 +52,7 @@ func (rs *RecoveryStorage) backgroundTask() {
 }
 
 // persistDritySnapshotWhenClosing persists the dirty snapshot when closing the recovery storage.
-func (rs *RecoveryStorage) persistDritySnapshotWhenClosing() {
+func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() {
 	ctx, cancel := context.WithTimeout(context.Background(), rs.cfg.gracefulTimeout)
 	defer cancel()
 
@@ -61,7 +61,7 @@ func (rs *RecoveryStorage) persistDritySnapshotWhenClosing() {
 }
 
 // persistDirtySnapshot persists the dirty snapshot to the catalog.
-func (rs *RecoveryStorage) persistDirtySnapshot(ctx context.Context, snapshot *RecoverySnapshot, lvl zapcore.Level) (err error) {
+func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, snapshot *RecoverySnapshot, lvl zapcore.Level) (err error) {
 	rs.metrics.ObserveIsOnPersisting(true)
 	logger := rs.Logger().With(
 		zap.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
@@ -129,7 +129,7 @@ func (rs *RecoveryStorage) persistDirtySnapshot(ctx context.Context, snapshot *R
 // call it in recovery storage is used to promise the drop virtual channel must be called after recovery.
 // In future, the flowgraph will be deprecated, all message operation will be implement here.
 // So the DropVirtualChannel will only be called once after that.
-func (rs *RecoveryStorage) dropAllVirtualChannel(ctx context.Context, vcs map[string]*streamingpb.VChannelMeta) error {
+func (rs *recoveryStorageImpl) dropAllVirtualChannel(ctx context.Context, vcs map[string]*streamingpb.VChannelMeta) error {
 	channels := make([]string, 0, len(vcs))
 	for channelName, vc := range vcs {
 		if vc.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
@@ -162,7 +162,7 @@ func (rs *RecoveryStorage) dropAllVirtualChannel(ctx context.Context, vcs map[st
 }
 
 // retryOperationWithBackoff retries the operation with exponential backoff.
-func (rs *RecoveryStorage) retryOperationWithBackoff(ctx context.Context, logger *log.MLogger, op func(ctx context.Context) error) error {
+func (rs *recoveryStorageImpl) retryOperationWithBackoff(ctx context.Context, logger *log.MLogger, op func(ctx context.Context) error) error {
 	backoff := rs.newBackoff()
 	for {
 		err := op(ctx)
@@ -183,10 +183,12 @@ func (rs *RecoveryStorage) retryOperationWithBackoff(ctx context.Context, logger
 }
 
 // newBackoff creates a new backoff instance with the default settings.
-func (rs *RecoveryStorage) newBackoff() *backoff.ExponentialBackOff {
+func (rs *recoveryStorageImpl) newBackoff() *backoff.ExponentialBackOff {
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 10 * time.Millisecond
 	backoff.MaxInterval = 1 * time.Second
 	backoff.MaxElapsedTime = 0
+	backoff.Reset()
+
 	return backoff
 }

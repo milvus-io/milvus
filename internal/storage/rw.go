@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	sio "io"
+	"path"
 	"sort"
 
 	"github.com/samber/lo"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const (
@@ -49,6 +51,7 @@ type rwOptions struct {
 	uploader            uploaderFn
 	multiPartUploadSize int64
 	columnGroups        []storagecommon.ColumnGroup
+	bucketName          string
 }
 
 type RwOption func(*rwOptions)
@@ -63,6 +66,12 @@ func DefaultRwOptions() *rwOptions {
 func WithVersion(version int64) RwOption {
 	return func(options *rwOptions) {
 		options.version = version
+	}
+}
+
+func WithBucketName(bucketName string) RwOption {
+	return func(options *rwOptions) {
+		options.bucketName = bucketName
 	}
 }
 
@@ -189,7 +198,11 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		paths := make([][]string, len(binlogLists[0]))
 		for _, binlogs := range binlogLists {
 			for j, binlog := range binlogs {
-				paths[j] = append(paths[j], binlog.GetLogPath())
+				logPath := binlog.GetLogPath()
+				if paramtable.Get().CommonCfg.StorageType.GetValue() != "local" {
+					path.Join(rwOptions.bucketName, logPath)
+				}
+				paths[j] = append(paths[j], logPath)
 			}
 		}
 		return newPackedRecordReader(paths, schema, rwOptions.bufferSize)
@@ -198,7 +211,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 }
 
 func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segmentID UniqueID,
-	schema *schemapb.CollectionSchema, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64,
+	schema *schemapb.CollectionSchema, allocator allocator.Interface, chunkSize uint64, bucketName, rootPath string, maxRowNum int64,
 	option ...RwOption,
 ) (BinlogRecordWriter, error) {
 	rwOptions := DefaultRwOptions()
@@ -219,7 +232,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 		)
 	case StorageV2:
 		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-			blobsWriter, allocator, chunkSize, rootPath, maxRowNum,
+			blobsWriter, allocator, chunkSize, bucketName, rootPath, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 		)
 	}
