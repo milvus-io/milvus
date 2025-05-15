@@ -170,7 +170,7 @@ pipeline {
                                     script {
                                         def release_name=sh(returnStdout: true, script: 'MODE=\"gpu\" ./get_release_name.sh')
                                         def clusterEnabled = 'false'
-                                        if ("${MILVUS_SERVER_TYPE}" == "distributed") {
+                                        if ("${MILVUS_SERVER_TYPE}" == "distributed-pulsar") {
                                             clusterEnabled = "true"
                                         }
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
