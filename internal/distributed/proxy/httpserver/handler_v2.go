@@ -2281,6 +2281,8 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 				HTTPReturnIndexIndexedRows:     indexDescription.IndexedRows,
 				HTTPReturnIndexState:           indexDescription.State.String(),
 				HTTPReturnIndexFailReason:      indexDescription.IndexStateFailReason,
+				HTTPReturnMinIndexVersion:      indexDescription.MinIndexVersion,
+				HTTPReturnMaxIndexVersion:      indexDescription.MaxIndexVersion,
 			}
 			indexInfos = append(indexInfos, indexInfo)
 		}

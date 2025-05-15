@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -1472,6 +1473,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 		IndexFileKeys:       nil,
 		IndexSerializedSize: 0,
 		WriteHandoff:        false,
+		CurrentIndexVersion: 7,
 	})
 	segIdx1.Insert(indexID+1, &model.SegmentIndex{
 		SegmentID:           segID,
@@ -1489,6 +1491,8 @@ func TestServer_DescribeIndex(t *testing.T) {
 		IndexFileKeys:       nil,
 		IndexSerializedSize: 0,
 		WriteHandoff:        false,
+		// deleted index
+		CurrentIndexVersion: 6,
 	})
 	segIdx1.Insert(indexID+3, &model.SegmentIndex{
 		SegmentID:           segID,
@@ -1545,28 +1549,30 @@ func TestServer_DescribeIndex(t *testing.T) {
 
 	segIdx2 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segIdx2.Insert(indexID, &model.SegmentIndex{
-		SegmentID:      segID - 1,
-		CollectionID:   collID,
-		PartitionID:    partID,
-		NumRows:        10000,
-		IndexID:        indexID,
-		BuildID:        buildID,
-		NodeID:         0,
-		IndexVersion:   1,
-		IndexState:     commonpb.IndexState_Finished,
-		CreatedUTCTime: createTS,
+		SegmentID:           segID - 1,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		CreatedUTCTime:      createTS,
+		CurrentIndexVersion: 6,
 	})
 	segIdx2.Insert(indexID+1, &model.SegmentIndex{
-		SegmentID:      segID - 1,
-		CollectionID:   collID,
-		PartitionID:    partID,
-		NumRows:        10000,
-		IndexID:        indexID + 1,
-		BuildID:        buildID + 1,
-		NodeID:         0,
-		IndexVersion:   1,
-		IndexState:     commonpb.IndexState_Finished,
-		CreatedUTCTime: createTS,
+		SegmentID:           segID - 1,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 1,
+		BuildID:             buildID + 1,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		CreatedUTCTime:      createTS,
+		CurrentIndexVersion: 6,
 	})
 	segIdx2.Insert(indexID+3, &model.SegmentIndex{
 		SegmentID:      segID - 1,
@@ -1594,16 +1600,17 @@ func TestServer_DescribeIndex(t *testing.T) {
 		CreatedUTCTime: createTS,
 	})
 	segIdx2.Insert(indexID+5, &model.SegmentIndex{
-		SegmentID:      segID - 1,
-		CollectionID:   collID,
-		PartitionID:    partID,
-		NumRows:        10000,
-		IndexID:        indexID + 5,
-		BuildID:        buildID + 5,
-		NodeID:         0,
-		IndexVersion:   1,
-		IndexState:     commonpb.IndexState_Finished,
-		CreatedUTCTime: createTS,
+		SegmentID:           segID - 1,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 5,
+		BuildID:             buildID + 5,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		CreatedUTCTime:      createTS,
+		CurrentIndexVersion: 6,
 	})
 	s.meta.indexMeta.segmentIndexes.Insert(segID-1, segIdx2)
 
@@ -1625,6 +1632,18 @@ func TestServer_DescribeIndex(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 5, len(resp.GetIndexInfos()))
+		minIndexVersion := int32(math.MaxInt32)
+		maxIndexVersion := int32(math.MinInt32)
+		for _, indexInfo := range resp.GetIndexInfos() {
+			if indexInfo.GetMinIndexVersion() < minIndexVersion {
+				minIndexVersion = indexInfo.GetMinIndexVersion()
+			}
+			if indexInfo.GetMaxIndexVersion() > maxIndexVersion {
+				maxIndexVersion = indexInfo.GetMaxIndexVersion()
+			}
+		}
+		assert.Equal(t, int32(7), minIndexVersion)
+		assert.Equal(t, int32(7), maxIndexVersion)
 	})
 
 	t.Run("describe after drop index", func(t *testing.T) {
