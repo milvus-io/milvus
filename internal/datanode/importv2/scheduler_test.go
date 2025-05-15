@@ -151,7 +151,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport() {
 	cm := mocks.NewChunkManager(s.T())
 	ioReader := strings.NewReader(string(bytes))
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(1024, nil)
-	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader, Closer: io.NopCloser(ioReader)}, nil)
 	s.cm = cm
 
 	preimportReq := &datapb.PreImportRequest{
@@ -205,7 +205,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport_Failed() {
 	}
 	ioReader := strings.NewReader(string(bytes))
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(1024, nil)
-	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader, Closer: io.NopCloser(ioReader)}, nil)
 	s.cm = cm
 
 	preimportReq := &datapb.PreImportRequest{
@@ -244,7 +244,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import() {
 
 	cm := mocks.NewChunkManager(s.T())
 	ioReader := strings.NewReader(string(bytes))
-	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader, Closer: io.NopCloser(ioReader)}, nil)
 	s.cm = cm
 
 	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
@@ -305,7 +305,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 
 	cm := mocks.NewChunkManager(s.T())
 	ioReader := strings.NewReader(string(bytes))
-	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader, Closer: io.NopCloser(ioReader)}, nil)
 	s.cm = cm
 
 	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
