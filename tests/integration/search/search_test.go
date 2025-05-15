@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -129,8 +130,7 @@ func (s *SearchSuite) run() {
 	} else {
 		fVecColumn = integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	}
-	var fVarCharColumn *schemapb.FieldData
-	fVarCharColumn = integration.NewVarCharFieldData(integration.VarCharField, rowNum, true)
+	fVarCharColumn := integration.NewVarCharFieldData(integration.VarCharField, rowNum, true)
 	hashKeys := integration.GenerateHashKeys(rowNum)
 	insertCheckReport := func() {
 		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
@@ -245,6 +245,22 @@ func (s *SearchSuite) run() {
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
+
+	results := searchResult.GetResults()
+	offset := 0
+	// verify group by field corresponds to fVarCharColumn
+	for i := range results.NumQueries {
+		k := int(results.Topks[i])
+		itr := typeutil.GetDataIterator(results.GroupByFieldValue)
+		m := make(map[any]any) // test if the group by field values are unique
+		for j := 0; j < k; j++ {
+			gpbVal := itr(offset + j)
+			s.NotContains(m, gpbVal)
+			m[gpbVal] = struct{}{}
+		}
+		offset += k
+		s.Equal(len(m), k)
+	}
 
 	queryCheckReport := func() {
 		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)

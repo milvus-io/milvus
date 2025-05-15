@@ -3390,24 +3390,24 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		searchInfo, err := parseSearchInfo(normalParam, schema, nil)
+		_, err := parseSearchInfo(normalParam, schema, nil)
 		assert.Error(t, err)
 		assert.True(t, strings.Contains(err.Error(), "exceeds configured max group size"))
 		{
 			resetSearchParamsValue(normalParam, GroupSizeKey, `10`)
-			searchInfo, err = parseSearchInfo(normalParam, schema, nil)
+			searchInfo, err := parseSearchInfo(normalParam, schema, nil)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(10), searchInfo.planInfo.GroupSize)
 		}
 		{
 			resetSearchParamsValue(normalParam, GroupSizeKey, `-1`)
-			searchInfo, err = parseSearchInfo(normalParam, schema, nil)
+			_, err := parseSearchInfo(normalParam, schema, nil)
 			assert.Error(t, err)
 			assert.True(t, strings.Contains(err.Error(), "is negative"))
 		}
 		{
 			resetSearchParamsValue(normalParam, GroupSizeKey, `xxx`)
-			searchInfo, err = parseSearchInfo(normalParam, schema, nil)
+			_, err := parseSearchInfo(normalParam, schema, nil)
 			assert.Error(t, err)
 			assert.True(t, strings.Contains(err.Error(), "failed to parse input group size"))
 		}
