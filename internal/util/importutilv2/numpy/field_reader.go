@@ -240,8 +240,6 @@ func (c *FieldReader) Next(count int64) (any, error) {
 	return data, nil
 }
 
-func (c *FieldReader) Close() {}
-
 // setByteOrder sets BigEndian/LittleEndian, the logic of this method is copied from npyio lib
 func (c *FieldReader) setByteOrder() {
 	var nativeEndian binary.ByteOrder
