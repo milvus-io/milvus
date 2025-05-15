@@ -19,14 +19,8 @@ package rootcoord
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type listDatabaseTask struct {
@@ -42,64 +36,7 @@ func (t *listDatabaseTask) Prepare(ctx context.Context) error {
 func (t *listDatabaseTask) Execute(ctx context.Context) error {
 	t.Resp.Status = merr.Success()
 
-	getVisibleDBs := func() (typeutil.Set[string], error) {
-		enableAuth := Params.CommonCfg.AuthorizationEnabled.GetAsBool()
-		privilegeDBs := typeutil.NewSet[string]()
-		if !enableAuth {
-			privilegeDBs.Insert(util.AnyWord)
-			return privilegeDBs, nil
-		}
-		curUser, err := contextutil.GetCurUserFromContext(ctx)
-		// it will fail if the inner node server use the list database API
-		if err != nil || (curUser == util.UserRoot && !Params.CommonCfg.RootShouldBindRole.GetAsBool()) {
-			if err != nil {
-				log.Ctx(ctx).Warn("get current user from context failed", zap.Error(err))
-			}
-			privilegeDBs.Insert(util.AnyWord)
-			return privilegeDBs, nil
-		}
-		userRoles, err := t.core.meta.SelectUser(ctx, "", &milvuspb.UserEntity{
-			Name: curUser,
-		}, true)
-		if err != nil {
-			return nil, err
-		}
-		if len(userRoles) == 0 {
-			return privilegeDBs, nil
-		}
-		for _, role := range userRoles[0].Roles {
-			if role.GetName() == util.RoleAdmin {
-				privilegeDBs.Insert(util.AnyWord)
-				return privilegeDBs, nil
-			}
-			if role.GetName() == util.RolePublic {
-				continue
-			}
-			entities, err := t.core.meta.SelectGrant(ctx, "", &milvuspb.GrantEntity{
-				Role:   role,
-				DbName: util.AnyWord,
-			})
-			if err != nil {
-				return nil, err
-			}
-			for _, entity := range entities {
-				privilegeDBs.Insert(entity.GetDbName())
-				if entity.GetDbName() == util.AnyWord {
-					return privilegeDBs, nil
-				}
-			}
-		}
-		return privilegeDBs, nil
-	}
-
-	isVisibleDBForCurUser := func(dbName string, visibleDBs typeutil.Set[string]) bool {
-		if visibleDBs.Contain(util.AnyWord) {
-			return true
-		}
-		return visibleDBs.Contain(dbName)
-	}
-
-	visibleDBs, err := getVisibleDBs()
+	visibleDBs, err := t.core.getCurrentUserVisibleDatabases(ctx)
 	if err != nil {
 		t.Resp.Status = merr.Status(err)
 		return err
@@ -118,7 +55,7 @@ func (t *listDatabaseTask) Execute(ctx context.Context) error {
 	dbIDs := make([]int64, 0, len(ret))
 	createdTimes := make([]uint64, 0, len(ret))
 	for _, db := range ret {
-		if !isVisibleDBForCurUser(db.Name, visibleDBs) {
+		if !isVisibleDatabaseForCurUser(db.Name, visibleDBs) {
 			continue
 		}
 		dbNames = append(dbNames, db.Name)
