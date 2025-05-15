@@ -1,16 +1,9 @@
-affinity:
-  nodeAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-    - preference:
-        matchExpressions:
-        - key: node-role.kubernetes.io/e2e
-          operator: Exists
-      weight: 1
 cluster:
   enabled: true
 streaming:
   enabled: true
 proxy:
+  replicas: 2
   resources:
     limits:
       cpu: "1"
@@ -19,6 +12,7 @@ proxy:
       cpu: "0.3"
       memory: 256Mi
 dataNode:
+  replicas: 2
   resources:
     limits:
       cpu: "2"
@@ -28,6 +22,7 @@ dataNode:
       memory: 500Mi
 indexNode:
   enabled: false
+  replicas: 2
   disk:
     enabled: true
   resources:
@@ -38,6 +33,7 @@ indexNode:
       cpu: "0.5"
       memory: 500Mi
 queryNode:
+  replicas: 2
   disk:
     enabled: true
   resources:
@@ -48,6 +44,7 @@ queryNode:
       cpu: "0.5"
       memory: 512Mi
 streamingNode:
+  replicas: 2
   resources:
     limits:
       cpu: "2"
@@ -74,6 +71,13 @@ extraConfigFiles:
         interval: 1800
         missingTolerance: 1800
         dropTolerance: 1800
+    queryNode:
+      mmap:
+        vectorField: true
+        vectorIndex: true
+        scalarField: true
+        scalarIndex: true
+        growingMmapEnabled: true
 metrics:
   serviceMonitor:
     enabled: true
@@ -95,32 +99,6 @@ etcd:
     requests:
       cpu: "0.2"
       memory: 256Mi
-    limits:
-      cpu: "1"
-      memory: 4Gi
-  tolerations:
-  - effect: NoSchedule
-    key: node-role.kubernetes.io/e2e
-    operator: Exists
-image:
-  all:
-    pullPolicy: Always
-    repository: harbor.milvus.io/milvus/milvus
-    tag: PR-35426-20240812-46dadb120
-minio:
-  affinity:
-    nodeAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-      - preference:
-          matchExpressions:
-          - key: node-role.kubernetes.io/e2e
-            operator: Exists
-        weight: 1
-  mode: standalone
-  resources:
-    requests:
-      cpu: "0.2"
-      memory: 512Mi
     limits:
       cpu: "1"
       memory: 4Gi
@@ -221,7 +199,29 @@ pulsarv3:
     - effect: NoSchedule
       key: node-role.kubernetes.io/e2e
       operator: Exists
-tolerations:
-- effect: NoSchedule
-  key: node-role.kubernetes.io/e2e
-  operator: Exists
+minio:
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - preference:
+          matchExpressions:
+          - key: node-role.kubernetes.io/e2e
+            operator: Exists
+        weight: 1
+  mode: standalone
+  resources:
+    requests:
+      cpu: "0.2"
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 4Gi
+  tolerations:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/e2e
+    operator: Exists
+image:
+  all:
+    pullPolicy: Always
+    repository: harbor.milvus.io/milvus/milvus
+    tag: nightly-20240821-ed4eaff
