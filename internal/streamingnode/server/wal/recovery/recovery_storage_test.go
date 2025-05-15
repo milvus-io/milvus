@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -122,7 +123,8 @@ func TestRecoveryStorage(t *testing.T) {
 			// make sure the checkpoint is saved.
 			paramtable.Get().Save(paramtable.Get().StreamingCfg.WALRecoveryGracefulCloseTimeout.Key, "1000s")
 		}
-		rs, snapshot, err := RecoverRecoveryStorage(context.Background(), b, msg)
+		rsInterface, snapshot, err := RecoverRecoveryStorage(context.Background(), b, msg)
+		rs := rsInterface.(*recoveryStorageImpl)
 		assert.NoError(t, err)
 		assert.NotNil(t, rs)
 		assert.NotNil(t, snapshot)
@@ -194,6 +196,10 @@ func (b *streamBuilder) segmentNum() int {
 		}
 	}
 	return segmentNum
+}
+
+func (b *streamBuilder) RWWALImpls() walimpls.WALImpls {
+	return nil
 }
 
 type testRecoveryStream struct {

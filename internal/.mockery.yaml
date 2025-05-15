@@ -52,12 +52,18 @@ packages:
       InterceptorWithReady:
       InterceptorWithMetrics:
       InterceptorBuilder:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards:
+    interfaces:
+      ShardManager:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils:
     interfaces:
       SealOperator:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector:
     interfaces:
       TimeTickSyncOperator:
+  github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery:
+    interfaces:
+      RecoveryStorage:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab:
     interfaces:
       ROWriteAheadBuffer:
@@ -92,8 +98,8 @@ packages:
     interfaces:
       QueryHook:
   github.com/milvus-io/milvus/internal/flushcommon/util:
-   interfaces:
-     MsgHandler:
+    interfaces:
+      MsgHandler:
   google.golang.org/grpc/resolver:
     interfaces:
       ClientConn:

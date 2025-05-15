@@ -55,6 +55,8 @@ func (w *segmentAllocWorker) do() {
 	backoff.InitialInterval = 10 * time.Millisecond
 	backoff.MaxInterval = 1 * time.Second
 	backoff.MaxElapsedTime = 0
+	backoff.Reset()
+
 	for {
 		err := w.doOnce()
 		if err == nil {
@@ -110,7 +112,7 @@ func (w *segmentAllocWorker) generateNewGrowingSegmentMessage() error {
 		storageVersion = storage.StorageV2
 	}
 	// Getnerate growing segment limitation.
-	limitation := GetSegmentLimitationPolicy().GenerateLimitation()
+	limitation := getSegmentLimitationPolicy().GenerateLimitation()
 	// Create a new segment by sending a create segment message into wal directly.
 	w.msg = message.NewCreateSegmentMessageBuilderV2().
 		WithVChannel(w.vchannel).

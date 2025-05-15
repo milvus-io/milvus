@@ -27,8 +27,8 @@ struct Meta {
     CacheWarmupPolicy cache_warmup_policy;
     bool support_eviction;
     explicit Meta(StorageType storage_type,
-         CacheWarmupPolicy cache_warmup_policy,
-         bool support_eviction)
+                  CacheWarmupPolicy cache_warmup_policy,
+                  bool support_eviction)
         : storage_type(storage_type),
           cache_warmup_policy(cache_warmup_policy),
           support_eviction(support_eviction) {
