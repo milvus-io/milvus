@@ -196,6 +196,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	if err != nil {
 		return err
 	}
+	loadInfo.Priority = task.LoadPriority()
 
 	req := packLoadSegmentRequest(
 		task,

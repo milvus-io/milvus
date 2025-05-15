@@ -11,6 +11,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
@@ -34,9 +35,10 @@ type DeleteRequest struct {
 }
 
 type LoadFieldDataRequest struct {
-	Fields   []LoadFieldDataInfo
-	MMapDir  string
-	RowCount int64
+	Fields       []LoadFieldDataInfo
+	MMapDir      string
+	RowCount     int64
+	LoadPriority commonpb.LoadPriority
 }
 
 type LoadFieldDataInfo struct {
@@ -82,6 +84,7 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 		defer C.free(unsafe.Pointer(mmapDir))
 		C.AppendMMapDirPath(cLoadFieldDataInfo, mmapDir)
 	}
+	C.SetLoadPriority(cLoadFieldDataInfo, C.int32_t(req.LoadPriority))
 	return &cLoadFieldDataRequest{
 		cLoadFieldDataInfo: cLoadFieldDataInfo,
 	}, nil

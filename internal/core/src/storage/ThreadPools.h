@@ -22,10 +22,11 @@
 
 namespace milvus {
 
+constexpr const char* THREAD_POOL_PRIORITY = "priority";
+
 enum ThreadPoolPriority {
     HIGH = 0,
-    MIDDLE = 1,
-    LOW = 2,
+    LOW = 1,
 };
 
 class ThreadPools {
@@ -43,9 +44,9 @@ class ThreadPools {
  private:
     ThreadPools() {
         name_map[HIGH] = "high_priority_thread_pool";
-        name_map[MIDDLE] = "middle_priority_thread_pool";
         name_map[LOW] = "low_priority_thread_pool";
     }
+
     void
     ShutDown();
     static std::map<ThreadPoolPriority, std::unique_ptr<ThreadPool>>

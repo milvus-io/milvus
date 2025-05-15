@@ -220,7 +220,8 @@ DiskFileManagerImpl::AddBatchIndexFiles(
 void
 DiskFileManagerImpl::CacheIndexToDiskInternal(
     const std::vector<std::string>& remote_files,
-    const std::function<std::string()>& get_local_index_prefix) {
+    const std::function<std::string()>& get_local_index_prefix,
+    milvus::ThreadPoolPriority priority) noexcept {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
 
@@ -261,7 +262,7 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
 
         auto appendIndexFiles = [&]() {
             auto index_chunks_futures =
-                GetObjectData(rcm_.get(), batch_remote_files);
+                GetObjectData(rcm_.get(), batch_remote_files, priority);
             for (auto& chunk_future : index_chunks_futures) {
                 auto chunk_codec = chunk_future.get();
                 file.Write(chunk_codec->PayloadData(),
@@ -287,28 +288,36 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
 
 void
 DiskFileManagerImpl::CacheIndexToDisk(
-    const std::vector<std::string>& remote_files) {
+    const std::vector<std::string>& remote_files,
+    milvus::ThreadPoolPriority priority) {
     return CacheIndexToDiskInternal(
-        remote_files, [this]() { return GetLocalIndexObjectPrefix(); });
+        remote_files,
+        [this]() { return GetLocalIndexObjectPrefix(); },
+        priority);
 }
 
 void
 DiskFileManagerImpl::CacheTextLogToDisk(
-    const std::vector<std::string>& remote_files) {
+    const std::vector<std::string>& remote_files,
+    milvus::ThreadPoolPriority priority) {
     return CacheIndexToDiskInternal(
-        remote_files, [this]() { return GetLocalTextIndexPrefix(); });
+        remote_files, [this]() { return GetLocalTextIndexPrefix(); }, priority);
 }
 
 void
 DiskFileManagerImpl::CacheJsonKeyIndexToDisk(
-    const std::vector<std::string>& remote_files) {
+    const std::vector<std::string>& remote_files,
+    milvus::ThreadPoolPriority priority) {
     return CacheIndexToDiskInternal(
-        remote_files, [this]() { return GetLocalJsonKeyIndexPrefix(); });
+        remote_files,
+        [this]() { return GetLocalJsonKeyIndexPrefix(); },
+        priority);
 }
 
 template <typename DataType>
 std::string
-DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
+DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files,
+                                        milvus::ThreadPoolPriority priority) {
     SortByPath(remote_files);
 
     auto segment_id = GetFieldDataMeta().segment_id;
@@ -340,7 +349,7 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
     int64_t write_offset = sizeof(num_rows) + sizeof(dim);
 
     auto FetchRawData = [&]() {
-        auto field_datas = GetObjectData(rcm_.get(), batch_files);
+        auto field_datas = GetObjectData(rcm_.get(), batch_files, priority);
         int batch_size = batch_files.size();
         for (int i = 0; i < batch_size; ++i) {
             auto field_data = field_datas[i].get()->GetFieldData();
@@ -693,14 +702,18 @@ DiskFileManagerImpl::IsExisted(const std::string& file) noexcept {
 
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<float>(
-    std::vector<std::string> remote_files);
+    std::vector<std::string> remote_files,
+    milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::LOW);
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<float16>(
-    std::vector<std::string> remote_files);
+    std::vector<std::string> remote_files,
+    milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::LOW);
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(
-    std::vector<std::string> remote_files);
+    std::vector<std::string> remote_files,
+    milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::LOW);
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bin1>(
-    std::vector<std::string> remote_files);
+    std::vector<std::string> remote_files,
+    milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::LOW);
 }  // namespace milvus::storage
