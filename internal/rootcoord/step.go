@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 )
@@ -564,30 +563,6 @@ func (s *WriteSchemaChangeWALStep) Execute(ctx context.Context) ([]nestedStep, e
 		zap.Uint64("WALUpdateTimestamp", s.collection.UpdateTimestamp),
 		zap.Any("appendResults", resp.AppendResults),
 	)
-
-	flushMsg, err := message.NewManualFlushMessageBuilderV2().
-		WithBroadcast(vchannels).
-		WithHeader(&messagespb.ManualFlushMessageHeader{
-			CollectionId: s.collection.CollectionID,
-			FlushTs:      s.ts,
-		}).
-		WithBody(&message.ManualFlushMessageBody{}).BuildBroadcast()
-	if err != nil {
-		return nil, err
-	}
-
-	// TODO remove manual flush and make schema change trigger flush as well
-	resp, err = streaming.WAL().Broadcast().Append(ctx, flushMsg)
-	if err != nil {
-		return nil, err
-	}
-
-	log.Ctx(ctx).Info(
-		"broadcast schema manual flush success",
-		zap.Uint64("broadcastID", resp.BroadcastID),
-		zap.Any("appendResults", resp.AppendResults),
-	)
-
 	return nil, nil
 }
 
