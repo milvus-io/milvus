@@ -148,7 +148,7 @@ func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int6
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", token),
 	}
-	body, err := utils.RetrySend(ctx, data, http.MethodPost, c.url, headers, 3, 1)
+	body, err := utils.RetrySend(ctx, data, http.MethodPost, c.url, headers, 3)
 	if err != nil {
 		return nil, err
 	}

@@ -925,7 +925,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: f"Decay function only supoorts single input, but gets [[reranker_field id]] input"}
+                 ct.err_msg: f"Decay function only supports single input, but gets [[reranker_field id]] input"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1053,7 +1053,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: f"Unsupported rerank function: [1] , list of supported [decay]"}
+                 ct.err_msg: f"Unsupported rerank function: [1]"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
@@ -1098,7 +1098,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {ct.err_code: 65535,
-                 ct.err_msg: f"Unsupported rerank function: [{not_supported_reranker}] , list of supported [decay]"}
+                 ct.err_msg: f"Unsupported rerank function: [{not_supported_reranker}]"}
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 

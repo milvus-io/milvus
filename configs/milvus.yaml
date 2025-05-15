@@ -1327,3 +1327,10 @@ function:
       voyageai:
         credential:  # The name in the crendential configuration item
         url:  # Your voyageai embedding url, Default is the official embedding url
+  rerank:
+    model:
+      providers:
+        tei:
+          enable: true # Whether to enable TEI rerank service
+        vllm:
+          enable: true # Whether to enable vllm rerank service

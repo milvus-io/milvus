@@ -236,7 +236,7 @@ func getField(inputField *schemapb.FieldData, start int64, size int64) (any, err
 			return inputField.GetScalars().GetBoolData().Data[start : start+size], nil
 		}
 		return []bool{}, nil
-	case schemapb.DataType_String:
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if inputField.GetScalars() != nil && inputField.GetScalars().GetStringData() != nil {
 			return inputField.GetScalars().GetStringData().Data[start : start+size], nil
 		}
@@ -284,4 +284,18 @@ func maxMerge[T PKType](cols []*columns) map[T]float32 {
 		}
 	}
 	return srcScores
+}
+
+func getPKType(collSchema *schemapb.CollectionSchema) (schemapb.DataType, error) {
+	pkType := schemapb.DataType_None
+	for _, field := range collSchema.Fields {
+		if field.IsPrimaryKey {
+			pkType = field.DataType
+		}
+	}
+
+	if pkType == schemapb.DataType_None {
+		return pkType, fmt.Errorf("Collection %s can not found pk field", collSchema.Name)
+	}
+	return pkType, nil
 }
