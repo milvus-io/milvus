@@ -129,6 +129,8 @@ minio:
   - effect: NoSchedule
     key: node-role.kubernetes.io/e2e
     operator: Exists
+pulsarv3:
+  enabled: false
 tolerations:
 - effect: NoSchedule
   key: node-role.kubernetes.io/e2e

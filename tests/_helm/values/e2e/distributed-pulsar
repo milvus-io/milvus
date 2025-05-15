@@ -129,6 +129,7 @@ minio:
     key: node-role.kubernetes.io/e2e
     operator: Exists
 pulsarv3:
+  enabled: true
   bookkeeper:
     affinity:
       nodeAffinity:

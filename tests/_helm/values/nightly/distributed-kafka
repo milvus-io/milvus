@@ -100,6 +100,7 @@ etcd:
     key: node-role.kubernetes.io/e2e
     operator: Exists
 kafka:
+  enabled: true
   affinity:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
@@ -149,6 +150,8 @@ minio:
   - effect: NoSchedule
     key: node-role.kubernetes.io/e2e
     operator: Exists
+pulsarv3:
+  enabled: false
 image:
   all:
     pullPolicy: Always
