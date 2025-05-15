@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -135,7 +136,9 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		}
 	}
 
-	w, err := storage.NewPackedRecordWriter(paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups)
+	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+
+	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups)
 	if err != nil {
 		return nil, err
 	}
