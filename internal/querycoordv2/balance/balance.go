@@ -92,7 +92,7 @@ func (b *RoundRobinBalancer) AssignSegment(ctx context.Context, collectionID int
 		return cnt1+delta1 < cnt2+delta2
 	})
 
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
 	ret := make([]SegmentAssignPlan, 0, len(segments))
 	for i, s := range segments {
 		plan := SegmentAssignPlan{

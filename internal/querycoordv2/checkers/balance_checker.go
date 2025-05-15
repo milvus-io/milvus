@@ -108,10 +108,9 @@ func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context) []int
 				continue
 			}
 			if b.stoppingBalanceCollectionsCurrentRound.Contain(cid) {
-				log.RatedDebug(10, "BalanceChecker is balancing this collection, skip balancing in this round",
-					zap.Int64("collectionID", cid))
 				continue
 			}
+
 			replicas := b.meta.ReplicaManager.GetByCollection(ctx, cid)
 			stoppingReplicas := make([]int64, 0)
 			for _, replica := range replicas {
@@ -208,42 +207,70 @@ func (b *BalanceChecker) balanceReplicas(ctx context.Context, replicaIDs []int64
 	return segmentPlans, channelPlans
 }
 
+// Notice: balance checker will generate tasks for multiple collections in one round,
+// so generated tasks will be submitted to scheduler directly, and return nil
 func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
-	var segmentPlans []balance.SegmentAssignPlan
-	var channelPlans []balance.ChannelAssignPlan
+	segmentBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
+	channelBatchSize := paramtable.Get().QueryCoordCfg.BalanceChannelBatchSize.GetAsInt()
+	balanceOnMultipleCollections := paramtable.Get().QueryCoordCfg.EnableBalanceOnMultipleCollections.GetAsBool()
+
+	segmentTasks := make([]task.Task, 0)
+	channelTasks := make([]task.Task, 0)
+
+	generateBalanceTaskForReplicas := func(replicas []int64) {
+		segmentPlans, channelPlans := b.balanceReplicas(ctx, replicas)
+		tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), segmentPlans)
+		task.SetPriority(task.TaskPriorityLow, tasks...)
+		task.SetReason("segment unbalanced", tasks...)
+		segmentTasks = append(segmentTasks, tasks...)
+
+		tasks = balance.CreateChannelTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), channelPlans)
+		task.SetReason("channel unbalanced", tasks...)
+		channelTasks = append(channelTasks, tasks...)
+	}
+
 	stoppingReplicas := b.getReplicaForStoppingBalance(ctx)
 	if len(stoppingReplicas) > 0 {
 		// check for stopping balance first
-		segmentPlans, channelPlans = b.balanceReplicas(ctx, stoppingReplicas)
+		generateBalanceTaskForReplicas(stoppingReplicas)
 		// iterate all collection to find a collection to balance
-		for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.stoppingBalanceCollectionsCurrentRound.Len() > 0 {
-			replicasToBalance := b.getReplicaForStoppingBalance(ctx)
-			segmentPlans, channelPlans = b.balanceReplicas(ctx, replicasToBalance)
+		for len(segmentTasks) < segmentBatchSize && len(channelTasks) < channelBatchSize && b.stoppingBalanceCollectionsCurrentRound.Len() > 0 {
+			if !balanceOnMultipleCollections && (len(segmentTasks) > 0 || len(channelTasks) > 0) {
+				// if balance on multiple collections is disabled, and there are already some tasks, break
+				break
+			}
+			if len(channelTasks) < channelBatchSize {
+				replicasToBalance := b.getReplicaForStoppingBalance(ctx)
+				generateBalanceTaskForReplicas(replicasToBalance)
+			}
 		}
 	} else {
 		// then check for auto balance
 		if time.Since(b.autoBalanceTs) > paramtable.Get().QueryCoordCfg.AutoBalanceInterval.GetAsDuration(time.Millisecond) {
 			b.autoBalanceTs = time.Now()
 			replicasToBalance := b.getReplicaForNormalBalance(ctx)
-			segmentPlans, channelPlans = b.balanceReplicas(ctx, replicasToBalance)
+			generateBalanceTaskForReplicas(replicasToBalance)
 			// iterate all collection to find a collection to balance
-			for len(segmentPlans) == 0 && len(channelPlans) == 0 && b.normalBalanceCollectionsCurrentRound.Len() > 0 {
+			for len(segmentTasks) < segmentBatchSize && len(channelTasks) < channelBatchSize && b.normalBalanceCollectionsCurrentRound.Len() > 0 {
+				if !balanceOnMultipleCollections && (len(segmentTasks) > 0 || len(channelTasks) > 0) {
+					// if balance on multiple collections is disabled, and there are already some tasks, break
+					break
+				}
 				replicasToBalance := b.getReplicaForNormalBalance(ctx)
-				segmentPlans, channelPlans = b.balanceReplicas(ctx, replicasToBalance)
+				generateBalanceTaskForReplicas(replicasToBalance)
 			}
 		}
 	}
 
-	ret := make([]task.Task, 0)
-	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), segmentPlans)
-	task.SetPriority(task.TaskPriorityLow, tasks...)
-	task.SetReason("segment unbalanced", tasks...)
-	ret = append(ret, tasks...)
+	for _, task := range segmentTasks {
+		b.scheduler.Add(task)
+	}
 
-	tasks = balance.CreateChannelTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), channelPlans)
-	task.SetReason("channel unbalanced", tasks...)
-	ret = append(ret, tasks...)
-	return ret
+	for _, task := range channelTasks {
+		b.scheduler.Add(task)
+	}
+
+	return nil
 }
 
 func (b *BalanceChecker) sortCollections(ctx context.Context, collections []int64) []int64 {
@@ -252,10 +279,15 @@ func (b *BalanceChecker) sortCollections(ctx context.Context, collections []int6
 		sortOrder = "byrowcount" // Default to ByRowCount
 	}
 
+	collectionRowCountMap := make(map[int64]int64)
+	for _, cid := range collections {
+		collectionRowCountMap[cid] = b.targetMgr.GetCollectionRowCount(ctx, cid, meta.CurrentTargetFirst)
+	}
+
 	// Define sorting functions
 	sortByRowCount := func(i, j int) bool {
-		rowCount1 := b.targetMgr.GetCollectionRowCount(ctx, collections[i], meta.CurrentTargetFirst)
-		rowCount2 := b.targetMgr.GetCollectionRowCount(ctx, collections[j], meta.CurrentTargetFirst)
+		rowCount1 := collectionRowCountMap[collections[i]]
+		rowCount2 := collectionRowCountMap[collections[j]]
 		return rowCount1 > rowCount2 || (rowCount1 == rowCount2 && collections[i] < collections[j])
 	}
 
