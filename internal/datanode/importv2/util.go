@@ -214,6 +214,7 @@ func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
 		if err != nil {
 			return err
 		}
+		defer runner.Close()
 
 		inputFieldIDs := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
 		inputDatas := make([]any, 0, len(inputFieldIDs))

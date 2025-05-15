@@ -70,6 +70,7 @@ func (p *pipeline) Start() error {
 
 func (p *pipeline) Close() {
 	for _, node := range p.nodes {
+		node.node.Close()
 		if node.Checker != nil {
 			node.Checker.Close()
 		}

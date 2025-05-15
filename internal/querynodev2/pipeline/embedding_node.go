@@ -203,6 +203,12 @@ func (eNode *embeddingNode) Operate(in Msg) Msg {
 	return nodeMsg
 }
 
+func (eNode *embeddingNode) Close() {
+	for _, functionRunner := range eNode.functionRunners {
+		functionRunner.Close()
+	}
+}
+
 func getEmbeddingFieldDatas(datas []*schemapb.FieldData, fieldIDs ...int64) ([]any, error) {
 	result := []any{}
 	for _, fieldID := range fieldIDs {
