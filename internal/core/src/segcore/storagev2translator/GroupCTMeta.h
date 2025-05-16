@@ -22,11 +22,14 @@ namespace milvus::segcore::storagev2translator {
 struct GroupCTMeta : public milvus::cachinglayer::Meta {
     std::vector<int64_t> num_rows_until_chunk_;
     std::vector<int64_t> chunk_memory_size_;
-    GroupCTMeta(milvus::cachinglayer::StorageType storage_type,
+    size_t num_fields_;
+    GroupCTMeta(size_t num_fields,
+                milvus::cachinglayer::StorageType storage_type,
                 CacheWarmupPolicy cache_warmup_policy,
                 bool support_eviction)
         : milvus::cachinglayer::Meta(
-              storage_type, cache_warmup_policy, support_eviction) {
+              storage_type, cache_warmup_policy, support_eviction),
+          num_fields_(num_fields) {
     }
 };
 
