@@ -17,7 +17,7 @@ require (
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.12-0.20250514091616-5b2150d3bf33
 	github.com/nats-io/nats-server/v2 v2.10.12
 	github.com/nats-io/nats.go v1.34.1
-	github.com/panjf2000/ants/v2 v2.7.2
+	github.com/panjf2000/ants/v2 v2.9.1
 	github.com/prometheus/client_golang v1.14.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/remeh/sizedwaitgroup v1.0.0
