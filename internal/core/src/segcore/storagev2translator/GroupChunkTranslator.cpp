@@ -42,7 +42,8 @@ GroupChunkTranslator::GroupChunkTranslator(
     std::vector<std::string> insert_files,
     bool use_mmap,
     std::vector<milvus_storage::RowGroupMetadataVector>& row_group_meta_list,
-    milvus_storage::FieldIDList field_id_list)
+    milvus_storage::FieldIDList field_id_list,
+    storage::MmapChunkDescriptorPtr desc)
     : segment_id_(segment_id),
       key_(fmt::format("seg_{}_cg_{}", segment_id, column_group_info.field_id)),
       field_metas_(field_metas),
@@ -51,6 +52,7 @@ GroupChunkTranslator::GroupChunkTranslator(
       use_mmap_(use_mmap),
       row_group_meta_list_(row_group_meta_list),
       field_id_list_(field_id_list),
+      desc_(desc),
       meta_(
           field_id_list.size(),
           use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -212,30 +214,12 @@ GroupChunkTranslator::load_group_chunk(
             chunk = create_chunk(field_meta, dim, array_vec);
         } else {
             // Mmap mode
-            auto filepath =
-                std::filesystem::path(column_group_info_.mmap_dir_path) /
-                std::to_string(segment_id_) / std::to_string(field_id) /
-                std::to_string(cid);
-
-            LOG_INFO(
-                "storage v2 segment {} mmaping field {} chunk {} to path {}",
-                segment_id_,
-                field_id,
-                cid,
-                filepath.string());
-
-            std::filesystem::create_directories(filepath.parent_path());
-
-            auto file =
-                File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
-            auto chunk = create_chunk(field_meta, dim, file, 0, array_vec);
-            auto ok = unlink(filepath.c_str());
-            AssertInfo(
-                ok == 0,
-                fmt::format(
-                    "storage v2 failed to unlink mmap data file {}, err: {}",
-                    filepath.c_str(),
-                    strerror(errno)));
+            chunk = create_chunk(
+                field_meta,
+                dim,
+                storage::MmapManager::GetInstance().GetMmapChunkManager(),
+                desc_,
+                array_vec);
         }
 
         chunks[fid] = std::move(chunk);

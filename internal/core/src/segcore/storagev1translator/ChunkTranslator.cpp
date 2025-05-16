@@ -21,7 +21,9 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/SystemProperty.h"
+#include "common/type_c.h"
 #include "segcore/Utils.h"
+#include "storage/MmapManager.h"
 #include "storage/ThreadPools.h"
 #include "mmap/Types.h"
 
@@ -32,7 +34,8 @@ ChunkTranslator::ChunkTranslator(
     FieldMeta field_meta,
     FieldDataInfo field_data_info,
     std::vector<std::pair<std::string, int64_t>>&& files_and_rows,
-    bool use_mmap)
+    bool use_mmap,
+    storage::MmapChunkDescriptorPtr desc)
     : segment_id_(segment_id),
       field_id_(field_data_info.field_id),
       field_meta_(field_meta),
@@ -40,6 +43,7 @@ ChunkTranslator::ChunkTranslator(
       use_mmap_(use_mmap),
       files_and_rows_(std::move(files_and_rows)),
       mmap_dir_path_(field_data_info.mmap_dir_path),
+      desc_(desc),
       meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
             milvus::segcore::getCacheWarmupPolicy(
@@ -112,7 +116,7 @@ ChunkTranslator::get_cells(
 
     if (use_mmap_) {
         folder = std::filesystem::path(mmap_dir_path_) /
-                      std::to_string(segment_id_) / std::to_string(field_id_);
+                 std::to_string(segment_id_) / std::to_string(field_id_);
         std::filesystem::create_directories(folder);
     }
 
@@ -132,37 +136,20 @@ ChunkTranslator::get_cells(
                                      : 1,
                                  array_vec);
         } else {
-            // we don't know the resulting file size beforehand, thus using a separate file for each chunk.
-            auto filepath = folder / std::to_string(cid);
-
-            LOG_INFO("segment {} mmaping field {} chunk {} to path {}",
-                     segment_id_,
-                     field_id_,
-                     cid,
-                     filepath.string());
-
-            auto file =
-                File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
-
             std::shared_ptr<milvus::ArrowDataWrapper> r;
             bool popped = channel->pop(r);
             AssertInfo(popped, "failed to pop arrow reader from channel");
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
-            chunk = create_chunk(field_meta_,
-                                 IsVectorDataType(data_type) &&
-                                         !IsSparseFloatVectorDataType(data_type)
-                                     ? field_meta_.get_dim()
-                                     : 1,
-                                 file,
-                                 /*file_offset*/ 0,
-                                 array_vec);
-            auto ok = unlink(filepath.c_str());
-            AssertInfo(
-                ok == 0,
-                fmt::format("failed to unlink mmap data file {}, err: {}",
-                            filepath.c_str(),
-                            strerror(errno)));
+            chunk = create_chunk(
+                field_meta_,
+                IsVectorDataType(data_type) &&
+                        !IsSparseFloatVectorDataType(data_type)
+                    ? field_meta_.get_dim()
+                    : 1,
+                storage::MmapManager::GetInstance().GetMmapChunkManager(),
+                desc_,
+                array_vec);
         }
         cells.emplace_back(cid, std::move(chunk));
     }

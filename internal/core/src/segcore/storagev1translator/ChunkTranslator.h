@@ -19,6 +19,7 @@
 #include "common/Chunk.h"
 #include "common/type_c.h"
 #include "mmap/Types.h"
+#include "storage/MmapChunkManager.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -40,7 +41,8 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
         FieldMeta field_meta,
         FieldDataInfo field_data_info,
         std::vector<std::pair<std::string, int64_t>>&& files_and_rows,
-        bool use_mmap);
+        bool use_mmap,
+        storage::MmapChunkDescriptorPtr desc);
 
     size_t
     num_cells() const override;
@@ -69,6 +71,7 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     CTMeta meta_;
     FieldMeta field_meta_;
     std::string mmap_dir_path_;
+    storage::MmapChunkDescriptorPtr desc_;
 };
 
 }  // namespace milvus::segcore::storagev1translator

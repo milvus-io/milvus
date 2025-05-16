@@ -306,7 +306,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 insert_files,
                 info.enable_mmap,
                 row_group_meta_list,
-                field_id_list);
+                field_id_list,
+                mmap_descriptor_);
 
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
@@ -383,7 +384,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     field_meta,
                     field_data_info,
                     std::move(insert_files_with_entries_nums),
-                    info.enable_mmap);
+                    info.enable_mmap,
+                    mmap_descriptor_);
 
             auto data_type = field_meta.get_data_type();
             auto column = MakeChunkedColumnBase(

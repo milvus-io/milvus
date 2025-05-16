@@ -22,14 +22,17 @@
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
+#include "storage/MmapChunkManager.h"
 namespace milvus {
 class ChunkWriterBase {
  public:
     explicit ChunkWriterBase(bool nullable) : nullable_(nullable) {
     }
 
-    ChunkWriterBase(File& file, size_t offset, bool nullable)
-        : file_(&file), file_offset_(offset), nullable_(nullable) {
+    ChunkWriterBase(storage::MmapChunkManagerPtr mcm,
+                    storage::MmapChunkDescriptorPtr desc,
+                    bool nullable)
+        : mcm_(mcm), desc_(desc), nullable_(nullable) {
     }
 
     virtual void
@@ -61,10 +64,10 @@ class ChunkWriterBase {
 
  protected:
     int row_nums_ = 0;
-    File* file_ = nullptr;
-    size_t file_offset_ = 0;
     bool nullable_ = false;
     std::shared_ptr<ChunkTarget> target_;
+    storage::MmapChunkManagerPtr mcm_;
+    storage::MmapChunkDescriptorPtr desc_;
 };
 
 template <typename ArrowType, typename T>
@@ -73,8 +76,11 @@ class ChunkWriter final : public ChunkWriterBase {
     ChunkWriter(int dim, bool nullable) : ChunkWriterBase(nullable), dim_(dim) {
     }
 
-    ChunkWriter(int dim, File& file, size_t offset, bool nullable)
-        : ChunkWriterBase(file, offset, nullable), dim_(dim){};
+    ChunkWriter(int dim,
+                storage::MmapChunkManagerPtr mcm,
+                storage::MmapChunkDescriptorPtr desc,
+                bool nullable)
+        : ChunkWriterBase(mcm, desc, nullable), dim_(dim) {};
 
     void
     write(const arrow::ArrayVector& array_vec) override {
@@ -92,8 +98,9 @@ class ChunkWriter final : public ChunkWriterBase {
         }
 
         row_nums_ = row_nums;
-        if (file_) {
-            target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
+        if (mcm_) {
+            auto data = mcm_->Allocate(desc_, size);
+            target_ = std::make_shared<MemChunkTarget>(data, size);
         } else {
             target_ = std::make_shared<MemChunkTarget>(size);
         }
@@ -146,8 +153,9 @@ ChunkWriter<arrow::BooleanArray, bool>::write(
         size += (data->length() + 7) / 8;
     }
     row_nums_ = row_nums;
-    if (file_) {
-        target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
+    if (mcm_) {
+        auto data = mcm_->Allocate(desc_, size);
+        target_ = std::make_shared<MemChunkTarget>(data, size);
     } else {
         target_ = std::make_shared<MemChunkTarget>(size);
     }
@@ -203,10 +211,10 @@ class ArrayChunkWriter : public ChunkWriterBase {
         : ChunkWriterBase(nullable), element_type_(element_type) {
     }
     ArrayChunkWriter(const milvus::DataType element_type,
-                     File& file,
-                     size_t offset,
+                     storage::MmapChunkManagerPtr mcm,
+                     storage::MmapChunkDescriptorPtr desc,
                      bool nullable)
-        : ChunkWriterBase(file, offset, nullable), element_type_(element_type) {
+        : ChunkWriterBase(mcm, desc, nullable), element_type_(element_type) {
     }
 
     void
@@ -263,8 +271,8 @@ create_chunk(const FieldMeta& field_meta,
 std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              int dim,
-             File& file,
-             size_t file_offset,
+             storage::MmapChunkManagerPtr mcm,
+             storage::MmapChunkDescriptorPtr desc,
              const arrow::ArrayVector& array_vec);
 
 arrow::ArrayVector
