@@ -1756,6 +1756,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	if isBackup {
 		files = make([]*internalpb.ImportFile, 0)
 		pool := conc.NewPool[struct{}](hardware.GetCPUNum() * 2)
+		defer pool.Release()
 		futures := make([]*conc.Future[struct{}], 0, len(in.GetFiles()))
 		mu := &sync.Mutex{}
 		for _, importFile := range in.GetFiles() {
