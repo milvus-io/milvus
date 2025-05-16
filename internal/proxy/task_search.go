@@ -386,6 +386,12 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			IgnoreGrowing:      ignoreGrowing,
 		}
 
+		// set analyzer name for sub search
+		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV("analyzer_name", subReq.GetSearchParams())
+		if err == nil {
+			internalSubReq.AnalyzerName = analyzer
+		}
+
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
