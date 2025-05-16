@@ -12,7 +12,10 @@ streaming:
   enabled: true
 service:
   type: ClusterIP
+woodpecker:
+  enabled: true
 standalone:
+  messageQueue: woodpecker
   disk:
     enabled: true
   resources:

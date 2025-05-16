@@ -1,3 +1,11 @@
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - preference:
+        matchExpressions:
+        - key: node-role.kubernetes.io/e2e
+          operator: Exists
+      weight: 1
 cluster:
   enabled: true
 woodpecker:
