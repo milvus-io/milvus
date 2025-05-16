@@ -53,15 +53,16 @@ type trigger interface {
 }
 
 type compactionSignal struct {
-	id           UniqueID
-	isForce      bool
-	collectionID UniqueID
-	partitionID  UniqueID
-	channel      string
-	segmentIDs   []UniqueID
-	pos          *msgpb.MsgPosition
-	resultCh     chan error
-	waitResult   bool
+	id                       UniqueID
+	isForce                  bool
+	collectionID             UniqueID
+	partitionID              UniqueID
+	channel                  string
+	segmentIDs               []UniqueID
+	pos                      *msgpb.MsgPosition
+	resultCh                 chan error
+	waitResult               bool
+	doStrictExpiryCompaction bool
 }
 
 func NewCompactionSignal() *compactionSignal {
@@ -133,6 +134,8 @@ type compactionTrigger struct {
 	// A sloopy hack, so we can test with different segment row count without worrying that
 	// they are re-calculated in every compaction.
 	testingOnly bool
+	// no need to use mutex for this map, as all operations towards should be executed serially
+	lastStrictExpiryCompactionTsMap map[CompactionGroupLabel]time.Time
 }
 
 func newCompactionTrigger(
@@ -143,16 +146,17 @@ func newCompactionTrigger(
 	indexVersionManager IndexEngineVersionManager,
 ) *compactionTrigger {
 	return &compactionTrigger{
-		meta:                         meta,
-		allocator:                    allocator,
-		signals:                      make(chan *compactionSignal, 100),
-		manualSignals:                make(chan *compactionSignal, 100),
-		compactionHandler:            compactionHandler,
-		indexEngineVersionManager:    indexVersionManager,
-		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-		handler:                      handler,
-		closeCh:                      lifetime.NewSafeChan(),
+		meta:                            meta,
+		allocator:                       allocator,
+		signals:                         make(chan *compactionSignal, 100),
+		manualSignals:                   make(chan *compactionSignal, 100),
+		compactionHandler:               compactionHandler,
+		indexEngineVersionManager:       indexVersionManager,
+		estimateDiskSegmentPolicy:       calBySchemaPolicyWithDiskIndex,
+		estimateNonDiskSegmentPolicy:    calBySchemaPolicy,
+		handler:                         handler,
+		closeCh:                         lifetime.NewSafeChan(),
+		lastStrictExpiryCompactionTsMap: make(map[CompactionGroupLabel]time.Time, 0),
 	}
 }
 
@@ -321,6 +325,24 @@ func (t *compactionTrigger) allocSignalID(ctx context.Context) (UniqueID, error)
 	return t.allocator.AllocID(ctx)
 }
 
+func (t *compactionTrigger) shouldDoStrictExpiryCompaction(group *chanPartSegments) bool {
+	if paramtable.Get().DataCoordCfg.CompactionForceExpiryInterval.GetAsInt() > 0 {
+		cate := CompactionGroupLabel{group.collectionID, group.partitionID, group.channelName}
+		lastExpiryCompactionTime, ok := t.lastStrictExpiryCompactionTsMap[cate]
+		if !ok || time.Since(lastExpiryCompactionTime) >= paramtable.Get().DataCoordCfg.CompactionForceExpiryInterval.GetAsDuration(time.Hour) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *compactionTrigger) mayUpdateStrictExpiryCompactionTs(signal *compactionSignal, plansSubmitted bool) {
+	if paramtable.Get().DataCoordCfg.CompactionForceExpiryInterval.GetAsInt() > 0 && signal.doStrictExpiryCompaction && plansSubmitted {
+		cate := CompactionGroupLabel{signal.collectionID, signal.partitionID, signal.channel}
+		t.lastStrictExpiryCompactionTsMap[cate] = time.Now()
+	}
+}
+
 // handleSignal is the internal logic to convert compactionSignal into compaction tasks.
 func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 	log := log.With(zap.Int64("compactionID", signal.id),
@@ -375,10 +397,13 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		}
 
 		expectedSize := getExpectedSegmentSize(t.meta, coll)
+		signal.doStrictExpiryCompaction = t.shouldDoStrictExpiryCompaction(&group)
 		plans := t.generatePlans(group.segments, signal, ct, expectedSize)
+		plansSubmitted := true
 		for _, plan := range plans {
 			if !signal.isForce && t.compactionHandler.isFull() {
 				log.Warn("compaction plan skipped due to handler full")
+				plansSubmitted = false
 				break
 			}
 			totalRows, inputSegmentIDs := plan.A, plan.B
@@ -422,6 +447,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 					zap.Int64("planID", task.GetPlanID()),
 					zap.Int64s("inputSegments", inputSegmentIDs),
 					zap.Error(err))
+				plansSubmitted = false
 				continue
 			}
 
@@ -429,6 +455,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 				zap.Int64("time cost", time.Since(start).Milliseconds()),
 				zap.Int64s("segmentIDs", inputSegmentIDs))
 		}
+		t.mayUpdateStrictExpiryCompactionTs(signal, plansSubmitted)
 	}
 	return nil
 }
@@ -449,7 +476,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	for _, segment := range segments {
 		segment := segment.ShadowClone()
 		// TODO should we trigger compaction periodically even if the segment has no obvious reason to be compacted?
-		if signal.isForce || t.ShouldDoSingleCompaction(segment, compactTime) {
+		if signal.isForce || t.ShouldDoSingleCompaction(segment, compactTime, signal) {
 			prioritizedCandidates = append(prioritizedCandidates, segment)
 		} else if t.isSmallSegment(segment, expectedSize) {
 			smallCandidates = append(smallCandidates, segment)
@@ -587,25 +614,19 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	if len(signal.segmentIDs) > 0 && len(segments) != len(signal.segmentIDs) {
 		return nil, merr.WrapErrServiceInternal("not all segment ids provided could be compacted")
 	}
-
-	type category struct {
-		collectionID int64
-		partitionID  int64
-		channelName  string
-	}
-	groups := lo.GroupBy(segments, func(segment *SegmentInfo) category {
-		return category{
-			collectionID: segment.CollectionID,
-			partitionID:  segment.PartitionID,
-			channelName:  segment.InsertChannel,
+	groups := lo.GroupBy(segments, func(segment *SegmentInfo) CompactionGroupLabel {
+		return CompactionGroupLabel{
+			CollectionID: segment.CollectionID,
+			PartitionID:  segment.PartitionID,
+			Channel:      segment.InsertChannel,
 		}
 	})
 
-	return lo.MapToSlice(groups, func(c category, segments []*SegmentInfo) chanPartSegments {
+	return lo.MapToSlice(groups, func(c CompactionGroupLabel, segments []*SegmentInfo) chanPartSegments {
 		return chanPartSegments{
-			collectionID: c.collectionID,
-			partitionID:  c.partitionID,
-			channelName:  c.channelName,
+			collectionID: c.CollectionID,
+			partitionID:  c.PartitionID,
+			channelName:  c.Channel,
 			segments:     segments,
 		}
 	}), nil
@@ -659,7 +680,20 @@ func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
 	return is
 }
 
-func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
+func (t *compactionTrigger) ShouldStrictCompactExpiry(fromTs uint64, compactTime *compactTime, signal *compactionSignal, segID int64) bool {
+	if signal != nil && signal.doStrictExpiryCompaction && fromTs <= compactTime.expireTime {
+		log.Info("Trigger strict expiry compaction for segment",
+			zap.Int64("segmentID", segID),
+			zap.Int64("collectionID", signal.collectionID),
+			zap.Int64("partition", signal.partitionID),
+			zap.String("channel", signal.channel),
+		)
+		return true
+	}
+	return false
+}
+
+func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime, signal *compactionSignal) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
 	log := log.Ctx(context.TODO())
@@ -673,6 +707,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 	// if expire time is enabled, put segment into compaction candidate
 	totalExpiredSize := int64(0)
 	totalExpiredRows := 0
+	var earliestFromTs uint64 = math.MaxUint64
 	for _, binlogs := range segment.GetBinlogs() {
 		for _, l := range binlogs.GetBinlogs() {
 			// TODO, we should probably estimate expired log entries by total rows in binlog and the ralationship of timeTo, timeFrom and expire time
@@ -685,7 +720,12 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 				totalExpiredRows += int(l.GetEntriesNum())
 				totalExpiredSize += l.GetMemorySize()
 			}
+			earliestFromTs = min(earliestFromTs, l.TimestampFrom)
 		}
+	}
+
+	if t.ShouldStrictCompactExpiry(earliestFromTs, compactTime, signal, segment.GetID()) {
+		return true
 	}
 
 	if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
