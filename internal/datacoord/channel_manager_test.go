@@ -705,8 +705,8 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch2", ToWatch)
 
 		m.AdvanceChannelState(ctx)
-		s.checkAssignment(m, 1, "ch1", ToWatch)
-		s.checkAssignment(m, 1, "ch2", ToWatch)
+		s.checkAssignment(m, 1, "ch1", Standby)
+		s.checkAssignment(m, 1, "ch2", Standby)
 	})
 	s.Run("advance to release channels notify success", func() {
 		chNodes := map[string]int64{
