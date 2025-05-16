@@ -5415,6 +5415,10 @@ type streamingConfig struct {
 	WALRecoveryGracefulCloseTimeout ParamItem `refreshable:"true"`
 	WALTruncateSampleInterval       ParamItem `refreshable:"true"`
 	WALTruncateRetentionInterval    ParamItem `refreshable:"true"`
+
+	// inteceptors
+	SealWorkerInterval         ParamItem `refreshable:"false"`
+	GrowingBytesNotifyCoolDown ParamItem `refreshable:"false"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -5640,6 +5644,22 @@ Greater the interval, more wal storage usage, more redundant data in wal`,
 		Export:       true,
 	}
 	p.WALTruncateRetentionInterval.Init(base.mgr)
+
+	p.SealWorkerInterval = ParamItem{
+		Key:          "streaming.inteceptors.sealWorkerInterval",
+		Version:      "2.6.0",
+		DefaultValue: "1m",
+		Export:       false,
+	}
+	p.SealWorkerInterval.Init(base.mgr)
+
+	p.GrowingBytesNotifyCoolDown = ParamItem{
+		Key:          "streaming.inteceptors.growingBytesNotifyCooldown",
+		Version:      "2.6.0",
+		DefaultValue: "5s",
+		Export:       false,
+	}
+	p.GrowingBytesNotifyCoolDown.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.
