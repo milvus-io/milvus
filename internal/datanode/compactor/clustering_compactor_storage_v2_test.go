@@ -281,7 +281,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) initStorageV2Segments(rows int,
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", CollectionID)
 	deleteData := storage.NewDeleteData([]storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}, []uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)})
 	pack := new(syncmgr.SyncPack).WithCollectionID(CollectionID).WithPartitionID(PartitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, segmentID, genCollectionSchema())).WithDeleteData(deleteData)
-	bw := syncmgr.NewBulkPackWriterV2(mc, cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0)
+	bw := syncmgr.NewBulkPackWriterV2(mc, genCollectionSchema(), cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0)
 	return bw.Write(context.Background(), pack)
 }
 

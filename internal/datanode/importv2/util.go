@@ -89,7 +89,11 @@ func NewSyncTask(ctx context.Context,
 		syncPack.WithBM25Stats(bm25Stats)
 	}
 
-	task := syncmgr.NewSyncTask().WithAllocator(allocator).WithMetaCache(metaCache).WithSyncPack(syncPack)
+	task := syncmgr.NewSyncTask().
+		WithAllocator(allocator).
+		WithMetaCache(metaCache).
+		WithSchema(metaCache.Schema()). // TODO specify import schema if needed
+		WithSyncPack(syncPack)
 	return task, nil
 }
 

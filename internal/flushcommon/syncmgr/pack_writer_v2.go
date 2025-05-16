@@ -49,7 +49,7 @@ type BulkPackWriterV2 struct {
 	multiPartUploadSize int64
 }
 
-func NewBulkPackWriterV2(metaCache metacache.MetaCache, chunkManager storage.ChunkManager,
+func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
 	allocator allocator.Interface, bufferSize, multiPartUploadSize int64, writeRetryOpts ...retry.Option,
 ) *BulkPackWriterV2 {
 	return &BulkPackWriterV2{
@@ -59,7 +59,7 @@ func NewBulkPackWriterV2(metaCache metacache.MetaCache, chunkManager storage.Chu
 			allocator:      allocator,
 			writeRetryOpts: writeRetryOpts,
 		},
-		schema:              metaCache.Schema(),
+		schema:              schema,
 		bufferSize:          bufferSize,
 		multiPartUploadSize: multiPartUploadSize,
 	}
