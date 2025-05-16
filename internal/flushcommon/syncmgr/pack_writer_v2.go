@@ -55,6 +55,7 @@ func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.Collect
 	return &BulkPackWriterV2{
 		BulkPackWriter: &BulkPackWriter{
 			metaCache:      metaCache,
+			schema:         schema,
 			chunkManager:   chunkManager,
 			allocator:      allocator,
 			writeRetryOpts: writeRetryOpts,
