@@ -67,7 +67,9 @@ func (d *taskDispatcher[K]) Stop() {
 			d.cancel()
 		}
 		d.wg.Wait()
-		d.pool.Release()
+		if d.pool != nil {
+			d.pool.Release()
+		}
 	})
 }
 

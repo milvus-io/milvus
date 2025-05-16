@@ -103,8 +103,12 @@ func (s *scheduler) Stop() {
 	close(s.receiveChan)
 	// wait workers quit
 	s.wg.Wait()
-	s.pool.Release()
-	s.gpuPool.Release()
+	if s.pool != nil {
+		s.pool.Release()
+	}
+	if s.gpuPool != nil {
+		s.gpuPool.Release()
+	}
 }
 
 // schedule the owned task asynchronously and continuously.
