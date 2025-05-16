@@ -542,7 +542,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channelName)
 			if err != nil || targetID != nodeID {
 				err := merr.WrapErrChannelNotFound(channelName, fmt.Sprintf("for node %d", nodeID))
-				log.Warn("failed to get latest wall allocated", zap.Error(err))
+				log.Warn("failed to get latest wal allocated", zap.Error(err))
 				return merr.Status(err), nil
 			}
 		} else if !s.channelManager.Match(nodeID, channelName) {

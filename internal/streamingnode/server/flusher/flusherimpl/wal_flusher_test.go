@@ -78,6 +78,9 @@ func TestWALFlusher(t *testing.T) {
 					},
 				},
 			},
+			Checkpoint: &recovery.WALCheckpoint{
+				TimeTick: 0,
+			},
 		},
 		RecoveryStorage: rs,
 	}
