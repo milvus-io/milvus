@@ -193,6 +193,9 @@ func (r *reader) Read() (*storage.InsertData, error) {
 	for range 4096 {
 		v, err := r.dr.NextValue()
 		if err == io.EOF {
+			if insertData.GetRowNum() == 0 {
+				return nil, io.EOF
+			}
 			break
 		}
 		if err != nil {

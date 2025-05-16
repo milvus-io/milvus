@@ -74,10 +74,7 @@ func (r *compositeRecord) Column(i FieldID) arrow.Array {
 }
 
 func (r *compositeRecord) Len() int {
-	for _, rec := range r.recs {
-		return rec.Len()
-	}
-	return 0
+	return r.recs[0].Len()
 }
 
 func (r *compositeRecord) Release() {
@@ -534,7 +531,7 @@ type DeserializeReaderImpl[T any] struct {
 
 // Iterate to next value, return error or EOF if no more value.
 func (deser *DeserializeReaderImpl[T]) NextValue() (*T, error) {
-	if deser.rec == nil || deser.pos >= deser.rec.Len()-1 {
+	if deser.pos == 0 || deser.pos >= len(deser.values) {
 		r, err := deser.rr.Next()
 		if err != nil {
 			return nil, err
@@ -547,11 +544,10 @@ func (deser *DeserializeReaderImpl[T]) NextValue() (*T, error) {
 		if err := deser.deserializer(deser.rec, deser.values); err != nil {
 			return nil, err
 		}
-	} else {
-		deser.pos++
 	}
-
-	return &deser.values[deser.pos], nil
+	ret := &deser.values[deser.pos]
+	deser.pos++
+	return ret, nil
 }
 
 func (deser *DeserializeReaderImpl[T]) Close() error {
