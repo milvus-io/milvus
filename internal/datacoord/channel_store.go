@@ -399,15 +399,6 @@ func (c *StateChannelStore) AddNode(nodeID int64) {
 	}
 }
 
-func (c *StateChannelStore) SetState(targetState ChannelState, nodeID int64, channel RWChannel, opID int64) {
-	channelName := channel.GetName()
-	if cInfo, ok := c.channelsInfo[nodeID]; ok {
-		if stateChannel, ok := cInfo.Channels[channelName]; ok {
-			stateChannel.(*StateChannel).setState(targetState)
-		}
-	}
-}
-
 func (c *StateChannelStore) UpdateState(err error, nodeID int64, channel RWChannel, opID int64) {
 	channelName := channel.GetName()
 	if cInfo, ok := c.channelsInfo[nodeID]; ok {
