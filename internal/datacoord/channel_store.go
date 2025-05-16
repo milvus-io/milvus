@@ -72,7 +72,7 @@ type RWChannelStore interface {
 	Update(op *ChannelOpSet) error
 
 	// UpdateState is used by StateChannelStore only
-	UpdateState(action Action, nodeID int64, channel RWChannel, opID int64)
+	UpdateState(err error, nodeID int64, channel RWChannel, opID int64)
 	// SegLegacyChannelByNode is used by StateChannelStore only
 	SetLegacyChannelByNode(nodeIDs ...int64)
 
@@ -408,31 +408,11 @@ func (c *StateChannelStore) SetState(targetState ChannelState, nodeID int64, cha
 	}
 }
 
-type Action string
-
-const (
-	OnSuccess         Action = "OnSuccess"
-	OnFailure         Action = "OnFailure"
-	OnNotifyDuplicate Action = "OnNotifyDuplicate" // notify ToWatch to DataNode already subscribed to the channel
-)
-
-func (c *StateChannelStore) UpdateState(action Action, nodeID int64, channel RWChannel, opID int64) {
+func (c *StateChannelStore) UpdateState(err error, nodeID int64, channel RWChannel, opID int64) {
 	channelName := channel.GetName()
 	if cInfo, ok := c.channelsInfo[nodeID]; ok {
 		if stateChannel, ok := cInfo.Channels[channelName]; ok {
-			switch action {
-			case OnSuccess:
-				stateChannel.(*StateChannel).TransitionOnSuccess(opID)
-			case OnFailure:
-				stateChannel.(*StateChannel).TransitionOnFailure(opID)
-			case OnNotifyDuplicate:
-				stateChannel.(*StateChannel).setState(ToRelease)
-			default:
-				log.Warn("unknown action", zap.Any("action", action),
-					zap.Int64("nodeID", nodeID),
-					zap.String("channel", channelName),
-					zap.Int64("opID", opID))
-			}
+			stateChannel.(*StateChannel).TransitionState(err, opID)
 		}
 	}
 }

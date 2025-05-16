@@ -561,7 +561,6 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 			got, err := f.Await()
 			res := got.(poolResult)
 
-			action := OnSuccess
 			if err != nil {
 				log.Ctx(ctx).Warn("Failed to notify channel operations to datanode",
 					zap.Int64("assignment", nodeAssign.NodeID),
@@ -569,10 +568,6 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 					zap.String("channel name", res.ch.GetName()),
 					zap.Error(err),
 				)
-				action = OnFailure
-				if err == merr.ErrChannelReduplicate {
-					action = OnNotifyDuplicate
-				}
 				failedChannels++
 			} else {
 				succeededChannels++
@@ -580,7 +575,7 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 			}
 
 			m.mu.Lock()
-			m.store.UpdateState(action, nodeID, res.ch, res.opID)
+			m.store.UpdateState(err, nodeID, res.ch, res.opID)
 			m.mu.Unlock()
 		}
 
@@ -596,9 +591,9 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 }
 
 type poolResult struct {
-	successful bool
-	ch         RWChannel
-	opID       int64
+	err  error
+	ch   RWChannel
+	opID int64
 }
 
 func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*NodeChannelInfo) bool {
@@ -624,10 +619,14 @@ func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*No
 			future := getOrCreateIOPool().Submit(func() (any, error) {
 				successful, got := m.Check(ctx, nodeID, tmpWatchInfo)
 				if got {
+					var err error
+					if !successful {
+						err = errors.New("operation in progress")
+					}
 					return poolResult{
-						successful: successful,
-						ch:         innerCh,
-						opID:       tmpWatchInfo.GetOpID(),
+						err:  err,
+						ch:   innerCh,
+						opID: tmpWatchInfo.GetOpID(),
 					}, nil
 				}
 				return nil, errors.New("Got results with no progress")
@@ -640,11 +639,7 @@ func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*No
 			if err == nil {
 				m.mu.Lock()
 				result := got.(poolResult)
-				action := OnSuccess
-				if !result.successful {
-					action = OnFailure
-				}
-				m.store.UpdateState(action, nodeID, result.ch, result.opID)
+				m.store.UpdateState(result.err, nodeID, result.ch, result.opID)
 				m.mu.Unlock()
 
 				advanced = true
