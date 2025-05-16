@@ -235,7 +235,9 @@ func (gc *garbageCollector) close() {
 	gc.stopOnce.Do(func() {
 		gc.cancel()
 		gc.wg.Wait()
-		gc.option.removeObjectPool.Release()
+		if gc.option.removeObjectPool != nil {
+			gc.option.removeObjectPool.Release()
+		}
 	})
 }
 

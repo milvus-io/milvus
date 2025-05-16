@@ -239,9 +239,6 @@ func (t *clusteringCompactionTask) init() error {
 }
 
 func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
-	defer t.mappingPool.Release()
-	defer t.flushPool.Release()
-
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("clusteringCompaction-%d", t.GetPlanID()))
 	defer span.End()
 	log := log.With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
@@ -780,6 +777,12 @@ func (t *clusteringCompactionTask) uploadPartitionStats(ctx context.Context, col
 
 // cleanUp try best to clean all temp datas
 func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
+	if t.mappingPool != nil {
+		t.mappingPool.Release()
+	}
+	if t.flushPool != nil {
+		t.flushPool.Release()
+	}
 }
 
 func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[interface{}]int64, error) {

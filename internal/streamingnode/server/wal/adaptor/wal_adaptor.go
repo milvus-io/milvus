@@ -283,7 +283,9 @@ func (w *walAdaptorImpl) Close() {
 	w.scanMetrics.Close()
 	w.writeMetrics.Close()
 
-	w.appendExecutionPool.Release()
+	if w.appendExecutionPool != nil {
+		w.appendExecutionPool.Release()
+	}
 }
 
 type interceptorBuildResult struct {
