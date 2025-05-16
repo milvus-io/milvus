@@ -626,6 +626,10 @@ func getBaseSearchParams() []*commonpb.KeyValuePair {
 			Key:   TopKKey,
 			Value: "10",
 		},
+		{
+			Key:   "analyzer_name",
+			Value: "test_analyzer",
+		}, // invalid analyzer
 	}
 }
 
