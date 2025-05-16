@@ -166,19 +166,23 @@ func (m *StatsManager) registerNewGrowingSegment(belongs SegmentBelongs, stats *
 	}
 	m.vchannelStats[belongs.VChannel].Collect(stats.Insert)
 
-	m.metricHelper.ObservePChannelBytesUpdate(belongs.PChannel, m.pchannelStats[belongs.PChannel].BinarySize)
+	m.metricHelper.ObservePChannelBytesUpdate(belongs.PChannel, *m.pchannelStats[belongs.PChannel])
 }
 
 // AllocRows alloc number of rows on current segment.
 // AllocRows will check if the segment has enough space to insert.
 // Must be called after RegisterGrowingSegment and before UnregisterGrowingSegment.
 func (m *StatsManager) AllocRows(segmentID int64, insert InsertMetrics) error {
-	shouldBeSealed, err := m.allocRows(segmentID, insert)
-	if err != nil {
-		return err
+	if insert.Rows == 0 || insert.BinarySize == 0 {
+		panic(fmt.Sprintf("insert rows or binary size cannot be 0, rows: %d, binary: %d", insert.Rows, insert.BinarySize))
 	}
+
+	shouldBeSealed, err := m.allocRows(segmentID, insert)
 	if shouldBeSealed {
 		m.worker.NotifySealSegment(segmentID, policy.PolicyCapacity())
+	}
+	if err != nil {
+		return err
 	}
 	m.notifyIfTotalGrowingBytesOverHWM()
 	return nil
@@ -209,13 +213,13 @@ func (m *StatsManager) allocRows(segmentID int64, insert InsertMetrics) (bool, e
 		}
 		m.vchannelStats[info.VChannel].Collect(insert)
 
-		m.metricHelper.ObservePChannelBytesUpdate(info.PChannel, m.pchannelStats[info.PChannel].BinarySize)
+		m.metricHelper.ObservePChannelBytesUpdate(info.PChannel, *m.pchannelStats[info.PChannel])
 		return stat.ShouldBeSealed(), nil
 	}
 	if stat.IsEmpty() {
 		return false, ErrTooLargeInsert
 	}
-	return false, ErrNotEnoughSpace
+	return stat.ShouldBeSealed(), ErrNotEnoughSpace
 }
 
 // notifyIfTotalGrowingBytesOverHWM notifies if the total bytes is over the high water mark.
@@ -307,15 +311,15 @@ func (m *StatsManager) unregisterSealedSegment(segmentID int64) *SegmentStats {
 
 	if _, ok := m.pchannelStats[info.PChannel]; ok {
 		m.pchannelStats[info.PChannel].Subtract(stats.Insert)
-		m.metricHelper.ObservePChannelBytesUpdate(info.PChannel, m.pchannelStats[info.PChannel].BinarySize)
-		if m.pchannelStats[info.PChannel].BinarySize == 0 {
+		m.metricHelper.ObservePChannelBytesUpdate(info.PChannel, *m.pchannelStats[info.PChannel])
+		if m.pchannelStats[info.PChannel].IsZero() {
 			// If the binary size is 0, it means the segment is empty, we can delete it.
 			delete(m.pchannelStats, info.PChannel)
 		}
 	}
 	if _, ok := m.vchannelStats[info.VChannel]; ok {
 		m.vchannelStats[info.VChannel].Subtract(stats.Insert)
-		if m.vchannelStats[info.VChannel].BinarySize == 0 {
+		if m.vchannelStats[info.VChannel].IsZero() {
 			delete(m.vchannelStats, info.VChannel)
 		}
 	}

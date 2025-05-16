@@ -187,24 +187,24 @@ woodpecker:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
     segmentRollingPolicy:
-      maxSize: 2000000000 # Maximum entries count of a segment, default is 2GB
-      maxInterval: 600 # Maximum interval between two segments in seconds, default is 10 minutes.
+      maxSize: 2GB # Maximum entries count of a segment, default is 2GB
+      maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
     auditor:
-      maxInterval: 10 # Maximum interval between two auditing operations in seconds, default is 10 seconds.
+      maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
   logstore:
     logFileSyncPolicy:
-      maxInterval: 1000 # Maximum interval between two sync operations in milliseconds.
-      maxBytes: 64000000 # Maximum size of write buffer in bytes.
+      maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
+      maxBytes: 64M # Maximum size of write buffer in bytes.
       maxEntries: 100000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
-      retryInterval: 1000 # Maximum interval between two retries in milliseconds.
-      maxFlushSize: 8000000 # Maximum size of a fragment in bytes to flush, default is 8M.
+      retryInterval: 1000ms # Maximum interval between two retries. default is 1000 milliseconds.
+      maxFlushSize: 8M # Maximum size of a fragment in bytes to flush, default is 8M.
       maxFlushThreads: 4 # Maximum number of threads to flush data
     fragmentManager:
-      maxBytes: 1000000000 # Maximum size of fragment cached data in bytes.
-      maxInterval: 1000 # Maximum interval between two fragment evicts in milliseconds.
+      maxBytes: 512M # Maximum size of fragment cached data in bytes.
+      maxInterval: 1s # Maximum interval between two fragment evicts. default is 1 second
   storage:
-    type: minio # The Type of the storage provider. Valid values: [default, minio, local, service], default is minio.
+    type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
@@ -875,7 +875,9 @@ common:
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
-    defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
+    # default password for root user. The maximum length is 72 characters. 
+    # Large numeric passwords require double quotes to avoid yaml parsing precision issues.
+    defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
     rbac:
@@ -1242,6 +1244,15 @@ streaming:
     # When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
     # If that persist operation exceeds this timeout, the wal recovery module will close right now.
     gracefulCloseTimeout: 3s
+  walTruncate:
+    # The interval of sampling wal checkpoint when truncate, 1m by default.
+    # Every time the checkpoint is persisted, the checkpoint will be sampled and used to be a candidate of truncate checkpoint.
+    # More samples, more frequent truncate, more memory usage.
+    sampleInterval: 1m
+    # The retention interval of wal truncate, 5m by default.
+    # If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
+    # Greater the interval, more wal storage usage, more redundant data in wal
+    retentionInterval: 5m
 
 # Any configuration related to the knowhere vector search engine
 knowhere:

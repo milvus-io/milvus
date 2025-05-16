@@ -112,7 +112,7 @@ func TestShardManager(t *testing.T) {
 			},
 		},
 		TxnManager: &mockedTxnManager{},
-	})
+	}).(*shardManagerImpl)
 	assert.Equal(t, channel, m.Channel())
 
 	// Test Checkers
@@ -200,7 +200,7 @@ func TestShardManager(t *testing.T) {
 		WithTimeTick(600).
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(3))
-	m.managers[10].onAllocating = make(chan struct{})
+	m.partitionManagers[10].onAllocating = make(chan struct{})
 	ch, err := m.WaitUntilGrowingSegmentReady(7, 10)
 	assert.NoError(t, err)
 	select {

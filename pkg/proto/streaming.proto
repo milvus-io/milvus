@@ -538,16 +538,10 @@ message SegmentAssignmentMeta {
     uint64 checkpoint_time_tick  = 8; // The timetick of checkpoint, the meta already see the message at this timetick.
 }
 
-// SegmentAssignmentState is the state of segment assignment.
-// The state machine can be described as following:
-// 1. PENDING -> GROWING -> SEALED -> FLUSHED
 enum SegmentAssignmentState {
     SEGMENT_ASSIGNMENT_STATE_UNKNOWN = 0;  // should never used.
-    SEGMENT_ASSIGNMENT_STATE_PENDING = 1;
-    SEGMENT_ASSIGNMENT_STATE_GROWING = 2;
-    SEGMENT_ASSIGNMENT_STATE_SEALED  = 3;
-    SEGMENT_ASSIGNMENT_STATE_FLUSHED = 4;  // can never be seen, because it's
-    // removed physically when enter FLUSHED.
+    SEGMENT_ASSIGNMENT_STATE_GROWING = 1;
+    SEGMENT_ASSIGNMENT_STATE_FLUSHED = 2;
 }
 
 // SegmentAssignmentStat is the stat of segment assignment.

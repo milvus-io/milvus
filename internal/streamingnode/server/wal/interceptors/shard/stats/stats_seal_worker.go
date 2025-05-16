@@ -21,8 +21,8 @@ var (
 func newSealWorker(statsManager *StatsManager) *sealWorker {
 	w := &sealWorker{
 		statsManager:         statsManager,
-		sealNotifier:         make(chan sealSegmentIDWithPolicy, 1),
-		growingBytesNotifier: syncutil.NewCooldownNotifier[uint64](growingBytesNotifyCooldown, 1),
+		sealNotifier:         make(chan sealSegmentIDWithPolicy, 100),
+		growingBytesNotifier: syncutil.NewCooldownNotifier[uint64](growingBytesNotifyCooldown, 100),
 	}
 	return w
 }
@@ -37,7 +37,10 @@ type sealWorker struct {
 
 // NotifySealSegment is used to notify the seal worker to seal the segment.
 func (m *sealWorker) NotifySealSegment(segmentID int64, sealPolicy policy.SealPolicy) {
-	m.sealNotifier <- sealSegmentIDWithPolicy{segmentID: segmentID, sealPolicy: sealPolicy}
+	go func() {
+		// we should async notify the seal worker to avoid blocking the caller.
+		m.sealNotifier <- sealSegmentIDWithPolicy{segmentID: segmentID, sealPolicy: sealPolicy}
+	}()
 }
 
 // NotifyGrowingBytes is used to notify the seal worker to seal the segment when the total size exceeds the threshold.

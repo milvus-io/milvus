@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -108,6 +109,11 @@ type InsertMetrics struct {
 	BinarySize uint64
 }
 
+// IsZero return true if InsertMetrics is zero.
+func (m *InsertMetrics) IsZero() bool {
+	return m.Rows == 0 && m.BinarySize == 0
+}
+
 // Collect collects other metrics.
 func (m *InsertMetrics) Collect(other InsertMetrics) {
 	m.Rows += other.Rows
@@ -117,10 +123,10 @@ func (m *InsertMetrics) Collect(other InsertMetrics) {
 // Subtract subtract by other metrics.
 func (m *InsertMetrics) Subtract(other InsertMetrics) {
 	if m.Rows < other.Rows {
-		panic("rows cannot be less than zero")
+		panic(fmt.Sprintf("rows cannot be less than zero, current: %d, target: %d", m.Rows, other.Rows))
 	}
 	if m.BinarySize < other.BinarySize {
-		panic("binary size cannot be less than zero")
+		panic(fmt.Sprintf("binary size cannot be less than zero, current: %d, target: %d", m.Rows, other.Rows))
 	}
 	m.Rows -= other.Rows
 	m.BinarySize -= other.BinarySize

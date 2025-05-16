@@ -20,8 +20,6 @@
 #include <utility>
 #include <vector>
 
-#include "folly/executors/InlineExecutor.h"
-
 #include "ConcurrentVector.h"
 #include "DeletedRecord.h"
 #include "SealedIndexingRecord.h"
@@ -29,12 +27,13 @@
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "google/protobuf/message_lite.h"
-#include "mmap/ChunkedColumn.h"
 #include "mmap/Types.h"
 #include "common/Types.h"
 #include "common/IndexMeta.h"
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/CacheSlot.h"
+#include "segcore/IndexConfigGenerator.h"
+#include "segcore/SegcoreConfig.h"
 
 namespace milvus::segcore {
 

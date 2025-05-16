@@ -229,6 +229,17 @@ type segmentLoader struct {
 
 var _ Loader = (*segmentLoader)(nil)
 
+func addBucketNameStorageV2(segmentInfo *querypb.SegmentLoadInfo) {
+	if segmentInfo.GetStorageVersion() == 2 {
+		bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+		for _, fieldBinlog := range segmentInfo.GetBinlogPaths() {
+			for _, binlog := range fieldBinlog.GetBinlogs() {
+				binlog.LogPath = path.Join(bucketName, binlog.LogPath)
+			}
+		}
+	}
+}
+
 func (loader *segmentLoader) Load(ctx context.Context,
 	collectionID int64,
 	segmentType SegmentType,
@@ -244,13 +255,11 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		log.Info("no segment to load")
 		return nil, nil
 	}
-	coll := loader.manager.Collection.Get(collectionID)
-	// filter field schema which need to be loaded
-	for _, info := range segments {
-		info.BinlogPaths = lo.Filter(info.GetBinlogPaths(), func(fbl *datapb.FieldBinlog, _ int) bool {
-			return coll.loadFields.Contain(fbl.GetFieldID()) || common.IsSystemField(fbl.GetFieldID())
-		})
+	for _, segmentInfo := range segments {
+		addBucketNameStorageV2(segmentInfo)
 	}
+
+	coll := loader.manager.Collection.Get(collectionID)
 
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)

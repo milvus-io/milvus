@@ -381,7 +381,10 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		targetSegmentIDs = originSegmentIDs
 	}
 
-	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
+	healthySegments := c.meta.GetSegments(targetSegmentIDs, func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment)
+	})
+	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
 	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !importutilv2.IsL0Import(job.GetOptions()) {
 		for _, segmentID := range unindexed {
 			select {
@@ -408,7 +411,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageWaitL0Import).Observe(float64(buildIndexDuration.Milliseconds()))
 	log.Info("import job l0 import done", zap.Duration("jobTimeCost/l0Import", waitL0ImportDuration))
 
-	if c.updateSegmentState(job, originSegmentIDs, statsSegmentIDs) {
+	if c.updateSegmentState(originSegmentIDs, statsSegmentIDs) {
 		return
 	}
 	// all finished, update import job state to `Completed`.
@@ -439,7 +442,7 @@ func (c *importChecker) waitL0ImortTaskDone(job ImportJob) bool {
 	return false
 }
 
-func (c *importChecker) updateSegmentState(job ImportJob, originSegmentIDs, statsSegmentIDs []int64) bool {
+func (c *importChecker) updateSegmentState(originSegmentIDs, statsSegmentIDs []int64) bool {
 	// Here, all segment indexes have been successfully built, try unset isImporting flag for all segments.
 	isImportingSegments := lo.Filter(append(originSegmentIDs, statsSegmentIDs...), func(segmentID int64, _ int) bool {
 		segment := c.meta.GetSegment(context.TODO(), segmentID)

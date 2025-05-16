@@ -353,6 +353,16 @@ func TestCompactionAndImport(t *testing.T) {
 			JobID:        100,
 			CollectionID: 1,
 			State:        internalpb.ImportJobState_Importing,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						DataType:     schemapb.DataType_Int64,
+						IsPrimaryKey: true,
+					},
+				},
+			},
 		},
 	}, nil).Once()
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)

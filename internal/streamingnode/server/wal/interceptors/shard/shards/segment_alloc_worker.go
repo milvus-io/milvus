@@ -55,6 +55,8 @@ func (w *segmentAllocWorker) do() {
 	backoff.InitialInterval = 10 * time.Millisecond
 	backoff.MaxInterval = 1 * time.Second
 	backoff.MaxElapsedTime = 0
+	backoff.Reset()
+
 	for {
 		err := w.doOnce()
 		if err == nil {
@@ -86,10 +88,10 @@ func (w *segmentAllocWorker) doOnce() error {
 	}
 	result, err := w.wal.Append(w.ctx, w.msg)
 	if err != nil {
-		w.Logger().Warn("failed to append create segment message", log.FieldMessage(w.msg), zap.Error(err))
+		w.Logger().Warn("failed to append create segment message", zap.Error(err))
 		return err
 	}
-	w.Logger().Info("append create segment message", log.FieldMessage(w.msg), zap.String("messageID", result.MessageID.String()), zap.Uint64("timetick", result.TimeTick))
+	w.Logger().Info("append create segment message", zap.String("messageID", result.MessageID.String()), zap.Uint64("timetick", result.TimeTick))
 	return nil
 }
 
@@ -110,7 +112,7 @@ func (w *segmentAllocWorker) generateNewGrowingSegmentMessage() error {
 		storageVersion = storage.StorageV2
 	}
 	// Getnerate growing segment limitation.
-	limitation := GetSegmentLimitationPolicy().GenerateLimitation()
+	limitation := getSegmentLimitationPolicy().GenerateLimitation()
 	// Create a new segment by sending a create segment message into wal directly.
 	w.msg = message.NewCreateSegmentMessageBuilderV2().
 		WithVChannel(w.vchannel).

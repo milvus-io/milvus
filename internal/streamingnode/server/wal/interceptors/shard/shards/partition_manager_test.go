@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -76,6 +77,7 @@ func TestPartitionManager(t *testing.T) {
 		},
 		&mockedTxnManager{},
 		100,
+		metricsutil.NewSegmentAssignMetrics(channel.Name),
 	)
 	createSegmentDone := make(chan struct{}, 1)
 	flushSegmentDone := make(chan struct{}, 1)

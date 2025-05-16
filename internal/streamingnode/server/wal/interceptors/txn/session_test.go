@@ -33,26 +33,12 @@ func TestSession(t *testing.T) {
 	<-m.RecoverDone()
 	session, err := m.BeginNewTxn(ctx, newBeginTxnMessage(0, 10*time.Millisecond))
 	assert.Equal(t, session.VChannel(), "v1")
-	assert.Equal(t, session.State(), message.TxnStateBegin)
+	assert.Equal(t, session.State(), message.TxnStateInFlight)
 	assert.NotNil(t, session)
 	assert.NoError(t, err)
 
-	// Test Begin
-	assert.Equal(t, message.TxnStateBegin, session.state)
-	assert.False(t, session.IsExpiredOrDone(0))
-	expiredTs := tsoutil.AddPhysicalDurationOnTs(0, 10*time.Millisecond)
-	assert.True(t, session.IsExpiredOrDone(expiredTs))
-	session.BeginRollback()
-	assert.Equal(t, message.TxnStateRollbacked, session.state)
-	assert.True(t, session.IsExpiredOrDone(0))
-
-	session, err = m.BeginNewTxn(ctx, newBeginTxnMessage(0, 10*time.Millisecond))
-	assert.NoError(t, err)
-	session.BeginDone()
-	assert.Equal(t, message.TxnStateInFlight, session.state)
-	assert.False(t, session.IsExpiredOrDone(0))
-
 	// Test add new message
+	expiredTs := tsoutil.AddPhysicalDurationOnTs(0, 10*time.Millisecond)
 	err = session.AddNewMessage(ctx, expiredTs)
 	assert.Error(t, err)
 	serr := status.AsStreamingError(err)
@@ -65,8 +51,6 @@ func TestSession(t *testing.T) {
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, serr.Code)
 
 	session, err = m.BeginNewTxn(ctx, newBeginTxnMessage(0, 10*time.Millisecond))
-	assert.NoError(t, err)
-	session.BeginDone()
 	assert.NoError(t, err)
 	err = session.AddNewMessage(ctx, 0)
 	assert.NoError(t, err)
@@ -82,7 +66,6 @@ func TestSession(t *testing.T) {
 	// Test Commit timeout.
 	session, err = m.BeginNewTxn(ctx, newBeginTxnMessage(0, 10*time.Millisecond))
 	assert.NoError(t, err)
-	session.BeginDone()
 	err = session.AddNewMessage(ctx, 0)
 	assert.NoError(t, err)
 
@@ -100,7 +83,6 @@ func TestSession(t *testing.T) {
 
 	// Test Rollback
 	session, _ = m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Millisecond))
-	session.BeginDone()
 	// Rollback expired.
 	err = session.RequestRollback(context.Background(), expiredTs)
 	assert.Error(t, err)
@@ -109,7 +91,6 @@ func TestSession(t *testing.T) {
 
 	// Rollback success
 	session, _ = m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Millisecond))
-	session.BeginDone()
 	err = session.RequestRollback(context.Background(), 0)
 	assert.NoError(t, err)
 	assert.Equal(t, message.TxnStateOnRollback, session.state)
@@ -129,7 +110,6 @@ func TestManager(t *testing.T) {
 			session, err := m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, time.Duration(i+1)*time.Millisecond))
 			assert.NoError(t, err)
 			assert.NotNil(t, session)
-			session.BeginDone()
 
 			session, err = m.GetSessionOfTxn(session.TxnContext().TxnID)
 			assert.NoError(t, err)

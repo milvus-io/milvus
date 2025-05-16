@@ -26,7 +26,8 @@ extern "C" {
 typedef void* CLoadFieldDataInfo;
 
 CStatus
-NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info);
+NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info,
+                     int64_t storage_version);
 
 void
 DeleteLoadFieldDataInfo(CLoadFieldDataInfo c_load_field_data_info);

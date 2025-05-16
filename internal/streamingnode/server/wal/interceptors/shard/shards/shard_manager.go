@@ -45,7 +45,7 @@ type ShardManagerRecoverParam struct {
 }
 
 // RecoverShardManager recovers the segment assignment manager from the recovery snapshot.
-func RecoverShardManager(param *ShardManagerRecoverParam) *ShardManager {
+func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 	// recover the collection infos
 	collections := newCollectionInfos(param.InitialRecoverSnapshot)
 	// recover the segment assignment infos
@@ -55,6 +55,8 @@ func RecoverShardManager(param *ShardManagerRecoverParam) *ShardManager {
 	logger := resource.Resource().Logger().With(log.FieldComponent("shard-manager")).With(zap.Stringer("pchannel", param.ChannelInfo))
 	// create managers list.
 	managers := make(map[int64]*partitionManager)
+	segmentTotal := 0
+	metrics := metricsutil.NewSegmentAssignMetrics(param.ChannelInfo.Name)
 	for collectionID, collectionInfo := range collections {
 		for partitionID := range collectionInfo.PartitionIDs {
 			segmentManagers := make(map[int64]*segmentAllocManager, 0)
@@ -76,26 +78,29 @@ func RecoverShardManager(param *ShardManagerRecoverParam) *ShardManager {
 				segmentManagers,
 				param.TxnManager,
 				param.InitialRecoverSnapshot.Checkpoint.TimeTick, // use the checkpoint time tick to fence directly.
+				metrics,
 			)
+			segmentTotal += len(segmentManagers)
 		}
 	}
-	m := &ShardManager{
-		mu:          sync.Mutex{},
-		ctx:         ctx,
-		cancel:      cancel,
-		wal:         param.WAL,
-		pchannel:    param.ChannelInfo,
-		managers:    managers,
-		collections: collections,
-		txnManager:  param.TxnManager,
-		metrics:     metricsutil.NewSegmentAssignMetrics(param.ChannelInfo.Name),
+	m := &shardManagerImpl{
+		mu:                sync.Mutex{},
+		ctx:               ctx,
+		cancel:            cancel,
+		wal:               param.WAL,
+		pchannel:          param.ChannelInfo,
+		partitionManagers: managers,
+		collections:       collections,
+		txnManager:        param.TxnManager,
+		metrics:           metrics,
 	}
 	m.SetLogger(logger)
 	m.updateMetrics()
+	m.metrics.UpdateSegmentCount(segmentTotal)
 	belongs := lo.Values(segmentBelongs)
 	stats := make([]*stats.SegmentStats, 0, len(belongs))
 	for _, belong := range belongs {
-		stat := m.managers[belong.PartitionID].segments[belong.SegmentID].GetStatFromRecovery()
+		stat := m.partitionManagers[belong.PartitionID].segments[belong.SegmentID].GetStatFromRecovery()
 		stats = append(stats, stat)
 	}
 	resource.Resource().SegmentStatsManager().RegisterSealOperator(m, belongs, stats)
@@ -154,21 +159,21 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 	return collectionInfoMap
 }
 
-// ShardManager manages the all shard info of collection on current pchannel.
+// shardManagerImpl manages the all shard info of collection on current pchannel.
 // It's a in-memory data structure, and will be recovered from recovery stroage of wal and wal itself.
 // !!! Don't add any block operation (such as rpc or meta opration) in this module.
-type ShardManager struct {
+type shardManagerImpl struct {
 	log.Binder
 
-	mu          sync.Mutex
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wal         *syncutil.Future[wal.WAL]
-	pchannel    types.PChannelInfo
-	managers    map[int64]*partitionManager // map partitionID to partition manager
-	collections map[int64]*CollectionInfo   // map collectionID to collectionInfo
-	metrics     *metricsutil.SegmentAssignMetrics
-	txnManager  TxnManager
+	mu                sync.Mutex
+	ctx               context.Context
+	cancel            context.CancelFunc
+	wal               *syncutil.Future[wal.WAL]
+	pchannel          types.PChannelInfo
+	partitionManagers map[int64]*partitionManager // map partitionID to partition manager
+	collections       map[int64]*CollectionInfo   // map collectionID to collectionInfo
+	metrics           *metricsutil.SegmentAssignMetrics
+	txnManager        TxnManager
 }
 
 type CollectionInfo struct {
@@ -176,12 +181,12 @@ type CollectionInfo struct {
 	PartitionIDs map[int64]struct{}
 }
 
-func (m *ShardManager) Channel() types.PChannelInfo {
+func (m *shardManagerImpl) Channel() types.PChannelInfo {
 	return m.pchannel
 }
 
 // Close try to persist all stats and invalid the manager.
-func (m *ShardManager) Close() {
+func (m *shardManagerImpl) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -191,8 +196,8 @@ func (m *ShardManager) Close() {
 	m.metrics.Close()
 }
 
-func (m *ShardManager) updateMetrics() {
-	m.metrics.UpdatePartitionCount(len(m.managers))
+func (m *shardManagerImpl) updateMetrics() {
+	m.metrics.UpdatePartitionCount(len(m.partitionManagers))
 	m.metrics.UpdateCollectionCount(len(m.collections))
 }
 

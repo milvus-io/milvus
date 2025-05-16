@@ -79,7 +79,7 @@ class Chunk {
     }
 
     virtual bool
-    isValid(int offset) {
+    isValid(int offset) const {
         if (nullable_) {
             return valid_[offset];
         }

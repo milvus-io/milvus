@@ -49,3 +49,12 @@ func TestConfigValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestTruncatorConfig(t *testing.T) {
+	// Mock paramtable values
+	paramtable.Init()
+	cfg := newTruncatorConfig()
+
+	assert.Equal(t, 1*time.Minute, cfg.sampleInterval)
+	assert.Equal(t, 5*time.Minute, cfg.retentionInterval)
+}

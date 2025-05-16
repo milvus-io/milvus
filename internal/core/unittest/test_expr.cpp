@@ -16457,6 +16457,7 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
     file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
         milvus::proto::schema::JSON);
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
         index::INVERTED_INDEX_TYPE,
         this->cast_type,

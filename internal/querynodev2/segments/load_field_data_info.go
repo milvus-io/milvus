@@ -37,7 +37,7 @@ func newLoadFieldDataInfo(ctx context.Context) (*LoadFieldDataInfo, error) {
 	var status C.CStatus
 	var cLoadFieldDataInfo C.CLoadFieldDataInfo
 	GetDynamicPool().Submit(func() (any, error) {
-		status = C.NewLoadFieldDataInfo(&cLoadFieldDataInfo)
+		status = C.NewLoadFieldDataInfo(&cLoadFieldDataInfo, C.int64_t(0))
 		return nil, nil
 	}).Await()
 	if err := HandleCStatus(ctx, &status, "newLoadFieldDataInfo failed"); err != nil {
