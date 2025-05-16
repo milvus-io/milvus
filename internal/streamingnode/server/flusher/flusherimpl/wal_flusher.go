@@ -153,12 +153,13 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	go cpUpdater.Start()
 
 	fc := &flusherComponents{
-		wal:          l,
-		broker:       broker,
-		cpUpdater:    cpUpdater,
-		chunkManager: chunkManager,
-		dataServices: make(map[string]*dataSyncServiceWrapper),
-		logger:       impl.logger,
+		wal:                        l,
+		broker:                     broker,
+		cpUpdater:                  cpUpdater,
+		chunkManager:               chunkManager,
+		dataServices:               make(map[string]*dataSyncServiceWrapper),
+		logger:                     impl.logger,
+		recoveryCheckPointTimeTick: snapshot.Checkpoint.TimeTick,
 	}
 	impl.logger.Info("flusher components intiailizing done")
 	if err := fc.recover(ctx, recoverInfos); err != nil {
