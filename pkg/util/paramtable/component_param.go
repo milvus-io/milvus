@@ -4572,6 +4572,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		DefaultValue: "true",
 		PanicIfEmpty: false,
 		Export:       false,
+		Forbidden:    true,
 	}
 	p.EnableStatsTask.Init(base.mgr)
 

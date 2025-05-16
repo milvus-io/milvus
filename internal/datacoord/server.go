@@ -1005,16 +1005,26 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	}
 	// set segment to SegmentState_Flushed
 	var operators []UpdateOperator
-	operators = append(operators, SetSegmentIsInvisible(segmentID, true))
+	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+		operators = append(operators, SetSegmentIsInvisible(segmentID, true))
+	}
 	operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
 	err := s.meta.UpdateSegmentsInfo(ctx, operators...)
 	if err != nil {
 		log.Warn("flush segment complete failed", zap.Error(err))
 		return err
 	}
-	select {
-	case getStatsTaskChSingleton() <- segmentID:
-	default:
+
+	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+		select {
+		case getStatsTaskChSingleton() <- segmentID:
+		default:
+		}
+	} else {
+		select {
+		case getBuildIndexChSingleton() <- segmentID:
+		default:
+		}
 	}
 
 	insertFileNum := 0
