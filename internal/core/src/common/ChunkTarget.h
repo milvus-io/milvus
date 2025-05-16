@@ -109,6 +109,10 @@ class MemChunkTarget : public ChunkTarget {
         data_ = reinterpret_cast<char*>(m);
     }
 
+    MemChunkTarget(void* data, size_t size)
+        : data_(static_cast<char*>(data)), size_(size) {
+    }
+
     void
     write(const void* data, size_t size, bool append = true) override;
 
