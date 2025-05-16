@@ -248,9 +248,9 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
                 *(arr.mutable_data()->Add()) = raw_str[i];
             }
             auto index = index::CreateStringIndexSort();
-            std::vector<uint8_t> buffer(arr.ByteSize());
-            ASSERT_TRUE(arr.SerializeToArray(buffer.data(), arr.ByteSize()));
-            index->BuildWithRawDataForUT(arr.ByteSize(), buffer.data());
+            std::vector<uint8_t> buffer(arr.ByteSizeLong());
+            ASSERT_TRUE(arr.SerializeToArray(buffer.data(), arr.ByteSizeLong()));
+            index->BuildWithRawDataForUT(arr.ByteSizeLong(), buffer.data());
             LoadIndexInfo info{
                 .field_id = schema->get_field_id(FieldName("str")).get(),
                 .index_params = GenIndexParams(index.get()),
@@ -291,9 +291,9 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
             *(arr.mutable_data()->Add()) = raw_str[i];
         }
         auto index = std::make_unique<MockStringIndex>();
-        std::vector<uint8_t> buffer(arr.ByteSize());
-        ASSERT_TRUE(arr.SerializeToArray(buffer.data(), arr.ByteSize()));
-        index->BuildWithRawDataForUT(arr.ByteSize(), buffer.data());
+        std::vector<uint8_t> buffer(arr.ByteSizeLong());
+        ASSERT_TRUE(arr.SerializeToArray(buffer.data(), arr.ByteSizeLong()));
+        index->BuildWithRawDataForUT(arr.ByteSizeLong(), buffer.data());
         LoadIndexInfo info{
             .field_id = schema->get_field_id(FieldName("str")).get(),
             .index_params = GenIndexParams(index.get()),

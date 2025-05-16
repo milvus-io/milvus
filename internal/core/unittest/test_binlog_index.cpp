@@ -188,7 +188,7 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
     //assert segment has been built binlog index
     EXPECT_TRUE(segment->HasIndex(vec_field_id));
     EXPECT_EQ(segment->get_row_count(), data_n);
-    EXPECT_FALSE(segment->HasFieldData(vec_field_id));
+    EXPECT_TRUE(segment->HasFieldData(vec_field_id));
 
     // 2. search binlog index
     auto num_queries = 10;
@@ -251,11 +251,11 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
         load_info.cache_index =
             CreateTestCacheIndex("test", std::move(indexing));
         load_info.index_params["metric_type"] = metric_type;
-        segment->DropFieldData(vec_field_id);
         ASSERT_NO_THROW(segment->LoadIndex(load_info));
         EXPECT_TRUE(segment->HasIndex(vec_field_id));
         EXPECT_EQ(segment->get_row_count(), data_n);
-        EXPECT_FALSE(segment->HasFieldData(vec_field_id));
+        // only INDEX_FAISS_IVFFLAT has raw data, thus it should release the raw field data.
+        EXPECT_EQ(segment->HasFieldData(vec_field_id), index_type != knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
         auto ivf_sr = segment->Search(plan.get(), ph_group.get(), 1L << 63, 0);
         auto similary = GetKnnSearchRecall(num_queries,
                                            binlog_index_sr->seg_offsets_.data(),
@@ -281,7 +281,7 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
     //assert segment has been built binlog index
     EXPECT_TRUE(segment->HasIndex(vec_field_id));
     EXPECT_EQ(segment->get_row_count(), data_n);
-    EXPECT_FALSE(segment->HasFieldData(vec_field_id));
+    EXPECT_TRUE(segment->HasFieldData(vec_field_id));
 
     // 2. search binlog index
     auto num_queries = 10;
@@ -345,11 +345,10 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
         load_info.cache_index =
             CreateTestCacheIndex("test", std::move(indexing));
         load_info.index_params["metric_type"] = metric_type;
-        segment->DropFieldData(vec_field_id);
         ASSERT_NO_THROW(segment->LoadIndex(load_info));
         EXPECT_TRUE(segment->HasIndex(vec_field_id));
         EXPECT_EQ(segment->get_row_count(), data_n);
-        EXPECT_FALSE(segment->HasFieldData(vec_field_id));
+        EXPECT_EQ(segment->HasFieldData(vec_field_id), index_type != knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
         auto ivf_sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
         auto similary = GetKnnSearchRecall(num_queries,
                                            binlog_index_sr->seg_offsets_.data(),
@@ -395,11 +394,11 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
     load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = metric_type;
 
-    segment->DropFieldData(vec_field_id);
     ASSERT_NO_THROW(segment->LoadIndex(load_info));
     EXPECT_TRUE(segment->HasIndex(vec_field_id));
     EXPECT_EQ(segment->get_row_count(), data_n);
-    EXPECT_FALSE(segment->HasFieldData(vec_field_id));
+    EXPECT_EQ(segment->HasFieldData(vec_field_id),
+              index_type != knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 }
 
 TEST_P(BinlogIndexTest, LoadBingLogWihIDMAP) {

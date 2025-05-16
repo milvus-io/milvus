@@ -213,7 +213,7 @@ TEST_F(ChunkedColumnGroupTest, ChunkedColumnGroup) {
     std::vector<std::unique_ptr<GroupChunk>> group_chunks;
     group_chunks.push_back(std::move(group_chunk));
     auto translator = std::make_unique<TestGroupChunkTranslator>(
-        std::vector<int64_t>{5}, "test_key", std::move(group_chunks));
+        2, std::vector<int64_t>{5}, "test_key", std::move(group_chunks));
     auto column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -250,7 +250,7 @@ TEST_F(ChunkedColumnGroupTest, ProxyChunkColumn) {
     std::vector<std::unique_ptr<GroupChunk>> group_chunks;
     group_chunks.push_back(std::move(group_chunk));
     auto translator = std::make_unique<TestGroupChunkTranslator>(
-        std::vector<int64_t>{5}, "test_key", std::move(group_chunks));
+        2, std::vector<int64_t>{5}, "test_key", std::move(group_chunks));
     auto column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 

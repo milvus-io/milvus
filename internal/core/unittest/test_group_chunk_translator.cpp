@@ -38,7 +38,7 @@ using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::segcore::storagev2translator;
 
-class TestGroupChunkTranslator : public ::testing::TestWithParam<bool> {
+class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
     void
     SetUp() override {
         auto conf = milvus_storage::ArrowFileSystemConfig();
@@ -77,7 +77,7 @@ class TestGroupChunkTranslator : public ::testing::TestWithParam<bool> {
     }
 
  protected:
-    ~TestGroupChunkTranslator() {
+    ~GroupChunkTranslatorTest() {
         if (GetParam()) {  // if use_mmap is true
             std::string mmap_dir = std::to_string(segment_id_);
             if (std::filesystem::exists(mmap_dir)) {
@@ -95,7 +95,7 @@ class TestGroupChunkTranslator : public ::testing::TestWithParam<bool> {
     int64_t segment_id_ = 0;
 };
 
-TEST_P(TestGroupChunkTranslator, TestWithMmap) {
+TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     auto use_mmap = GetParam();
     std::unordered_map<FieldId, FieldMeta> field_metas = schema_->get_fields();
     auto column_group_info = FieldDataInfo(0, 3000, "");
@@ -157,6 +157,6 @@ TEST_P(TestGroupChunkTranslator, TestWithMmap) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(TestGroupChunkTranslator,
-                         TestGroupChunkTranslator,
+INSTANTIATE_TEST_SUITE_P(GroupChunkTranslatorTest,
+                         GroupChunkTranslatorTest,
                          testing::Bool());

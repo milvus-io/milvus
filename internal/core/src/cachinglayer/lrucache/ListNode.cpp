@@ -23,6 +23,7 @@
 #include "cachinglayer/lrucache/DList.h"
 #include "cachinglayer/Utils.h"
 #include "common/EasyAssert.h"
+#include "log/Log.h"
 
 namespace milvus::cachinglayer::internal {
 
@@ -62,6 +63,28 @@ ListNode::~ListNode() {
         std::unique_lock<std::shared_mutex> lock(mtx_);
         dlist_->removeItem(this, size_);
     }
+}
+
+bool
+ListNode::manual_evict() {
+    std::unique_lock<std::shared_mutex> lock(mtx_);
+    if (state_ == State::ERROR || state_ == State::LOADING) {
+        LOG_ERROR("manual_evict() called on a {} cell", state_to_string(state_));
+        return true;
+    }
+    if (state_ == State::NOT_LOADED) {
+        return true;
+    }
+    if (pin_count_.load() > 0) {
+        LOG_ERROR("manual_evict() called on a LOADED and pinned cell, aborting eviction.");
+        return false;
+    }
+    // cell is LOADED
+    clear_data();
+    if (dlist_) {
+        dlist_->removeItem(this, size_);
+    }
+    return true;
 }
 
 ResourceUsage&

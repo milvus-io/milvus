@@ -52,6 +52,7 @@ GroupChunkTranslator::GroupChunkTranslator(
       row_group_meta_list_(row_group_meta_list),
       field_id_list_(field_id_list),
       meta_(
+          field_id_list.size(),
           use_mmap ? milvus::cachinglayer::StorageType::DISK
                    : milvus::cachinglayer::StorageType::MEMORY,
           // TODO(tiered storage 2): vector may be of small size and mixed with scalar, do we force it

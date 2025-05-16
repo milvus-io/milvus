@@ -100,13 +100,15 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
 
 class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
  public:
-    TestGroupChunkTranslator(std::vector<int64_t> num_rows_per_chunk,
+    TestGroupChunkTranslator(size_t num_fields,
+                             std::vector<int64_t> num_rows_per_chunk,
                              std::string key,
                              std::vector<std::unique_ptr<GroupChunk>>&& chunks)
         : Translator<milvus::GroupChunk>(),
           num_cells_(num_rows_per_chunk.size()),
           chunks_(std::move(chunks)),
           meta_(segcore::storagev2translator::GroupCTMeta(
+              num_fields,
               StorageType::MEMORY,
               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
               true)) {
