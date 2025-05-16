@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -18,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 )
 
@@ -421,18 +423,18 @@ func (s *StateChannelStoreSuite) TestUpdateState() {
 	tests := []struct {
 		description string
 
-		inAction        Action
+		inErr           error
 		inChannelState  ChannelState
 		outChannelState ChannelState
 	}{
-		{"input standby fail", OnFailure, Standby, Standby},
-		{"input standby success", OnSuccess, Standby, ToWatch},
-		{"input towatch duplicate", OnNotifyDuplicate, ToWatch, ToRelease},
-		{"input towatch fail", OnFailure, ToWatch, Standby},
-		{"input towatch success", OnSuccess, ToWatch, Watching},
-		{"input torelease duplicate", OnNotifyDuplicate, ToRelease, ToRelease},
-		{"input torelease fail", OnFailure, ToRelease, ToRelease},
-		{"input torelease success", OnSuccess, ToRelease, Releasing},
+		{"input standby fail", errors.New("fail"), Standby, Standby},
+		{"input standby success", nil, Standby, ToWatch},
+		{"input towatch duplicate", merr.ErrChannelReduplicate, ToWatch, ToRelease},
+		{"input towatch fail", errors.New("fail"), ToWatch, Standby},
+		{"input towatch success", nil, ToWatch, Watching},
+		{"input torelease duplicate", merr.ErrChannelReduplicate, ToRelease, ToRelease},
+		{"input torelease fail", errors.New("fail"), ToRelease, ToRelease},
+		{"input torelease success", nil, ToRelease, Releasing},
 	}
 
 	for _, test := range tests {
@@ -449,7 +451,7 @@ func (s *StateChannelStoreSuite) TestUpdateState() {
 				},
 			}
 
-			store.UpdateState(test.inAction, bufferID, channel, 0)
+			store.UpdateState(test.inErr, bufferID, channel, 0)
 			s.Equal(test.outChannelState, channel.currentState)
 		})
 	}
