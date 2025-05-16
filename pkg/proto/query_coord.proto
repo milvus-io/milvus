@@ -721,6 +721,7 @@ message SyncAction {
     repeated int64 droppedInTarget = 10;
     msg.MsgPosition checkpoint = 11;
     map<int64, int64> partition_stats_versions = 12;
+    msg.MsgPosition deleteCP = 13;
 }
 
 message SyncDistributionRequest {
@@ -851,6 +852,7 @@ message ChannelTarget {
   repeated int64 growing_segmentIDs = 3;
   repeated PartitionTarget partition_targets = 4;
   msg.MsgPosition seek_position = 5;
+  msg.MsgPosition delete_checkpoint = 6;
 }
 
 message CollectionTarget {
