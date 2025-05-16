@@ -378,6 +378,31 @@ func (s *ChannelManagerSuite) TestFindWatcher() {
 func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	s.Run("advance towatch dn watched to torelease", func() {
+		chNodes := map[string]int64{
+			"ch1": 1,
+			"ch2": 1,
+		}
+		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
+		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error {
+				s.Require().Equal(1, len(req.GetInfos()))
+				switch req.GetInfos()[0].GetVchan().GetChannelName() {
+				case "ch2":
+					return merr.WrapErrChannelReduplicate("ch2")
+				default:
+					return nil
+				}
+			}).Twice()
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		s.Require().NoError(err)
+		s.checkAssignment(m, 1, "ch1", ToWatch)
+		s.checkAssignment(m, 1, "ch2", ToWatch)
+
+		m.AdvanceChannelState(ctx)
+		s.checkAssignment(m, 1, "ch1", Watching)
+		s.checkAssignment(m, 1, "ch2", ToRelease)
+	})
 	s.Run("advance statndby with no available nodes", func() {
 		chNodes := map[string]int64{
 			"ch1": bufferID,
@@ -680,8 +705,8 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch2", ToWatch)
 
 		m.AdvanceChannelState(ctx)
-		s.checkAssignment(m, 1, "ch1", ToWatch)
-		s.checkAssignment(m, 1, "ch2", ToWatch)
+		s.checkAssignment(m, 1, "ch1", Standby)
+		s.checkAssignment(m, 1, "ch2", Standby)
 	})
 	s.Run("advance to release channels notify success", func() {
 		chNodes := map[string]int64{

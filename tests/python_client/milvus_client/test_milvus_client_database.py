@@ -430,7 +430,7 @@ class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
         # 1. create database
         db_name = cf.gen_unique_str(db_prefix)
         properties = {"database.force.deny.writing": "false",
-                      "database.replica.number": "3"}
+                      "database.replica.number": "1"}
         self.create_database(client, db_name, properties=properties)
         describe = self.describe_database(client, db_name)
         dbs = self.list_databases(client)[0]
@@ -439,7 +439,7 @@ class TestMilvusClientDatabaseValid(TestMilvusClientV2Base):
                                check_task=CheckTasks.check_describe_database_property,
                                check_items={"db_name": db_name,
                                             "database.force.deny.writing": "false",
-                                            "database.replica.number": "3"})
+                                            "database.replica.number": "1"})
         self.using_database(client, db_name)
         # 2. create collection
         collection_name = cf.gen_unique_str(prefix)

@@ -105,6 +105,12 @@ func (m *ChannelManagerImpl) Submit(info *datapb.ChannelWatchInfo) error {
 		return nil
 	}
 
+	// DataNode already watched this channel of other OpID
+	if info.GetState() == datapb.ChannelWatchState_ToWatch &&
+		m.fgManager.HasFlowgraph(channel) {
+		return merr.WrapErrChannelReduplicate(channel)
+	}
+
 	if info.GetState() == datapb.ChannelWatchState_ToRelease &&
 		!m.fgManager.HasFlowgraph(channel) {
 		log.Warn("Release op already finished, skip", zap.Int64("opID", info.GetOpID()), zap.String("channel", channel))
