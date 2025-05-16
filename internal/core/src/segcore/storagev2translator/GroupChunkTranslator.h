@@ -29,6 +29,7 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
+#include "storage/MmapChunkManager.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -43,7 +44,8 @@ class GroupChunkTranslator
         bool use_mmap,
         std::vector<milvus_storage::RowGroupMetadataVector>&
             row_group_meta_list,
-        milvus_storage::FieldIDList field_id_list);
+        milvus_storage::FieldIDList field_id_list,
+        storage::MmapChunkDescriptorPtr desc);
 
     ~GroupChunkTranslator() override;
 
@@ -80,8 +82,6 @@ class GroupChunkTranslator
 
     void
     process_batch(const std::shared_ptr<arrow::Table>& table,
-                  const std::vector<std::string>& files,
-                  std::vector<size_t>& file_offsets,
                   std::vector<size_t>& row_counts);
 
     int64_t segment_id_;
@@ -99,6 +99,7 @@ class GroupChunkTranslator
     std::vector<milvus::GroupChunk*> group_chunks_;
     int64_t timestamp_offet_;
     bool use_mmap_;
+    storage::MmapChunkDescriptorPtr desc_;
 };
 
 }  // namespace milvus::segcore::storagev2translator

@@ -42,7 +42,8 @@ GroupChunkTranslator::GroupChunkTranslator(
     std::vector<std::string> insert_files,
     bool use_mmap,
     std::vector<milvus_storage::RowGroupMetadataVector>& row_group_meta_list,
-    milvus_storage::FieldIDList field_id_list)
+    milvus_storage::FieldIDList field_id_list,
+    storage::MmapChunkDescriptorPtr desc)
     : segment_id_(segment_id),
       key_(fmt::format("seg_{}_cg_{}", segment_id, column_group_info.field_id)),
       field_metas_(field_metas),
@@ -51,6 +52,7 @@ GroupChunkTranslator::GroupChunkTranslator(
       use_mmap_(use_mmap),
       row_group_meta_list_(row_group_meta_list),
       field_id_list_(field_id_list),
+      desc_(desc),
       meta_(
           field_id_list.size(),
           use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -189,53 +191,27 @@ void
 GroupChunkTranslator::load_column_group_in_memory() {
     std::vector<size_t> row_counts(field_id_list_.size(), 0);
     std::shared_ptr<milvus::ArrowDataWrapper> r;
-    std::vector<std::string> files;
-    std::vector<size_t> file_offsets;
     while (column_group_info_.arrow_reader_channel->pop(r)) {
         for (const auto& table : r->arrow_tables) {
-            process_batch(table, files, file_offsets, row_counts);
+            process_batch(table, row_counts);
         }
     }
 }
 
 void
 GroupChunkTranslator::load_column_group_in_mmap() {
-    std::vector<std::string> files;
-    std::vector<size_t> file_offsets;
     std::vector<size_t> row_counts;
-
-    // Initialize files and offsets
-    for (size_t i = 0; i < field_id_list_.size(); ++i) {
-        auto field_id = field_id_list_.Get(i);
-        auto filepath =
-            std::filesystem::path(column_group_info_.mmap_dir_path) /
-            std::to_string(segment_id_) / std::to_string(field_id);
-        auto dir = filepath.parent_path();
-        std::filesystem::create_directories(dir);
-        files.push_back(filepath.string());
-        file_offsets.push_back(0);
-        row_counts.push_back(0);
-    }
 
     std::shared_ptr<milvus::ArrowDataWrapper> r;
     while (column_group_info_.arrow_reader_channel->pop(r)) {
         for (const auto& table : r->arrow_tables) {
-            process_batch(table, files, file_offsets, row_counts);
+            process_batch(table, row_counts);
         }
-    }
-    for (size_t i = 0; i < files.size(); ++i) {
-        auto ok = unlink(files[i].c_str());
-        AssertInfo(ok == 0,
-                   fmt::format("failed to unlink mmap data file {}, err: {}",
-                               files[i].c_str(),
-                               strerror(errno)));
     }
 }
 
 void
 GroupChunkTranslator::process_batch(const std::shared_ptr<arrow::Table>& table,
-                                    const std::vector<std::string>& files,
-                                    std::vector<size_t>& file_offsets,
                                     std::vector<size_t>& row_counts) {
     // Create chunks for each field in this batch
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
@@ -263,17 +239,12 @@ GroupChunkTranslator::process_batch(const std::shared_ptr<arrow::Table>& table,
             chunk = create_chunk(field_meta, dim, array_vec);
         } else {
             // Mmap mode
-            int flags = O_RDWR;
-            if (file_offsets[i] == 0) {
-                // First write to this file, create and truncate
-                flags |= O_CREAT | O_TRUNC;
-            }
-            auto file = File::Open(files[i], flags);
-            // should seek to the file offset before writing
-            file.Seek(file_offsets[i], SEEK_SET);
-            chunk =
-                create_chunk(field_meta, dim, file, file_offsets[i], array_vec);
-            file_offsets[i] += chunk->Size();
+            chunk = create_chunk(
+                field_meta,
+                dim,
+                storage::MmapManager::GetInstance().GetMmapChunkManager(),
+                desc_,
+                array_vec);
         }
 
         row_counts[i] += chunk->RowNums();
