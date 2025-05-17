@@ -44,16 +44,18 @@ type SearchParams struct {
 	groupByFieldId  int64
 	groupSize       int64
 	strictGroupSize bool
+
+	searchMetrics []string
 }
 
-func NewSearchParams(nq, limit, offset, roundDecimal, groupByFieldId, groupSize int64, strictGroupSize bool) *SearchParams {
+func NewSearchParams(nq, limit, offset, roundDecimal, groupByFieldId, groupSize int64, strictGroupSize bool, searchMetrics []string) *SearchParams {
 	return &SearchParams{
-		nq, limit, offset, roundDecimal, groupByFieldId, groupSize, strictGroupSize,
+		nq, limit, offset, roundDecimal, groupByFieldId, groupSize, strictGroupSize, searchMetrics,
 	}
 }
 
 type Reranker interface {
-	Process(ctx context.Context, searchParams *SearchParams, searchData []*schemapb.SearchResultData) (*schemapb.SearchResultData, error)
+	Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error)
 	IsSupportGroup() bool
 	GetInputFieldNames() []string
 	GetInputFieldIDs() []int64
@@ -132,14 +134,18 @@ func (fScore *FunctionScore) Process(ctx context.Context, searchParams *SearchPa
 	})
 
 	// rankResult only has scores
-	rankResult, err := fScore.reranker.Process(ctx, searchParams, allSearchResultData)
+	inputs, err := newRerankInputs(allSearchResultData, fScore.reranker.GetInputFieldIDs())
+	if err != nil {
+		return nil, err
+	}
+	rankResult, err := fScore.reranker.Process(ctx, searchParams, inputs)
 	if err != nil {
 		return nil, err
 	}
 
 	ret := &milvuspb.SearchResults{
 		Status:  merr.Success(),
-		Results: rankResult,
+		Results: rankResult.searchResultData,
 	}
 	return ret, nil
 }

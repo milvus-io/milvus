@@ -22,14 +22,11 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 )
 
 const (
@@ -46,7 +43,7 @@ const (
 	expFunction    string = "exp"
 )
 
-type DecayFunction[T int64 | string, R int32 | int64 | float32 | float64] struct {
+type DecayFunction[T PKType, R int32 | int64 | float32 | float64] struct {
 	RerankBase
 
 	functionName string
@@ -115,7 +112,7 @@ func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 }
 
 // T: PK Type, R: field type
-func newFunction[T int64 | string, R int32 | int64 | float32 | float64](base *RerankBase, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
+func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
 	var err error
 	decayFunc := &DecayFunction[T, R]{RerankBase: *base, offset: 0, decay: 0.5}
 	orginInit := false
@@ -176,156 +173,52 @@ func newFunction[T int64 | string, R int32 | int64 | float32 | float64](base *Re
 	default:
 		return nil, fmt.Errorf("Invaild decay function: %s, only support [%s,%s,%s]", decayFunctionName, gaussFunction, linearFunction, expFunction)
 	}
-
 	return decayFunc, nil
 }
 
-func (decay *DecayFunction[T, R]) reScore(multipSearchResultData []*schemapb.SearchResultData) (*idSocres[T], error) {
-	newScores := newIdScores[T]()
-	for _, data := range multipSearchResultData {
-		var inputField *schemapb.FieldData
-		for _, field := range data.FieldsData {
-			if field == nil {
-				continue
-			}
-			if field.FieldId == decay.GetInputFieldIDs()[0] {
-				inputField = field
-			}
-		}
-		if inputField == nil {
-			return nil, fmt.Errorf("Rerank decay function can not find input field, name: %s", decay.GetInputFieldNames()[0])
-		}
-		var inputValues *numberField[R]
-		if tmp, err := getNumberic(inputField); err != nil {
-			return nil, err
-		} else {
-			inputValues = tmp.(*numberField[R])
-		}
-
-		ids := newMilvusIDs(data.Ids, decay.pkType).(milvusIDs[T])
-		for idx, id := range ids.data {
-			if !newScores.exist(id) {
-				if v, err := inputValues.GetFloat64(idx); err != nil {
-					return nil, err
-				} else {
-					newScores.set(id, float32(decay.reScorer(decay.origin, decay.scale, decay.decay, decay.offset, v)))
-				}
-			}
-		}
+func toGreaterScore(score float32, metricType string) float32 {
+	switch strings.ToUpper(metricType) {
+	case metric.COSINE, metric.IP, metric.BM25:
+		return score
+	default:
+		return 1.0 - 2*float32(math.Atan(float64(score)))/math.Pi
 	}
-	return newScores, nil
 }
 
-func (decay *DecayFunction[T, R]) orgnizeNqScores(searchParams *SearchParams, multipSearchResultData []*schemapb.SearchResultData, idScoreData *idSocres[T]) []map[T]float32 {
-	nqScores := make([]map[T]float32, searchParams.nq)
-	for i := int64(0); i < searchParams.nq; i++ {
-		nqScores[i] = make(map[T]float32)
-	}
-
-	for _, data := range multipSearchResultData {
-		start := int64(0)
-		for nqIdx := int64(0); nqIdx < searchParams.nq; nqIdx++ {
-			realTopk := data.Topks[nqIdx]
-			for j := start; j < start+realTopk; j++ {
-				id := typeutil.GetPK(data.GetIds(), j).(T)
-				if _, exists := nqScores[nqIdx][id]; !exists {
-					nqScores[nqIdx][id] = idScoreData.get(id)
-				}
+func (decay *DecayFunction[T, R]) processOneSearchData(ctx context.Context, searchParams *SearchParams, cols []*columns) *IDScores[T] {
+	srcScores := maxMerge[T](cols)
+	decayScores := map[T]float32{}
+	for _, col := range cols {
+		if col.size == 0 {
+			continue
+		}
+		nums := col.data[0].([]R)
+		ids := col.ids.([]T)
+		for idx, id := range ids {
+			if _, ok := decayScores[id]; !ok {
+				decayScores[id] = float32(decay.reScorer(decay.origin, decay.scale, decay.decay, decay.offset, float64(nums[idx])))
 			}
-			start += realTopk
 		}
 	}
-	return nqScores
+	for id := range decayScores {
+		decayScores[id] = decayScores[id] * srcScores[id]
+	}
+	return newIDScores(decayScores, searchParams)
 }
 
-func (decay *DecayFunction[T, R]) maxMerge(searchParams *SearchParams, multipSearchResultData []*schemapb.SearchResultData) []map[T]float32 {
-	nqSrcScores := make([]map[T]float32, searchParams.nq)
-	for i := int64(0); i < searchParams.nq; i++ {
-		nqSrcScores[i] = make(map[T]float32)
-	}
-
-	for _, data := range multipSearchResultData {
-		start := int64(0)
-		for nqIdx := int64(0); nqIdx < searchParams.nq; nqIdx++ {
-			realTopk := data.Topks[nqIdx]
-			for j := start; j < start+realTopk; j++ {
-				id := typeutil.GetPK(data.GetIds(), j).(T)
-				if _, exists := nqSrcScores[nqIdx][id]; !exists {
-					nqSrcScores[nqIdx][id] = data.GetScores()[j]
-				} else {
-					nqSrcScores[nqIdx][id] = max(data.GetScores()[j], nqSrcScores[nqIdx][id])
-				}
+func (decay *DecayFunction[T, R]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
+	outputs := newRerankOutputs(searchParams)
+	for _, cols := range inputs.data {
+		for i, col := range cols {
+			metricType := searchParams.searchMetrics[i]
+			for j, score := range col.scores {
+				col.scores[j] = toGreaterScore(score, metricType)
 			}
-			start += realTopk
 		}
+		idScore := decay.processOneSearchData(ctx, searchParams, cols)
+		appendResult(outputs, idScore.ids, idScore.scores)
 	}
-	return nqSrcScores
-}
-
-func (decay *DecayFunction[T, R]) Process(ctx context.Context, searchParams *SearchParams, multipSearchResultData []*schemapb.SearchResultData) (*schemapb.SearchResultData, error) {
-	ret := &schemapb.SearchResultData{
-		NumQueries: searchParams.nq,
-		TopK:       searchParams.limit,
-		FieldsData: make([]*schemapb.FieldData, 0),
-		Scores:     []float32{},
-		Ids:        &schemapb.IDs{},
-		Topks:      []int64{},
-	}
-	multipSearchResultData = lo.Filter(multipSearchResultData, func(searchResult *schemapb.SearchResultData, i int) bool {
-		return len(searchResult.FieldsData) != 0 && searchResult.Ids != nil
-	})
-
-	if len(multipSearchResultData) == 0 {
-		return ret, nil
-	}
-
-	idScoreData, err := decay.reScore(multipSearchResultData)
-	if err != nil {
-		return nil, err
-	}
-	mergedSrcScore := decay.maxMerge(searchParams, multipSearchResultData)
-	nqScores := decay.orgnizeNqScores(searchParams, multipSearchResultData, idScoreData)
-	for i := int64(0); i < searchParams.nq; i++ {
-		for id, score := range mergedSrcScore[i] {
-			nqScores[i][id] = nqScores[i][id] * score
-		}
-	}
-
-	topk := searchParams.limit + searchParams.offset
-	for i := int64(0); i < searchParams.nq; i++ {
-		idScoreMap := nqScores[i]
-		ids := make([]T, 0)
-		for id := range idScoreMap {
-			ids = append(ids, id)
-		}
-
-		big := func(i, j int) bool {
-			if idScoreMap[ids[i]] == idScoreMap[ids[j]] {
-				return ids[i] < ids[j]
-			}
-			return idScoreMap[ids[i]] > idScoreMap[ids[j]]
-		}
-		sort.Slice(ids, big)
-
-		if int64(len(ids)) > topk {
-			ids = ids[:topk]
-		}
-
-		// set real topk
-		ret.Topks = append(ret.Topks, max(0, int64(len(ids))-searchParams.offset))
-		// append id and score
-		for index := searchParams.offset; index < int64(len(ids)); index++ {
-			typeutil.AppendPKs(ret.Ids, ids[index])
-			score := idScoreMap[ids[index]]
-			if searchParams.roundDecimal != -1 {
-				multiplier := math.Pow(10.0, float64(searchParams.roundDecimal))
-				score = float32(math.Floor(float64(score)*multiplier+0.5) / multiplier)
-			}
-			ret.Scores = append(ret.Scores, score)
-		}
-	}
-
-	return ret, nil
+	return outputs, nil
 }
 
 type decayReScorer func(float64, float64, float64, float64, float64) float64
