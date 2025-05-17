@@ -7,7 +7,7 @@ use log::info;
 use tantivy::indexer::UserOperation;
 use tantivy::schema::{
     Field, IndexRecordOption, NumericOptions, Schema, SchemaBuilder, TextFieldIndexing,
-    TextOptions, FAST,
+    TextOptions, FAST, STRING,
 };
 use tantivy::{doc, Index, IndexWriter, TantivyDocument};
 
@@ -47,6 +47,7 @@ pub(crate) fn schema_builder_add_field(
         TantivyDataType::Text => {
             panic!("text should be indexed with analyzer");
         }
+        TantivyDataType::JSON => schema_builder.add_json_field(&field_name, STRING | FAST),
     }
 }
 
@@ -81,6 +82,13 @@ impl TantivyValue<TantivyDocument> for bool {
     #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_bool(Field::from_field_id(field), *self);
+    }
+}
+
+impl TantivyValue<TantivyDocument> for serde_json::Value {
+    #[inline]
+    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
+        document.add_field_value(Field::from_field_id(field), self);
     }
 }
 
@@ -169,6 +177,25 @@ impl IndexWriterWrapperImpl {
         for element in datas {
             let data = unsafe { CStr::from_ptr(*element) };
             document.add_field_value(self.field, data.to_str()?);
+        }
+
+        self.add_document(document, offset)
+    }
+
+    pub fn add_json(&mut self, data: &str, offset: u32) -> Result<()> {
+        let j = serde_json::from_str::<serde_json::Value>(data)?;
+        let mut document = TantivyDocument::default();
+        j.add_to_document(self.field.field_id(), &mut document);
+
+        self.add_document(document, offset)
+    }
+
+    pub fn add_array_json(&mut self, datas: &[*const c_char], offset: u32) -> Result<()> {
+        let mut document = TantivyDocument::default();
+        for element in datas {
+            let data = unsafe { CStr::from_ptr(*element) };
+            let j = serde_json::from_str::<serde_json::Value>(data.to_str()?)?;
+            j.add_to_document(self.field.field_id(), &mut document);
         }
 
         self.add_document(document, offset)

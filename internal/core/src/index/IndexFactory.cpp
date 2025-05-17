@@ -17,11 +17,13 @@
 #include "index/IndexFactory.h"
 #include <cstdlib>
 #include <memory>
+#include <string>
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 #include "common/JsonCastType.h"
 #include "common/Types.h"
 #include "index/Index.h"
+#include "index/JsonFlatIndex.h"
 #include "index/VectorMemIndex.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
@@ -396,6 +398,9 @@ IndexFactory::CreateJsonIndex(
         case JsonCastType::DataType::VARCHAR:
             return std::make_unique<index::JsonInvertedIndex<std::string>>(
                 cast_dtype, nested_path, file_manager_context);
+        case JsonCastType::DataType::JSON:
+            return std::make_unique<JsonFlatIndex>(file_manager_context,
+                                                   nested_path);
         default:
             PanicInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
     }
