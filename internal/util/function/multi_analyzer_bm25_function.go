@@ -235,3 +235,9 @@ func (v *MultiAnalyzerBM25FunctionRunner) GetOutputFields() []*schemapb.FieldSch
 func (v *MultiAnalyzerBM25FunctionRunner) GetInputFields() []*schemapb.FieldSchema {
 	return v.inputFields
 }
+
+func (v *MultiAnalyzerBM25FunctionRunner) Close() {
+	for _, analyzer := range v.analyzers {
+		analyzer.Destroy()
+	}
+}

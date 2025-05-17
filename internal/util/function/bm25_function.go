@@ -171,6 +171,10 @@ func (v *BM25FunctionRunner) GetInputFields() []*schemapb.FieldSchema {
 	return []*schemapb.FieldSchema{v.inputField}
 }
 
+func (v *BM25FunctionRunner) Close() {
+	v.tokenizer.Destroy()
+}
+
 func buildSparseFloatArray(mapdata []map[uint32]float32) *schemapb.SparseFloatArray {
 	dim := int64(0)
 	bytes := lo.Map(mapdata, func(sparseMap map[uint32]float32, _ int) []byte {
