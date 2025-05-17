@@ -376,9 +376,12 @@ func (r *recoveryStorageImpl) handleImport(_ message.ImmutableImportMessageV1) {
 // handleSchemaChange handles the schema change message.
 func (r *recoveryStorageImpl) handleSchemaChange(msg message.ImmutableSchemaChangeMessageV2) {
 	// when schema change happens, we need to flush all segments in the collection.
-	// TODO: add the flush segment list into schema change message.
-	// TODO: persist the schema change into recoveryinfo.
-	r.flushAllSegmentOfCollection(msg, msg.Header().CollectionId)
+	segments := make(map[int64]struct{}, len(msg.Header().FlushedSegmentIds))
+	for _, segmentID := range msg.Header().FlushedSegmentIds {
+		segments[segmentID] = struct{}{}
+	}
+	r.flushSegments(msg, segments)
+	// TODO: persist the schema change into recoveryinfo
 }
 
 // detectInconsistency detects the inconsistency in the recovery storage.

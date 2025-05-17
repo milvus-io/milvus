@@ -20,9 +20,10 @@ var (
 // newSealWorker creates a new seal worker.
 func newSealWorker(statsManager *StatsManager) *sealWorker {
 	w := &sealWorker{
-		statsManager:         statsManager,
-		sealNotifier:         make(chan sealSegmentIDWithPolicy, 100),
-		growingBytesNotifier: syncutil.NewCooldownNotifier[uint64](growingBytesNotifyCooldown, 100),
+		statsManager:            statsManager,
+		sealNotifier:            make(chan sealSegmentIDWithPolicy, 100),
+		growingBytesNotifier:    syncutil.NewCooldownNotifier[uint64](growingBytesNotifyCooldown, 100),
+		timePolicyCheckInterval: defaultSealWorkerTimerInterval,
 	}
 	return w
 }
@@ -30,9 +31,10 @@ func newSealWorker(statsManager *StatsManager) *sealWorker {
 // sealWorker is the background task that handles the seal signal from stats manager or timer.
 type sealWorker struct {
 	log.Binder
-	statsManager         *StatsManager // reference to the stats manager.
-	sealNotifier         chan sealSegmentIDWithPolicy
-	growingBytesNotifier *syncutil.CooldownNotifier[uint64]
+	statsManager            *StatsManager // reference to the stats manager.
+	sealNotifier            chan sealSegmentIDWithPolicy
+	growingBytesNotifier    *syncutil.CooldownNotifier[uint64]
+	timePolicyCheckInterval time.Duration
 }
 
 // NotifySealSegment is used to notify the seal worker to seal the segment.
@@ -51,7 +53,7 @@ func (m *sealWorker) NotifyGrowingBytes(totalBytes uint64) {
 // loop is the main loop of stats manager.
 func (m *sealWorker) loop() {
 	memoryNotifier := make(chan policy.SealPolicy, 1)
-	timer := time.NewTicker(defaultSealWorkerTimerInterval)
+	timer := time.NewTicker(m.timePolicyCheckInterval)
 	listener := &hardware.SystemMetricsListener{
 		Cooldown: 30 * time.Second,
 		Condition: func(sm hardware.SystemMetrics) bool {
