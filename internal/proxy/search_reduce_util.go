@@ -25,7 +25,7 @@ func reduceSearchResult(ctx context.Context, subSearchResultData []*schemapb.Sea
 		if reduceInfo.GetIsAdvance() {
 			// for hybrid search group by, we cannot reduce result for results from one single search path,
 			// because the final score has not been accumulated, also, offset cannot be applied
-			return reduceAdvanceGroupBY(ctx,
+			return reduceAdvanceGroupBy(ctx,
 				subSearchResultData, reduceInfo.GetNq(), reduceInfo.GetTopK(), reduceInfo.GetPkType(), reduceInfo.GetMetricType())
 		}
 		return reduceSearchResultDataWithGroupBy(ctx,
@@ -69,7 +69,7 @@ func checkResultDatas(ctx context.Context, subSearchResultData []*schemapb.Searc
 	return allSearchCount, hitNum, nil
 }
 
-func reduceAdvanceGroupBY(ctx context.Context, subSearchResultData []*schemapb.SearchResultData,
+func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.SearchResultData,
 	nq int64, topK int64, pkType schemapb.DataType, metricType string,
 ) (*milvuspb.SearchResults, error) {
 	log.Ctx(ctx).Debug("reduceAdvanceGroupBY", zap.Int("len(subSearchResultData)", len(subSearchResultData)), zap.Int64("nq", nq))
@@ -117,6 +117,11 @@ func reduceAdvanceGroupBY(ctx context.Context, subSearchResultData []*schemapb.S
 			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
 		}
 	}
+
+	gpFieldBuilder, err := typeutil.NewFieldDataBuilder(subSearchResultData[0].GetGroupByFieldValue().GetType(), true, int(limit))
+	if err != nil {
+		return ret, err
+	}
 	// reducing nq * topk results
 	for nqIdx := int64(0); nqIdx < nq; nqIdx++ {
 		dataCount := int64(0)
@@ -127,23 +132,23 @@ func reduceAdvanceGroupBY(ctx context.Context, subSearchResultData []*schemapb.S
 			subGroupByVals := subData.GetGroupByFieldValue()
 
 			nqTopK := subData.Topks[nqIdx]
+			groupByValIterator := typeutil.GetDataIterator(subGroupByVals)
+
 			for i := int64(0); i < nqTopK; i++ {
 				innerIdx := subSearchNqOffset[subIdx][nqIdx] + i
 				pk := typeutil.GetPK(subPks, innerIdx)
 				score := subScores[innerIdx]
-				groupByVal := typeutil.GetData(subData.GetGroupByFieldValue(), int(innerIdx))
+				groupByVal := groupByValIterator(int(innerIdx))
+				gpFieldBuilder.Add(groupByVal)
 				typeutil.AppendPKs(ret.Results.Ids, pk)
 				ret.Results.Scores = append(ret.Results.Scores, score)
-				if err := typeutil.AppendGroupByValue(ret.Results, groupByVal, subGroupByVals.GetType()); err != nil {
-					log.Ctx(ctx).Error("failed to append groupByValues", zap.Error(err))
-					return ret, err
-				}
 				dataCount += 1
 			}
 		}
 		ret.Results.Topks = append(ret.Results.Topks, dataCount)
 	}
 
+	ret.Results.GroupByFieldValue = gpFieldBuilder.Build()
 	ret.Results.TopK = topK // realTopK is the topK of the nq-th query
 	if !metric.PositivelyRelated(metricType) {
 		for k := range ret.Results.Scores {
@@ -194,7 +199,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 	}
 	groupBound := groupSize * limit
 	if err := setupIdListForSearchResult(ret, pkType, groupBound); err != nil {
-		return ret, nil
+		return ret, err
 	}
 
 	if allSearchCount, _, err := checkResultDatas(ctx, subSearchResultData, nq, topk); err != nil {
@@ -207,8 +212,9 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 	var (
 		subSearchNum = len(subSearchResultData)
 		// for results of each subSearchResultData, storing the start offset of each query of nq queries
-		subSearchNqOffset       = make([][]int64, subSearchNum)
-		totalResCount     int64 = 0
+		subSearchNqOffset                 = make([][]int64, subSearchNum)
+		totalResCount               int64 = 0
+		subSearchGroupByValIterator       = make([]func(int) any, subSearchNum)
 	)
 	for i := 0; i < subSearchNum; i++ {
 		subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
@@ -216,6 +222,11 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
 		}
 		totalResCount += subSearchNqOffset[i][nq-1]
+		subSearchGroupByValIterator[i] = typeutil.GetDataIterator(subSearchResultData[i].GetGroupByFieldValue())
+	}
+	gpFieldBuilder, err := typeutil.NewFieldDataBuilder(subSearchResultData[0].GetGroupByFieldValue().GetType(), true, int(limit))
+	if err != nil {
+		return ret, err
 	}
 
 	var realTopK int64 = -1
@@ -245,11 +256,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 
 			id := typeutil.GetPK(subSearchRes.GetIds(), resultDataIdx)
 			score := subSearchRes.GetScores()[resultDataIdx]
-			groupByVal := typeutil.GetData(subSearchRes.GetGroupByFieldValue(), int(resultDataIdx))
-			if groupByVal == nil {
-				return nil, errors.New("get nil groupByVal from subSearchRes, wrong states, as milvus doesn't support nil value," +
-					"there must be sth wrong on queryNode side")
-			}
+			groupByVal := subSearchGroupByValIterator[subSearchIdx](int(resultDataIdx))
 
 			if int64(len(skipOffsetMap)) < offset || skipOffsetMap[groupByVal] {
 				skipOffsetMap[groupByVal] = true
@@ -276,18 +283,13 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		// assemble all eligible values in group
 		// values in groupByValList is sorted by the highest score in each group
 		for _, groupVal := range groupByValList {
-			if groupVal != nil {
-				groupEntities := groupByValMap[groupVal]
-				for _, groupEntity := range groupEntities {
-					subResData := subSearchResultData[groupEntity.subSearchIdx]
-					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx)
-					typeutil.AppendPKs(ret.Results.Ids, groupEntity.id)
-					ret.Results.Scores = append(ret.Results.Scores, groupEntity.score)
-					if err := typeutil.AppendGroupByValue(ret.Results, groupVal, subResData.GetGroupByFieldValue().GetType()); err != nil {
-						log.Ctx(ctx).Error("failed to append groupByValues", zap.Error(err))
-						return ret, err
-					}
-				}
+			groupEntities := groupByValMap[groupVal]
+			for _, groupEntity := range groupEntities {
+				subResData := subSearchResultData[groupEntity.subSearchIdx]
+				retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx)
+				typeutil.AppendPKs(ret.Results.Ids, groupEntity.id)
+				ret.Results.Scores = append(ret.Results.Scores, groupEntity.score)
+				gpFieldBuilder.Add(groupVal)
 			}
 		}
 
@@ -296,6 +298,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		}
 		realTopK = j
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
+		ret.Results.GroupByFieldValue = gpFieldBuilder.Build()
 
 		// limit search result to avoid oom
 		if retSize > maxOutputSize {
@@ -535,11 +538,12 @@ func rankSearchResultDataByGroup(ctx context.Context,
 		start := 0
 		// milvus has limits for the value range of nq and limit
 		// no matter on 32-bit and 64-bit platform, converting nq and topK into int is safe
+		groupByValIterator := typeutil.GetDataIterator(result.GetResults().GetGroupByFieldValue())
 		for i := 0; i < int(nq); i++ {
 			realTopK := int(result.GetResults().Topks[i])
 			for j := start; j < start+realTopK; j++ {
 				id := typeutil.GetPK(result.GetResults().GetIds(), int64(j))
-				groupByVal := typeutil.GetData(result.GetResults().GetGroupByFieldValue(), j)
+				groupByVal := groupByValIterator(j)
 				if accumulatedScores[i][id] != nil {
 					accumulatedScores[i][id].accumulatedScore += scores[j]
 				} else {
@@ -550,6 +554,10 @@ func rankSearchResultDataByGroup(ctx context.Context,
 		}
 	}
 
+	gpFieldBuilder, err := typeutil.NewFieldDataBuilder(groupByDataType, true, int(limit))
+	if err != nil {
+		return ret, err
+	}
 	for i := int64(0); i < nq; i++ {
 		idSet := accumulatedScores[i]
 		keys := make([]interface{}, 0)
@@ -631,13 +639,14 @@ func rankSearchResultDataByGroup(ctx context.Context,
 					score = float32(math.Floor(float64(score)*multiplier+0.5) / multiplier)
 				}
 				ret.Results.Scores = append(ret.Results.Scores, score)
-				typeutil.AppendGroupByValue(ret.Results, group.groupVal, groupByDataType)
+				gpFieldBuilder.Add(group.groupVal)
 			}
 			returnedRowNum += len(group.idList)
 		}
 		ret.Results.Topks = append(ret.Results.Topks, int64(returnedRowNum))
 	}
 
+	ret.Results.GroupByFieldValue = gpFieldBuilder.Build()
 	return ret, nil
 }
 
