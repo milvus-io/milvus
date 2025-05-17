@@ -159,7 +159,8 @@ func (s *SyncTaskSuite) getSuiteSyncTask(pack *SyncPack) *SyncTask {
 			WithChannelName(s.channelName)).
 		WithAllocator(s.allocator).
 		WithChunkManager(s.chunkManager).
-		WithMetaCache(s.metacache)
+		WithMetaCache(s.metacache).
+		WithSchema(s.schema)
 	return task
 }
 
@@ -235,7 +236,7 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 					MsgID:       []byte{1, 2, 3, 4},
 					Timestamp:   100,
 				}))
-		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
 		if storageVersion == storage.StorageV2 {
 			task.WithMultiPartUploadSize(0)
 			task.WithSyncBufferSize(packed.DefaultWriteBufferSize)
@@ -255,7 +256,7 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 					MsgID:       []byte{1, 2, 3, 4},
 					Timestamp:   100,
 				}))
-		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
 		if storageVersion == storage.StorageV2 {
 			task.WithMultiPartUploadSize(0)
 			task.WithSyncBufferSize(packed.DefaultWriteBufferSize)
@@ -274,7 +275,7 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 				MsgID:       []byte{1, 2, 3, 4},
 				Timestamp:   100,
 			}))
-		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
 		if storageVersion == storage.StorageV2 {
 			task.WithMultiPartUploadSize(0)
 			task.WithSyncBufferSize(packed.DefaultWriteBufferSize)
@@ -303,7 +304,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 				MsgID:       []byte{1, 2, 3, 4},
 				Timestamp:   100,
 			}))
-		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
 
 		err := task.Run(ctx)
 		s.NoError(err)
@@ -324,7 +325,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 				MsgID:       []byte{1, 2, 3, 4},
 				Timestamp:   100,
 			}))
-		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
 
 		err := task.Run(ctx)
 		s.NoError(err)

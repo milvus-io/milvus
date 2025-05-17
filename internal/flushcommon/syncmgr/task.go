@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/json"
@@ -62,6 +63,7 @@ type SyncTask struct {
 
 	metacache  metacache.MetaCache
 	metaWriter MetaWriter
+	schema     *schemapb.CollectionSchema // schema for when buffer created, could be different from current on in metacache
 
 	pack *SyncPack
 
@@ -126,14 +128,14 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	switch segmentInfo.GetStorageVersion() {
 	case storage.StorageV2:
-		writer := NewBulkPackWriterV2(t.metacache, t.chunkManager, t.allocator, t.syncBufferSize, t.multiPartUploadSize, t.writeRetryOpts...)
+		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, t.syncBufferSize, t.multiPartUploadSize, t.writeRetryOpts...)
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
 		if err != nil {
 			log.Warn("failed to write sync data with storage v2 format", zap.Error(err))
 			return err
 		}
 	default:
-		writer := NewBulkPackWriter(t.metacache, t.chunkManager, t.allocator, t.writeRetryOpts...)
+		writer := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
 		if err != nil {
 			log.Warn("failed to write sync data", zap.Error(err))
