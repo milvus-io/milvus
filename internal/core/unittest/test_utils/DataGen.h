@@ -1196,7 +1196,8 @@ inline std::unique_ptr<milvus::index::VectorIndex>
 GenVecIndexing(int64_t N,
                int64_t dim,
                const float* vec,
-               const char* index_type) {
+               const char* index_type,
+               bool use_knowhere_build_pool = true) {
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, std::to_string(dim)},
@@ -1215,6 +1216,7 @@ GenVecIndexing(int64_t N,
         index_type,
         knowhere::metric::L2,
         knowhere::Version::GetCurrentVersion().VersionNumber(),
+        use_knowhere_build_pool,
         file_manager_context);
     indexing->BuildWithDataset(database, conf);
     auto create_index_result = indexing->Upload();
