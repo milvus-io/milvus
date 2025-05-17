@@ -49,7 +49,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                       IndexMetaPtr index_meta,
                                       const SegcoreConfig& segcore_config,
                                       int64_t segment_id,
-                                      bool TEST_skip_index_for_retrieve = false,
                                       bool is_sorted_by_pk = false);
     ~ChunkedSegmentSealedImpl() override;
     void
@@ -462,14 +461,12 @@ CreateSealedSegment(
     IndexMetaPtr index_meta = empty_index_meta,
     int64_t segment_id = 0,
     const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
-    bool TEST_skip_index_for_retrieve = false,
     bool is_sorted_by_pk = false) {
     return std::make_unique<ChunkedSegmentSealedImpl>(
         schema,
         index_meta,
         segcore_config,
         segment_id,
-        TEST_skip_index_for_retrieve,
         is_sorted_by_pk);
 }
 }  // namespace milvus::segcore
