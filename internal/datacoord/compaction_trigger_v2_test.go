@@ -31,12 +31,12 @@ func TestCompactionTriggerManagerSuite(t *testing.T) {
 type CompactionTriggerManagerSuite struct {
 	suite.Suite
 
-	mockAlloc       *allocator.MockAllocator
-	handler         Handler
-	mockPlanContext *MockCompactionPlanContext
-	testLabel       *CompactionGroupLabel
-	meta            *meta
-	imeta           ImportMeta
+	mockAlloc *allocator.MockAllocator
+	handler   Handler
+	inspector *MockCompactionInspector
+	testLabel *CompactionGroupLabel
+	meta      *meta
+	imeta     ImportMeta
 
 	triggerManager *CompactionTriggerManager
 }
@@ -44,7 +44,7 @@ type CompactionTriggerManagerSuite struct {
 func (s *CompactionTriggerManagerSuite) SetupTest() {
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.handler = NewNMockHandler(s.T())
-	s.mockPlanContext = NewMockCompactionPlanContext(s.T())
+	s.inspector = NewMockCompactionInspector(s.T())
 
 	s.testLabel = &CompactionGroupLabel{
 		CollectionID: 1,
@@ -60,10 +60,10 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{}, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{}, nil)
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{}, nil)
-	importMeta, err := NewImportMeta(context.TODO(), catalog)
+	importMeta, err := NewImportMeta(context.TODO(), catalog, s.mockAlloc, s.meta)
 	s.Require().NoError(err)
 	s.imeta = importMeta
-	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.mockPlanContext, s.meta, s.imeta)
+	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.inspector, s.meta, s.imeta)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
@@ -95,7 +95,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	log.Info("view", zap.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
-	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).
 		RunAndReturn(func(task *datapb.CompactionTask) error {
 			s.EqualValues(19530, task.GetTriggerID())
 			// s.True(signal.isGlobal)
@@ -138,7 +138,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	log.Info("view", zap.Any("cView", cView))
 
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
-	s.mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).
 		RunAndReturn(func(task *datapb.CompactionTask) error {
 			s.EqualValues(19530, task.GetTriggerID())
 			s.EqualValues(30000, task.GetPos().GetTimestamp())
@@ -327,8 +327,8 @@ func TestCompactionAndImport(t *testing.T) {
 	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
 		ID: 1,
 	}, nil)
-	mockPlanContext := NewMockCompactionPlanContext(t)
-	mockPlanContext.EXPECT().isFull().Return(false)
+	inspector := NewMockCompactionInspector(t)
+	inspector.EXPECT().isFull().Return(false)
 
 	testLabel := &CompactionGroupLabel{
 		CollectionID: 1,
@@ -366,10 +366,10 @@ func TestCompactionAndImport(t *testing.T) {
 		},
 	}, nil).Once()
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
-	importMeta, err := NewImportMeta(context.TODO(), catalog)
+	importMeta, err := NewImportMeta(context.TODO(), catalog, mockAlloc, meta)
 	assert.NoError(t, err)
 	imeta := importMeta
-	triggerManager := NewCompactionTriggerManager(mockAlloc, handler, mockPlanContext, meta, imeta)
+	triggerManager := NewCompactionTriggerManager(mockAlloc, handler, inspector, meta, imeta)
 
 	Params.Save(Params.DataCoordCfg.L0CompactionTriggerInterval.Key, "1")
 	defer Params.Reset(Params.DataCoordCfg.L0CompactionTriggerInterval.Key)
@@ -381,7 +381,7 @@ func TestCompactionAndImport(t *testing.T) {
 	mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
 	mockAlloc.EXPECT().AllocN(mock.Anything).Return(195300, 195300, nil)
 	mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(30000, nil)
-	mockPlanContext.EXPECT().enqueueCompaction(mock.Anything).
+	inspector.EXPECT().enqueueCompaction(mock.Anything).
 		RunAndReturn(func(task *datapb.CompactionTask) error {
 			assert.Equal(t, datapb.CompactionType_Level0DeleteCompaction, task.GetType())
 			expectedSegs := []int64{100, 101, 102}

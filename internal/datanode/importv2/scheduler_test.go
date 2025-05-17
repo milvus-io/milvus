@@ -130,7 +130,7 @@ func (s *SchedulerSuite) TestScheduler_Slots() {
 	s.manager.Add(preimportTask)
 
 	slots := s.scheduler.Slots()
-	s.Equal(paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt64()-1, slots)
+	s.Equal(int64(1), slots)
 }
 
 func (s *SchedulerSuite) TestScheduler_Start_Preimport() {

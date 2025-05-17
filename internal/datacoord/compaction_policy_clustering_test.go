@@ -45,7 +45,7 @@ type ClusteringCompactionPolicySuite struct {
 	mockAlloc          *allocator.MockAllocator
 	mockTriggerManager *MockTriggerManager
 	handler            *NMockHandler
-	mockPlanContext    *MockCompactionPlanContext
+	inspector          *MockCompactionInspector
 	catalog            *mocks.DataCoordCatalog
 	meta               *meta
 

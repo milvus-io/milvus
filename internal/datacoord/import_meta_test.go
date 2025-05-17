@@ -40,7 +40,7 @@ func TestImportMeta_Restore(t *testing.T) {
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{TaskID: 2}}, nil)
 	ctx := context.TODO()
 
-	im, err := NewImportMeta(ctx, catalog)
+	im, err := NewImportMeta(ctx, catalog, nil, nil)
 	assert.NoError(t, err)
 
 	jobs := im.GetJobBy(ctx)
@@ -59,20 +59,20 @@ func TestImportMeta_Restore(t *testing.T) {
 	mockErr := errors.New("mock error")
 	catalog = mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{TaskID: 1}}, mockErr)
-	_, err = NewImportMeta(ctx, catalog)
+	_, err = NewImportMeta(ctx, catalog, nil, nil)
 	assert.Error(t, err)
 
 	catalog = mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{TaskID: 2}}, mockErr)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{TaskID: 1}}, nil)
-	_, err = NewImportMeta(ctx, catalog)
+	_, err = NewImportMeta(ctx, catalog, nil, nil)
 	assert.Error(t, err)
 
 	catalog = mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{JobID: 0}}, mockErr)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{TaskID: 1}}, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{TaskID: 2}}, nil)
-	_, err = NewImportMeta(ctx, catalog)
+	_, err = NewImportMeta(ctx, catalog, nil, nil)
 	assert.Error(t, err)
 }
 
@@ -84,7 +84,7 @@ func TestImportMeta_Job(t *testing.T) {
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
 
-	im, err := NewImportMeta(context.TODO(), catalog)
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 	assert.NoError(t, err)
 
 	jobIDs := []int64{1000, 2000, 3000}
@@ -158,7 +158,7 @@ func TestImportMetaAddJob(t *testing.T) {
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 
-	im, err := NewImportMeta(context.TODO(), catalog)
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 	assert.NoError(t, err)
 
 	var job ImportJob = &importJob{
@@ -201,19 +201,19 @@ func TestImportMeta_ImportTask(t *testing.T) {
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
 
-	im, err := NewImportMeta(context.TODO(), catalog)
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 	assert.NoError(t, err)
 
-	task1 := &importTask{
-		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:        1,
-			TaskID:       2,
-			CollectionID: 3,
-			SegmentIDs:   []int64{5, 6},
-			NodeID:       7,
-			State:        datapb.ImportTaskStateV2_Pending,
-		},
+	taskProto := &datapb.ImportTaskV2{
+		JobID:        1,
+		TaskID:       2,
+		CollectionID: 3,
+		SegmentIDs:   []int64{5, 6},
+		NodeID:       7,
+		State:        datapb.ImportTaskStateV2_Pending,
 	}
+	task1 := &importTask{}
+	task1.task.Store(taskProto)
 	err = im.AddTask(context.TODO(), task1)
 	assert.NoError(t, err)
 	err = im.AddTask(context.TODO(), task1)
@@ -222,8 +222,8 @@ func TestImportMeta_ImportTask(t *testing.T) {
 	assert.Equal(t, task1, res)
 
 	task2 := task1.Clone()
-	task2.(*importTask).TaskID = 8
-	task2.(*importTask).State = datapb.ImportTaskStateV2_Completed
+	task2.(*importTask).task.Load().TaskID = 8
+	task2.(*importTask).task.Load().State = datapb.ImportTaskStateV2_Completed
 	err = im.AddTask(context.TODO(), task2)
 	assert.NoError(t, err)
 
@@ -234,14 +234,22 @@ func TestImportMeta_ImportTask(t *testing.T) {
 	assert.Equal(t, task2.GetTaskID(), tasks[0].GetTaskID())
 
 	err = im.UpdateTask(context.TODO(), task1.GetTaskID(), UpdateNodeID(9),
-		UpdateState(datapb.ImportTaskStateV2_Failed),
+		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateFileStats([]*datapb.ImportFileStats{1: {
 			FileSize: 100,
 		}}))
 	assert.NoError(t, err)
 	task := im.GetTask(context.TODO(), task1.GetTaskID())
 	assert.Equal(t, int64(9), task.GetNodeID())
-	assert.Equal(t, datapb.ImportTaskStateV2_Failed, task.GetState())
+	assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
+	assert.Equal(t, int64(9), task1.GetNodeID())
+	assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task1.GetState())
+
+	err = im.UpdateTask(context.TODO(), task1.GetTaskID(), UpdateNodeID(10),
+		UpdateState(datapb.ImportTaskStateV2_Completed))
+	assert.NoError(t, err)
+	assert.Equal(t, int64(10), task1.GetNodeID())
+	assert.Equal(t, datapb.ImportTaskStateV2_Completed, task1.GetState())
 
 	err = im.RemoveTask(context.TODO(), task1.GetTaskID())
 	assert.NoError(t, err)
@@ -262,20 +270,20 @@ func TestImportMeta_Task_Failed(t *testing.T) {
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(mockErr)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(mockErr)
 
-	im, err := NewImportMeta(context.TODO(), catalog)
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 	assert.NoError(t, err)
 	im.(*importMeta).catalog = catalog
 
-	task := &importTask{
-		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:        1,
-			TaskID:       2,
-			CollectionID: 3,
-			SegmentIDs:   []int64{5, 6},
-			NodeID:       7,
-			State:        datapb.ImportTaskStateV2_Pending,
-		},
+	taskProto := &datapb.ImportTaskV2{
+		JobID:        1,
+		TaskID:       2,
+		CollectionID: 3,
+		SegmentIDs:   []int64{5, 6},
+		NodeID:       7,
+		State:        datapb.ImportTaskStateV2_Pending,
 	}
+	task := &importTask{}
+	task.task.Store(taskProto)
 
 	err = im.AddTask(context.TODO(), task)
 	assert.Error(t, err)
@@ -293,25 +301,23 @@ func TestTaskStatsJSON(t *testing.T) {
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
-	im, err := NewImportMeta(context.TODO(), catalog)
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 	assert.NoError(t, err)
 
 	statsJSON := im.TaskStatsJSON(context.TODO())
 	assert.Equal(t, "[]", statsJSON)
 
-	task1 := &importTask{
-		ImportTaskV2: &datapb.ImportTaskV2{
-			TaskID: 1,
-		},
+	taskProto := &datapb.ImportTaskV2{
+		TaskID: 1,
 	}
+	task1 := &importTask{}
+	task1.task.Store(taskProto)
 	err = im.AddTask(context.TODO(), task1)
 	assert.NoError(t, err)
 
-	task2 := &importTask{
-		ImportTaskV2: &datapb.ImportTaskV2{
-			TaskID: 2,
-		},
-	}
+	taskProto.TaskID = 2
+	task2 := &importTask{}
+	task2.task.Store(taskProto)
 	err = im.AddTask(context.TODO(), task2)
 	assert.NoError(t, err)
 

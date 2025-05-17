@@ -27,15 +27,16 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -43,6 +44,8 @@ type statsTaskSuite struct {
 	suite.Suite
 	mt *meta
 
+	collID   int64
+	partID   int64
 	segID    int64
 	taskID   int64
 	targetID int64
@@ -53,6 +56,8 @@ func Test_statsTaskSuite(t *testing.T) {
 }
 
 func (s *statsTaskSuite) SetupSuite() {
+	s.collID = 1
+	s.partID = 2
 	s.taskID = 1178
 	s.segID = 1179
 	s.targetID = 1180
@@ -81,8 +86,8 @@ func (s *statsTaskSuite) SetupSuite() {
 				s.segID: {
 					SegmentInfo: &datapb.SegmentInfo{
 						ID:            s.segID,
-						CollectionID:  collID,
-						PartitionID:   partID,
+						CollectionID:  s.collID,
+						PartitionID:   s.partID,
 						InsertChannel: "ch1",
 						NumOfRows:     65535,
 						State:         commonpb.SegmentState_Flushed,
@@ -94,12 +99,12 @@ func (s *statsTaskSuite) SetupSuite() {
 			},
 			secondaryIndexes: segmentInfoIndexes{
 				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-					collID: {
+					s.collID: {
 						s.segID: {
 							SegmentInfo: &datapb.SegmentInfo{
 								ID:            s.segID,
-								CollectionID:  collID,
-								PartitionID:   partID,
+								CollectionID:  s.collID,
+								PartitionID:   s.partID,
 								InsertChannel: "ch1",
 								NumOfRows:     65535,
 								State:         commonpb.SegmentState_Flushed,
@@ -114,8 +119,8 @@ func (s *statsTaskSuite) SetupSuite() {
 						s.segID: {
 							SegmentInfo: &datapb.SegmentInfo{
 								ID:            s.segID,
-								CollectionID:  collID,
-								PartitionID:   partID,
+								CollectionID:  s.collID,
+								PartitionID:   s.partID,
 								InsertChannel: "ch1",
 								NumOfRows:     65535,
 								State:         commonpb.SegmentState_Flushed,
@@ -139,481 +144,578 @@ func (s *statsTaskSuite) SetupSuite() {
 	}
 }
 
-func (s *statsTaskSuite) TestTaskStats_PreCheck() {
-	st := newStatsTask(s.taskID, s.segID, s.targetID, indexpb.StatsSubJob_Sort, 1)
+func (s *statsTaskSuite) TestBasicTaskOperations() {
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:          s.taskID,
+		SegmentID:       s.segID,
+		TargetSegmentID: s.targetID,
+		SubJobType:      indexpb.StatsSubJob_Sort,
+		State:           indexpb.JobState_JobStateInit,
+	}, 1, s.mt, nil, nil, nil, newIndexEngineVersionManager())
 
-	s.Equal(s.taskID, st.GetTaskID())
-
-	s.Run("queue time", func() {
-		t := time.Now()
-		st.SetQueueTime(t)
-		s.Equal(t, st.GetQueueTime())
+	s.Run("task type and state", func() {
+		s.Equal(taskcommon.Stats, st.GetTaskType())
+		s.Equal(st.GetState(), st.GetTaskState())
+		s.Equal(int64(1), st.GetTaskSlot())
 	})
 
-	s.Run("start time", func() {
-		t := time.Now()
-		st.SetStartTime(t)
-		s.Equal(t, st.GetStartTime())
+	s.Run("time management", func() {
+		now := time.Now()
+
+		st.SetTaskTime(taskcommon.TimeQueue, now)
+		s.Equal(now, st.GetTaskTime(taskcommon.TimeQueue))
+
+		st.SetTaskTime(taskcommon.TimeStart, now)
+		s.Equal(now, st.GetTaskTime(taskcommon.TimeStart))
+
+		st.SetTaskTime(taskcommon.TimeEnd, now)
+		s.Equal(now, st.GetTaskTime(taskcommon.TimeEnd))
 	})
 
-	s.Run("end time", func() {
-		t := time.Now()
-		st.SetEndTime(t)
-		s.Equal(t, st.GetEndTime())
+	s.Run("state management", func() {
+		st.SetState(indexpb.JobState_JobStateInProgress, "test reason")
+		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+		s.Equal("test reason", st.GetFailReason())
+	})
+}
+
+func (s *statsTaskSuite) TestUpdateStateAndVersion() {
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:     s.taskID,
+		SegmentID:  s.segID,
+		SubJobType: indexpb.StatsSubJob_Sort,
+		State:      indexpb.JobState_JobStateInit,
+		Version:    1,
+		NodeID:     0,
+	}, 1, s.mt, nil, nil, nil, newIndexEngineVersionManager())
+
+	s.Run("update state success", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		s.mt.statsTaskMeta.catalog = catalog
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+		err := st.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, "running")
+		s.NoError(err)
+		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+		s.Equal("running", st.GetFailReason())
 	})
 
-	s.Run("CheckTaskHealthy", func() {
-		s.True(st.CheckTaskHealthy(s.mt))
+	s.Run("update state failure", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		s.mt.statsTaskMeta.catalog = catalog
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).
+			Return(errors.New("mock error"))
+		err := st.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "error")
+		s.Error(err)
+	})
 
+	s.Run("update version success", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		s.mt.statsTaskMeta.catalog = catalog
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+		err := st.UpdateTaskVersion(100)
+		s.NoError(err)
+		s.Equal(int64(2), st.GetVersion())
+		s.Equal(int64(100), st.GetNodeID())
+	})
+
+	s.Run("update version failure", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		s.mt.statsTaskMeta.catalog = catalog
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).
+			Return(errors.New("mock error"))
+		err := st.UpdateTaskVersion(200)
+		s.Error(err)
+	})
+}
+
+func (s *statsTaskSuite) TestResetTask() {
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	s.mt.statsTaskMeta.catalog = catalog
+
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:     s.taskID,
+		SegmentID:  s.segID,
+		SubJobType: indexpb.StatsSubJob_Sort,
+		State:      indexpb.JobState_JobStateInProgress,
+	}, 1, s.mt, nil, nil, nil, newIndexEngineVersionManager())
+
+	s.Run("reset success", func() {
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+		st.resetTask(context.Background(), "reset task")
+		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
+		s.Equal("reset task", st.GetFailReason())
+		s.False(s.mt.segments.segments[s.segID].isCompacting)
+	})
+
+	s.Run("reset with update failure", func() {
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).
+			Return(errors.New("mock error"))
+		st.resetTask(context.Background(), "reset task")
+		// State remains unchanged on error
+		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
+	})
+}
+
+func (s *statsTaskSuite) TestHandleEmptySegment() {
+	handler := NewNMockHandler(s.T())
+
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:     s.taskID,
+		SegmentID:  s.segID,
+		SubJobType: indexpb.StatsSubJob_Sort,
+		State:      indexpb.JobState_JobStateInit,
+	}, 1, s.mt, nil, handler, nil, newIndexEngineVersionManager())
+
+	s.Run("handle empty segment success", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		s.mt.statsTaskMeta.catalog = catalog
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+		err := st.handleEmptySegment(context.Background())
+		s.NoError(err)
+		s.Equal(indexpb.JobState_JobStateFinished, st.GetState())
+	})
+
+	s.Run("handle empty segment with update failure", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		s.mt.statsTaskMeta.catalog = catalog
+		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).
+			Return(errors.New("mock error"))
+		err := st.handleEmptySegment(context.Background())
+		s.Error(err)
+	})
+}
+
+func (s *statsTaskSuite) TestCreateTaskOnWorker() {
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:          s.taskID,
+		SegmentID:       s.segID,
+		TargetSegmentID: s.targetID,
+		SubJobType:      indexpb.StatsSubJob_Sort,
+		State:           indexpb.JobState_JobStateInit,
+	}, 1, s.mt, nil, nil, nil, newIndexEngineVersionManager())
+
+	s.Run("segment is compacting", func() {
+		s.mt.segments.segments[s.segID].isCompacting = true
+		s.Run("drop task failed", func() {
+			catalog := catalogmocks.NewDataCoordCatalog(s.T())
+			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+			st.meta.statsTaskMeta.catalog = catalog
+			st.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+			s.Equal(indexpb.JobState_JobStateInit, st.GetState())
+		})
+
+		s.Run("drop task success", func() {
+			catalog := catalogmocks.NewDataCoordCatalog(s.T())
+			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
+			st.meta.statsTaskMeta.catalog = catalog
+			st.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+			s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+		})
+		s.mt.segments.segments[s.segID].isCompacting = false
+	})
+
+	s.Run("segment in L0 compaction", func() {
+		st.SetState(indexpb.JobState_JobStateInit, "")
+		compactionInspector := NewMockCompactionInspector(s.T())
+		compactionInspector.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(false)
+		st.compactionInspector = compactionInspector
+		st.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+		// No state change as we just log and exit
+		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
+	})
+
+	compactionInspector := NewMockCompactionInspector(s.T())
+	compactionInspector.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
+	st.compactionInspector = compactionInspector
+
+	s.Run("segment not healthy", func() {
+		// Set up a temporary nil segment return
 		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
-		s.False(st.CheckTaskHealthy(s.mt))
-	})
 
-	s.Run("UpdateVersion", func() {
-		catalog := catalogmocks.NewDataCoordCatalog(s.T())
-		s.mt.statsTaskMeta.catalog = catalog
-
-		s.Run("segment is compacting", func() {
-			s.mt.segments.segments[s.segID].isCompacting = true
-
-			s.Error(st.UpdateVersion(context.Background(), 1, s.mt, nil))
+		s.Run("drop task failed", func() {
+			catalog := catalogmocks.NewDataCoordCatalog(s.T())
+			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+			st.meta.statsTaskMeta.catalog = catalog
+			s.NoError(s.mt.statsTaskMeta.AddStatsTask(st.StatsTask))
+			st.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+			s.Equal(indexpb.JobState_JobStateInit, st.GetState())
 		})
 
-		s.Run("segment is in l0 compaction", func() {
+		s.Run("drop task success", func() {
 			s.mt.segments.segments[s.segID].isCompacting = false
-			compactionHandler := NewMockCompactionPlanContext(s.T())
-			compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(false)
-			s.Error(st.UpdateVersion(context.Background(), 1, s.mt, compactionHandler))
-			s.False(s.mt.segments.segments[s.segID].isCompacting)
-		})
-
-		s.Run("normal case", func() {
-			s.mt.segments.segments[s.segID].isCompacting = false
-			compactionHandler := NewMockCompactionPlanContext(s.T())
-			compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
-
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
-			s.NoError(st.UpdateVersion(context.Background(), 1, s.mt, compactionHandler))
-		})
-
-		s.Run("failed case", func() {
-			s.mt.segments.segments[s.segID].isCompacting = false
-			compactionHandler := NewMockCompactionPlanContext(s.T())
-			compactionHandler.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
-
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("error")).Once()
-			s.Error(st.UpdateVersion(context.Background(), 1, s.mt, compactionHandler))
+			catalog := catalogmocks.NewDataCoordCatalog(s.T())
+			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
+			st.meta.statsTaskMeta.catalog = catalog
+			st.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+			s.Equal(indexpb.JobState_JobStateNone, st.GetState())
 		})
 	})
 
-	s.Run("UpdateMetaBuildingState", func() {
+	s.Run("empty segment", func() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
-		s.mt.statsTaskMeta.catalog = catalog
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		st.meta.statsTaskMeta.catalog = catalog
+		st.meta.catalog = catalog
+		s.NoError(s.mt.statsTaskMeta.AddStatsTask(st.StatsTask))
+		s.mt.segments.segments[s.segID].NumOfRows = 0
+		s.mt.segments.segments[s.segID].isCompacting = false
+		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
 
-		s.Run("normal case", func() {
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
-			s.NoError(st.UpdateMetaBuildingState(s.mt))
-		})
-
-		s.Run("update error", func() {
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("error")).Once()
-			s.Error(st.UpdateMetaBuildingState(s.mt))
-		})
+		st.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+		s.Equal(indexpb.JobState_JobStateFinished, st.GetState())
 	})
 
-	s.Run("PreCheck", func() {
+	s.Run("update version failed", func() {
+		st.SetState(indexpb.JobState_JobStateInit, "")
+		s.mt.segments.segments[s.segID].isCompacting = false
+		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.segments[s.segID].NumOfRows = 1000
+		compactionInspector.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		st.meta.statsTaskMeta.catalog = catalog
+
+		st.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
+	})
+
+	s.Run("prepare job request failed", func() {
+		st.SetState(indexpb.JobState_JobStateInit, "")
+		s.mt.segments.segments[s.segID].isCompacting = false
+		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		compactionInspector.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+		st.meta.statsTaskMeta.catalog = catalog
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+		st.handler = handler
+
+		cluster := session.NewMockCluster(s.T())
+		st.CreateTaskOnWorker(1, cluster)
+		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
+	})
+
+	s.Run("send job to worker failed", func() {
+		st.SetState(indexpb.JobState_JobStateInit, "")
+		s.mt.segments.segments[s.segID].isCompacting = false
+		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		compactionInspector.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+		st.meta.statsTaskMeta.catalog = catalog
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+			ID: s.collID,
+			Properties: map[string]string{
+				common.CollectionTTLConfigKey: "3600",
+			},
+			Schema: newTestSchema(),
+		}, nil)
+		st.handler = handler
+		ac := allocator.NewMockAllocator(s.T())
+		ac.EXPECT().AllocN(mock.Anything).Return(1, 1000000, nil)
+		st.allocator = ac
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(nil)
+
+		st.CreateTaskOnWorker(1, cluster)
+		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
+	})
+
+	s.Run("update InProgress failed", func() {
+		st.SetState(indexpb.JobState_JobStateInit, "")
+		s.mt.segments.segments[s.segID].isCompacting = false
+		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		compactionInspector.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
+		st.meta.statsTaskMeta.catalog = catalog
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(nil)
+
+		st.CreateTaskOnWorker(1, cluster)
+		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
+	})
+
+	s.Run("success case", func() {
+		s.mt.segments.segments[s.segID].isCompacting = false
+		compactionInspector.EXPECT().checkAndSetSegmentStating(mock.Anything, mock.Anything).Return(true)
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+		st.meta.statsTaskMeta.catalog = catalog
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().CreateStats(mock.Anything, mock.Anything).Return(nil)
+
+		st.CreateTaskOnWorker(1, cluster)
+		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+	})
+}
+
+func (s *statsTaskSuite) TestQueryTaskOnWorker() {
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:     s.taskID,
+		SegmentID:  s.segID,
+		SubJobType: indexpb.StatsSubJob_Sort,
+		State:      indexpb.JobState_JobStateInProgress,
+		NodeID:     100,
+	}, 1, s.mt, nil, nil, nil, newIndexEngineVersionManager())
+
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.mt.catalog = catalog
+
+	s.Run("query task success", func() {
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryStats(mock.Anything, mock.Anything).Return(&workerpb.StatsResults{
+			Results: []*workerpb.StatsResult{{
+				TaskID: s.taskID,
+				State:  indexpb.JobState_JobStateFinished,
+			}},
+		}, nil)
+
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+		st.meta.statsTaskMeta.catalog = catalog
+
+		st.QueryTaskOnWorker(cluster)
+		s.Equal(indexpb.JobState_JobStateFinished, st.GetState())
+	})
+
+	s.Run("node not found", func() {
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryStats(mock.Anything, mock.Anything).Return(nil, merr.ErrNodeNotFound)
+		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(nil)
+
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+		st.meta.statsTaskMeta.catalog = catalog
+
+		// Should skip the query
+		st.QueryTaskOnWorker(cluster)
+		s.Equal(indexpb.JobState_JobStateInit, st.GetState()) // No change
+	})
+
+	s.Run("query with error", func() {
+		st.SetState(indexpb.JobState_JobStateInProgress, "")
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryStats(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(nil)
+
+		st.QueryTaskOnWorker(cluster)
+		s.Equal(indexpb.JobState_JobStateInit, st.GetState()) // No change
+	})
+}
+
+func (s *statsTaskSuite) TestDropTaskOnWorker() {
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:     s.taskID,
+		SegmentID:  s.segID,
+		SubJobType: indexpb.StatsSubJob_Sort,
+		State:      indexpb.JobState_JobStateInProgress,
+		NodeID:     100,
+	}, 1, s.mt, nil, nil, nil, newIndexEngineVersionManager())
+
+	s.Run("drop task success", func() {
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(nil)
+
+		st.DropTaskOnWorker(cluster)
+		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+	})
+
+	s.Run("drop with error from worker", func() {
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+
+		st.DropTaskOnWorker(cluster)
+		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+	})
+}
+
+func (s *statsTaskSuite) TestSetJobInfo() {
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:     s.taskID,
+		SegmentID:  s.segID,
+		SubJobType: indexpb.StatsSubJob_Sort,
+		State:      indexpb.JobState_JobStateInProgress,
+	}, 1, s.mt, nil, nil, nil, newIndexEngineVersionManager())
+
+	result := &workerpb.StatsResult{
+		TaskID:       s.taskID,
+		State:        indexpb.JobState_JobStateFinished,
+		FailReason:   "",
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		Channel:      "test-channel",
+		NumRows:      1000,
+	}
+
+	// Temporarily replace the segment with one we control
+	origSegments := s.mt.segments
+
+	// Create test segment for testing
+	testSegment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            s.segID,
+			CollectionID:  s.collID,
+			PartitionID:   s.partID,
+			InsertChannel: "ch1",
+		},
+	}
+
+	s.mt.segments.segments[s.segID] = testSegment
+
+	s.Run("set job info success for different sub job types", func() {
+		// Create mock catalog
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		s.mt.statsTaskMeta.catalog = catalog
+		s.mt.catalog = catalog
 
-		s.Run("segment not healthy", func() {
-			s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		// Test Sort job type
+		st.SubJobType = indexpb.StatsSubJob_Sort
+		err := st.SetJobInfo(context.Background(), result)
+		s.NoError(err)
 
-			checkPass := st.PreCheck(context.Background(), &taskScheduler{
-				meta:                      s.mt,
-				indexEngineVersionManager: newIndexEngineVersionManager(),
-			})
+		// Test TextIndexJob job type
+		st.SubJobType = indexpb.StatsSubJob_TextIndexJob
+		err = st.SetJobInfo(context.Background(), result)
+		s.NoError(err)
 
-			s.False(checkPass)
-		})
-
-		s.Run("segment is sorted", func() {
-			s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
-			s.mt.segments.segments[s.segID].IsSorted = true
-
-			checkPass := st.PreCheck(context.Background(), &taskScheduler{
-				meta:                      s.mt,
-				indexEngineVersionManager: newIndexEngineVersionManager(),
-			})
-
-			s.False(checkPass)
-		})
-
-		s.Run("get collection failed", func() {
-			s.mt.segments.segments[s.segID].IsSorted = false
-
-			handler := NewNMockHandler(s.T())
-			handler.EXPECT().GetCollection(context.Background(), collID).Return(nil, errors.New("mock error")).Once()
-			checkPass := st.PreCheck(context.Background(), &taskScheduler{
-				meta:                      s.mt,
-				handler:                   handler,
-				indexEngineVersionManager: newIndexEngineVersionManager(),
-			})
-
-			s.False(checkPass)
-		})
-
-		s.Run("get collection ttl failed", func() {
-			handler := NewNMockHandler(s.T())
-			handler.EXPECT().GetCollection(context.Background(), collID).Return(&collectionInfo{
-				ID: collID,
-				Schema: &schemapb.CollectionSchema{
-					Name: "test_1",
-					Fields: []*schemapb.FieldSchema{
-						{
-							FieldID:      100,
-							Name:         "pk",
-							IsPrimaryKey: true,
-							DataType:     schemapb.DataType_Int64,
-							AutoID:       true,
-						},
-						{
-							FieldID:      101,
-							Name:         "embedding",
-							IsPrimaryKey: true,
-							DataType:     schemapb.DataType_FloatVector,
-							AutoID:       true,
-							TypeParams: []*commonpb.KeyValuePair{
-								{Key: "dim", Value: "8"},
-							},
-						},
-					},
-				},
-				Properties: map[string]string{common.CollectionTTLConfigKey: "false"},
-			}, nil).Once()
-
-			checkPass := st.PreCheck(context.Background(), &taskScheduler{
-				meta:                      s.mt,
-				handler:                   handler,
-				indexEngineVersionManager: newIndexEngineVersionManager(),
-			})
-
-			s.False(checkPass)
-		})
-
-		s.Run("alloc failed", func() {
-			alloc := allocator.NewMockAllocator(s.T())
-			alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, errors.New("mock error"))
-
-			handler := NewNMockHandler(s.T())
-			handler.EXPECT().GetCollection(context.Background(), collID).Return(&collectionInfo{
-				ID: collID,
-				Schema: &schemapb.CollectionSchema{
-					Name: "test_1",
-					Fields: []*schemapb.FieldSchema{
-						{
-							FieldID:      100,
-							Name:         "pk",
-							IsPrimaryKey: true,
-							DataType:     schemapb.DataType_Int64,
-							AutoID:       true,
-						},
-						{
-							FieldID:      101,
-							Name:         "embedding",
-							IsPrimaryKey: true,
-							DataType:     schemapb.DataType_FloatVector,
-							AutoID:       true,
-							TypeParams: []*commonpb.KeyValuePair{
-								{Key: "dim", Value: "8"},
-							},
-						},
-					},
-				},
-				Properties: map[string]string{common.CollectionTTLConfigKey: "100"},
-			}, nil)
-
-			checkPass := st.PreCheck(context.Background(), &taskScheduler{
-				meta:                      s.mt,
-				handler:                   handler,
-				allocator:                 alloc,
-				indexEngineVersionManager: newIndexEngineVersionManager(),
-			})
-
-			s.False(checkPass)
-		})
-
-		s.Run("normal case", func() {
-			alloc := allocator.NewMockAllocator(s.T())
-			alloc.EXPECT().AllocN(mock.Anything).Return(1, 100, nil)
-
-			handler := NewNMockHandler(s.T())
-			handler.EXPECT().GetCollection(context.Background(), collID).Return(&collectionInfo{
-				ID: collID,
-				Schema: &schemapb.CollectionSchema{
-					Name: "test_1",
-					Fields: []*schemapb.FieldSchema{
-						{
-							FieldID:      100,
-							Name:         "pk",
-							IsPrimaryKey: true,
-							DataType:     schemapb.DataType_Int64,
-							AutoID:       true,
-						},
-						{
-							FieldID:      101,
-							Name:         "embedding",
-							IsPrimaryKey: true,
-							DataType:     schemapb.DataType_FloatVector,
-							AutoID:       true,
-							TypeParams: []*commonpb.KeyValuePair{
-								{Key: "dim", Value: "8"},
-							},
-						},
-					},
-				},
-				Properties: map[string]string{common.CollectionTTLConfigKey: "100"},
-			}, nil)
-
-			checkPass := st.PreCheck(context.Background(), &taskScheduler{
-				meta:                      s.mt,
-				handler:                   handler,
-				allocator:                 alloc,
-				indexEngineVersionManager: newIndexEngineVersionManager(),
-			})
-
-			s.True(checkPass)
-		})
+		// Test BM25Job job type
+		st.SubJobType = indexpb.StatsSubJob_BM25Job
+		err = st.SetJobInfo(context.Background(), result)
+		s.NoError(err)
 	})
 
-	s.Run("AssignTask", func() {
-		s.Run("assign failed", func() {
-			in := mocks.NewMockDataNodeClient(s.T())
-			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "mock error",
-			}, nil)
+	// Restore original segments
+	s.mt.segments = origSegments
+}
 
-			mt := &meta{
-				segments: &SegmentsInfo{
-					segments: map[int64]*SegmentInfo{
-						st.segmentID: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:    st.segmentID,
-								State: commonpb.SegmentState_Flushed,
-							},
-						},
-					},
-				},
-			}
+// TestPrepareJobRequest tests edge cases of prepareJobRequest
+func (s *statsTaskSuite) TestPrepareJobRequest() {
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:     s.taskID,
+		SegmentID:  s.segID,
+		SubJobType: indexpb.StatsSubJob_Sort,
+		State:      indexpb.JobState_JobStateInit,
+	}, 1, s.mt, nil, nil, nil, newIndexEngineVersionManager())
 
-			s.False(st.AssignTask(context.Background(), in, mt))
-		})
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            s.segID,
+			CollectionID:  s.collID,
+			PartitionID:   s.partID,
+			InsertChannel: "test-channel",
+			NumOfRows:     1000,
+		},
+	}
 
-		s.Run("assign success", func() {
-			in := mocks.NewMockDataNodeClient(s.T())
-			in.EXPECT().CreateJobV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			}, nil)
+	s.Run("get collection failed", func() {
+		// Create a handler that returns nil collection
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(nil, errors.New("collection not found"))
+		st.handler = handler
 
-			mt := &meta{
-				segments: &SegmentsInfo{
-					segments: map[int64]*SegmentInfo{
-						st.segmentID: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:    st.segmentID,
-								State: commonpb.SegmentState_Flushed,
-							},
-						},
-					},
-				},
-			}
-
-			s.True(st.AssignTask(context.Background(), in, mt))
-		})
+		_, err := st.prepareJobRequest(context.Background(), segment)
+		s.Error(err)
+		s.Contains(err.Error(), "failed to get collection info")
 	})
 
-	s.Run("QueryResult", func() {
-		s.Run("query failed", func() {
-			in := mocks.NewMockDataNodeClient(s.T())
-			in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "mock failed",
-				},
-			}, nil)
-
-			st.QueryResult(context.Background(), in)
-		})
-
-		s.Run("state finished", func() {
-			in := mocks.NewMockDataNodeClient(s.T())
-			in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				Result: &workerpb.QueryJobsV2Response_StatsJobResults{
-					StatsJobResults: &workerpb.StatsResults{
-						Results: []*workerpb.StatsResult{
-							{
-								TaskID:        s.taskID,
-								State:         indexpb.JobState_JobStateFinished,
-								FailReason:    "",
-								CollectionID:  collID,
-								PartitionID:   partID,
-								SegmentID:     s.segID,
-								Channel:       "ch1",
-								InsertLogs:    nil,
-								StatsLogs:     nil,
-								TextStatsLogs: nil,
-								NumRows:       65535,
-							},
-						},
-					},
-				},
-			}, nil)
-
-			st.QueryResult(context.Background(), in)
-			s.Equal(indexpb.JobState_JobStateFinished, st.taskInfo.State)
-		})
-
-		s.Run("task none", func() {
-			in := mocks.NewMockDataNodeClient(s.T())
-			in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				Result: &workerpb.QueryJobsV2Response_StatsJobResults{
-					StatsJobResults: &workerpb.StatsResults{
-						Results: []*workerpb.StatsResult{
-							{
-								TaskID:       s.taskID,
-								State:        indexpb.JobState_JobStateNone,
-								FailReason:   "",
-								CollectionID: collID,
-								PartitionID:  partID,
-								SegmentID:    s.segID,
-								NumRows:      65535,
-							},
-						},
-					},
-				},
-			}, nil)
-
-			st.QueryResult(context.Background(), in)
-			s.Equal(indexpb.JobState_JobStateRetry, st.taskInfo.State)
-		})
-
-		s.Run("task not exist", func() {
-			in := mocks.NewMockDataNodeClient(s.T())
-			in.EXPECT().QueryJobsV2(mock.Anything, mock.Anything).Return(&workerpb.QueryJobsV2Response{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				Result: &workerpb.QueryJobsV2Response_StatsJobResults{
-					StatsJobResults: &workerpb.StatsResults{
-						Results: []*workerpb.StatsResult{},
-					},
-				},
-			}, nil)
-
-			st.QueryResult(context.Background(), in)
-			s.Equal(indexpb.JobState_JobStateRetry, st.taskInfo.State)
-		})
-	})
-
-	s.Run("DropTaskOnWorker", func() {
-		s.Run("drop failed", func() {
-			in := mocks.NewMockDataNodeClient(s.T())
-			in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "mock error",
-			}, nil)
-
-			s.False(st.DropTaskOnWorker(context.Background(), in))
-		})
-
-		s.Run("drop success", func() {
-			in := mocks.NewMockDataNodeClient(s.T())
-			in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(&commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			}, nil)
-
-			s.True(st.DropTaskOnWorker(context.Background(), in))
-		})
-	})
-
-	s.Run("SetJobInfo", func() {
-		st.taskInfo = &workerpb.StatsResult{
-			TaskID:       s.taskID,
-			State:        indexpb.JobState_JobStateFinished,
-			FailReason:   "",
-			CollectionID: collID,
-			PartitionID:  partID,
-			SegmentID:    s.segID + 1,
-			Channel:      "ch1",
-			InsertLogs: []*datapb.FieldBinlog{
-				{
-					FieldID: 100,
-					Binlogs: []*datapb.Binlog{{LogID: 1000}, {LogID: 1002}},
-				},
-				{
-					FieldID: 101,
-					Binlogs: []*datapb.Binlog{{LogID: 1001}, {LogID: 1003}},
-				},
+	s.Run("invalid collection TTL", func() {
+		// Create handler with collection that has invalid TTL
+		collection := &collectionInfo{
+			Schema: newTestSchema(),
+			Properties: map[string]string{
+				common.CollectionTTLConfigKey: "invalid-ttl", // This will cause strconv.Atoi to fail
 			},
-			StatsLogs: []*datapb.FieldBinlog{
-				{
-					FieldID: 100,
-					Binlogs: []*datapb.Binlog{{LogID: 1004}},
-				},
-			},
-			TextStatsLogs: map[int64]*datapb.TextIndexStats{
-				101: {
-					FieldID:    101,
-					Version:    1,
-					Files:      []string{"file1", "file2"},
-					LogSize:    100,
-					MemorySize: 100,
-				},
-			},
-			NumRows: 65500,
 		}
 
-		s.Run("set target segment failed", func() {
-			catalog := catalogmocks.NewDataCoordCatalog(s.T())
-			s.mt.catalog = catalog
-			catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
-			s.Error(st.SetJobInfo(s.mt))
-		})
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(collection, nil)
+		st.handler = handler
 
-		s.Run("update stats task failed", func() {
-			catalog := catalogmocks.NewDataCoordCatalog(s.T())
-			s.mt.catalog = catalog
-			s.mt.statsTaskMeta.catalog = catalog
-			catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		_, err := st.prepareJobRequest(context.Background(), segment)
+		s.Error(err)
+		s.Contains(err.Error(), "failed to get collection TTL")
+	})
 
-			s.Error(st.SetJobInfo(s.mt))
-		})
+	s.Run("allocation failure", func() {
+		// Create a handler with valid collection
+		collection := &collectionInfo{
+			Schema: newTestSchema(),
+			Properties: map[string]string{
+				common.CollectionTTLConfigKey: "3600",
+			},
+		}
 
-		s.Run("normal case", func() {
-			catalog := catalogmocks.NewDataCoordCatalog(s.T())
-			catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-			s.mt.catalog = catalog
-			s.mt.statsTaskMeta.catalog = catalog
-			updateStateOp := UpdateStatusOperator(s.segID, commonpb.SegmentState_Flushed)
-			err := s.mt.UpdateSegmentsInfo(context.TODO(), updateStateOp)
-			s.NoError(err)
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(collection, nil)
 
-			s.NoError(st.SetJobInfo(s.mt))
-			s.NotNil(s.mt.GetHealthySegment(context.TODO(), s.targetID))
-			t, ok := s.mt.statsTaskMeta.tasks.Get(s.taskID)
-			s.True(ok)
-			s.Equal(indexpb.JobState_JobStateFinished, t.GetState())
-			s.Equal(datapb.SegmentLevel_L2, s.mt.GetHealthySegment(context.TODO(), s.targetID).GetLevel())
-		})
+		// Create allocator that fails
+		ac := allocator.NewMockAllocator(s.T())
+		ac.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), errors.New("allocation failed"))
+
+		st.handler = handler
+		st.allocator = ac
+
+		_, err := st.prepareJobRequest(context.Background(), segment)
+		s.Error(err)
+		s.Contains(err.Error(), "failed to allocate log IDs")
+	})
+
+	s.Run("success case", func() {
+		// Create a handler with valid collection
+		collection := &collectionInfo{
+			Schema: newTestSchema(),
+			Properties: map[string]string{
+				common.CollectionTTLConfigKey: "3600",
+			},
+		}
+
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(collection, nil)
+
+		// Create successful allocator
+		ac := allocator.NewMockAllocator(s.T())
+		startID, endID := int64(1000), int64(2000)
+		ac.EXPECT().AllocN(mock.Anything).Return(startID, endID, nil)
+
+		st.handler = handler
+		st.allocator = ac
+
+		// Add binlogs and deltalogs to the segment
+		segment.Binlogs = []*datapb.FieldBinlog{
+			{FieldID: 1, Binlogs: []*datapb.Binlog{{LogPath: "binlog1"}}},
+		}
+		segment.Deltalogs = []*datapb.FieldBinlog{
+			{FieldID: 1, Binlogs: []*datapb.Binlog{{LogPath: "deltalog1"}}},
+		}
+
+		req, err := st.prepareJobRequest(context.Background(), segment)
+		s.NoError(err)
+		s.NotNil(req)
+
+		// Verify request fields
+		s.Equal(s.taskID, req.TaskID)
+		s.Equal(s.collID, req.CollectionID)
+		s.Equal(s.partID, req.PartitionID)
+		s.Equal(s.segID, req.SegmentID)
+		s.Equal(startID, req.StartLogID)
+		s.Equal(endID, req.EndLogID)
+		s.Equal(int64(1000), req.NumRows)
+		s.Equal(int64(3600000000000), req.CollectionTtl) // 1 hour in nanoseconds
 	})
 }
