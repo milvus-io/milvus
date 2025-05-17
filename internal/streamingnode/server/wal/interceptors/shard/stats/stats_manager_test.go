@@ -145,7 +145,7 @@ func TestStatsManager(t *testing.T) {
 	assert.Empty(t, m.sealOperators)
 }
 
-func TestConcurrentStasManager(t *testing.T) {
+func TestConcurrentStatsManager(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	params.Save(params.DataCoordCfg.SegmentMaxBinlogFileNumber.Key, "5")
@@ -155,7 +155,7 @@ func TestConcurrentStasManager(t *testing.T) {
 	params.Save(params.DataCoordCfg.SegmentMaxLifetime.Key, "0.3")
 	params.Save(params.DataCoordCfg.SegmentMaxIdleTime.Key, "0.1")
 	params.Save(params.DataCoordCfg.SegmentMinSizeFromIdleToSealed.Key, "1024")
-	defaultSealWorkerTimerInterval = 10 * time.Millisecond
+	params.Save(params.StreamingCfg.SealWorkerInterval.Key, "10ms")
 
 	m := NewStatsManager()
 

@@ -9,12 +9,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-)
-
-var (
-	defaultSealWorkerTimerInterval = 1 * time.Minute
-	growingBytesNotifyCooldown     = 5 * time.Second
 )
 
 // newSealWorker creates a new seal worker.
@@ -22,7 +18,7 @@ func newSealWorker(statsManager *StatsManager) *sealWorker {
 	w := &sealWorker{
 		statsManager:         statsManager,
 		sealNotifier:         make(chan sealSegmentIDWithPolicy, 100),
-		growingBytesNotifier: syncutil.NewCooldownNotifier[uint64](growingBytesNotifyCooldown, 100),
+		growingBytesNotifier: syncutil.NewCooldownNotifier[uint64](paramtable.Get().StreamingCfg.GrowingBytesNotifyCoolDown.GetAsDurationByParse(), 100),
 	}
 	return w
 }
@@ -51,7 +47,7 @@ func (m *sealWorker) NotifyGrowingBytes(totalBytes uint64) {
 // loop is the main loop of stats manager.
 func (m *sealWorker) loop() {
 	memoryNotifier := make(chan policy.SealPolicy, 1)
-	timer := time.NewTicker(defaultSealWorkerTimerInterval)
+	timer := time.NewTicker(paramtable.Get().StreamingCfg.SealWorkerInterval.GetAsDurationByParse())
 	listener := &hardware.SystemMetricsListener{
 		Cooldown: 30 * time.Second,
 		Condition: func(sm hardware.SystemMetrics) bool {
