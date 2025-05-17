@@ -141,18 +141,6 @@ pull_request_rules:
         add:
           - ci-passed
 
-  - name: Test passed for go unittest code changed -2.2.*
-    conditions:
-      - *2X_BRANCH
-      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
-      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=Code Checker MacOS 13'
-      - -files~=^(?!internal\/.*_test\.go).*$
-    actions:
-      label:
-        add:
-          - ci-passed
-
   - name: Test passed for mergify changed
     conditions:
       # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
@@ -300,12 +288,12 @@ pull_request_rules:
           - lgtm
           - approved
 
-  - name:  master or 2.5 - Remove ci-passed label when status for code checker or ut is not success
+  - name:  master or 2.x - Remove ci-passed label when status for code checker or ut is not success
     conditions:
       # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or:
         - *MASTER_BRANCH
-        - *25_BRANCH
+        - *2X_BRANCH
       - label!=manual-pass
       - *source_code_files
       - or:
@@ -319,27 +307,6 @@ pull_request_rules:
           - 'status-success!=Integration Test'
           - 'status-success!=Code Checker MacOS 13'
           # - 'status-success!=Code Checker Amazonlinux 2023'
-    actions:
-      label:
-        remove:
-          - ci-passed
-
-  - name: 2.3 or 2.4 - Remove ci-passed label when status for code checker or ut  is not success
-    conditions:
-      - or:
-        - *23_BRANCH
-        - *24_BRANCH
-      - label!=manual-pass
-      - *source_code_files
-      - or:
-          - *failed_on_ubuntu_20
-          - *failed_on_ubuntu_22
-          # - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
-          - 'status-success!=UT for Cpp'
-          - 'status-success!=UT for Go'
-          - 'status-success!=Integration Test'
-          - 'status-success!=Code Checker MacOS 13'
-          # - 'status-success!=Code Checker CentOS 7'
     actions:
       label:
         remove:
