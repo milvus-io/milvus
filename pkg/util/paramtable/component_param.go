@@ -2810,9 +2810,35 @@ type queryNodeConfig struct {
 	// Json Key Stats
 	JSONKeyStatsCommitInterval        ParamItem `refreshable:"false"`
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
+
+	// Idf Oracle
+	IDFEnableDisk       ParamItem `refreshable:"true"`
+	IDFLocalPath        ParamItem `refreshable:"true"`
+	IDFWriteConcurrenct ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
+	p.IDFEnableDisk = ParamItem{
+		Key:          "queryNode.idfOracle.enableDisk",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+	}
+	p.IDFEnableDisk.Init(base.mgr)
+
+	p.IDFLocalPath = ParamItem{
+		Key:          "queryNode.idfOracle.localPath",
+		Version:      "2.6.0",
+		DefaultValue: "/var/lib/milvus/bm25_logs",
+	}
+	p.IDFLocalPath.Init(base.mgr)
+
+	p.IDFWriteConcurrenct = ParamItem{
+		Key:          "queryNode.idfOracle.writeConcurrency",
+		Version:      "2.6.0",
+		DefaultValue: "8",
+	}
+	p.IDFWriteConcurrenct.Init(base.mgr)
+
 	p.SoPath = ParamItem{
 		Key:          "queryNode.soPath",
 		Version:      "2.3.0",
