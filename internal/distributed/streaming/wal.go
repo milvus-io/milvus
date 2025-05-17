@@ -181,6 +181,12 @@ func (w *walAccesserImpl) Close() {
 		w.handlerClient.Close()
 	}
 	w.streamingCoordClient.Close()
+	if w.appendExecutionPool != nil {
+		w.appendExecutionPool.Release()
+	}
+	if w.dispatchExecutionPool != nil {
+		w.dispatchExecutionPool.Release()
+	}
 }
 
 // newErrScanner creates a scanner that returns an error.

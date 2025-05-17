@@ -227,6 +227,7 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 	}
 
 	pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
+	defer pool.Release()
 	futures := make([]*conc.Future[any], 0, len(collectionIDs))
 	collectionSegments := make([][]*datapb.SegmentInfo, len(collectionIDs))
 	for i, collectionID := range collectionIDs {

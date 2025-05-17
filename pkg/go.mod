@@ -22,7 +22,7 @@ require (
 	github.com/klauspost/compress v1.17.9
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.0-beta.0.20250514091016-4080770055ad
 	github.com/minio/minio-go/v7 v7.0.73
-	github.com/panjf2000/ants/v2 v2.7.2
+	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/prometheus/client_golang v1.14.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/remeh/sizedwaitgroup v1.0.0
@@ -32,7 +32,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/cast v1.3.1
 	github.com/streamnative/pulsarctl v0.5.0
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865
 	github.com/tidwall/gjson v1.17.0

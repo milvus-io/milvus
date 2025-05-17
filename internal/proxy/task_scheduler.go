@@ -531,6 +531,7 @@ func (sched *taskScheduler) definitionLoop() {
 	defer sched.wg.Done()
 
 	pool := conc.NewPool[struct{}](paramtable.Get().ProxyCfg.DDLConcurrency.GetAsInt(), conc.WithExpiryDuration(time.Minute))
+	defer pool.Release()
 	for {
 		select {
 		case <-sched.ctx.Done():
@@ -553,6 +554,7 @@ func (sched *taskScheduler) controlLoop() {
 	defer sched.wg.Done()
 
 	pool := conc.NewPool[struct{}](paramtable.Get().ProxyCfg.DCLConcurrency.GetAsInt(), conc.WithExpiryDuration(time.Minute))
+	defer pool.Release()
 	for {
 		select {
 		case <-sched.ctx.Done():
@@ -573,6 +575,7 @@ func (sched *taskScheduler) controlLoop() {
 func (sched *taskScheduler) manipulationLoop() {
 	defer sched.wg.Done()
 	pool := conc.NewPool[struct{}](paramtable.Get().ProxyCfg.MaxTaskNum.GetAsInt())
+	defer pool.Release()
 	for {
 		select {
 		case <-sched.ctx.Done():
@@ -596,6 +599,8 @@ func (sched *taskScheduler) queryLoop() {
 	poolSize := paramtable.Get().ProxyCfg.MaxTaskNum.GetAsInt()
 	pool := conc.NewPool[struct{}](poolSize, conc.WithExpiryDuration(time.Minute))
 	subTaskPool := conc.NewPool[struct{}](poolSize, conc.WithExpiryDuration(time.Minute))
+	defer pool.Release()
+	defer subTaskPool.Release()
 
 	for {
 		select {
