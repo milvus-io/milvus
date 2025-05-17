@@ -24,7 +24,7 @@ def get_all_collections():
             data = json.load(f)
             all_collections = data["all"]
     except Exception as e:
-        log.warn(f"get_all_collections error: {e}")
+        log.warning(f"get_all_collections error: {e}")
         return [None]
     return all_collections
 
