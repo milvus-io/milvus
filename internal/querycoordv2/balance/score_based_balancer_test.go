@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -81,6 +82,8 @@ func (suite *ScoreBasedBalancerTestSuite) SetupTest() {
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
+
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.CollectionBalanceChannelBatchSize.Key, "5")
 }
 
 func (suite *ScoreBasedBalancerTestSuite) TearDownTest() {
@@ -119,8 +122,6 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 			unstableAssignment: true,
 			expectPlans: [][]SegmentAssignPlan{
 				{
-					// as assign segments is used while loading collection,
-					// all assignPlan should have weight equal to 1(HIGH PRIORITY)
 					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{
 						ID: 3, NumOfRows: 15,
 						CollectionID: 1,
@@ -129,6 +130,34 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 						ID: 2, NumOfRows: 10,
 						CollectionID: 1,
 					}}, From: -1, To: 3},
+					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{
+						ID: 1, NumOfRows: 5,
+						CollectionID: 1,
+					}}, From: -1, To: 2},
+				},
+			},
+		},
+		{
+			name:          "test assigning segments with resource exhausted nodes",
+			comment:       "this case verifies that segments won't be assigned to resource exhausted nodes",
+			distributions: map[int64][]*meta.Segment{},
+			assignments: [][]*meta.Segment{
+				{
+					{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 5, CollectionID: 1}},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 10, CollectionID: 1}},
+				},
+			},
+			nodes:              []int64{1, 2},
+			collectionIDs:      []int64{0},
+			states:             []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
+			segmentCnts:        []int{0, 0, 0},
+			unstableAssignment: false,
+			expectPlans: [][]SegmentAssignPlan{
+				{
+					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{
+						ID: 2, NumOfRows: 10,
+						CollectionID: 1,
+					}}, From: -1, To: 2},
 					{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{
 						ID: 1, NumOfRows: 5,
 						CollectionID: 1,
@@ -243,6 +272,12 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
 			}
+
+			// Mock resource exhausted node for the specific test case
+			if c.name == "test assigning segments with resource exhausted nodes" {
+				suite.balancer.nodeManager.MarkResourceExhaustion(c.nodes[0], time.Hour)
+			}
+
 			for i := range c.collectionIDs {
 				plans := balancer.AssignSegment(ctx, c.collectionIDs[i], c.assignments[i], c.nodes, false)
 				if c.unstableAssignment {
@@ -1594,4 +1629,125 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnStoppingNode() {
 	}
 	suite.Equal(node2Counter.Load(), int32(5))
 	suite.Equal(node3Counter.Load(), int32(5))
+}
+
+func (suite *ScoreBasedBalancerTestSuite) TestAssignChannel() {
+	ctx := context.Background()
+	cases := []struct {
+		name               string
+		nodes              []int64
+		collectionID       int64
+		replicaID          int64
+		channels           []*datapb.VchannelInfo
+		states             []session.State
+		distributions      map[int64][]*meta.DmChannel
+		expectPlans        []ChannelAssignPlan
+		unstableAssignment bool
+	}{
+		{
+			name:         "test empty cluster assigning channels",
+			nodes:        []int64{1, 2, 3},
+			collectionID: 1,
+			replicaID:    1,
+			channels: []*datapb.VchannelInfo{
+				{CollectionID: 1, ChannelName: "channel1"},
+				{CollectionID: 1, ChannelName: "channel2"},
+				{CollectionID: 1, ChannelName: "channel3"},
+			},
+			states:             []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
+			distributions:      map[int64][]*meta.DmChannel{},
+			unstableAssignment: true,
+			expectPlans: []ChannelAssignPlan{
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel1"}}, From: -1, To: 1},
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel2"}}, From: -1, To: 2},
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel3"}}, From: -1, To: 3},
+			},
+		},
+		{
+			name:         "test assigning channels with resource exhausted nodes",
+			nodes:        []int64{1, 2, 3},
+			collectionID: 1,
+			replicaID:    1,
+			channels: []*datapb.VchannelInfo{
+				{CollectionID: 1, ChannelName: "channel1"},
+				{CollectionID: 1, ChannelName: "channel2"},
+			},
+			states:        []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
+			distributions: map[int64][]*meta.DmChannel{},
+			expectPlans: []ChannelAssignPlan{
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel1"}}, From: -1, To: 2},
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel2"}}, From: -1, To: 3},
+			},
+		},
+		{
+			name:         "test non-empty cluster assigning channels",
+			nodes:        []int64{1, 2, 3},
+			collectionID: 1,
+			replicaID:    1,
+			channels: []*datapb.VchannelInfo{
+				{CollectionID: 1, ChannelName: "channel4"},
+				{CollectionID: 1, ChannelName: "channel5"},
+			},
+			states: []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
+			distributions: map[int64][]*meta.DmChannel{
+				1: {
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel1"}, Node: 1},
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel2"}, Node: 1},
+				},
+				2: {
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel3"}, Node: 2},
+				},
+			},
+			expectPlans: []ChannelAssignPlan{
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel4"}}, From: -1, To: 3},
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel5"}}, From: -1, To: 2},
+			},
+		},
+	}
+
+	for _, c := range cases {
+		suite.Run(c.name, func() {
+			suite.SetupSuite()
+			defer suite.TearDownTest()
+			balancer := suite.balancer
+
+			// Set up nodes
+			for i := range c.nodes {
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodes[i],
+					Address:  "127.0.0.1:0",
+					Hostname: "localhost",
+				})
+				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributions[c.nodes[i]])))
+				nodeInfo.SetState(c.states[i])
+				suite.balancer.nodeManager.Add(nodeInfo)
+			}
+
+			// Mark node 1 as resource exhausted for the specific test case
+			if c.name == "test assigning channels with resource exhausted nodes" {
+				suite.balancer.nodeManager.MarkResourceExhaustion(c.nodes[0], time.Hour)
+			}
+
+			// Set up channel distributions
+			for node, channels := range c.distributions {
+				balancer.dist.ChannelDistManager.Update(node, channels...)
+			}
+
+			// Convert VchannelInfo to DmChannel
+			dmChannels := make([]*meta.DmChannel, 0, len(c.channels))
+			for _, ch := range c.channels {
+				dmChannels = append(dmChannels, &meta.DmChannel{
+					VchannelInfo: ch,
+				})
+			}
+
+			// Test channel assignment
+			plans := balancer.AssignChannel(ctx, c.collectionID, dmChannels, c.nodes, true)
+			if c.unstableAssignment {
+				suite.Len(plans, len(c.expectPlans))
+			} else {
+				assertChannelAssignPlanElementMatch(&suite.Suite, c.expectPlans, plans)
+			}
+		})
+	}
 }
