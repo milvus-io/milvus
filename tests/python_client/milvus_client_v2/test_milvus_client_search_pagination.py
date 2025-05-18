@@ -825,7 +825,7 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize('vector_dtype', ct.all_dense_vector_types)
-    @pytest.mark.parametrize('index', ct.all_index_types[:7])
+    @pytest.mark.parametrize('index', ct.all_index_types[:8])
     @pytest.mark.parametrize('metric_type', ct.dense_metrics)
     def test_search_pagination_dense_vectors_indices_metrics_growing(self, vector_dtype, index, metric_type):
         """

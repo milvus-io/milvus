@@ -274,8 +274,8 @@ class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
     """
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                             ct.default_all_indexes_params[:7]))
+                             zip(ct.all_index_types[:8],
+                             ct.default_all_indexes_params[:8]))
     async def test_async_milvus_client_create_drop_index_default(self, index, params, metric_type):
         """
         target: test create and drop index normal case

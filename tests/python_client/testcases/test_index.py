@@ -426,7 +426,7 @@ class TestNewIndexBase(TestcaseBase):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("index_type", ct.all_index_types[0:7])
+    @pytest.mark.parametrize("index_type", ct.all_index_types[0:8])
     def test_create_index_default(self, index_type):
         """
         target: test create index interface
@@ -892,7 +892,7 @@ class TestNewIndexBase(TestcaseBase):
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:6])
+    @pytest.mark.parametrize("index", ct.all_index_types[:7])
     def test_drop_mmap_index(self, index):
         """
         target: disabling and re-enabling mmap for index
@@ -1386,7 +1386,7 @@ class TestIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "   ", "invalid"])
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
     def test_invalid_sparse_metric_type(self, metric_type, index):
         """
         target: unsupported metric_type create index
@@ -1407,7 +1407,7 @@ class TestIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("ratio", [-0.5, 1, 3])
-    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index ", ct.all_index_types[10:12])
     def test_invalid_sparse_ratio(self, ratio, index):
         """
         target: index creation for unsupported ratio parameter
@@ -1428,7 +1428,7 @@ class TestIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("inverted_index_algo", ["INVALID_ALGO"])
-    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index ", ct.all_index_types[10:12])
     def test_invalid_sparse_inverted_index_algo(self, inverted_index_algo, index):
         """
         target: index creation for unsupported ratio parameter

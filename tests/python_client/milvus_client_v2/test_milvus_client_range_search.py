@@ -64,7 +64,7 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:7]
+range_search_supported_indexes = ct.all_index_types[:8]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -84,7 +84,7 @@ max_hybrid_search_req_num = ct.max_hybrid_search_req_num
 class TestCollectionRangeSearch(TestcaseBase):
     """ Test case of range search interface """
 
-    @pytest.fixture(scope="function", params=ct.all_index_types[:7])
+    @pytest.fixture(scope="function", params=ct.all_index_types[:8])
     def index_type(self, request):
         tags = request.config.getoption("--tags")
         if CaseLabel.L2 not in tags:

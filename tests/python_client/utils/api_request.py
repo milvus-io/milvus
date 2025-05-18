@@ -49,7 +49,8 @@ def api_request(_list, **kwargs):
             log_arg = arg_str[0:log_row_length] + '......' if len(arg_str) > log_row_length else arg_str
             # if enable_traceback == "True":
             if kwargs.get("enable_traceback", True):
-                log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__qualname__, log_arg, str(kwargs)))
+                log_kwargs = kwargs[0:log_row_length] + '......' if len(kwargs) > log_row_length else kwargs
+                log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__qualname__, log_arg, str(log_kwargs)))
             return func(*arg, **kwargs)
     return False, False
 
@@ -61,7 +62,8 @@ def logger_interceptor():
             arg_str = str(arg)
             log_arg = arg_str[0:log_row_length] + '......' if len(arg_str) > log_row_length else arg_str
             if kwargs.get("enable_traceback", True):
-                log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__name__, log_arg, str(kwargs)))
+                log_kwargs = kwargs[0:log_row_length] + '......' if len(kwargs) > log_row_length else kwargs
+                log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__name__, log_arg, str(log_kwargs)))
 
         def log_response(res, **kwargs):
             if kwargs.get("enable_traceback", True):

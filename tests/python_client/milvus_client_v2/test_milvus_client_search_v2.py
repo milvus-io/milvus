@@ -64,7 +64,7 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:7]
+range_search_supported_indexes = ct.all_index_types[:8]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -145,7 +145,7 @@ class TestSearchBase(TestcaseBase):
                                          "limit": ct.default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[7:9])
+    @pytest.mark.parametrize("index", ct.all_index_types[8:10])
     def test_enable_mmap_search_for_binary_indexes(self, index):
         """
         target: enable mmap for binary indexes
@@ -1226,7 +1226,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:8])
     @pytest.mark.parametrize("metrics", ct.dense_metrics)
     @pytest.mark.parametrize("limit", [20, 1200])
     def test_search_output_field_vector_after_different_index_metrics(self, index, metrics, limit):
@@ -2231,7 +2231,7 @@ class TestCollectionSearch(TestcaseBase):
             assert res.get(ct.default_string_field_name) == "abc"
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[1:4])
+    @pytest.mark.parametrize("index", ct.all_index_types[1:5])
     def test_search_repeatedly_ivf_index_different_limit(self, index):
         """
         target: test create collection repeatedly
