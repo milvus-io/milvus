@@ -158,7 +158,7 @@ message CreateSegmentMessageHeader {
 message ManualFlushMessageHeader {
     int64 collection_id = 1;
     uint64 flush_ts     = 2;
-    repeated int64 segment_ids   = 3; // the segment ids to be flushed
+    repeated int64 segment_ids   = 3; // the segment ids to be flushed, will be filled by wal shard manager.
 }
 
 // CreateCollectionMessageHeader is the header of create collection message.
@@ -211,7 +211,7 @@ message ImportMessageHeader {}
 // SchemaChangeMessageHeader is the header of CollectionSchema update message.
 message SchemaChangeMessageHeader{
     int64 collection_id = 1;
-    repeated int64 flushed_segment_ids = 2;
+    repeated int64 flushed_segment_ids = 2; // will be filled by wal shard manager.
 }
 
 // SchemaChangeMessageBody is the body of CollectionSchema update message.

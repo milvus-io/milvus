@@ -37,6 +37,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeInsert:           impl.handleInsertMessage,
 		message.MessageTypeDelete:           impl.handleDeleteMessage,
 		message.MessageTypeManualFlush:      impl.handleManualFlushMessage,
+		message.MessageTypeSchemaChange:     impl.handleSchemaChange,
 		message.MessageTypeCreateSegment:    impl.handleCreateSegment,
 		message.MessageTypeFlush:            impl.handleFlushSegment,
 	}
@@ -218,6 +219,22 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 	})
 	header.SegmentIds = segmentIDs
 	maunalFlushMsg.OverwriteHeader(header)
+
+	return appendOp(ctx, msg)
+}
+
+// handleSchemaChange handles the schema change message.
+func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	schemaChangeMsg := message.MustAsMutableCollectionSchemaChangeV2(msg)
+	header := schemaChangeMsg.Header()
+	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
+	if err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
+
+	// Modify the header of schema change message, carry with the all flushed segment ids.
+	header.FlushedSegmentIds = segmentIDs
+	schemaChangeMsg.OverwriteHeader(header)
 
 	return appendOp(ctx, msg)
 }

@@ -38,7 +38,10 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 			// If the background task is exiting when on-operating persist operation,
 			// We can try to do a graceful exit.
 			rs.Logger().Info("recovery storage background task, perform a graceful exit...")
-			rs.persistDritySnapshotWhenClosing()
+			if err := rs.persistDritySnapshotWhenClosing(); err != nil {
+				rs.Logger().Warn("failed to persist dirty snapshot when closing", zap.Error(err))
+				return
+			}
 			rs.gracefulClosed = true
 			return // exit the background task
 		case <-rs.persistNotifier:
@@ -52,12 +55,12 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 }
 
 // persistDritySnapshotWhenClosing persists the dirty snapshot when closing the recovery storage.
-func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() {
+func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
 	ctx, cancel := context.WithTimeout(context.Background(), rs.cfg.gracefulTimeout)
 	defer cancel()
 
 	snapshot := rs.consumeDirtySnapshot()
-	_ = rs.persistDirtySnapshot(ctx, snapshot, zap.InfoLevel)
+	return rs.persistDirtySnapshot(ctx, snapshot, zap.InfoLevel)
 }
 
 // persistDirtySnapshot persists the dirty snapshot to the catalog.
