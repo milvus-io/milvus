@@ -151,6 +151,8 @@ if ( APPLE )
             "-fopenmp"
             "-pedantic"
             "-Wall"
+            "-Werror=terminate"
+            "-Werror=exceptions"
             "-D_DARWIN_C_SOURCE"
             "-Wno-gnu-zero-variadic-macro-arguments"
             "-Wno-variadic-macros"
