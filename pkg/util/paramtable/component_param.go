@@ -302,6 +302,8 @@ type commonConfig struct {
 	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
 	EnabledJSONKeyStats               ParamItem `refreshable:"true"`
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"true"`
+
+	EnableConfigParamTypeCheck ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -673,10 +675,11 @@ like the old password verification when updating the credential`,
 	p.SuperUsers.Init(base.mgr)
 
 	p.DefaultRootPassword = ParamItem{
-		Key:          "common.security.defaultRootPassword",
-		Version:      "2.4.7",
-		Doc:          "default password for root user. The maximum length is 72 characters, and double quotes are required.",
-		DefaultValue: "\"Milvus\"",
+		Key:     "common.security.defaultRootPassword",
+		Version: "2.4.7",
+		Doc: `default password for root user. The maximum length is 72 characters. 
+Large numeric passwords require double quotes to avoid yaml parsing precision issues.`,
+		DefaultValue: "Milvus",
 		Export:       true,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
@@ -1030,6 +1033,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnabledGrowingSegmentJSONKeyStats.Init(base.mgr)
+
+	p.EnableConfigParamTypeCheck = ParamItem{
+		Key:          "common.enableConfigParamTypeCheck",
+		Version:      "2.5.5",
+		DefaultValue: "true",
+		Doc:          "Indicates whether to enable config param type check",
+		Export:       true,
+	}
+	p.EnableConfigParamTypeCheck.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -4797,6 +4809,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		DefaultValue: "true",
 		PanicIfEmpty: false,
 		Export:       false,
+		Forbidden:    true,
 	}
 	p.EnableStatsTask.Init(base.mgr)
 
@@ -5392,11 +5405,17 @@ type streamingConfig struct {
 
 	// logging
 	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
+	// memory usage control
+	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
+	FlushGrowingSegmentBytesHwmThreshold ParamItem `refreshable:"true"`
+	FlushGrowingSegmentBytesLwmThreshold ParamItem `refreshable:"true"`
 
 	// recovery configuration.
 	WALRecoveryPersistInterval      ParamItem `refreshable:"true"`
 	WALRecoveryMaxDirtyMessage      ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout ParamItem `refreshable:"true"`
+	WALTruncateSampleInterval       ParamItem `refreshable:"true"`
+	WALTruncateRetentionInterval    ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -5535,6 +5554,39 @@ If the wal implementation is woodpecker, the minimum threshold is 3s`,
 	}
 	p.LoggingAppendSlowThreshold.Init(base.mgr)
 
+	p.FlushMemoryThreshold = ParamItem{
+		Key:     "streaming.flush.memoryThreshold",
+		Version: "2.6.0",
+		Doc: `The threshold of memory usage for one streaming node,
+If the memory usage is higher than this threshold, the node will try to trigger flush action to decrease the total of growing segment until growingSegmentBytesLwmThreshold,
+the value should be in the range of (0, 1), 0.6 by default.`,
+		DefaultValue: "0.6",
+		Export:       true,
+	}
+	p.FlushMemoryThreshold.Init(base.mgr)
+
+	p.FlushGrowingSegmentBytesHwmThreshold = ParamItem{
+		Key:     "streaming.flush.growingSegmentBytesHwmThreshold",
+		Version: "2.6.0",
+		Doc: `The high watermark of total growing segment bytes for one streaming node,
+If the total bytes of growing segment is greater than this threshold,
+a flush process will be triggered to decrease total bytes of growing segment until growingSegmentBytesLwmThreshold, 0.4 by default`,
+		DefaultValue: "0.4",
+		Export:       true,
+	}
+	p.FlushGrowingSegmentBytesHwmThreshold.Init(base.mgr)
+
+	p.FlushGrowingSegmentBytesLwmThreshold = ParamItem{
+		Key:     "streaming.flush.growingSegmentBytesLwmThreshold",
+		Version: "2.6.0",
+		Doc: `The lower watermark of total growing segment bytes for one streaming node,
+growing segment flush process will try to flush some growing segment into sealed 
+until the total bytes of growing segment is less than this threshold, 0.2 by default.`,
+		DefaultValue: "0.2",
+		Export:       true,
+	}
+	p.FlushGrowingSegmentBytesLwmThreshold.Init(base.mgr)
+
 	p.WALRecoveryPersistInterval = ParamItem{
 		Key:     "streaming.walRecovery.persistInterval",
 		Version: "2.6.0",
@@ -5567,6 +5619,28 @@ If that persist operation exceeds this timeout, the wal recovery module will clo
 		Export:       true,
 	}
 	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
+
+	p.WALTruncateSampleInterval = ParamItem{
+		Key:     "streaming.walTruncate.sampleInterval",
+		Version: "2.6.0",
+		Doc: `The interval of sampling wal checkpoint when truncate, 1m by default.
+Every time the checkpoint is persisted, the checkpoint will be sampled and used to be a candidate of truncate checkpoint.
+More samples, more frequent truncate, more memory usage.`,
+		DefaultValue: "1m",
+		Export:       true,
+	}
+	p.WALTruncateSampleInterval.Init(base.mgr)
+
+	p.WALTruncateRetentionInterval = ParamItem{
+		Key:     "streaming.walTruncate.retentionInterval",
+		Version: "2.6.0",
+		Doc: `The retention interval of wal truncate, 5m by default.
+If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
+Greater the interval, more wal storage usage, more redundant data in wal`,
+		DefaultValue: "5m",
+		Export:       true,
+	}
+	p.WALTruncateRetentionInterval.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

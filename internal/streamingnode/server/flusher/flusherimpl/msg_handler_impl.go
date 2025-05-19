@@ -105,20 +105,14 @@ func (impl *msgHandlerImpl) HandleManualFlush(flushMsg message.ImmutableManualFl
 	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.Header().FlushTs); err != nil {
 		return errors.Wrap(err, "failed to flush channel")
 	} // may be redundant.
-
-	broadcastID := flushMsg.BroadcastHeader().BroadcastID
-	if broadcastID == 0 {
-		return nil
-	}
-	return streaming.WAL().Broadcast().Ack(context.Background(), types.BroadcastAckRequest{
-		BroadcastID: flushMsg.BroadcastHeader().BroadcastID,
-		VChannel:    vchannel,
-	})
+	return nil
 }
 
 func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.ImmutableSchemaChangeMessageV2) error {
 	vchannel := msg.VChannel()
-	impl.wbMgr.SealSegments(context.Background(), msg.VChannel(), msg.Header().FlushedSegmentIds)
+	if err := impl.wbMgr.SealSegments(context.Background(), msg.VChannel(), msg.Header().FlushedSegmentIds); err != nil {
+		return errors.Wrap(err, "failed to seal segments")
+	}
 	return streaming.WAL().Broadcast().Ack(ctx, types.BroadcastAckRequest{
 		BroadcastID: msg.BroadcastHeader().BroadcastID,
 		VChannel:    vchannel,

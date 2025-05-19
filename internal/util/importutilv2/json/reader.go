@@ -40,6 +40,7 @@ type Row = map[storage.FieldID]any
 type reader struct {
 	ctx    context.Context
 	cm     storage.ChunkManager
+	cmr    storage.FileReader
 	schema *schemapb.CollectionSchema
 
 	fileSize *atomic.Int64
@@ -65,6 +66,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	reader := &reader{
 		ctx:        ctx,
 		cm:         cm,
+		cmr:        r,
 		schema:     schema,
 		fileSize:   atomic.NewInt64(0),
 		filePath:   path,
@@ -180,4 +182,8 @@ func (j *reader) Size() (int64, error) {
 	return size, nil
 }
 
-func (j *reader) Close() {}
+func (j *reader) Close() {
+	if j.cmr != nil {
+		j.cmr.Close()
+	}
+}

@@ -175,7 +175,7 @@ var (
 	MustAsMutableBeginTxnMessageV2         = mustAsSpecializedMutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
 	MustAsMutableCommitTxnMessageV2        = mustAsSpecializedMutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 	MustAsMutableRollbackTxnMessageV2      = mustAsSpecializedMutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
-	MustAsMutableCollectionSchemaChangeV2  = mustAsSpecializedImmutableMessage[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
+	MustAsMutableCollectionSchemaChangeV2  = mustAsSpecializedMutableMessage[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
 
 	AsImmutableTimeTickMessageV1         = asSpecializedImmutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
 	AsImmutableInsertMessageV1           = asSpecializedImmutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]

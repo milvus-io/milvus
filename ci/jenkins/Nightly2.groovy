@@ -8,7 +8,7 @@ String cron_string = BRANCH_NAME == 'master' ? '50 4 * * * ' : ''
 // Make timeout 4 hours so that we can run two nightly during the ci
 int total_timeout_minutes = 7 * 60
 
-def milvus_helm_chart_version = '4.2.47'
+def milvus_helm_chart_version = '4.2.48'
 
 pipeline {
     triggers {
@@ -96,7 +96,7 @@ pipeline {
                 axes {
                     axis {
                         name 'milvus_deployment_option'
-                        values 'standalone', 'distributed-pulsar', 'distributed-kafka', 'distributed-woodpecker', 'standalone-authentication'
+                        values 'distributed-pulsar-mmap', 'distributed-kafka', 'distributed-woodpecker', 'standalone-authentication-mmap'
                     }
                 }
                 stages {

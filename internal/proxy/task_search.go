@@ -865,9 +865,9 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		}
 		annsFieldName = vecFields[0].Name
 	}
-	searchInfo := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
-	if searchInfo.parseError != nil {
-		return nil, nil, 0, false, searchInfo.parseError
+	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
+	if err != nil {
+		return nil, nil, 0, false, err
 	}
 	if searchInfo.collectionID > 0 && searchInfo.collectionID != t.GetCollectionID() {
 		return nil, nil, 0, false, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
@@ -1254,8 +1254,9 @@ func (t *searchTask) reorganizeRequeryResults(ctx context.Context, fields []*sch
 		return nil, err
 	}
 	offsets := make(map[any]int)
+	pkItr := typeutil.GetDataIterator(pkFieldData)
 	for i := 0; i < typeutil.GetPKSize(pkFieldData); i++ {
-		pk := typeutil.GetData(pkFieldData, i)
+		pk := pkItr(i)
 		offsets[pk] = i
 	}
 

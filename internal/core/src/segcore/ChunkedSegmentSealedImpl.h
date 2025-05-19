@@ -20,8 +20,6 @@
 #include <utility>
 #include <vector>
 
-#include "folly/executors/InlineExecutor.h"
-
 #include "ConcurrentVector.h"
 #include "DeletedRecord.h"
 #include "SealedIndexingRecord.h"
@@ -29,12 +27,13 @@
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "google/protobuf/message_lite.h"
-#include "mmap/ChunkedColumn.h"
 #include "mmap/Types.h"
 #include "common/Types.h"
 #include "common/IndexMeta.h"
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/CacheSlot.h"
+#include "segcore/IndexConfigGenerator.h"
+#include "segcore/SegcoreConfig.h"
 
 namespace milvus::segcore {
 
@@ -409,7 +408,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     BitsetType index_ready_bitset_;
     BitsetType binlog_index_bitset_;
     std::atomic<int> system_ready_count_ = 0;
-    // segment data
+
+    // when index is ready (index_ready_bitset_/binlog_index_bitset_ is set to true), must also set index_has_raw_data_
+    // to indicate whether the loaded index has raw data.
+    std::unordered_map<FieldId, bool> index_has_raw_data_;
 
     // TODO: generate index for scalar
     std::optional<int64_t> num_rows_;

@@ -212,8 +212,6 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 	}
 }
 
-func (c *FieldReader) Close() {}
-
 func ReadBoolData(pcr *FieldReader, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {

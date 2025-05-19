@@ -64,29 +64,23 @@ class SegmentChunkReader {
                                const FieldId field_id,
                                const int64_t num_chunk,
                                const int64_t batch_size) const {
-        int64_t processed_rows = 0;
-        for (int64_t chunk_id = current_chunk_id; chunk_id < num_chunk;
-             ++chunk_id) {
-            int64_t chunk_size = 0;
-            if (segment_->type() == SegmentType::Growing) {
-                const auto size_per_chunk = SizePerChunk();
-                chunk_size = chunk_id == num_chunk - 1
-                                 ? active_count_ - chunk_id * size_per_chunk
-                                 : size_per_chunk;
-            } else {
-                chunk_size = segment_->chunk_size(field_id, chunk_id);
-            }
+        int64_t segment_row_count = segment_->get_row_count();
+        int64_t current_offset =
+            segment_->num_rows_until_chunk(field_id, current_chunk_id) +
+            current_chunk_pos;
+        int64_t target_offset = current_offset + batch_size;
 
-            for (int64_t i = chunk_id == current_chunk_id ? current_chunk_pos
-                                                          : 0;
-                 i < chunk_size;
-                 ++i) {
-                if (++processed_rows >= batch_size) {
-                    current_chunk_id = chunk_id;
-                    current_chunk_pos = i + 1;
-                }
-            }
+        if (target_offset >= segment_row_count) {
+            current_chunk_id = num_chunk - 1;
+            current_chunk_pos =
+                segment_row_count -
+                segment_->num_rows_until_chunk(field_id, current_chunk_id);
+            return;
         }
+        auto [chunk_id, chunk_pos] =
+            segment_->get_chunk_by_offset(field_id, target_offset);
+        current_chunk_id = chunk_id;
+        current_chunk_pos = chunk_pos;
     }
 
     void

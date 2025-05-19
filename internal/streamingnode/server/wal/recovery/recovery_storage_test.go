@@ -12,15 +12,21 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 func TestRecoveryStorage(t *testing.T) {
@@ -84,8 +90,14 @@ func TestRecoveryStorage(t *testing.T) {
 		cp = checkpoint
 		return nil
 	})
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
+		Status: merr.Success(),
+	}, nil)
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	f.Set(mixCoord)
 
-	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog))
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog), resource.OptMixCoordClient(f))
 	b := &streamBuilder{
 		channel:                types.PChannelInfo{Name: "test_channel"},
 		lastConfirmedMessageID: 1,
@@ -111,7 +123,8 @@ func TestRecoveryStorage(t *testing.T) {
 			// make sure the checkpoint is saved.
 			paramtable.Get().Save(paramtable.Get().StreamingCfg.WALRecoveryGracefulCloseTimeout.Key, "1000s")
 		}
-		rs, snapshot, err := RecoverRecoveryStorage(context.Background(), b, msg)
+		rsInterface, snapshot, err := RecoverRecoveryStorage(context.Background(), b, msg)
+		rs := rsInterface.(*recoveryStorageImpl)
 		assert.NoError(t, err)
 		assert.NotNil(t, rs)
 		assert.NotNil(t, snapshot)
@@ -138,14 +151,18 @@ func TestRecoveryStorage(t *testing.T) {
 		assert.Equal(t, partitionNum, b.partitionNum())
 		assert.Equal(t, collectionNum, b.collectionNum())
 		assert.Equal(t, segmentNum, b.segmentNum())
+
+		if rs.gracefulClosed {
+			// only available when graceful closing
+			assert.Equal(t, b.collectionNum(), len(vchannelMetas))
+			partitionNum := 0
+			for _, v := range vchannelMetas {
+				partitionNum += len(v.CollectionInfo.Partitions)
+			}
+			assert.Equal(t, b.partitionNum(), partitionNum)
+			assert.Equal(t, b.segmentNum(), len(segmentMetas))
+		}
 	}
-	assert.Equal(t, b.collectionNum(), len(vchannelMetas))
-	partitionNum := 0
-	for _, v := range vchannelMetas {
-		partitionNum += len(v.CollectionInfo.Partitions)
-	}
-	assert.Equal(t, b.partitionNum(), partitionNum)
-	assert.Equal(t, b.segmentNum(), len(segmentMetas))
 }
 
 type streamBuilder struct {
@@ -179,6 +196,10 @@ func (b *streamBuilder) segmentNum() int {
 		}
 	}
 	return segmentNum
+}
+
+func (b *streamBuilder) RWWALImpls() walimpls.WALImpls {
+	return nil
 }
 
 type testRecoveryStream struct {
@@ -242,6 +263,7 @@ func (b *streamBuilder) generateStreamMessage() []message.ImmutableMessage {
 		b.createTxn,
 		b.createTxn,
 		b.createManualFlush,
+		b.createSchemaChange,
 	}
 	msgs := make([]message.ImmutableMessage, 0)
 	for i := 0; i < int(rand.Int63n(1000)+1000); i++ {
@@ -501,13 +523,7 @@ func (b *streamBuilder) createManualFlush() message.ImmutableMessage {
 		}
 		segmentIDs := make([]int64, 0)
 		for partitionID := range collection {
-			if rand.Int31n(3) < 1 {
-				continue
-			}
 			for segmentID := range collection[partitionID] {
-				if rand.Int31n(4) < 2 {
-					continue
-				}
 				segmentIDs = append(segmentIDs, segmentID)
 				delete(collection[partitionID], segmentID)
 			}
@@ -523,6 +539,34 @@ func (b *streamBuilder) createManualFlush() message.ImmutableMessage {
 				SegmentIds:   segmentIDs,
 			}).
 			WithBody(&message.ManualFlushMessageBody{}).
+			MustBuildMutable().
+			WithTimeTick(b.timetick).
+			WithLastConfirmed(rmq.NewRmqID(b.lastConfirmedMessageID)).
+			IntoImmutableMessage(rmq.NewRmqID(b.messageID))
+	}
+	return nil
+}
+
+func (b *streamBuilder) createSchemaChange() message.ImmutableMessage {
+	for collectionID, collection := range b.collectionIDs {
+		if rand.Int31n(3) < 1 {
+			continue
+		}
+		segmentIDs := make([]int64, 0)
+		for partitionID := range collection {
+			for segmentID := range collection[partitionID] {
+				segmentIDs = append(segmentIDs, segmentID)
+				delete(collection[partitionID], segmentID)
+			}
+		}
+		b.nextMessage()
+		return message.NewSchemaChangeMessageBuilderV2().
+			WithVChannel(b.vchannels[collectionID]).
+			WithHeader(&message.SchemaChangeMessageHeader{
+				CollectionId:      collectionID,
+				FlushedSegmentIds: segmentIDs,
+			}).
+			WithBody(&message.SchemaChangeMessageBody{}).
 			MustBuildMutable().
 			WithTimeTick(b.timetick).
 			WithLastConfirmed(rmq.NewRmqID(b.lastConfirmedMessageID)).

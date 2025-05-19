@@ -31,7 +31,7 @@ func TestPackedSerde(t *testing.T) {
 		t.Skip("storage v2 cgo not ready yet")
 		initcore.InitLocalArrowFileSystem("/tmp")
 		size := 10
-
+		bucketName := "a-bucket"
 		paths := [][]string{{"/tmp/0"}, {"/tmp/1"}}
 		bufferSize := int64(10 * 1024 * 1024) // 10MB
 		schema := generateTestSchema()
@@ -49,7 +49,7 @@ func TestPackedSerde(t *testing.T) {
 			}
 			multiPartUploadSize := int64(0)
 			batchSize := 7
-			writer, err := NewPackedSerializeWriter(chunkPaths, generateTestSchema(), bufferSize, multiPartUploadSize, []storagecommon.ColumnGroup{group}, batchSize)
+			writer, err := NewPackedSerializeWriter(bucketName, chunkPaths, generateTestSchema(), bufferSize, multiPartUploadSize, []storagecommon.ColumnGroup{group}, batchSize)
 			assert.NoError(t, err)
 
 			for i := 1; i <= size; i++ {

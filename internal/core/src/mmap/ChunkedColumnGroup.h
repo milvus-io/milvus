@@ -56,6 +56,11 @@ class ChunkedColumnGroup {
 
     virtual ~ChunkedColumnGroup() = default;
 
+    void
+    ManualEvictCache() const {
+        slot_->ManualEvictAll();
+    }
+
     // Get the number of group chunks
     size_t
     num_chunks() const {
@@ -94,6 +99,14 @@ class ChunkedColumnGroup {
         return meta->num_rows_until_chunk_;
     }
 
+    size_t
+    NumFieldsInGroup() const {
+        auto meta =
+            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
+                slot_->meta());
+        return meta->num_fields_;
+    }
+
  protected:
     mutable std::shared_ptr<CacheSlot<GroupChunk>> slot_;
     size_t num_chunks_{0};
@@ -109,6 +122,13 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
           field_id_(field_id),
           field_meta_(field_meta),
           data_type_(field_meta.get_data_type()) {
+    }
+
+    void
+    ManualEvictCache() const override {
+        if (group_->NumFieldsInGroup() == 1) {
+            group_->ManualEvictCache();
+        }
     }
 
     PinWrapper<const char*>
@@ -378,7 +398,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
  private:
     std::shared_ptr<ChunkedColumnGroup> group_;
     FieldId field_id_;
-    const FieldMeta& field_meta_;
+    const FieldMeta field_meta_;
     DataType data_type_;
 };
 

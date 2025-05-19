@@ -15,7 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -28,12 +28,13 @@ import (
 
 // flusherComponents is the components of the flusher.
 type flusherComponents struct {
-	wal          wal.WAL
-	broker       broker.Broker
-	cpUpdater    *util.ChannelCheckpointUpdater
-	chunkManager storage.ChunkManager
-	dataServices map[string]*dataSyncServiceWrapper
-	logger       *log.MLogger
+	wal                        wal.WAL
+	broker                     broker.Broker
+	cpUpdater                  *util.ChannelCheckpointUpdater
+	chunkManager               storage.ChunkManager
+	dataServices               map[string]*dataSyncServiceWrapper
+	logger                     *log.MLogger
+	recoveryCheckPointTimeTick uint64 // The time tick of the recovery storage.
 }
 
 // WhenCreateCollection handles the create collection message.
@@ -41,6 +42,16 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 	if _, ok := impl.dataServices[createCollectionMsg.VChannel()]; ok {
 		impl.logger.Info("the data sync service of current vchannel is built, skip it", zap.String("vchannel", createCollectionMsg.VChannel()))
 		// May repeated consumed, so we ignore the message.
+		return
+	}
+	if createCollectionMsg.TimeTick() <= impl.recoveryCheckPointTimeTick {
+		// It should already be recovered from the recovery storage.
+		// if it's not in recovery storage, it means the createCollection is already dropped.
+		// so we can skip it.
+		impl.logger.Info("the create collection message is older than the recovery checkpoint, skip it",
+			zap.String("vchannel", createCollectionMsg.VChannel()),
+			zap.Uint64("timeTick", createCollectionMsg.TimeTick()),
+			zap.Uint64("recoveryCheckPointTimeTick", impl.recoveryCheckPointTimeTick))
 		return
 	}
 	createCollectionRequest, err := createCollectionMsg.Body()
@@ -84,7 +95,7 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 			}
 			if tt, ok := t.(*syncmgr.SyncTask); ok {
 				insertLogs, _, _, _ := tt.Binlogs()
-				resource.Resource().SegmentAssignStatsManager().UpdateOnSync(tt.SegmentID(), stats.SyncOperationMetrics{
+				resource.Resource().SegmentStatsManager().UpdateOnSync(tt.SegmentID(), stats.SyncOperationMetrics{
 					BinLogCounterIncr:     1,
 					BinLogFileCounterIncr: uint64(len(insertLogs)),
 				})
@@ -258,7 +269,7 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 			}
 			if tt, ok := t.(*syncmgr.SyncTask); ok {
 				insertLogs, _, _, _ := tt.Binlogs()
-				resource.Resource().SegmentAssignStatsManager().UpdateOnSync(tt.SegmentID(), stats.SyncOperationMetrics{
+				resource.Resource().SegmentStatsManager().UpdateOnSync(tt.SegmentID(), stats.SyncOperationMetrics{
 					BinLogCounterIncr:     1,
 					BinLogFileCounterIncr: uint64(len(insertLogs)),
 				})

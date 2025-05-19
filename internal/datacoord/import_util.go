@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
@@ -125,6 +126,11 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 }
 
 func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta) ([]int64, error) {
+	pkField, err := typeutil.GetPrimaryFieldSchema(job.GetSchema())
+	if err != nil {
+		return nil, err
+	}
+
 	// merge hashed sizes
 	hashedDataSize := make(map[string]map[int64]int64) // vchannel->(partitionID->size)
 	for _, fileStats := range task.GetFileStats() {
@@ -168,6 +174,24 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 
 	for vchannel, partitionSizes := range hashedDataSize {
 		for partitionID, size := range partitionSizes {
+			if pkField.GetAutoID() && size == 0 {
+				// When autoID is enabled, the preimport task estimates row distribution by
+				// evenly dividing the total row count (numRows) across all vchannels:
+				// `estimatedCount = numRows / vchannelNum`.
+				//
+				// However, the actual import task hashes real auto-generated IDs to determine
+				// the target vchannel. This mismatch can lead to inaccurate row distribution estimation
+				// in such corner cases:
+				//
+				// - Importing 1 row into 2 vchannels:
+				//     • Preimport: 1 / 2 = 0 → both v0 and v1 are estimated to have 0 rows
+				//     • Import: real autoID (e.g., 457975852966809057) hashes to v1
+				//       → actual result: v0 = 0, v1 = 1
+				//
+				// To avoid such inconsistencies, we ensure that at least one segment is
+				// allocated for each vchannel when autoID is enabled.
+				size = 1
+			}
 			err := addSegment(vchannel, partitionID, size)
 			if err != nil {
 				return nil, err

@@ -16,14 +16,15 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
@@ -44,21 +45,6 @@ func TestWALFlusher(t *testing.T) {
 	defer streamingutil.UnsetStreamingServiceEnabled()
 
 	mixcoord := newMockMixcoord(t, false)
-	mixcoord.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Collections: []*rootcoordpb.CollectionInfoOnPChannel{
-			{
-				CollectionId: 100,
-				Vchannel:     "vchannel-1",
-			},
-			{
-				CollectionId: 100,
-				Vchannel:     "vchannel-2",
-			},
-		},
-	}, nil)
 	mixcoord.EXPECT().AllocSegment(mock.Anything, mock.Anything).Return(&datapb.AllocSegmentResponse{
 		Status: merr.Status(nil),
 	}, nil)
@@ -67,14 +53,36 @@ func TestWALFlusher(t *testing.T) {
 	}, nil)
 	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	fMixcoord.Set(mixcoord)
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything).Return()
+	rs.EXPECT().Close().Return()
 	resource.InitForTest(
 		t,
 		resource.OptMixCoordClient(fMixcoord),
 		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
 	)
 	l := newMockWAL(t, false)
-	param := &interceptors.InterceptorBuildParam{
-		WAL: syncutil.NewFuture[wal.WAL](),
+	param := &RecoverWALFlusherParam{
+		ChannelInfo: l.Channel(),
+		WAL:         syncutil.NewFuture[wal.WAL](),
+		RecoverySnapshot: &recovery.RecoverySnapshot{
+			VChannels: map[string]*streamingpb.VChannelMeta{
+				"vchannel-1": {
+					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+						CollectionId: 100,
+					},
+				},
+				"vchannel-2": {
+					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+						CollectionId: 100,
+					},
+				},
+			},
+			Checkpoint: &recovery.WALCheckpoint{
+				TimeTick: 0,
+			},
+		},
+		RecoveryStorage: rs,
 	}
 	param.WAL.Set(l)
 	flusher := RecoverWALFlusher(param)
