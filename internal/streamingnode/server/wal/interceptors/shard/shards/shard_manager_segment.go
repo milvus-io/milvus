@@ -122,11 +122,25 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if pm, ok := m.partitionManagers[req.PartitionID]; ok {
-		return pm.AssignSegment(req)
-	} else {
+	pm, ok := m.partitionManagers[req.PartitionID]
+	if !ok {
 		return nil, ErrPartitionNotFound
 	}
+	result, err := pm.AssignSegment(req)
+	if err == nil {
+		m.metrics.ObserveInsert(req.InsertMetrics.Rows, req.InsertMetrics.BinarySize)
+		return result, nil
+	}
+	return nil, err
+}
+
+// ApplyDelete: TODO move the L0 flush operation here.
+func (m *shardManagerImpl) ApplyDelete(msg message.MutableDeleteMessageV1) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.metrics.ObserveDelete(msg.Header().GetRows())
+	return nil
 }
 
 // WaitUntilGrowingSegmentReady waits until the growing segment is ready.

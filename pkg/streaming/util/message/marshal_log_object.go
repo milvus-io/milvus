@@ -88,6 +88,7 @@ func marshalSpecializedHeader(t MessageType, h string, enc zapcore.ObjectEncoder
 		enc.AddString("rows", strings.Join(rows, "|"))
 	case *DeleteMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
+		enc.AddUint64("rows", header.GetRows())
 	case *CreateCollectionMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
 	case *DropCollectionMessageHeader:
@@ -108,6 +109,8 @@ func marshalSpecializedHeader(t MessageType, h string, enc zapcore.ObjectEncoder
 		enc.AddInt64("collectionID", header.GetCollectionId())
 		encodeSegmentIDs(header.GetSegmentIds(), enc)
 	case *SchemaChangeMessageHeader:
+		enc.AddInt64("collectionID", header.GetCollectionId())
+		encodeSegmentIDs(header.GetFlushedSegmentIds(), enc)
 	case *ImportMessageHeader:
 	}
 }

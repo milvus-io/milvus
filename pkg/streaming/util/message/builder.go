@@ -234,6 +234,16 @@ func (b *mutableMesasgeBuilder[H, B]) BuildBroadcast() (BroadcastMutableMessage,
 	return msg, nil
 }
 
+// MustBuildBroadcast build broadcast message
+// Panics if build failed.
+func (b *mutableMesasgeBuilder[H, B]) MustBuildBroadcast() BroadcastMutableMessage {
+	msg, err := b.BuildBroadcast()
+	if err != nil {
+		panic(err)
+	}
+	return msg
+}
+
 // build builds a message.
 func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 	// payload and header must be a pointer

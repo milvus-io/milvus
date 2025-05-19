@@ -274,6 +274,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				zap.Int32("msgType", int32(msg.Type())),
 				zap.Uint64("timetick", manualFlushMsg.ManualFlushMessage.TimeTick()),
 				zap.Uint64("flushTs", manualFlushMsg.ManualFlushMessage.Header().FlushTs),
+				zap.Int64s("segmentIDs", manualFlushMsg.ManualFlushMessage.Header().SegmentIds),
 			)
 			logger.Info("receive manual flush message")
 			if err := ddn.msgHandler.HandleManualFlush(manualFlushMsg.ManualFlushMessage); err != nil {
@@ -302,7 +303,12 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			if header.GetCollectionId() != ddn.collectionID {
 				continue
 			}
-			logger := log.With(zap.String("vchannel", ddn.Name()))
+			logger := log.With(
+				zap.String("vchannel", ddn.Name()),
+				zap.Int32("msgType", int32(msg.Type())),
+				zap.Uint64("timetick", schemaMsg.SchemaChangeMessage.TimeTick()),
+				zap.Int64s("segmentIDs", schemaMsg.SchemaChangeMessage.Header().FlushedSegmentIds),
+			)
 			logger.Info("receive schema change message")
 			body, err := schemaMsg.SchemaChangeMessage.Body()
 			if err != nil {

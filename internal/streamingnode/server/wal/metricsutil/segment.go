@@ -22,6 +22,10 @@ func NewSegmentAssignMetrics(pchannel string) *SegmentAssignMetrics {
 		flushedTotal:     metrics.WALSegmentFlushedTotal.MustCurryWith(constLabel),
 		partitionTotal:   metrics.WALPartitionTotal.With(constLabel),
 		collectionTotal:  metrics.WALCollectionTotal.With(constLabel),
+
+		insertRowsTotal: metrics.WALInsertRowsTotal.With(constLabel),
+		insertBytes:     metrics.WALInsertBytes.With(constLabel),
+		deleteRowsTotal: metrics.WALDeleteRowsTotal.With(constLabel),
 	}
 }
 
@@ -37,6 +41,10 @@ type SegmentAssignMetrics struct {
 	flushedTotal     *prometheus.CounterVec
 	partitionTotal   prometheus.Gauge
 	collectionTotal  prometheus.Gauge
+
+	insertRowsTotal prometheus.Counter
+	insertBytes     prometheus.Counter
+	deleteRowsTotal prometheus.Counter
 }
 
 // ObserveOnAllocating observe a allocating operation and return a guard function.
@@ -53,6 +61,17 @@ func (m *SegmentAssignMetrics) ObseveOnFlushing() func() {
 	return func() {
 		m.onFlushTotal.Dec()
 	}
+}
+
+// ObserveInsert observe a insert operation
+func (m *SegmentAssignMetrics) ObserveInsert(rows uint64, bytes uint64) {
+	m.insertRowsTotal.Add(float64(rows))
+	m.insertBytes.Add(float64(bytes))
+}
+
+// ObserveDelete observe a insert operation
+func (m *SegmentAssignMetrics) ObserveDelete(rows uint64) {
+	m.deleteRowsTotal.Add(float64(rows))
 }
 
 // ObserveCreateSegment increments the total number of growing segment.
@@ -87,4 +106,7 @@ func (m *SegmentAssignMetrics) Close() {
 	metrics.WALSegmentBytes.Delete(m.constLabel)
 	metrics.WALPartitionTotal.Delete(m.constLabel)
 	metrics.WALCollectionTotal.Delete(m.constLabel)
+	metrics.WALInsertRowsTotal.Delete(m.constLabel)
+	metrics.WALDeleteRowsTotal.Delete(m.constLabel)
+	metrics.WALInsertBytes.Delete(m.constLabel)
 }

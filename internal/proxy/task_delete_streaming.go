@@ -49,6 +49,7 @@ func (dt *deleteTaskByStreamingService) Execute(ctx context.Context) (err error)
 			msg, err := message.NewDeleteMessageBuilderV1().
 				WithHeader(&message.DeleteMessageHeader{
 					CollectionId: dt.collectionID,
+					Rows:         uint64(deleteMsg.NumRows),
 				}).
 				WithBody(deleteMsg.DeleteRequest).
 				WithVChannel(vchannel).

@@ -349,7 +349,7 @@ func (m *StatsManager) selectSegmentsWithTimePolicy() map[int64]policy.SealPolic
 // selectSegmentsUntilLessThanLWM selects segments until the total size is less than the threshold.
 func (m *StatsManager) selectSegmentsUntilLessThanLWM() []int64 {
 	m.mu.Lock()
-	restSpace := m.totalStats.BinarySize - uint64(m.cfg.growingBytesLWM)
+	restSpace := int64(m.totalStats.BinarySize) - m.cfg.growingBytesLWM
 	m.mu.Unlock()
 
 	if restSpace <= 0 {
@@ -363,7 +363,7 @@ func (m *StatsManager) selectSegmentsUntilLessThanLWM() []int64 {
 	})
 	for restSpace > 0 && statsHeap.Len() > 0 {
 		nextOne := statsHeap.Pop()
-		restSpace -= nextOne.binarySize
+		restSpace -= int64(nextOne.binarySize)
 		segmentIDs = append(segmentIDs, nextOne.segmentID)
 	}
 	return segmentIDs

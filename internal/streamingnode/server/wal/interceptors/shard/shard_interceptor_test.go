@@ -218,6 +218,7 @@ func TestShardInterceptor(t *testing.T) {
 
 	shardManager.EXPECT().CheckIfCollectionExists(mock.Anything).Unset()
 	shardManager.EXPECT().CheckIfCollectionExists(mock.Anything).Return(nil)
+	shardManager.EXPECT().ApplyDelete(mock.Anything).Return(nil)
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
 	assert.NotNil(t, msgID)

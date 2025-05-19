@@ -201,6 +201,7 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
 
+	impl.shardManager.ApplyDelete(deleteMessage)
 	return appendOp(ctx, msg)
 }
 

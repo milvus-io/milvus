@@ -202,6 +202,9 @@ func (m *messageImpl) VChannel() string {
 // BroadcastHeader returns the broadcast header of current message.
 func (m *messageImpl) BroadcastHeader() *BroadcastHeader {
 	header := m.broadcastHeader()
+	if header == nil {
+		return nil
+	}
 	return newBroadcastHeaderFromProto(header)
 }
 
