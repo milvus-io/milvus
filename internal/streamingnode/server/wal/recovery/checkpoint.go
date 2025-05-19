@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	recoveryMagicStreamingInitialized int64 = 1 // the vchannel info is set into the catalog.
+	RecoveryMagicStreamingInitialized int64 = 1 // the vchannel info is set into the catalog.
 	// the checkpoint is set into the catalog.
 )
 
