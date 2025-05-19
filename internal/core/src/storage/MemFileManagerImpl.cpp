@@ -195,8 +195,7 @@ MemFileManagerImpl::cache_row_data_to_memory_storage_v2(const Config& config) {
     }
     auto field_datas = GetFieldDatasFromStorageV2(
         remote_files, field_meta_.field_id, data_type.value(), dim);
-    AssertInfo(field_datas.size() == remote_files.size(),
-               "inconsistent file num and raw data num!");
+    // field data list could differ for storage v2 group list
     return field_datas;
 }
 
