@@ -694,6 +694,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                  default_string_field_name: str(i)} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
+        self.wait_for_index_ready(client, collection_name, index_name=default_vector_field_name)
         # 3. search iterator
         vectors_to_search = cf.gen_vectors(1, default_dim)
         search_params = {"params": {}}
