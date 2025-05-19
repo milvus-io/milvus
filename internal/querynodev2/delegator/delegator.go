@@ -397,6 +397,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				GroupSize:          subReq.GetGroupSize(),
 				FieldId:            subReq.GetFieldId(),
 				IsTopkReduce:       req.GetReq().GetIsTopkReduce(),
+				AnalyzerName:       subReq.GetAnalyzerName(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
