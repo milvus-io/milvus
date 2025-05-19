@@ -178,15 +178,16 @@ func Test_compactionTrigger_force_without_index(t *testing.T) {
 
 	compactionHandler := &spyCompactionHandler{t: t, spyChan: make(chan *datapb.CompactionPlan, 1), meta: m}
 	tr := &compactionTrigger{
-		meta:              m,
-		handler:           newMockHandlerWithMeta(m),
-		allocator:         newMock0Allocator(t),
-		signals:           make(chan *compactionSignal, 100),
-		manualSignals:     make(chan *compactionSignal, 100),
-		compactionHandler: compactionHandler,
-		globalTrigger:     nil,
-		closeCh:           lifetime.NewSafeChan(),
-		testingOnly:       true,
+		meta:                            m,
+		handler:                         newMockHandlerWithMeta(m),
+		allocator:                       newMock0Allocator(t),
+		signals:                         make(chan *compactionSignal, 100),
+		manualSignals:                   make(chan *compactionSignal, 100),
+		compactionHandler:               compactionHandler,
+		globalTrigger:                   nil,
+		closeCh:                         lifetime.NewSafeChan(),
+		testingOnly:                     true,
+		lastStrictExpiryCompactionTsMap: make(map[CompactionGroupLabel]time.Time),
 	}
 	tr.closeWaiter.Add(1)
 	go func() {
@@ -1874,7 +1875,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		},
 	}
 
-	couldDo := trigger.ShouldDoSingleCompaction(info, &compactTime{})
+	couldDo := trigger.ShouldDoSingleCompaction(info, &compactTime{}, nil)
 	assert.True(t, couldDo)
 
 	// Test too many stats log
@@ -1892,7 +1893,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		},
 	}
 
-	couldDo = trigger.ShouldDoSingleCompaction(info, &compactTime{})
+	couldDo = trigger.ShouldDoSingleCompaction(info, &compactTime{}, nil)
 	assert.False(t, couldDo)
 
 	// Test expire triggered  compaction
@@ -1927,15 +1928,27 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	}
 
 	// expire time < Timestamp To
-	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 200}, nil)
 	assert.False(t, couldDo)
 
 	// didn't reach single compaction size 10 * 1024 * 1024
-	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 600})
+	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 600}, nil)
 	assert.False(t, couldDo)
 
 	// expire time < Timestamp False
-	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 1200})
+	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 1200}, nil)
+	assert.True(t, couldDo)
+
+	// under strict expiry compaction mode
+	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 200}, &compactionSignal{
+		doStrictExpiryCompaction: true,
+	})
+	assert.False(t, couldDo)
+
+	// expire expireTime >= fromTs will trigger strict expiry compaction
+	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{expireTime: 300}, &compactionSignal{
+		doStrictExpiryCompaction: true,
+	})
 	assert.True(t, couldDo)
 
 	// Test Delete triggered compaction
@@ -1970,7 +1983,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	}
 
 	// deltalog is large enough, should do compaction
-	couldDo = trigger.ShouldDoSingleCompaction(info3, &compactTime{})
+	couldDo = trigger.ShouldDoSingleCompaction(info3, &compactTime{}, nil)
 	assert.True(t, couldDo)
 
 	mockVersionManager := NewMockVersionManager(t)
@@ -2037,7 +2050,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	// expire time < Timestamp To, but index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex
 	Params.Save(Params.DataCoordCfg.AutoUpgradeSegmentIndex.Key, "true")
 	defer Params.Save(Params.DataCoordCfg.AutoUpgradeSegmentIndex.Key, "false")
-	couldDo = trigger.ShouldDoSingleCompaction(info4, &compactTime{expireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(info4, &compactTime{expireTime: 300}, nil)
 	assert.True(t, couldDo)
 
 	indexMeta.updateSegmentIndex(&model.SegmentIndex{
@@ -2047,14 +2060,14 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		IndexFileKeys:       []string{"index1"},
 	})
 	// expire time < Timestamp To, and index engine version is 2 which is equal CurrentIndexVersion in segmentIndex
-	couldDo = trigger.ShouldDoSingleCompaction(info5, &compactTime{expireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(info5, &compactTime{expireTime: 300}, nil)
 	assert.False(t, couldDo)
 
 	Params.Save(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key, "true")
 	defer Params.Save(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key, "false")
 	Params.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, "5")
 	defer Params.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, "-1")
-	couldDo = trigger.ShouldDoSingleCompaction(info5, &compactTime{expireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(info5, &compactTime{expireTime: 300}, nil)
 	assert.True(t, couldDo)
 
 	indexMeta.updateSegmentIndex(&model.SegmentIndex{
@@ -2064,7 +2077,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 		IndexFileKeys:       nil,
 	})
 	// expire time < Timestamp To, and index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex but indexFileKeys is nil
-	couldDo = trigger.ShouldDoSingleCompaction(info6, &compactTime{expireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(info6, &compactTime{expireTime: 300}, nil)
 	assert.False(t, couldDo)
 }
 
@@ -2607,6 +2620,67 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 			WithPartitionID(s.partitionID).
 			WithChannel(s.channel))
 		s.NoError(err)
+	})
+	s.Run("test_strict_expiry_compaction_ts_map", func() {
+		defer s.SetupTest()
+		tr := s.tr
+		s.compactionHandler.EXPECT().isFull().Return(false)
+		start := int64(20000)
+		s.allocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
+			return start, start + i, nil
+		}).Maybe()
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+			Schema: schema,
+			Properties: map[string]string{
+				common.CollectionTTLConfigKey: "100",
+			},
+		}, nil)
+
+		// Enable strict expiry compaction
+		paramtable.Get().Save(paramtable.Get().DataCoordCfg.CompactionForceExpiryInterval.Key, "1")
+		defer paramtable.Get().Save(paramtable.Get().DataCoordCfg.CompactionForceExpiryInterval.Key, "-1")
+
+		// First compaction should do strict expiry
+		cate := CompactionGroupLabel{s.collectionID, s.partitionID, s.channel}
+		signal := NewCompactionSignal().
+			WithCollectionID(s.collectionID).
+			WithPartitionID(s.partitionID).
+			WithChannel(s.channel)
+		err := tr.handleSignal(signal)
+		s.NoError(err)
+
+		// Verify timestamp was recorded
+		lastTs, exists := tr.lastStrictExpiryCompactionTsMap[cate]
+		s.True(exists)
+		s.True(time.Since(lastTs) < time.Second)
+
+		// Second compaction within interval should not do strict expiry
+		shouldDoStrict := tr.shouldDoStrictExpiryCompaction(&chanPartSegments{
+			collectionID: s.collectionID,
+			partitionID:  s.partitionID,
+			channelName:  s.channel,
+		})
+		s.False(shouldDoStrict)
+
+		// After interval passes, should do strict expiry again
+		tr.lastStrictExpiryCompactionTsMap[cate] = time.Now().Add(-2 * time.Hour)
+		shouldDoStrict = tr.shouldDoStrictExpiryCompaction(&chanPartSegments{
+			collectionID: s.collectionID,
+			partitionID:  s.partitionID,
+			channelName:  s.channel,
+		})
+		s.True(shouldDoStrict)
+
+		// judge segments should be judged to do priority compaction
+		groups, err := tr.getCandidates(signal)
+		s.Nil(err)
+		s.Equal(1, len(groups))
+		s.True(signal.doStrictExpiryCompaction)
+		coll, err := tr.getCollection(groups[0].collectionID)
+		ct, err := getCompactTime(tsoutil.ComposeTSByTime(time.Now(), 0), coll)
+		for _, segment := range groups[0].segments {
+			s.True(tr.ShouldDoSingleCompaction(segment, ct, signal))
+		}
 	})
 }
 
