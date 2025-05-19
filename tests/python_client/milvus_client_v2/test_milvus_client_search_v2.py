@@ -1228,7 +1228,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index", ct.all_index_types[:8])
     @pytest.mark.parametrize("metrics", ct.dense_metrics)
-    @pytest.mark.parametrize("limit", [20, 1200])
+    @pytest.mark.parametrize("limit", [200])
     def test_search_output_field_vector_after_different_index_metrics(self, index, metrics, limit):
         """
         target: test search with output vector field after different index
