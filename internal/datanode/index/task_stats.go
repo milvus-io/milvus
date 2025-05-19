@@ -605,7 +605,7 @@ func buildIndexParams(
 	if req.GetStorageVersion() == storage.StorageV2 {
 		params.SegmentInsertFiles = GetSegmentInsertFiles(
 			req.GetInsertLogs(),
-			req.GetStorageConfig().RootPath,
+			req.GetStorageConfig(),
 			req.GetCollectionID(),
 			req.GetPartitionID(),
 			req.GetTargetSegmentID())
