@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/panjf2000/ants/v2"
+	ants "github.com/panjf2000/ants/v2"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/generic"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
