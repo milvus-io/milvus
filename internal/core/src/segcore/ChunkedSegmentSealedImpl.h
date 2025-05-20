@@ -26,6 +26,7 @@
 #include "SegmentSealed.h"
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
+#include "folly/Synchronized.h"
 #include "google/protobuf/message_lite.h"
 #include "mmap/Types.h"
 #include "common/Types.h"
@@ -34,6 +35,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "segcore/IndexConfigGenerator.h"
 #include "segcore/SegcoreConfig.h"
+#include "folly/concurrency/ConcurrentHashMap.h"
 
 namespace milvus::segcore {
 
@@ -68,6 +70,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     HasIndex(FieldId field_id) const override;
     bool
     HasFieldData(FieldId field_id) const override;
+
+    PinWrapper<index::IndexBase*>
+    GetIndex(FieldId field_id) const override {
+        return scalar_indexings_.withRLock(
+            [&](auto& map) -> PinWrapper<index::IndexBase*> {
+                auto iter = map.find(field_id);
+                if (iter == map.end()) {
+                    return nullptr;
+                }
+                auto ca = SemiInlineGet(iter->second->PinCells({0}));
+                auto index = ca->get_cell_of(0);
+                return PinWrapper<index::IndexBase*>(ca, index);
+            });
+    }
 
     bool
     Contain(const PkType& pk) const override {
@@ -455,7 +471,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::unordered_set<FieldId> ngram_fields_{};
 
     // scalar field index
-    std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings_;
+    folly::Synchronized<std::unordered_map<FieldId, index::CacheIndexBasePtr>>
+        scalar_indexings_;
     // vector field index
     SealedIndexingRecord vector_indexings_;
 

@@ -523,6 +523,23 @@ func (task *LeaderTask) MarshalJSON() ([]byte, error) {
 	return marshalJSON(task)
 }
 
+type DropIndexTask struct {
+	*baseTask
+}
+
+func NewDropIndexTask(ctx context.Context,
+	source Source,
+	collectionID typeutil.UniqueID,
+	replica *meta.Replica,
+	action *DropIndexAction,
+) *DropIndexTask {
+	base := newBaseTask(ctx, source, collectionID, replica, action.Shard, fmt.Sprintf("DropIndexTask-%s", action.Type().String()))
+	base.actions = []Action{action}
+	return &DropIndexTask{
+		baseTask: base,
+	}
+}
+
 func marshalJSON(task Task) ([]byte, error) {
 	return json.Marshal(&metricsinfo.QueryCoordTask{
 		TaskName:     task.Name(),
