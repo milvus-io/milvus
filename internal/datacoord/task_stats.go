@@ -401,6 +401,13 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
 			return err
 		}
+	case indexpb.StatsSubJob_JsonKeyIndexJob:
+		err := st.meta.UpdateSegment(st.GetSegmentID(), SetJsonKeyIndexLogs(result.GetJsonKeyStatsLogs()))
+		if err != nil {
+			log.Ctx(ctx).Warn("save json key index stats result failed", zap.Int64("taskId", st.GetTaskID()),
+				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
+			return err
+		}
 	case indexpb.StatsSubJob_BM25Job:
 		// bm25 logs are generated during with segment flush.
 	}
