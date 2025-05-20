@@ -263,7 +263,7 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 	}, 7*time.Second, 1*time.Second)
 
 	ch1View := suite.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel("channel-1"))[0].View
-	action := suite.observer.checkNeedUpdateTargetVersion(ctx, ch1View, 100)
+	action := suite.observer.genSyncAction(ctx, ch1View, 100)
 	suite.Equal(action.GetDeleteCP().Timestamp, uint64(200))
 }
 

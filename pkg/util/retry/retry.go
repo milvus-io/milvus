@@ -13,6 +13,8 @@ package retry
 
 import (
 	"context"
+	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -22,6 +24,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
+
+func getCaller(skip int) string {
+	_, file, line, ok := runtime.Caller(skip)
+	if !ok {
+		return "unknown"
+	}
+	return file + ":" + strconv.Itoa(line)
+}
 
 // Do will run function with retry mechanism.
 // fn is the func to run.
@@ -43,7 +53,10 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 	for i := uint(0); c.attempts == 0 || i < c.attempts; i++ {
 		if err := fn(); err != nil {
 			if i%4 == 0 {
-				log.Warn("retry func failed", zap.Uint("retried", i), zap.Error(err))
+				log.Warn("retry func failed",
+					zap.Uint("retried", i),
+					zap.Error(err),
+					zap.String("caller", getCaller(2)))
 			}
 
 			if !IsRecoverable(err) {
@@ -52,6 +65,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 					zap.Uint("retried", i),
 					zap.Uint("attempt", c.attempts),
 					zap.Bool("isContextErr", isContextErr),
+					zap.String("caller", getCaller(2)),
 				)
 				if isContextErr && lastErr != nil {
 					return lastErr
@@ -62,6 +76,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 				log.Warn("retry func failed, not be retryable",
 					zap.Uint("retried", i),
 					zap.Uint("attempt", c.attempts),
+					zap.String("caller", getCaller(2)),
 				)
 				return err
 			}
@@ -73,6 +88,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 					zap.Uint("retried", i),
 					zap.Uint("attempt", c.attempts),
 					zap.Bool("isContextErr", isContextErr),
+					zap.String("caller", getCaller(2)),
 				)
 				if isContextErr && lastErr != nil {
 					return lastErr
@@ -88,6 +104,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 				log.Warn("retry func failed, ctx done",
 					zap.Uint("retried", i),
 					zap.Uint("attempt", c.attempts),
+					zap.String("caller", getCaller(2)),
 				)
 				return lastErr
 			}
@@ -127,11 +144,22 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 	for i := uint(0); i < c.attempts; i++ {
 		if shouldRetry, err := fn(); err != nil {
 			if i%4 == 0 {
-				log.Warn("retry func failed", zap.Uint("retried", i), zap.Error(err))
+				log.Warn("retry func failed",
+					zap.Uint("retried", i),
+					zap.String("caller", getCaller(2)),
+					zap.Error(err),
+				)
 			}
 
 			if !shouldRetry {
-				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) && lastErr != nil {
+				isContextErr := errors.IsAny(err, context.Canceled, context.DeadlineExceeded)
+				log.Warn("retry func failed, not be recoverable",
+					zap.Uint("retried", i),
+					zap.Uint("attempt", c.attempts),
+					zap.Bool("isContextErr", isContextErr),
+					zap.String("caller", getCaller(2)),
+				)
+				if isContextErr && lastErr != nil {
 					return lastErr
 				}
 				return err
@@ -139,8 +167,14 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 
 			deadline, ok := ctx.Deadline()
 			if ok && time.Until(deadline) < c.sleep {
-				// to avoid sleep until ctx done
-				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) && lastErr != nil {
+				isContextErr := errors.IsAny(err, context.Canceled, context.DeadlineExceeded)
+				log.Warn("retry func failed, deadline",
+					zap.Uint("retried", i),
+					zap.Uint("attempt", c.attempts),
+					zap.Bool("isContextErr", isContextErr),
+					zap.String("caller", getCaller(2)),
+				)
+				if isContextErr && lastErr != nil {
 					return lastErr
 				}
 				return err
@@ -151,6 +185,11 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
+				log.Warn("retry func failed, ctx done",
+					zap.Uint("retried", i),
+					zap.Uint("attempt", c.attempts),
+					zap.String("caller", getCaller(2)),
+				)
 				return lastErr
 			}
 
@@ -161,6 +200,12 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 		} else {
 			return nil
 		}
+	}
+	if lastErr != nil {
+		log.Warn("retry func failed, reach max retry",
+			zap.Uint("attempt", c.attempts),
+			zap.String("caller", getCaller(2)),
+		)
 	}
 	return lastErr
 }
