@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -1520,6 +1521,19 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			}
 			if lo.Contains(allOutputFields, field.FieldName) {
 				fieldSchema.IsFunctionOutput = true
+			}
+			if field.MultiAnalyzerParam != nil {
+				multiAnalyzerBytes, err := json.Marshal(field.MultiAnalyzerParam)
+				if err != nil {
+					log.Ctx(ctx).Warn("parse MultiAnalyzer failed")
+					HTTPAbortReturn(c, http.StatusOK, gin.H{
+						HTTPReturnCode:    merr.Code(err),
+						HTTPReturnMessage: "parse MultiAnalyzer failed, err:" + err.Error(),
+					})
+					return nil, err
+				}
+				multiAnalyzerStr := string(multiAnalyzerBytes)
+				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: function.MultiAnalyzerParams, Value: multiAnalyzerStr})
 			}
 			collSchema.Fields = append(collSchema.Fields, &fieldSchema)
 			fieldNames[field.FieldName] = true

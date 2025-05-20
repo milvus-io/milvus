@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-const multiAnalyzerParams = "multi_analyzer_params"
+const MultiAnalyzerParams = "multi_analyzer_params"
 
 // BM25 Runner with Multi Analyzer
 // Input: string string // text, analyzer name
@@ -45,7 +45,7 @@ type MultiAnalyzerBM25FunctionRunner struct {
 
 func getMultiAnalyzerParams(field *schemapb.FieldSchema) (string, bool) {
 	for _, param := range field.GetTypeParams() {
-		if param.Key == multiAnalyzerParams {
+		if param.Key == MultiAnalyzerParams {
 			return param.Value, true
 		}
 	}
