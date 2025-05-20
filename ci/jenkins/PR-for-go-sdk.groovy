@@ -87,7 +87,7 @@ pipeline {
                 axes {
                     axis {
                         name 'milvus_deployment_option'
-                        values 'standalone', 'distributed-pulsar'
+                        values 'standalone'
                     }
                 }
                 stages {

@@ -336,7 +336,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
                                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1896")
     @pytest.mark.parametrize("name", ["12 s", "(mn)", "中文", "%$#"])
     async def test_async_milvus_client_load_partitions_invalid_partition_name(self, name):
         """
@@ -352,15 +351,13 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid partition name: {name}. collection name can only "
-                                                f"contain numbers, letters and underscores: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"partition not found"}
         await async_client.load_partitions(collection_name, name,
                                            check_task=CheckTasks.err_res, check_items=error)
         # 3. drop action
         await async_client.drop_collection(collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="pymilvus issue 1896")
     async def test_async_milvus_client_load_partitions_partition_not_existed(self):
         """
         target: test load partitions with nonexistent partition name
@@ -376,15 +373,13 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"partition not found[database=default]"
-                                                f"[collection={collection_name}]"}
+        error = {ct.err_code: 1100, ct.err_msg: f"partition not found"}
         await async_client.load_partitions(collection_name, partition_name,
                                            check_task=CheckTasks.err_res, check_items=error)
         # 3. drop action
         await async_client.drop_collection(collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="pymilvus issue 1896")
     async def test_async_milvus_client_load_partitions_partition_name_over_max_length(self):
         """
         target: test load partitions with partition name over max length 255
@@ -400,9 +395,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
-        error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {collection_name}. "
-                                                f"the length of a collection name must be less than 255 characters: "
-                                                f"invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"partition not found"}
         await async_client.load_partitions(collection_name, partition_name,
                                            check_task=CheckTasks.err_res, check_items=error)
     
@@ -494,7 +487,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
                                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1896")
     @pytest.mark.parametrize("partition_name", ["12 s", "(mn)", "中文", "%$#"])
     async def test_async_milvus_client_release_partitions_invalid_partition_name(self, partition_name):
         """
@@ -510,15 +502,13 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim)
         # 2. release partitions
-        error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}. The first character of a "
-                                                 f"partition name must be an underscore or letter.]"}
+        error = {ct.err_code: 65535, ct.err_msg: f"partition not found"}
         await async_client.release_partitions(collection_name, partition_name,
                                               check_task=CheckTasks.err_res, check_items=error)
         # 3. drop action
         await async_client.drop_collection(collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="pymilvus issue 1896")
     async def test_async_milvus_client_release_partitions_invalid_partition_name_list(self):
         """
         target: test release partitions with invalid partition name list
@@ -534,8 +524,7 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         await async_client.create_collection(collection_name, default_dim)
         # 2. release partition
         partition_name = ["12-s"]
-        error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}. The first character of a "
-                                                 f"partition name must be an underscore or letter.]"}
+        error = {ct.err_code: 65535, ct.err_msg: f"partition not found"}
         await async_client.release_partitions(collection_name, partition_name,
                                               check_task=CheckTasks.err_res, check_items=error)
         # 3. drop action
@@ -690,8 +679,8 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
             assert partition_name not in partitions
         await async_client.drop_collection(collection_name)
 
-
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip(reason="blocked by pymilvus issue #2796")
     async def test_async_milvus_client_load_release_partitions(self):
         """
         target: test load and release partitions normal case

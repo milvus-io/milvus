@@ -64,7 +64,7 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:7]
+range_search_supported_indexes = ct.all_index_types[:8]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -85,7 +85,7 @@ class TestSparseSearch(TestcaseBase):
     """ Add some test cases for the sparse vector """
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
     @pytest.mark.parametrize("inverted_index_algo", ct.inverted_index_algo)
     def test_sparse_index_search(self, index, inverted_index_algo):
         """
@@ -125,7 +125,7 @@ class TestSparseSearch(TestcaseBase):
                                          "output_fields": [ct.default_sparse_vec_field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
     @pytest.mark.parametrize("dim", [32768, ct.max_sparse_vector_dim])
     def test_sparse_index_dim(self, index, dim):
         """
@@ -151,7 +151,7 @@ class TestSparseSearch(TestcaseBase):
                                          "limit": 1})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
     @pytest.mark.parametrize("inverted_index_algo", ct.inverted_index_algo)
     def test_sparse_index_enable_mmap_search(self, index, inverted_index_algo):
         """
@@ -199,7 +199,7 @@ class TestSparseSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("drop_ratio_build", [0.01])
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
     def test_search_sparse_ratio(self, drop_ratio_build, index):
         """
         target: create a sparse index by adjusting the ratio parameter.
@@ -237,7 +237,7 @@ class TestSparseSearch(TestcaseBase):
                                 check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
     def test_sparse_vector_search_output_field(self, index):
         """
         target: create sparse vectors and search
@@ -266,7 +266,7 @@ class TestSparseSearch(TestcaseBase):
                                          })
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
     @pytest.mark.parametrize("inverted_index_algo", ct.inverted_index_algo)
     def test_sparse_vector_search_iterator(self, index, inverted_index_algo):
         """

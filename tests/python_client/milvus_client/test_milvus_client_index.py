@@ -237,7 +237,7 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:8])
     def test_milvus_client_index_with_params(self, index, metric_type):
         """
         target: test index with user defined params
@@ -284,7 +284,7 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:8])
     def test_milvus_client_index_after_insert(self, index, metric_type):
         """
         target: test index after insert

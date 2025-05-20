@@ -2314,6 +2314,10 @@ def gen_search_param(index_type, metric_type="L2"):
         for search_list in [20, 300, 1500]:
             diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
             search_params.append(diskann_search_param)
+    elif index_type == "IVF_RABITQ":
+        for rbq_bits_query in [6, 7]:
+            ivf_rabitq_search_param = {"metric_type": metric_type, "params": {"rbq_bits_query": rbq_bits_query}}
+            search_params.append(ivf_rabitq_search_param)
     else:
         log.error("Invalid index_type.")
         raise Exception("Invalid index_type.")
@@ -2840,6 +2844,11 @@ def get_search_params_params(index_type):
     return params
 
 
+def get_default_metric_for_vector_type(vector_type=DataType.FLOAT_VECTOR):
+    """get default metric for vector type"""
+    return ct.default_metric_for_vector_type[vector_type]
+
+
 def assert_json_contains(expr, list_data):
     opposite = False
     if expr.startswith("not"):
@@ -3285,6 +3294,15 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok", empty_percentage=0):
         ]
     return vectors
 
+def gen_int8_vectors(num, dim):
+    raw_vectors = []
+    int8_vectors = []
+    for _ in range(num):
+        raw_vector = [random.randint(-128, 127) for _ in range(dim)]
+        raw_vectors.append(raw_vector)
+        int8_vector = np.array(raw_vector, dtype=np.int8)
+        int8_vectors.append(int8_vector)
+    return raw_vectors, int8_vectors
 
 def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
     vectors = []
@@ -3300,6 +3318,8 @@ def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
         vectors = gen_text_vectors(nb)    # for Full Text Search
     elif vector_data_type == DataType.BINARY_VECTOR:
         vectors = gen_binary_vectors(nb, dim)[1]
+    elif vector_data_type == DataType.INT8_VECTOR:
+        vectors = gen_int8_vectors(nb, dim)[1]
     else:
         log.error(f"Invalid vector data type: {vector_data_type}")
         raise Exception(f"Invalid vector data type: {vector_data_type}")
