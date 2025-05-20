@@ -888,6 +888,13 @@ This helps Milvus-CDC synchronize incremental data`,
 		DefaultValue: "10000",
 		Doc:          "batch size when to apply pk to bloom filter",
 		Export:       true,
+		Formatter: func(value string) string {
+			batchSize := getAsInt(value)
+			if batchSize < 1 {
+				return "10000"
+			}
+			return strconv.Itoa(batchSize)
+		},
 	}
 	p.BloomFilterApplyBatchSize.Init(base.mgr)
 
@@ -3815,12 +3822,12 @@ type dataCoordConfig struct {
 	GCScanIntervalInHour    ParamItem `refreshable:"false"`
 	EnableActiveStandby     ParamItem `refreshable:"false"`
 
-	BindIndexNodeMode          ParamItem `refreshable:"false"`
-	IndexNodeAddress           ParamItem `refreshable:"false"`
-	WithCredential             ParamItem `refreshable:"false"`
-	IndexNodeID                ParamItem `refreshable:"false"`
-	IndexTaskSchedulerInterval ParamItem `refreshable:"false"`
-	TaskSlowThreshold          ParamItem `refreshable:"true"`
+	BindIndexNodeMode    ParamItem `refreshable:"false"`
+	IndexNodeAddress     ParamItem `refreshable:"false"`
+	WithCredential       ParamItem `refreshable:"false"`
+	IndexNodeID          ParamItem `refreshable:"false"`
+	TaskScheduleInterval ParamItem `refreshable:"false"`
+	TaskSlowThreshold    ParamItem `refreshable:"true"`
 
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
@@ -4557,12 +4564,12 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.IndexNodeID.Init(base.mgr)
-	p.IndexTaskSchedulerInterval = ParamItem{
+	p.TaskScheduleInterval = ParamItem{
 		Key:          "indexCoord.scheduler.interval",
 		Version:      "2.0.0",
 		DefaultValue: "100",
 	}
-	p.IndexTaskSchedulerInterval.Init(base.mgr)
+	p.TaskScheduleInterval.Init(base.mgr)
 
 	p.TaskSlowThreshold = ParamItem{
 		Key:          "datacoord.scheduler.taskSlowThreshold",
@@ -4745,27 +4752,41 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	p.ClusteringCompactionSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.clusteringCompactionUsage",
 		Version:      "2.4.6",
-		Doc:          "slot usage of clustering compaction job.",
-		DefaultValue: "16",
+		Doc:          "slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.",
+		DefaultValue: "65536",
 		PanicIfEmpty: false,
 		Export:       true,
+		Formatter: func(value string) string {
+			slot := getAsInt(value)
+			if slot < 1 {
+				return "65536"
+			}
+			return strconv.Itoa(slot)
+		},
 	}
 	p.ClusteringCompactionSlotUsage.Init(base.mgr)
 
 	p.MixCompactionSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.mixCompactionUsage",
 		Version:      "2.4.6",
-		Doc:          "slot usage of mix compaction job.",
-		DefaultValue: "8",
+		Doc:          "slot usage of mix compaction task.",
+		DefaultValue: "4",
 		PanicIfEmpty: false,
 		Export:       true,
+		Formatter: func(value string) string {
+			slot := getAsInt(value)
+			if slot < 1 {
+				return "4"
+			}
+			return strconv.Itoa(slot)
+		},
 	}
 	p.MixCompactionSlotUsage.Init(base.mgr)
 
 	p.L0DeleteCompactionSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.l0DeleteCompactionUsage",
 		Version:      "2.4.6",
-		Doc:          "slot usage of l0 compaction job.",
+		Doc:          "slot usage of l0 compaction task.",
 		DefaultValue: "8",
 		PanicIfEmpty: false,
 		Export:       true,
@@ -4796,9 +4817,16 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.slot.analyzeTaskSlotUsage",
 		Version:      "2.5.8",
 		Doc:          "slot usage of analyze task",
-		DefaultValue: "65535",
+		DefaultValue: "65536",
 		PanicIfEmpty: false,
 		Export:       true,
+		Formatter: func(value string) string {
+			slot := getAsInt(value)
+			if slot < 1 {
+				return "65536"
+			}
+			return strconv.Itoa(slot)
+		},
 	}
 	p.AnalyzeTaskSlotUsage.Init(base.mgr)
 

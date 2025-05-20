@@ -90,6 +90,15 @@ func Test_NewClient(t *testing.T) {
 
 		r14, err := client.DropCompactionPlan(ctx, nil)
 		retCheck(retNotNil, r14, err)
+
+		r15, err := client.CreateTask(ctx, nil)
+		retCheck(retNotNil, r15, err)
+
+		r16, err := client.QueryTask(ctx, nil)
+		retCheck(retNotNil, r16, err)
+
+		r17, err := client.DropTask(ctx, nil)
+		retCheck(retNotNil, r17, err)
 	}
 
 	client.(*Client).grpcClient = &mock2.GRPCClientBase[DataNodeClient]{
@@ -248,6 +257,30 @@ func TestIndexClient(t *testing.T) {
 
 		req := &workerpb.DropJobsV2Request{}
 		_, err := client.DropJobsV2(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("CreateTask", func(t *testing.T) {
+		mockIN.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.CreateTaskRequest{}
+		_, err := client.CreateTask(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("QueryTask", func(t *testing.T) {
+		mockIN.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.QueryTaskRequest{}
+		_, err := client.QueryTask(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("DropTask", func(t *testing.T) {
+		mockIN.EXPECT().DropTask(mock.Anything, mock.Anything).Return(nil, nil)
+
+		req := &workerpb.DropTaskRequest{}
+		_, err := client.DropTask(ctx, req)
 		assert.NoError(t, err)
 	})
 

@@ -31,12 +31,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -49,6 +51,7 @@ func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
 		zap.Int64("jobID", task.GetJobID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
 		zap.String("type", task.GetType().String()),
+		zap.String("state", task.GetTaskState().String()),
 		zap.Int64("nodeID", task.GetNodeID()),
 	}
 	res = append(res, fields...)
@@ -56,8 +59,7 @@ func WrapTaskLog(task ImportTask, fields ...zap.Field) []zap.Field {
 }
 
 func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
-	job ImportJob,
-	alloc allocator.Allocator,
+	job ImportJob, alloc allocator.Allocator, imeta ImportMeta,
 ) ([]ImportTask, error) {
 	idStart, _, err := alloc.AllocN(int64(len(fileGroups)))
 	if err != nil {
@@ -70,24 +72,27 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 				ImportFile: f,
 			}
 		})
-		task := &preImportTask{
-			PreImportTask: &datapb.PreImportTask{
-				JobID:        job.GetJobID(),
-				TaskID:       idStart + int64(i),
-				CollectionID: job.GetCollectionID(),
-				State:        datapb.ImportTaskStateV2_Pending,
-				FileStats:    fileStats,
-				CreatedTime:  time.Now().Format("2006-01-02T15:04:05Z07:00"),
-			},
-			tr: timerecord.NewTimeRecorder("preimport task"),
+		taskProto := &datapb.PreImportTask{
+			JobID:        job.GetJobID(),
+			TaskID:       idStart + int64(i),
+			CollectionID: job.GetCollectionID(),
+			State:        datapb.ImportTaskStateV2_Pending,
+			FileStats:    fileStats,
+			CreatedTime:  time.Now().Format("2006-01-02T15:04:05Z07:00"),
 		}
+		task := &preImportTask{
+			imeta: imeta,
+			tr:    timerecord.NewTimeRecorder("preimport task"),
+			times: taskcommon.NewTimes(),
+		}
+		task.task.Store(taskProto)
 		tasks = append(tasks, task)
 	}
 	return tasks, nil
 }
 
 func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
-	job ImportJob, alloc allocator.Allocator, meta *meta,
+	job ImportJob, alloc allocator.Allocator, meta *meta, imeta ImportMeta,
 ) ([]ImportTask, error) {
 	idBegin, _, err := alloc.AllocN(int64(len(fileGroups)))
 	if err != nil {
@@ -95,30 +100,35 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	}
 	tasks := make([]ImportTask, 0, len(fileGroups))
 	for i, group := range fileGroups {
-		task := &importTask{
-			ImportTaskV2: &datapb.ImportTaskV2{
-				JobID:        job.GetJobID(),
-				TaskID:       idBegin + int64(i),
-				CollectionID: job.GetCollectionID(),
-				NodeID:       NullNodeID,
-				State:        datapb.ImportTaskStateV2_Pending,
-				FileStats:    group,
-				CreatedTime:  time.Now().Format("2006-01-02T15:04:05Z07:00"),
-			},
-			tr: timerecord.NewTimeRecorder("import task"),
+		taskProto := &datapb.ImportTaskV2{
+			JobID:        job.GetJobID(),
+			TaskID:       idBegin + int64(i),
+			CollectionID: job.GetCollectionID(),
+			NodeID:       NullNodeID,
+			State:        datapb.ImportTaskStateV2_Pending,
+			FileStats:    group,
+			CreatedTime:  time.Now().Format("2006-01-02T15:04:05Z07:00"),
 		}
+		task := &importTask{
+			alloc: alloc,
+			meta:  meta,
+			imeta: imeta,
+			tr:    timerecord.NewTimeRecorder("import task"),
+			times: taskcommon.NewTimes(),
+		}
+		task.task.Store(taskProto)
 		segments, err := AssignSegments(job, task, alloc, meta)
 		if err != nil {
 			return nil, err
 		}
-		task.SegmentIDs = segments
+		taskProto.SegmentIDs = segments
 		if paramtable.Get().DataCoordCfg.EnableStatsTask.GetAsBool() {
 			statsSegIDBegin, _, err := alloc.AllocN(int64(len(segments)))
 			if err != nil {
 				return nil, err
 			}
-			task.StatsSegmentIDs = lo.RangeFrom(statsSegIDBegin, len(segments))
-			log.Info("preallocate stats segment ids", WrapTaskLog(task, zap.Int64s("segmentIDs", task.StatsSegmentIDs))...)
+			taskProto.StatsSegmentIDs = lo.RangeFrom(statsSegIDBegin, len(segments))
+			log.Info("preallocate stats segment ids", WrapTaskLog(task, zap.Int64s("segmentIDs", taskProto.StatsSegmentIDs))...)
 		}
 		tasks = append(tasks, task)
 	}
@@ -479,7 +489,7 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) (float32, i
 	return float32(importedRows) / float32(totalRows), importedRows, totalRows
 }
 
-func getStatsProgress(jobID int64, imeta ImportMeta, sjm StatsJobManager) float32 {
+func getStatsProgress(jobID int64, imeta ImportMeta, sjm StatsInspector) float32 {
 	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
 		return 1
 	}
@@ -532,7 +542,7 @@ func getIndexBuildingProgress(jobID int64, imeta ImportMeta, meta *meta) float32
 // 10%: Completed
 // TODO: Wrap a function to map status to user status.
 // TODO: Save these progress to job instead of recalculating.
-func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta, sjm StatsJobManager) (int64, internalpb.ImportJobState, int64, int64, string) {
+func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta, sjm StatsInspector) (int64, internalpb.ImportJobState, int64, int64, string) {
 	job := imeta.GetJob(context.TODO(), jobID)
 	if job == nil {
 		return 0, internalpb.ImportJobState_Failed, 0, 0, fmt.Sprintf("import job does not exist, jobID=%d", jobID)
@@ -598,15 +608,11 @@ func GetTaskProgresses(jobID int64, imeta ImportMeta, meta *meta) []*internalpb.
 	return progresses
 }
 
-func DropImportTask(task ImportTask, cluster Cluster, tm ImportMeta) error {
+func DropImportTask(task ImportTask, cluster session.Cluster, tm ImportMeta) error {
 	if task.GetNodeID() == NullNodeID {
 		return nil
 	}
-	req := &datapb.DropImportRequest{
-		JobID:  task.GetJobID(),
-		TaskID: task.GetTaskID(),
-	}
-	err := cluster.DropImport(task.GetNodeID(), req)
+	err := cluster.DropImport(task.GetNodeID(), task.GetTaskID())
 	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
 		return err
 	}

@@ -267,7 +267,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 		s.Run("failed case", func() {
 			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
-			s.Error(m.DropStatsTask(1))
+			s.Error(m.DropStatsTask(context.TODO(), 1))
 			_, ok := m.tasks.Get(1)
 			s.True(ok)
 		})
@@ -275,11 +275,11 @@ func (s *statsTaskMetaSuite) Test_Method() {
 		s.Run("normal case", func() {
 			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
 
-			s.NoError(m.DropStatsTask(1))
+			s.NoError(m.DropStatsTask(context.TODO(), 1))
 			_, ok := m.tasks.Get(1)
 			s.False(ok)
 
-			s.NoError(m.DropStatsTask(1000))
+			s.NoError(m.DropStatsTask(context.TODO(), 1000))
 		})
 	})
 }

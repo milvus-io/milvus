@@ -419,3 +419,15 @@ func (s *Server) QueryJobsV2(ctx context.Context, request *workerpb.QueryJobsV2R
 func (s *Server) DropJobsV2(ctx context.Context, request *workerpb.DropJobsV2Request) (*commonpb.Status, error) {
 	return s.datanode.DropJobsV2(ctx, request)
 }
+
+func (s *Server) CreateTask(ctx context.Context, request *workerpb.CreateTaskRequest) (*commonpb.Status, error) {
+	return s.datanode.CreateTask(ctx, request)
+}
+
+func (s *Server) QueryTask(ctx context.Context, request *workerpb.QueryTaskRequest) (*workerpb.QueryTaskResponse, error) {
+	return s.datanode.QueryTask(ctx, request)
+}
+
+func (s *Server) DropTask(ctx context.Context, request *workerpb.DropTaskRequest) (*commonpb.Status, error) {
+	return s.datanode.DropTask(ctx, request)
+}
