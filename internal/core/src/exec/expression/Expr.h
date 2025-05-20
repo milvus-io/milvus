@@ -41,6 +41,22 @@ namespace exec {
 
 enum class FilterType { sequential = 0, random = 1 };
 
+inline PinWrapper<index::IndexBase*>
+PinIndex(const segcore::SegmentInternalInterface* segment,
+         const FieldMeta& field_meta,
+         const std::vector<std::string>& path = {},
+         DataType data_type = DataType::NONE,
+         bool any_type = false,
+         bool is_array = false) {
+    if (field_meta.get_data_type() == DataType::JSON) {
+        auto pointer = milvus::Json::pointer(path);
+        return segment->GetJsonIndex(
+            field_meta.get_id(), pointer, data_type, any_type, is_array);
+    } else {
+        return segment->GetIndex(field_meta.get_id());
+    }
+}
+
 class Expr {
  public:
     Expr(DataType type,
@@ -174,13 +190,15 @@ class SegmentExpr : public Expr {
             pk_type_ = field_meta.get_data_type();
         }
 
-        if (field_meta.get_data_type() == DataType::JSON) {
-            auto pointer = milvus::Json::pointer(nested_path_);
-            if (is_index_mode_ = segment_->HasIndex(field_id_,
-                                                    pointer,
-                                                    value_type_,
-                                                    allow_any_json_cast_type_,
-                                                    is_json_contains_)) {
+        if (segment_->type() == SegmentType::Sealed) {
+            pinned_index_ = PinIndex(segment_,
+                                     field_meta,
+                                     nested_path_,
+                                     value_type_,
+                                     allow_any_json_cast_type_,
+                                     is_json_contains_);
+            if (pinned_index_.get() != nullptr) {
+                is_index_mode_ = true;
                 num_index_chunk_ = 1;
             }
         } else {
@@ -835,7 +853,13 @@ class SegmentExpr : public Expr {
 
                 if (field_type_ == DataType::JSON) {
                     auto pointer = milvus::Json::pointer(nested_path_);
-                    json_pw = segment_->chunk_json_index(field_id_, pointer, i);
+                    json_pw =
+                        segment_->chunk_json_index(field_id_,
+                                                   pointer,
+                                                   value_type_,
+                                                   allow_any_json_cast_type_,
+                                                   is_json_contains_,
+                                                   i);
 
                     // check if it is a json flat index, if so, create a json flat index query executor
                     auto json_flat_index =
@@ -1283,6 +1307,7 @@ class SegmentExpr : public Expr {
     // sometimes need to skip index and using raw data
     // default true means use index as much as possible
     bool use_index_{true};
+    PinWrapper<index::IndexBase*> pinned_index_{nullptr};
 
     int64_t active_count_{0};
     int64_t num_data_chunk_{0};
