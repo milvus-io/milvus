@@ -26,6 +26,7 @@ tests/python_client/default.etcd/
 .vscode
 docker-compose-devcontainer.yml
 docker-compose-devcontainer.yml.tmp
+.cursor
 
 *.code-workspace
 
