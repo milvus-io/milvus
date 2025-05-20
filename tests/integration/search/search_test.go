@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -249,12 +248,12 @@ func (s *SearchSuite) run() {
 	results := searchResult.GetResults()
 	offset := 0
 	// verify group by field corresponds to fVarCharColumn
+	gbf := results.GetGroupByFieldValue().GetScalars().GetStringData().GetData()
 	for i := range results.NumQueries {
 		k := int(results.Topks[i])
-		itr := typeutil.GetDataIterator(results.GroupByFieldValue)
 		m := make(map[any]any, k) // test if the group by field values are unique
 		for j := 0; j < k; j++ {
-			gpbVal := itr(offset + j)
+			gpbVal := gbf[offset+j]
 			s.NotContains(m, gpbVal)
 			m[gpbVal] = struct{}{}
 		}
