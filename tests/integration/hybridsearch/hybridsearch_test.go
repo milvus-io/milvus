@@ -349,6 +349,7 @@ func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
 	})
 	s.NoError(err)
 	s.NoError(merr.Error(loadStatus))
+	s.WaitForLoad(ctx, collectionName)
 
 	// search
 	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
