@@ -109,8 +109,8 @@ class MemChunkTarget : public ChunkTarget {
         data_ = reinterpret_cast<char*>(m);
     }
 
-    MemChunkTarget(void* data, size_t size)
-        : data_(static_cast<char*>(data)), size_(size) {
+    MemChunkTarget(void* data, size_t cap)
+        : data_(static_cast<char*>(data)), cap_(cap) {
     }
 
     void
