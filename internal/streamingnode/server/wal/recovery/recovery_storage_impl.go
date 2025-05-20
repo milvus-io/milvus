@@ -82,12 +82,26 @@ type recoveryStorageImpl struct {
 	segments               map[int64]*segmentRecoveryInfo
 	vchannels              map[string]*vchannelRecoveryInfo
 	checkpoint             *WALCheckpoint
+	flusherCheckpoint      *WALCheckpoint
 	dirtyCounter           int // records the message count since last persist snapshot.
 	// used to trigger the recovery persist operation.
 	persistNotifier chan struct{}
 	gracefulClosed  bool
 	truncator       *samplingTruncator
 	metrics         *recoveryMetrics
+}
+
+// UpdateFlusherCheckpoint updates the checkpoint of flusher.
+// TODO: should be removed in future, after merge the flusher logic into recovery storage.
+func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(checkpoint *WALCheckpoint) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.flusherCheckpoint == nil || r.flusherCheckpoint.MessageID.LTE(checkpoint.MessageID) {
+		r.flusherCheckpoint = checkpoint
+		r.Logger().Info("update checkpoint of flusher", zap.String("messageID", checkpoint.MessageID.String()))
+		return
+	}
+	r.Logger().Warn("update illegal checkpoint of flusher", zap.String("current", r.flusherCheckpoint.MessageID.String()), zap.String("target", checkpoint.MessageID.String()))
 }
 
 // ObserveMessage is called when a new message is observed.
