@@ -50,6 +50,7 @@ const (
 	TaskTypeMove
 	TaskTypeUpdate
 	TaskTypeStatsUpdate
+	TaskTypeDropIndex
 )
 
 var TaskTypeName = map[Type]string{
@@ -558,6 +559,9 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 			return merr.WrapErrServiceInternal("task with the same segment exists")
 		}
+	case *DropIndexTask:
+		// TODO
+
 	default:
 		panic(fmt.Sprintf("preAdd: forget to process task type: %+v", task))
 	}
@@ -1071,6 +1075,10 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 			return err
 		}
 
+	case *DropIndexTask:
+		if err := scheduler.checkDropIndexTaskStale(task); err != nil {
+			return err
+		}
 	default:
 		panic(fmt.Sprintf("checkStale: forget to check task type: %+v", task))
 	}
@@ -1176,5 +1184,10 @@ func (scheduler *taskScheduler) checkLeaderTaskStale(task *LeaderTask) error {
 			}
 		}
 	}
+	return nil
+}
+
+func (scheduler *taskScheduler) checkDropIndexTaskStale(task *DropIndexTask) error {
+	// TODO
 	return nil
 }

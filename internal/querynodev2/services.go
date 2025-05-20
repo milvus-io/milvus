@@ -494,6 +494,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	// Delegates request to workers
 	if req.GetNeedTransfer() {
+		log.Info("[remove] start to load segments on delegator", zap.Stringer("req", req), zap.Any("delegators", node.delegators.Keys()))
 		delegator, ok := node.delegators.Get(segment.GetInsertChannel())
 		if !ok {
 			msg := "failed to load segments, delegator not found"
@@ -1262,6 +1263,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			IsSorted:           s.IsSorted(),
 			LastDeltaTimestamp: s.LastDeltaTimestamp(),
 			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {
+				log.Info("[remove] segment index info", zap.Any("indexInfo", info.IndexInfo))
 				return info.IndexInfo.IndexID, info.IndexInfo
 			}),
 			FieldJsonIndexStats: s.GetFieldJSONIndexStats(),
@@ -1626,4 +1628,33 @@ func (node *QueryNode) getDistributionModifyTS() int64 {
 	node.lastModifyLock.RLock()
 	defer node.lastModifyLock.RUnlock()
 	return node.lastModifyTs
+}
+
+func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) (*commonpb.Status, error) {
+	defer node.updateDistributionModifyTS()
+	keys := node.delegators.Keys()
+	log.Info("[remove] received drop index", zap.Stringer("req", req), zap.Strings("keys", keys))
+	if req.GetNeedTransfer() {
+		shardDelegator, ok := node.delegators.Get(req.GetChannel())
+		if !ok {
+			return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel())), nil
+		}
+		req.NeedTransfer = false
+		if err := shardDelegator.DropIndex(ctx, req); err != nil {
+			return merr.Status(err), nil
+		}
+	}
+	segments, err := node.manager.Segment.GetAndPinBy(segments.WithChannel(req.GetChannel()))
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	defer node.manager.Segment.Unpin(segments)
+	fieldIDs := req.GetFieldIDs()
+	for _, segment := range segments {
+		for _, fieldID := range fieldIDs {
+			log.Info("[remove] drop index", zap.Int64("fieldID", fieldID), zap.Int64("segmentID", segment.ID()))
+			segment.DropIndex(ctx, fieldID)
+		}
+	}
+	return merr.Success(), nil
 }

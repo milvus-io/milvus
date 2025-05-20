@@ -85,6 +85,7 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 
 	for _, collectionID := range collectionIDs {
 		indexInfos, err := c.broker.ListIndexes(ctx, collectionID)
+		log.Info("[remove] list indexes", zap.Any("collectionID", collectionID), zap.Any("indexInfos", indexInfos))
 		if err != nil {
 			log.Warn("failed to list indexes", zap.Int64("collection", collectionID), zap.Error(err))
 			continue
@@ -116,6 +117,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collection.GetCollectionID()),
 	)
+	log.Info("[remove] check replica", zap.Any("collectionID", collection.GetCollectionID()), zap.Any("indexInfos", indexInfos), zap.Any("schema", schema))
 	var tasks []task.Task
 
 	segments := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
@@ -126,12 +128,14 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 
 	idSegmentsStats := make(map[int64]*meta.Segment)
 	targetsStats := make(map[int64][]int64) // segmentID => FieldID
+	redundant := typeutil.NewConcurrentSet[int64]()
+	log.Info("[remove] check segments", zap.Any("segments", len(segments)))
 	for _, segment := range segments {
 		// skip update index in read only node
 		if roNodeSet.Contain(segment.Node) {
 			continue
 		}
-
+		log.Info("[remove] check segment", zap.Any("segment", segment.GetID()))
 		missing := c.checkSegment(segment, indexInfos)
 		missingStats := c.checkSegmentStats(segment, schema, collection.LoadFields)
 		if len(missing) > 0 {
@@ -141,6 +145,8 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 			targetsStats[segment.GetID()] = missingStats
 			idSegmentsStats[segment.GetID()] = segment
 		}
+
+		redundant.Upsert(c.checkRedundant(segment, indexInfos)...)
 	}
 
 	segmentsToUpdate := typeutil.NewSet[int64]()
@@ -190,6 +196,9 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	})
 	tasks = append(tasks, tasksStats...)
 
+	dropTasks := c.createSegmentDropTasks(ctx, replica, redundant.Collect())
+	tasks = append(tasks, dropTasks...)
+
 	return tasks
 }
 
@@ -207,6 +216,24 @@ func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb
 		}
 	}
 	return result
+}
+
+func (c *IndexChecker) checkRedundant(segment *meta.Segment, indexInfos []*indexpb.IndexInfo) (fieldIDs []int64) {
+	var redundant []int64
+	indexInfoMap := typeutil.NewConcurrentSet[int64]()
+
+	for _, indexInfo := range indexInfos {
+		indexInfoMap.Insert(indexInfo.IndexID)
+	}
+
+	log.Info("[remove] check redundant", zap.Any("indexInfoMap", indexInfoMap.Collect()), zap.Any("segment.IndexInfo", segment.IndexInfo))
+	for indexID, fieldIndexInfo := range segment.IndexInfo {
+		if !indexInfoMap.Contain(indexID) {
+			redundant = append(redundant, fieldIndexInfo.GetFieldID())
+		}
+	}
+
+	return redundant
 }
 
 func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *meta.Segment, replica *meta.Replica) (task.Task, bool) {
@@ -289,4 +316,20 @@ func (c *IndexChecker) createSegmentStatsUpdateTask(ctx context.Context, segment
 	t.SetPriority(task.TaskPriorityLow)
 	t.SetReason("missing json stats")
 	return t, true
+}
+
+func (c *IndexChecker) createSegmentDropTasks(ctx context.Context, replica *meta.Replica, fieldIDs []int64) []task.Task {
+	if len(fieldIDs) == 0 {
+		return nil
+	}
+	log.Info("[remove] create segment drop tasks", zap.Any("fieldIDs", fieldIDs))
+	channels := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
+	tasks := make([]task.Task, 0)
+	for _, channel := range channels {
+		action := task.NewDropIndexAction(channel.Node, task.ActionTypeDropIndex, channel.ChannelName, fieldIDs)
+		t := task.NewDropIndexTask(ctx, c.ID(), replica.GetCollectionID(), replica, action)
+		log.Info("[remove] create segment drop task", zap.Any("channel", channel.ChannelName), zap.Any("fieldIDs", fieldIDs), zap.Any("node", channel.Node))
+		tasks = append(tasks, t)
+	}
+	return tasks
 }
