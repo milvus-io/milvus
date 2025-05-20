@@ -132,8 +132,9 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
             info.enable_mmap);
 
     if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id)) {
-        fields_.erase(field_id);
-        set_bit(field_data_ready_bitset_, field_id, false);
+        // fields_.erase(field_id);
+        // set_bit(field_data_ready_bitset_, field_id, false);
+        fields_.at(field_id)->ManualEvictCache();
     }
     if (get_bit(binlog_index_bitset_, field_id)) {
         set_bit(binlog_index_bitset_, field_id, false);
@@ -178,7 +179,7 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         index.index = std::move(const_cast<LoadIndexInfo&>(info).cache_index);
         index.cast_type =
             JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
-        json_indices.push_back(std::move(index));
+        json_indices.wlock()->push_back(std::move(index));
         return;
     }
 
@@ -188,8 +189,9 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         ngram_indexings_[field_id] =
             std::move(const_cast<LoadIndexInfo&>(info).cache_index);
     } else {
-        scalar_indexings_[field_id] =
-            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+        scalar_indexings_.wlock()->insert(
+            {field_id,
+             std::move(const_cast<LoadIndexInfo&>(info).cache_index)});
     }
 
     LoadResourceRequest request =
@@ -208,8 +210,9 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         !is_pk) {
         // We do not erase the primary key field: if insert record is evicted from memory, when reloading it'll
         // need the pk field again.
-        fields_.erase(field_id);
-        set_bit(field_data_ready_bitset_, field_id, false);
+        // fields_.erase(field_id);
+        // set_bit(field_data_ready_bitset_, field_id, false);
+        fields_.at(field_id)->ManualEvictCache();
     }
 }
 
@@ -495,7 +498,7 @@ ChunkedSegmentSealedImpl::num_chunk_index(FieldId field_id) const {
         return int64_t(vector_indexings_.is_ready(field_id));
     }
 
-    return scalar_indexings_.count(field_id);
+    return scalar_indexings_.rlock()->count(field_id);
 }
 
 int64_t
@@ -613,10 +616,12 @@ PinWrapper<const index::IndexBase*>
 ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
                                            int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
-    AssertInfo(scalar_indexings_.find(field_id) != scalar_indexings_.end(),
-               "Cannot find scalar_indexing with field_id: " +
-                   std::to_string(field_id.get()));
-    auto slot = scalar_indexings_.at(field_id);
+    auto slot = scalar_indexings_.withRLock([&](auto& mapping) {
+        AssertInfo(mapping.find(field_id) != mapping.end(),
+                   "Cannot find scalar_indexing with field_id: " +
+                       std::to_string(field_id.get()));
+        return mapping.at(field_id);
+    });
     lck.unlock();
 
     auto ca = SemiInlineGet(slot->PinCells({0}));
@@ -803,16 +808,31 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id) {
 
 void
 ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
+    LOG_INFO("[remove] drop index {}", field_id.get());
     AssertInfo(!SystemProperty::Instance().IsSystem(field_id),
                "Field id:" + std::to_string(field_id.get()) +
                    " isn't one of system type when drop index");
     auto& field_meta = schema_->operator[](field_id);
-    AssertInfo(field_meta.is_vector(),
-               "Field meta of offset:" + std::to_string(field_id.get()) +
-                   " is not vector type");
+    // AssertInfo(field_meta.is_vector(),
+    //            "Field meta of offset:" + std::to_string(field_id.get()) +
+    //                " is not vector type");
 
     std::unique_lock lck(mutex_);
-    vector_indexings_.drop_field_indexing(field_id);
+    if (field_meta.is_vector()) {
+        vector_indexings_.drop_field_indexing(field_id);
+    } else if (field_meta.is_json()) {
+        auto indices = json_indices.wlock();
+        auto itr = std::find_if(
+            indices->begin(), indices->end(), [field_id](const auto& index) {
+                return index.field_id == field_id;
+            });
+        if (itr != indices->end()) {
+            indices->erase(itr);
+        }
+    } else {
+        LOG_INFO("[remove] drop index");
+        scalar_indexings_.wlock()->erase(field_id);
+    }
     set_bit(index_ready_bitset_, field_id, false);
 }
 
@@ -981,7 +1001,8 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       field_data_ready_bitset_(schema->size()),
       index_ready_bitset_(schema->size()),
       binlog_index_bitset_(schema->size()),
-      scalar_indexings_(schema->size()),
+      scalar_indexings_(std::unordered_map<FieldId, index::CacheIndexBasePtr>(
+          schema->size())),
       insert_record_(*schema, MAX_ROW_COUNT),
       schema_(schema),
       id_(segment_id),
@@ -1140,7 +1161,7 @@ ChunkedSegmentSealedImpl::ClearData() {
         index_has_raw_data_.clear();
         system_ready_count_ = 0;
         num_rows_ = std::nullopt;
-        scalar_indexings_.clear();
+        scalar_indexings_.wlock()->clear();
         vector_indexings_.clear();
         insert_record_.clear();
         fields_.clear();
@@ -1194,10 +1215,15 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
                     index->AddText(std::string(value), is_valid, offset);
                 });
         } else {  // fetch raw data from index.
-            auto field_index_iter = scalar_indexings_.find(field_id);
-            AssertInfo(field_index_iter != scalar_indexings_.end(),
-                       "failed to create text index, neither raw data nor "
-                       "index are found");
+            auto field_index_iter =
+                scalar_indexings_.withRLock([&](auto& mapping) {
+                    auto iter = mapping.find(field_id);
+                    AssertInfo(
+                        iter != mapping.end(),
+                        "failed to create text index, neither raw data nor "
+                        "index are found");
+                    return iter;
+                });
             auto accessor =
                 SemiInlineGet(field_index_iter->second->PinCells({0}));
             auto ptr = accessor->get_cell_of(0);
@@ -1570,8 +1596,10 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
     } else if (IsJsonDataType(field_meta.get_data_type())) {
         return get_bit(field_data_ready_bitset_, fieldID);
     } else {
-        auto scalar_index = scalar_indexings_.find(fieldID);
-        if (scalar_index != scalar_indexings_.end()) {
+        auto has_scalar_index = scalar_indexings_.withRLock([&](auto& mapping) {
+            return mapping.find(fieldID) != mapping.end();
+        });
+        if (has_scalar_index) {
             AssertInfo(
                 index_has_raw_data_.find(fieldID) != index_has_raw_data_.end(),
                 "index_has_raw_data_ is not set for fieldID: " +
