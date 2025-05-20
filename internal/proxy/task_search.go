@@ -263,7 +263,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if username, _ := GetCurUserFromContext(ctx); username != "" {
 		t.SearchRequest.Username = username
 	}
-
+	if collectionInfo.schema != nil {
+		t.CollectionTtl, _ = getCollectionTTL(collectionInfo.schema.GetProperties())
+	}
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 
 	log.Debug("search PreExecute done.",

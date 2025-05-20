@@ -870,7 +870,6 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	defer func() {
 		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
 	}()
-
 	// Send task to scheduler and wait until it finished.
 	task := tasks.NewQueryTask(queryCtx, collection, node.manager, req)
 	if err := node.scheduler.Add(task); err != nil {

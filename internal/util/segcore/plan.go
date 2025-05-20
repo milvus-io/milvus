@@ -81,6 +81,7 @@ type SearchRequest struct {
 	searchFieldID     int64
 	mvccTimestamp     typeutil.Timestamp
 	consistencyLevel  commonpb.ConsistencyLevel
+	collectionTTL     typeutil.Timestamp
 }
 
 func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
@@ -125,6 +126,7 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		searchFieldID:     int64(fieldID),
 		mvccTimestamp:     req.GetReq().GetMvccTimestamp(),
 		consistencyLevel:  req.GetReq().GetConsistencyLevel(),
+		collectionTTL:     req.GetReq().GetCollectionTtl(),
 	}, nil
 }
 
@@ -156,9 +158,10 @@ type RetrievePlan struct {
 	maxLimitSize     int64
 	ignoreNonPk      bool
 	consistencyLevel commonpb.ConsistencyLevel
+	collectionTTL    typeutil.Timestamp
 }
 
-func NewRetrievePlan(col *CCollection, expr []byte, timestamp typeutil.Timestamp, msgID int64, consistencylevel commonpb.ConsistencyLevel) (*RetrievePlan, error) {
+func NewRetrievePlan(col *CCollection, expr []byte, timestamp typeutil.Timestamp, msgID int64, consistencylevel commonpb.ConsistencyLevel, collectionTTL typeutil.Timestamp) (*RetrievePlan, error) {
 	if col.rawPointer() == nil {
 		return nil, errors.New("collection is released")
 	}
@@ -174,6 +177,7 @@ func NewRetrievePlan(col *CCollection, expr []byte, timestamp typeutil.Timestamp
 		msgID:            msgID,
 		maxLimitSize:     maxLimitSize,
 		consistencyLevel: consistencylevel,
+		collectionTTL:    collectionTTL,
 	}, nil
 }
 

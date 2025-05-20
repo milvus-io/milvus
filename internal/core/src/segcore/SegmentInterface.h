@@ -66,7 +66,8 @@ class SegmentInterface {
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_group,
            Timestamp timestamp,
-           int32_t consistency_level = 0) const = 0;
+           int32_t consistency_level = 0,
+           Timestamp collection_ttl = 0) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
@@ -74,7 +75,8 @@ class SegmentInterface {
              Timestamp timestamp,
              int64_t limit_size,
              bool ignore_non_pk,
-             int32_t consistency_level = 0) const = 0;
+             int32_t consistency_level = 0,
+             Timestamp collection_ttl = 0) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
@@ -270,7 +272,8 @@ class SegmentInternalInterface : public SegmentInterface {
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_group,
            Timestamp timestamp,
-           int32_t consistency_level = 0) const override;
+           int32_t consistency_level = 0,
+           Timestamp collection_ttl = 0) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
@@ -286,7 +289,8 @@ class SegmentInternalInterface : public SegmentInterface {
              Timestamp timestamp,
              int64_t limit_size,
              bool ignore_non_pk,
-             int32_t consistency_level = 0) const override;
+             int32_t consistency_level = 0,
+             Timestamp collection_ttl = 0) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
@@ -380,7 +384,8 @@ class SegmentInternalInterface : public SegmentInterface {
     // bitset 1 means not hit. 0 means hit.
     virtual void
     mask_with_timestamps(BitsetTypeView& bitset_chunk,
-                         Timestamp timestamp) const = 0;
+                         Timestamp timestamp,
+                         Timestamp collection_ttl) const = 0;
 
     // count of chunks
     virtual int64_t

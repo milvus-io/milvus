@@ -80,12 +80,13 @@ SegmentInternalInterface::Search(
     const query::Plan* plan,
     const query::PlaceholderGroup* placeholder_group,
     Timestamp timestamp,
-    int32_t consistency_level) const {
+    int32_t consistency_level,
+    Timestamp collection_ttl) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(
-        *this, timestamp, placeholder_group, consistency_level);
+        *this, timestamp, placeholder_group, consistency_level, collection_ttl);
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
@@ -98,11 +99,13 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    Timestamp timestamp,
                                    int64_t limit_size,
                                    bool ignore_non_pk,
-                                   int32_t consistency_level) const {
+                                   int32_t consistency_level,
+                                   Timestamp collection_ttl) const {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("Retrieve", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
-    query::ExecPlanNodeVisitor visitor(*this, timestamp, consistency_level);
+    query::ExecPlanNodeVisitor visitor(
+        *this, timestamp, consistency_level, collection_ttl);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
     results->set_has_more_result(retrieve_results.has_more_result);

@@ -77,7 +77,7 @@ func (suite *PlanSuite) TestPlanCreateByExpr() {
 
 func (suite *PlanSuite) TestQueryPlanCollectionReleased() {
 	suite.collection.Release()
-	_, err := segcore.NewRetrievePlan(suite.collection, nil, 0, 0, 0)
+	_, err := segcore.NewRetrievePlan(suite.collection, nil, 0, 0, 0, 0)
 	suite.Error(err)
 }
 
