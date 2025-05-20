@@ -398,6 +398,9 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 		return err
 	}
 
+	// mark segment compacting false
+	meta.SetSegmentCompacting(st.segmentID, false)
+
 	log.Info("SetJobInfo for stats task success", zap.Int64("taskID", st.taskID),
 		zap.Int64("oldSegmentID", st.segmentID), zap.Int64("targetSegmentID", st.taskInfo.GetSegmentID()),
 		zap.String("subJobType", st.subJobType.String()), zap.String("state", st.taskInfo.GetState().String()))
