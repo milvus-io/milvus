@@ -34,6 +34,18 @@ type GrpcDataNodeClient struct {
 	Err error
 }
 
+func (m *GrpcDataNodeClient) CreateTask(ctx context.Context, in *workerpb.CreateTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) QueryTask(ctx context.Context, in *workerpb.QueryTaskRequest, opts ...grpc.CallOption) (*workerpb.QueryTaskResponse, error) {
+	return &workerpb.QueryTaskResponse{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) DropTask(ctx context.Context, in *workerpb.DropTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcDataNodeClient) CreateJob(ctx context.Context, in *workerpb.CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

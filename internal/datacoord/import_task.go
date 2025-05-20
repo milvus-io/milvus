@@ -17,13 +17,8 @@
 package datacoord
 
 import (
-	"google.golang.org/protobuf/proto"
-
-	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
@@ -86,9 +81,9 @@ func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
 	return func(t ImportTask) {
 		switch t.GetType() {
 		case PreImportTaskType:
-			t.(*preImportTask).PreImportTask.State = state
+			t.(*preImportTask).task.Load().State = state
 		case ImportTaskType:
-			t.(*importTask).ImportTaskV2.State = state
+			t.(*importTask).task.Load().State = state
 		}
 	}
 }
@@ -97,9 +92,9 @@ func UpdateReason(reason string) UpdateAction {
 	return func(t ImportTask) {
 		switch t.GetType() {
 		case PreImportTaskType:
-			t.(*preImportTask).PreImportTask.Reason = reason
+			t.(*preImportTask).task.Load().Reason = reason
 		case ImportTaskType:
-			t.(*importTask).ImportTaskV2.Reason = reason
+			t.(*importTask).task.Load().Reason = reason
 		}
 	}
 }
@@ -108,9 +103,9 @@ func UpdateCompleteTime(completeTime string) UpdateAction {
 	return func(t ImportTask) {
 		switch t.GetType() {
 		case PreImportTaskType:
-			t.(*preImportTask).PreImportTask.CompleteTime = completeTime
+			t.(*preImportTask).task.Load().CompleteTime = completeTime
 		case ImportTaskType:
-			t.(*importTask).ImportTaskV2.CompleteTime = completeTime
+			t.(*importTask).task.Load().CompleteTime = completeTime
 		}
 	}
 }
@@ -119,9 +114,9 @@ func UpdateNodeID(nodeID int64) UpdateAction {
 	return func(t ImportTask) {
 		switch t.GetType() {
 		case PreImportTaskType:
-			t.(*preImportTask).PreImportTask.NodeID = nodeID
+			t.(*preImportTask).task.Load().NodeID = nodeID
 		case ImportTaskType:
-			t.(*importTask).ImportTaskV2.NodeID = nodeID
+			t.(*importTask).task.Load().NodeID = nodeID
 		}
 	}
 }
@@ -129,7 +124,7 @@ func UpdateNodeID(nodeID int64) UpdateAction {
 func UpdateFileStats(fileStats []*datapb.ImportFileStats) UpdateAction {
 	return func(t ImportTask) {
 		if task, ok := t.(*preImportTask); ok {
-			task.PreImportTask.FileStats = fileStats
+			task.task.Load().FileStats = fileStats
 		}
 	}
 }
@@ -137,7 +132,7 @@ func UpdateFileStats(fileStats []*datapb.ImportFileStats) UpdateAction {
 func UpdateSegmentIDs(segmentIDs []UniqueID) UpdateAction {
 	return func(t ImportTask) {
 		if task, ok := t.(*importTask); ok {
-			task.ImportTaskV2.SegmentIDs = segmentIDs
+			task.task.Load().SegmentIDs = segmentIDs
 		}
 	}
 }
@@ -145,12 +140,13 @@ func UpdateSegmentIDs(segmentIDs []UniqueID) UpdateAction {
 func UpdateStatsSegmentIDs(segmentIDs []UniqueID) UpdateAction {
 	return func(t ImportTask) {
 		if task, ok := t.(*importTask); ok {
-			task.ImportTaskV2.StatsSegmentIDs = segmentIDs
+			task.task.Load().StatsSegmentIDs = segmentIDs
 		}
 	}
 }
 
 type ImportTask interface {
+	task.Task
 	GetJobID() int64
 	GetTaskID() int64
 	GetCollectionID() int64
@@ -160,96 +156,6 @@ type ImportTask interface {
 	GetReason() string
 	GetFileStats() []*datapb.ImportFileStats
 	GetTR() *timerecord.TimeRecorder
-	GetSlots() int64
 	Clone() ImportTask
 	GetSource() datapb.ImportTaskSourceV2
-}
-
-type preImportTask struct {
-	*datapb.PreImportTask
-	tr *timerecord.TimeRecorder
-}
-
-func (p *preImportTask) GetType() TaskType {
-	return PreImportTaskType
-}
-
-func (p *preImportTask) GetTR() *timerecord.TimeRecorder {
-	return p.tr
-}
-
-func (p *preImportTask) GetSlots() int64 {
-	return int64(funcutil.Min(len(p.GetFileStats()), paramtable.Get().DataNodeCfg.MaxTaskSlotNum.GetAsInt()))
-}
-
-func (p *preImportTask) Clone() ImportTask {
-	return &preImportTask{
-		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
-		tr:            p.tr,
-	}
-}
-
-func (p *preImportTask) GetSource() datapb.ImportTaskSourceV2 {
-	return datapb.ImportTaskSourceV2_Request
-}
-
-func (p *preImportTask) MarshalJSON() ([]byte, error) {
-	importTask := metricsinfo.ImportTask{
-		JobID:        p.GetJobID(),
-		TaskID:       p.GetTaskID(),
-		CollectionID: p.GetCollectionID(),
-		NodeID:       p.GetNodeID(),
-		State:        p.GetState().String(),
-		Reason:       p.GetReason(),
-		TaskType:     p.GetType().String(),
-		CreatedTime:  p.GetCreatedTime(),
-		CompleteTime: p.GetCompleteTime(),
-	}
-	return json.Marshal(importTask)
-}
-
-type importTask struct {
-	*datapb.ImportTaskV2
-	tr *timerecord.TimeRecorder
-}
-
-func (t *importTask) GetType() TaskType {
-	return ImportTaskType
-}
-
-func (t *importTask) GetTR() *timerecord.TimeRecorder {
-	return t.tr
-}
-
-func (t *importTask) GetSlots() int64 {
-	// Consider the following two scenarios:
-	// 1. Importing a large number of small files results in
-	//    a small total data size, making file count unsuitable as a slot number.
-	// 2. Importing a file with many shards number results in many segments and a small total data size,
-	//    making segment count unsuitable as a slot number.
-	// Taking these factors into account, we've decided to use the
-	// minimum value between segment count and file count as the slot number.
-	return int64(funcutil.Min(len(t.GetFileStats()), len(t.GetSegmentIDs()), paramtable.Get().DataNodeCfg.MaxTaskSlotNum.GetAsInt()))
-}
-
-func (t *importTask) Clone() ImportTask {
-	return &importTask{
-		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
-		tr:           t.tr,
-	}
-}
-
-func (t *importTask) MarshalJSON() ([]byte, error) {
-	importTask := metricsinfo.ImportTask{
-		JobID:        t.GetJobID(),
-		TaskID:       t.GetTaskID(),
-		CollectionID: t.GetCollectionID(),
-		NodeID:       t.GetNodeID(),
-		State:        t.GetState().String(),
-		Reason:       t.GetReason(),
-		TaskType:     t.GetType().String(),
-		CreatedTime:  t.GetCreatedTime(),
-		CompleteTime: t.GetCompleteTime(),
-	}
-	return json.Marshal(importTask)
 }

@@ -1639,11 +1639,11 @@ func TestGetCompactionState(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
-		mockHandler := NewMockCompactionPlanContext(t)
+		mockHandler := NewMockCompactionInspector(t)
 		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{
 			state: commonpb.CompactionState_Completed,
 		})
-		svr.compactionHandler = mockHandler
+		svr.compactionInspector = mockHandler
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -1666,8 +1666,8 @@ func TestGetCompactionState(t *testing.T) {
 				{State: datapb.CompactionTaskState_timeout},
 				{State: datapb.CompactionTaskState_timeout},
 			})
-		mockHandler := newCompactionPlanHandler(nil, nil, mockMeta, nil, nil)
-		svr.compactionHandler = mockHandler
+		mockHandler := newCompactionInspector(mockMeta, nil, nil, nil)
+		svr.compactionInspector = mockHandler
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 1})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -1698,9 +1698,9 @@ func TestManualCompaction(t *testing.T) {
 		svr.compactionTrigger = mockTrigger
 		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(1, nil)
 
-		mockHandler := NewMockCompactionPlanContext(t)
+		mockHandler := NewMockCompactionInspector(t)
 		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
-		svr.compactionHandler = mockHandler
+		svr.compactionInspector = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
 			Timetravel:   1,
@@ -1745,12 +1745,12 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
-		mockHandler := NewMockCompactionPlanContext(t)
+		mockHandler := NewMockCompactionInspector(t)
 		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{
 			state:        commonpb.CompactionState_Executing,
 			executingCnt: 1,
 		})
-		svr.compactionHandler = mockHandler
+		svr.compactionInspector = mockHandler
 
 		resp, err := svr.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
 			CompactionID: 1,
@@ -1852,6 +1852,10 @@ func TestHandleSessionEvent(t *testing.T) {
 	defer cluster.Close()
 
 	svr := newTestServer(t, WithCluster(cluster))
+	manager := session.NewMockNodeManager(t)
+	manager.EXPECT().AddNode(mock.Anything, mock.Anything).Return(nil)
+	manager.EXPECT().RemoveNode(mock.Anything).Return()
+	svr.nodeManager = manager
 	defer closeTestServer(t, svr)
 	t.Run("handle events", func(t *testing.T) {
 		// None event

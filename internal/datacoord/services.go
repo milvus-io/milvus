@@ -713,7 +713,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		}
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
-	s.compactionHandler.removeTasksByChannel(channel)
+	s.compactionInspector.removeTasksByChannel(channel)
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
 	s.meta.MarkChannelCheckpointDropped(ctx, channel)
 
@@ -1229,7 +1229,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	taskCnt := s.compactionHandler.getCompactionTasksNumBySignalID(id)
+	taskCnt := s.compactionInspector.getCompactionTasksNumBySignalID(id)
 	if taskCnt == 0 {
 		resp.CompactionID = -1
 		resp.CompactionPlanCount = 0
@@ -1263,7 +1263,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 		return resp, nil
 	}
 
-	info := s.compactionHandler.getCompactionInfo(ctx, req.GetCompactionID())
+	info := s.compactionInspector.getCompactionInfo(ctx, req.GetCompactionID())
 
 	resp.State = info.state
 	resp.ExecutingPlanNo = int64(info.executingCnt)
@@ -1297,7 +1297,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 		return resp, nil
 	}
 
-	info := s.compactionHandler.getCompactionInfo(ctx, req.GetCompactionID())
+	info := s.compactionInspector.getCompactionInfo(ctx, req.GetCompactionID())
 	resp.State = info.state
 	resp.MergeInfos = lo.MapToSlice[int64, *milvuspb.CompactionMergeInfo](info.mergeInfos, func(_ int64, merge *milvuspb.CompactionMergeInfo) *milvuspb.CompactionMergeInfo {
 		return merge
@@ -1908,7 +1908,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
 		return resp, nil
 	}
-	progress, state, importedRows, totalRows, reason := GetJobProgress(jobID, s.importMeta, s.meta, s.jobManager)
+	progress, state, importedRows, totalRows, reason := GetJobProgress(jobID, s.importMeta, s.meta, s.statsInspector)
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
@@ -1945,7 +1945,7 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 	}
 
 	for _, job := range jobs {
-		progress, state, _, _, reason := GetJobProgress(job.GetJobID(), s.importMeta, s.meta, s.jobManager)
+		progress, state, _, _, reason := GetJobProgress(job.GetJobID(), s.importMeta, s.meta, s.statsInspector)
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
 		resp.States = append(resp.States, state)
 		resp.Reasons = append(resp.Reasons, reason)

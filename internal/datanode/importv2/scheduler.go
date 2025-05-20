@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type Scheduler interface {
@@ -88,17 +87,13 @@ func (s *scheduler) Start() {
 	}
 }
 
+// Slots returns the available slots for import
 func (s *scheduler) Slots() int64 {
 	tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending, datapb.ImportTaskStateV2_InProgress))
 	used := lo.SumBy(tasks, func(t Task) int64 {
 		return t.GetSlots()
 	})
-	total := paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt64()
-	free := total - used
-	if free >= 0 {
-		return free
-	}
-	return 0
+	return used
 }
 
 func (s *scheduler) Close() {
