@@ -144,6 +144,24 @@ func (m *analyzeMeta) BuildingTask(taskID int64) error {
 	return m.saveTask(cloneT)
 }
 
+func (m *analyzeMeta) UpdateState(taskID int64, state indexpb.JobState, failReason string) error {
+	m.Lock()
+	defer m.Unlock()
+
+	t, ok := m.tasks[taskID]
+	if !ok {
+		return fmt.Errorf("there is no task with taskID: %d", taskID)
+	}
+
+	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
+	cloneT.State = state
+	cloneT.FailReason = failReason
+	log.Info("update analyze task state", zap.Int64("taskID", taskID), zap.String("state", state.String()),
+		zap.String("failReason", failReason))
+
+	return m.saveTask(cloneT)
+}
+
 func (m *analyzeMeta) FinishTask(taskID int64, result *workerpb.AnalyzeResult) error {
 	m.Lock()
 	defer m.Unlock()

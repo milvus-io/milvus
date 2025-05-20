@@ -78,24 +78,20 @@ func NewExecutor() *executor {
 func (e *executor) Execute(task Compactor) (bool, error) {
 	e.slotMu.Lock()
 	defer e.slotMu.Unlock()
-	if paramtable.Get().DataNodeCfg.SlotCap.GetAsInt64()-e.usingSlots >= task.GetSlotUsage() {
-		newSlotUsage := task.GetSlotUsage()
-		// compatible for old datacoord or unexpected request
-		if task.GetSlotUsage() <= 0 {
-			switch task.GetCompactionType() {
-			case datapb.CompactionType_ClusteringCompaction:
-				newSlotUsage = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
-			case datapb.CompactionType_MixCompaction:
-				newSlotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-			case datapb.CompactionType_Level0DeleteCompaction:
-				newSlotUsage = paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
-			}
-			log.Warn("illegal task slot usage, change it to a default value", zap.Int64("illegalSlotUsage", task.GetSlotUsage()), zap.Int64("newSlotUsage", newSlotUsage))
+	newSlotUsage := task.GetSlotUsage()
+	// compatible for old datacoord or unexpected request
+	if task.GetSlotUsage() <= 0 {
+		switch task.GetCompactionType() {
+		case datapb.CompactionType_ClusteringCompaction:
+			newSlotUsage = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
+		case datapb.CompactionType_MixCompaction:
+			newSlotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
+		case datapb.CompactionType_Level0DeleteCompaction:
+			newSlotUsage = paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
 		}
-		e.usingSlots = e.usingSlots + newSlotUsage
-	} else {
-		return false, merr.WrapErrDataNodeSlotExhausted()
+		log.Warn("illegal task slot usage, change it to a default value", zap.Int64("illegalSlotUsage", task.GetSlotUsage()), zap.Int64("newSlotUsage", newSlotUsage))
 	}
+	e.usingSlots = e.usingSlots + newSlotUsage
 	_, ok := e.executing.GetOrInsert(task.GetPlanID(), task)
 	if ok {
 		log.Warn("duplicated compaction task",
@@ -107,8 +103,9 @@ func (e *executor) Execute(task Compactor) (bool, error) {
 	return true, nil
 }
 
+// Slots returns the available slots for compaction
 func (e *executor) Slots() int64 {
-	return paramtable.Get().DataNodeCfg.SlotCap.GetAsInt64() - e.getUsingSlots()
+	return e.getUsingSlots()
 }
 
 func (e *executor) getUsingSlots() int64 {

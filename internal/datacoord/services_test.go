@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
@@ -53,6 +52,8 @@ func WithChannelManager(cm ChannelManager) Option {
 		svr.sessionManager = session.NewDataNodeManagerImpl(session.WithDataNodeCreator(svr.dataNodeCreator))
 		svr.channelManager = cm
 		svr.cluster = NewClusterImpl(svr.sessionManager, svr.channelManager)
+		svr.nodeManager = session.NewNodeManager(svr.dataNodeCreator)
+		svr.cluster2 = session.NewCluster(svr.nodeManager)
 	}
 }
 
@@ -1352,7 +1353,7 @@ func TestImportV2(t *testing.T) {
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-		s.importMeta, err = NewImportMeta(context.TODO(), catalog)
+		s.importMeta, err = NewImportMeta(context.TODO(), catalog, nil, nil)
 		assert.NoError(t, err)
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
@@ -1370,7 +1371,7 @@ func TestImportV2(t *testing.T) {
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(mockErr)
-		s.importMeta, err = NewImportMeta(context.TODO(), catalog)
+		s.importMeta, err = NewImportMeta(context.TODO(), catalog, nil, nil)
 		assert.NoError(t, err)
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
 			Files: []*internalpb.ImportFile{
@@ -1437,10 +1438,10 @@ func TestImportV2(t *testing.T) {
 		wal := mock_streaming.NewMockWALAccesser(t)
 		b := mock_streaming.NewMockBroadcast(t)
 		wal.EXPECT().Broadcast().Return(b).Maybe()
-		streaming.SetWALForTest(wal)
-		defer streaming.RecoverWALForTest()
+		// streaming.SetWALForTest(wal)
+		// defer streaming.RecoverWALForTest()
 
-		s.importMeta, err = NewImportMeta(context.TODO(), catalog)
+		s.importMeta, err = NewImportMeta(context.TODO(), catalog, nil, nil)
 		assert.NoError(t, err)
 		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
 			JobID: "-1",
@@ -1483,7 +1484,7 @@ func TestImportV2(t *testing.T) {
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 		catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
-		s.importMeta, err = NewImportMeta(context.TODO(), catalog)
+		s.importMeta, err = NewImportMeta(context.TODO(), catalog, nil, nil)
 		assert.NoError(t, err)
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
@@ -1494,13 +1495,13 @@ func TestImportV2(t *testing.T) {
 		}
 		err = s.importMeta.AddJob(context.TODO(), job)
 		assert.NoError(t, err)
-		var task ImportTask = &preImportTask{
-			PreImportTask: &datapb.PreImportTask{
-				JobID:  0,
-				TaskID: 1,
-				State:  datapb.ImportTaskStateV2_Failed,
-			},
+		taskProto := &datapb.PreImportTask{
+			JobID:  0,
+			TaskID: 1,
+			State:  datapb.ImportTaskStateV2_Failed,
 		}
+		var task ImportTask = &preImportTask{}
+		task.(*preImportTask).task.Store(taskProto)
 		err = s.importMeta.AddTask(context.TODO(), task)
 		assert.NoError(t, err)
 		resp, err = s.ListImports(ctx, &internalpb.ListImportsRequestInternal{

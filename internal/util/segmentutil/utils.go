@@ -36,3 +36,16 @@ func CalcRowCountFromBinLog(seg *datapb.SegmentInfo) int64 {
 	}
 	return rowCt
 }
+
+// CalcDelRowCountFromDeltaLog calculates deleted rows of a L0 segment from delta logs
+func CalcDelRowCountFromDeltaLog(seg *datapb.SegmentInfo) int64 {
+	var rowCt int64
+	if len(seg.GetDeltalogs()) > 0 {
+		for _, dls := range seg.GetDeltalogs() {
+			for _, dl := range dls.GetBinlogs() {
+				rowCt += dl.GetEntriesNum()
+			}
+		}
+	}
+	return rowCt
+}

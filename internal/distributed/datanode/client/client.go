@@ -341,3 +341,21 @@ func (c *Client) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Request
 		return client.DropJobsV2(ctx, req)
 	})
 }
+
+func (c *Client) CreateTask(ctx context.Context, in *workerpb.CreateTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client DataNodeClient) (*commonpb.Status, error) {
+		return client.CreateTask(ctx, in)
+	})
+}
+
+func (c *Client) QueryTask(ctx context.Context, in *workerpb.QueryTaskRequest, opts ...grpc.CallOption) (*workerpb.QueryTaskResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client DataNodeClient) (*workerpb.QueryTaskResponse, error) {
+		return client.QueryTask(ctx, in)
+	})
+}
+
+func (c *Client) DropTask(ctx context.Context, in *workerpb.DropTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client DataNodeClient) (*commonpb.Status, error) {
+		return client.DropTask(ctx, in)
+	})
+}

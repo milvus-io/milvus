@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/task"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
@@ -113,18 +114,20 @@ type Server struct {
 	// self host id allocator, to avoid get unique id from rootcoord
 	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	cluster          Cluster
-	sessionManager   session.DataNodeManager
+	sessionManager   session.DataNodeManager // TODO: sheep, remove sessionManager and cluster
+	nodeManager      session.NodeManager
+	cluster2         session.Cluster
 	channelManager   ChannelManager
 	mixCoord         types.MixCoord
 	garbageCollector *garbageCollector
 	gcOpt            GcOption
 	handler          Handler
 	importMeta       ImportMeta
-	importScheduler  ImportScheduler
+	importInspector  ImportInspector
 	importChecker    ImportChecker
 
 	compactionTrigger        trigger
-	compactionHandler        compactionPlanContext
+	compactionInspector      CompactionInspector
 	compactionTriggerManager TriggerManager
 
 	syncSegmentsScheduler *SyncSegmentsScheduler
@@ -148,11 +151,12 @@ type Server struct {
 	// indexCoord             types.IndexCoord
 
 	// segReferManager  *SegmentReferenceManager
-	indexNodeManager          session.WorkerManager
 	indexEngineVersionManager IndexEngineVersionManager
 
-	taskScheduler *taskScheduler
-	jobManager    StatsJobManager
+	statsInspector   *statsInspector
+	indexInspector   *indexInspector
+	analyzeInspector *analyzeInspector
+	globalScheduler  task.GlobalScheduler
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -285,24 +289,27 @@ func (s *Server) initDataCoord() error {
 	}
 	log.Info("init datanode cluster done")
 
-	s.initIndexNodeManager()
-
 	if err = s.initServiceDiscovery(); err != nil {
 		return err
 	}
 	log.Info("init service discovery done")
 
-	s.importMeta, err = NewImportMeta(s.ctx, s.meta.catalog)
+	s.globalScheduler = task.NewGlobalTaskScheduler(s.ctx, s.cluster2)
+
+	s.importMeta, err = NewImportMeta(s.ctx, s.meta.catalog, s.allocator, s.meta)
 	if err != nil {
 		return err
 	}
 	s.initCompaction()
 	log.Info("init compaction done")
 
-	s.initTaskScheduler(storageCli)
+	s.initAnalyzeInspector()
+	log.Info("init analyze inspector done")
+
+	s.initIndexInspector(storageCli)
 	log.Info("init task scheduler done")
 
-	s.initJobManager()
+	s.initStatsInspector()
 	log.Info("init statsJobManager done")
 
 	if err = s.initSegmentManager(); err != nil {
@@ -312,8 +319,9 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 
-	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta)
-	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.importMeta, s.jobManager, s.compactionTriggerManager)
+	s.importInspector = NewImportInspector(s.meta, s.importMeta, s.globalScheduler)
+
+	s.importChecker = NewImportChecker(s.meta, s.broker, s.allocator, s.importMeta, s.statsInspector, s.compactionTriggerManager)
 
 	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
 
@@ -373,6 +381,8 @@ func (s *Server) initCluster() error {
 		return err
 	}
 	s.cluster = NewClusterImpl(s.sessionManager, s.channelManager)
+	s.nodeManager = session.NewNodeManager(s.dataNodeCreator)
+	s.cluster2 = session.NewCluster(s.nodeManager)
 	return nil
 }
 
@@ -443,44 +453,42 @@ func (s *Server) initServiceDiscovery() error {
 	if err != nil {
 		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
 	}
-
-	for _, s := range sessions {
-		info := &session.NodeInfo{
-			NodeID:  s.ServerID,
-			Address: s.Address,
-		}
-
-		if s.Version.LTE(legacyVersion) {
-			info.IsLegacy = true
-		}
-
-		datanodes = append(datanodes, info)
-	}
-
-	log.Info("DataCoord Cluster Manager start up")
-	if err := s.cluster.Startup(s.ctx, datanodes); err != nil {
-		log.Warn("DataCoord Cluster Manager failed to start up", zap.Error(err))
-		return err
-	}
-	log.Info("DataCoord Cluster Manager start up successfully")
-
-	// TODO implement rewatch logic
-	s.dnEventCh = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, nil)
-
 	if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
-		if err = s.indexNodeManager.AddNode(Params.DataCoordCfg.IndexNodeID.GetAsInt64(), Params.DataCoordCfg.IndexNodeAddress.GetValue()); err != nil {
-			log.Error("add dataNode fail", zap.Int64("ServerID", Params.DataCoordCfg.IndexNodeID.GetAsInt64()),
-				zap.String("address", Params.DataCoordCfg.IndexNodeAddress.GetValue()), zap.Error(err))
+		log.Info("initServiceDiscovery adding datanode with bind mode",
+			zap.Int64("nodeID", Params.DataCoordCfg.IndexNodeID.GetAsInt64()),
+			zap.String("address", Params.DataCoordCfg.IndexNodeAddress.GetValue()))
+		if err := s.nodeManager.AddNode(Params.DataCoordCfg.IndexNodeID.GetAsInt64(),
+			Params.DataCoordCfg.IndexNodeAddress.GetValue()); err != nil {
+			log.Warn("DataCoord failed to add datanode", zap.Error(err))
 			return err
 		}
-		log.Info("add dataNode success", zap.String("DataNode address", Params.DataCoordCfg.IndexNodeAddress.GetValue()),
-			zap.Int64("nodeID", Params.DataCoordCfg.IndexNodeID.GetAsInt64()))
 	} else {
-		for _, session := range sessions {
-			if err := s.indexNodeManager.AddNode(session.ServerID, session.Address); err != nil {
+		for _, ss := range sessions {
+			info := &session.NodeInfo{
+				NodeID:  ss.ServerID,
+				Address: ss.Address,
+			}
+
+			if ss.Version.LTE(legacyVersion) {
+				info.IsLegacy = true
+			}
+
+			datanodes = append(datanodes, info)
+			if err := s.nodeManager.AddNode(info.NodeID, info.Address); err != nil {
+				log.Warn("DataCoord failed to add datanode", zap.Error(err))
 				return err
 			}
 		}
+
+		log.Info("DataCoord Cluster Manager start up")
+		if err := s.cluster.Startup(s.ctx, datanodes); err != nil {
+			log.Warn("DataCoord Cluster Manager failed to start up", zap.Error(err))
+			return err
+		}
+		log.Info("DataCoord Cluster Manager start up successfully")
+
+		// TODO implement rewatch logic
+		s.dnEventCh = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, nil)
 	}
 
 	s.indexEngineVersionManager = newIndexEngineVersionManager()
@@ -568,31 +576,30 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
 }
 
-func (s *Server) initTaskScheduler(manager storage.ChunkManager) {
-	if s.taskScheduler == nil {
-		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler, s.allocator, s.compactionHandler)
-		s.compactionHandler.setTaskScheduler(s.taskScheduler)
+func (s *Server) initAnalyzeInspector() {
+	if s.analyzeInspector == nil {
+		s.analyzeInspector = newAnalyzeInspector(s.ctx, s.meta, s.globalScheduler)
 	}
 }
 
-func (s *Server) initJobManager() {
-	if s.jobManager == nil {
-		s.jobManager = newJobManager(s.ctx, s.meta, s.taskScheduler, s.allocator)
+func (s *Server) initIndexInspector(storageCli storage.ChunkManager) {
+	if s.indexInspector == nil {
+		s.indexInspector = newIndexInspector(s.ctx, s.notifyIndexChan, s.meta, s.globalScheduler, s.allocator, s.handler, storageCli, s.indexEngineVersionManager)
 	}
 }
 
-func (s *Server) initIndexNodeManager() {
-	if s.indexNodeManager == nil {
-		s.indexNodeManager = session.NewNodeManager(s.ctx, s.dataNodeCreator)
+func (s *Server) initStatsInspector() {
+	if s.statsInspector == nil {
+		s.statsInspector = newStatsInspector(s.ctx, s.meta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
 	}
 }
 
 func (s *Server) initCompaction() {
-	cph := newCompactionPlanHandler(s.cluster, s.sessionManager, s.meta, s.allocator, s.handler)
+	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler)
 	cph.loadMeta()
-	s.compactionHandler = cph
-	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler, s.meta, s.importMeta)
-	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
+	s.compactionInspector = cph
+	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.importMeta)
+	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
 }
 
 func (s *Server) stopCompaction() {
@@ -603,14 +610,14 @@ func (s *Server) stopCompaction() {
 		s.compactionTriggerManager.Stop()
 	}
 
-	if s.compactionHandler != nil {
-		s.compactionHandler.stop()
+	if s.compactionInspector != nil {
+		s.compactionInspector.stop()
 	}
 }
 
 func (s *Server) startCompaction() {
-	if s.compactionHandler != nil {
-		s.compactionHandler.start()
+	if s.compactionInspector != nil {
+		s.compactionInspector.start()
 	}
 
 	if s.compactionTrigger != nil {
@@ -630,7 +637,8 @@ func (s *Server) startServerLoop() {
 	s.serverLoopWg.Add(2)
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
-	go s.importScheduler.Start()
+	s.globalScheduler.Start()
+	go s.importInspector.Start()
 	go s.importChecker.Start()
 	s.garbageCollector.start()
 
@@ -662,10 +670,9 @@ func (s *Server) collectMetaMetrics(ctx context.Context) {
 }
 
 func (s *Server) startTaskScheduler() {
-	s.taskScheduler.Start()
-	s.jobManager.Start()
-
-	s.startIndexService(s.serverLoopCtx)
+	s.statsInspector.Start()
+	s.indexInspector.Start()
+	s.analyzeInspector.Start()
 	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
 
@@ -779,7 +786,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 					zap.String("event type", event.EventType.String()))
 				return nil
 			}
-			return s.indexNodeManager.AddNode(event.Session.ServerID, event.Session.Address)
+			return s.nodeManager.AddNode(event.Session.ServerID, event.Session.Address)
 		case sessionutil.SessionDelEvent:
 			log.Info("received datanode unregister",
 				zap.String("address", info.Address),
@@ -796,18 +803,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 					zap.String("event type", event.EventType.String()))
 				return nil
 			}
-			s.indexNodeManager.RemoveNode(event.Session.ServerID)
-		case sessionutil.SessionUpdateEvent:
-			if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
-				log.Info("receive datanode session event, but adding indexnode by bind mode, skip it",
-					zap.String("address", event.Session.Address),
-					zap.Int64("serverID", event.Session.ServerID),
-					zap.String("event type", event.EventType.String()))
-				return nil
-			}
-			serverID := event.Session.ServerID
-			log.Info("received datanode SessionUpdateEvent", zap.Int64("serverID", serverID))
-			s.indexNodeManager.StoppingNode(serverID)
+			s.nodeManager.RemoveNode(event.Session.ServerID)
 		default:
 			log.Warn("receive unknown service event type",
 				zap.Any("type", event.EventType))
@@ -960,18 +956,22 @@ func (s *Server) Stop() error {
 	s.stopServerLoop()
 	log.Info("datacoord stopServerLoop stopped")
 
-	s.importScheduler.Close()
+	s.globalScheduler.Stop()
+	s.importInspector.Close()
 	s.importChecker.Close()
 	s.syncSegmentsScheduler.Stop()
 
 	s.stopCompaction()
 	log.Info("datacoord compaction stopped")
 
-	s.jobManager.Stop()
-	log.Info("datacoord statsJobManager stopped")
+	s.statsInspector.Stop()
+	log.Info("datacoord stats inspector stopped")
 
-	s.taskScheduler.Stop()
-	log.Info("datacoord index builder stopped")
+	s.indexInspector.Stop()
+	log.Info("datacoord index inspector stopped")
+
+	s.analyzeInspector.Stop()
+	log.Info("datacoord analyze inspector stopped")
 
 	s.cluster.Close()
 	log.Info("datacoord cluster stopped")
