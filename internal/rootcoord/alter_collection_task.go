@@ -274,8 +274,8 @@ func (a *alterCollectionFieldTask) Prepare(ctx context.Context) error {
 }
 
 func (a *alterCollectionFieldTask) Execute(ctx context.Context) error {
-	if a.Req.GetProperties() == nil {
-		return errors.New("only support alter collection properties, but collection field properties is empty")
+	if len(a.Req.GetProperties()) == 0 && len(a.Req.GetDeleteKeys()) == 0 {
+		return errors.New("The field properties to alter and keys to delete must not be empty at the same time")
 	}
 
 	oldColl, err := a.core.meta.GetCollectionByName(ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.ts)
@@ -314,7 +314,13 @@ func executeAlterCollectionFieldTaskSteps(ctx context.Context,
 ) error {
 	var err error
 	filedName := request.GetFieldName()
-	newFieldProperties := UpdateFieldPropertyParams(oldFieldProperties, request.GetProperties())
+
+	var newFieldProperties []*commonpb.KeyValuePair
+	if len(request.Properties) > 0 {
+		newFieldProperties = UpdateFieldPropertyParams(oldFieldProperties, request.GetProperties())
+	} else if len(request.DeleteKeys) > 0 {
+		newFieldProperties = DeleteProperties(oldFieldProperties, request.GetDeleteKeys())
+	}
 	oldColl := col.Clone()
 	err = ResetFieldProperties(oldColl, filedName, oldFieldProperties)
 	if err != nil {
