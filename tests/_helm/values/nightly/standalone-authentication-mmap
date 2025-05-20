@@ -10,6 +10,8 @@ cluster:
   enabled: false
 streaming:
   enabled: true
+woodpecker:
+  enabled: true
 service:
   type: ClusterIP
 woodpecker:
