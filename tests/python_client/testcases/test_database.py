@@ -892,6 +892,7 @@ class TestDatabaseOtherApi(TestcaseBase):
                                             partition_names=[partition_name],
                                             check_task=CheckTasks.check_query_iterator,
                                             check_items={"count": 1000,
+                                                         "pk_name": self.database_wrap.primary_field.name,
                                                          "batch_size": ct.default_limit * 10})
 
     def prepare_data_for_db_search(self):

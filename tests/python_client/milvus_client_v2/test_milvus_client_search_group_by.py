@@ -64,7 +64,7 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:7]
+range_search_supported_indexes = ct.all_index_types[:8]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -182,7 +182,7 @@ class TestSearchGroupBy(TestcaseBase):
                             check_items={"err_code": err_code, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:8])
     def test_search_group_by_unsupported_index(self, index):
         """
         target: test search group by with the unsupported vector index

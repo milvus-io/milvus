@@ -31,6 +31,7 @@
 #include "arrow/type_fwd.h"
 #include "cachinglayer/Utils.h"
 #include "common/ChunkWriter.h"
+#include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -50,8 +51,15 @@ GroupChunkTranslator::GroupChunkTranslator(
       use_mmap_(use_mmap),
       row_group_meta_list_(row_group_meta_list),
       field_id_list_(field_id_list),
-      meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
-                     : milvus::cachinglayer::StorageType::MEMORY) {
+      meta_(
+          field_id_list.size(),
+          use_mmap ? milvus::cachinglayer::StorageType::DISK
+                   : milvus::cachinglayer::StorageType::MEMORY,
+          // TODO(tiered storage 2): vector may be of small size and mixed with scalar, do we force it
+          // to use the warm up policy of scalar field?
+          milvus::segcore::getCacheWarmupPolicy(/* is_vector */ false,
+                                                /* is_index */ false),
+          /* support_eviction */ true) {
     AssertInfo(insert_files_.size() == row_group_meta_list_.size(),
                "Number of insert files must match number of row group metas");
     meta_.num_rows_until_chunk_.push_back(0);
@@ -216,6 +224,13 @@ GroupChunkTranslator::load_column_group_in_mmap() {
         for (const auto& table : r->arrow_tables) {
             process_batch(table, files, file_offsets, row_counts);
         }
+    }
+    for (size_t i = 0; i < files.size(); ++i) {
+        auto ok = unlink(files[i].c_str());
+        AssertInfo(ok == 0,
+                   fmt::format("failed to unlink mmap data file {}, err: {}",
+                               files[i].c_str(),
+                               strerror(errno)));
     }
 }
 

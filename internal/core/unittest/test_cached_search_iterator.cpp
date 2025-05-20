@@ -48,16 +48,10 @@ constexpr size_t kHnswEf = 128;
 const MetricType kMetricType = knowhere::metric::L2;
 }  // namespace
 
-enum class ConstructorType {
-    VectorIndex = 0,
-    RawData,
-    VectorBase,
-    ChunkedColumn
-};
+enum class ConstructorType { VectorIndex = 0, VectorBase, ChunkedColumn };
 
 static const std::vector<ConstructorType> kConstructorTypes = {
     ConstructorType::VectorIndex,
-    ConstructorType::RawData,
     ConstructorType::VectorBase,
     ConstructorType::ChunkedColumn,
 };
@@ -121,15 +115,6 @@ class CachedSearchIteratorTest
                     knowhere_query_dataset_,
                     search_info,
                     bitset);
-
-            case ConstructorType::RawData:
-                return std::make_unique<CachedSearchIterator>(
-                    search_dataset_,
-                    dataset::RawDataset{0, dim_, nb_, base_dataset_.data()},
-                    search_info,
-                    std::map<std::string, std::string>{},
-                    bitset,
-                    data_type_);
 
             case ConstructorType::VectorBase:
                 return std::make_unique<CachedSearchIterator>(
@@ -706,16 +691,6 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          search_info,
                          nullptr),
                      SegcoreError);
-    } else if (std::get<0>(GetParam()) == ConstructorType::RawData) {
-        EXPECT_THROW(
-            auto iterator = std::make_unique<CachedSearchIterator>(
-                dataset::SearchDataset{},
-                dataset::RawDataset{0, dim_, nb_, base_dataset_.data()},
-                search_info,
-                std::map<std::string, std::string>{},
-                nullptr,
-                data_type_),
-            SegcoreError);
     } else if (std::get<0>(GetParam()) == ConstructorType::VectorBase) {
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
                          dataset::SearchDataset{},
@@ -781,9 +756,6 @@ INSTANTIATE_TEST_SUITE_P(
         switch (constructor_type) {
             case ConstructorType::VectorIndex:
                 constructor_type_str = "VectorIndex";
-                break;
-            case ConstructorType::RawData:
-                constructor_type_str = "RawData";
                 break;
             case ConstructorType::VectorBase:
                 constructor_type_str = "VectorBase";

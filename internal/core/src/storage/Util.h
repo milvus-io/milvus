@@ -220,6 +220,19 @@ SortByPath(std::vector<std::string>& paths) {
               });
 }
 
+// same as SortByPath, but with pair of path and entries_nums
+inline void
+SortByPath(std::vector<std::pair<std::string, int64_t>>& paths) {
+    std::sort(
+        paths.begin(),
+        paths.end(),
+        [](const std::pair<std::string, int64_t>& a,
+           const std::pair<std::string, int64_t>& b) {
+            return std::stol(a.first.substr(a.first.find_last_of("/") + 1)) <
+                   std::stol(b.first.substr(b.first.find_last_of("/") + 1));
+        });
+}
+
 // used only for test
 inline std::shared_ptr<ArrowDataWrapper>
 ConvertFieldDataToArrowDataWrapper(const FieldDataPtr& field_data) {

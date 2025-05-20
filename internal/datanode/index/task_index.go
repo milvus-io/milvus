@@ -299,7 +299,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	if buildIndexParams.StorageVersion == storage.StorageV2 {
 		buildIndexParams.SegmentInsertFiles = GetSegmentInsertFiles(
 			it.req.GetInsertLogs(),
-			it.req.GetStorageConfig().RootPath,
+			it.req.GetStorageConfig(),
 			it.req.GetCollectionID(),
 			it.req.GetPartitionID(),
 			it.req.GetSegmentID())

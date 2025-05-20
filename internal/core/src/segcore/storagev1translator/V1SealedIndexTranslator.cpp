@@ -1,6 +1,7 @@
 #include "segcore/storagev1translator/V1SealedIndexTranslator.h"
 #include "index/IndexFactory.h"
 #include "segcore/load_index_c.h"
+#include "segcore/Utils.h"
 #include <utility>
 #include "storage/RemoteChunkManagerSingleton.h"
 
@@ -28,7 +29,13 @@ V1SealedIndexTranslator::V1SealedIndexTranslator(
       key_(fmt::format("seg_{}_si_{}",
                        load_index_info->segment_id,
                        load_index_info->field_id)),
-      meta_(milvus::cachinglayer::StorageType::MEMORY) {
+      meta_(load_index_info->enable_mmap
+                ? milvus::cachinglayer::StorageType::DISK
+                : milvus::cachinglayer::StorageType::MEMORY,
+            milvus::segcore::getCacheWarmupPolicy(
+                IsVectorDataType(load_index_info->field_type),
+                /* is_index */ true),
+            /* support_eviction */ false) {
 }
 
 size_t

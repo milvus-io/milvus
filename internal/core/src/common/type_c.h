@@ -32,6 +32,14 @@ enum SegmentType {
 
 typedef enum SegmentType SegmentType;
 
+enum CacheWarmupPolicy {
+    CacheWarmupPolicy_Disable = 0,
+    CacheWarmupPolicy_Sync = 1,
+    CacheWarmupPolicy_Async = 2,
+};
+
+typedef enum CacheWarmupPolicy CacheWarmupPolicy;
+
 // pure C don't support that we use schemapb.DataType directly.
 // Note: the value of all enumerations must match the corresponding schemapb.DataType.
 // TODO: what if there are increments in schemapb.DataType.

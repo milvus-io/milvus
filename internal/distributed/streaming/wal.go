@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
@@ -33,7 +34,7 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 		// streaming service is enabled, create the handler client for the streaming service.
 		handlerClient = handler.NewHandlerClient(streamingCoordClient.Assignment())
 	}
-	return &walAccesserImpl{
+	w := &walAccesserImpl{
 		lifetime:             typeutil.NewLifetime(),
 		streamingCoordClient: streamingCoordClient,
 		handlerClient:        handlerClient,
@@ -44,10 +45,13 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 		appendExecutionPool:   conc.NewPool[struct{}](0),
 		dispatchExecutionPool: conc.NewPool[struct{}](0),
 	}
+	w.SetLogger(log.With(log.FieldComponent("wal-accesser")))
+	return w
 }
 
 // walAccesserImpl is the implementation of WALAccesser.
 type walAccesserImpl struct {
+	log.Binder
 	lifetime *typeutil.Lifetime
 
 	// All services
@@ -177,6 +181,12 @@ func (w *walAccesserImpl) Close() {
 		w.handlerClient.Close()
 	}
 	w.streamingCoordClient.Close()
+	if w.appendExecutionPool != nil {
+		w.appendExecutionPool.Release()
+	}
+	if w.dispatchExecutionPool != nil {
+		w.dispatchExecutionPool.Release()
+	}
 }
 
 // newErrScanner creates a scanner that returns an error.

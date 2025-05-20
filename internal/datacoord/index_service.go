@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -60,10 +61,6 @@ func (s *Server) startIndexService(ctx context.Context) {
 }
 
 func (s *Server) createIndexForSegment(ctx context.Context, segment *SegmentInfo, indexID UniqueID) error {
-	if !segment.GetIsSorted() && Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsImporting() && segment.Level != datapb.SegmentLevel_L0 {
-		log.Info("segment not sorted, skip create index", zap.Int64("segmentID", segment.GetID()))
-		return nil
-	}
 	log.Info("create index for segment", zap.Int64("segmentID", segment.ID), zap.Int64("indexID", indexID))
 	buildID, err := s.allocator.AllocID(context.Background())
 	if err != nil {
@@ -88,7 +85,7 @@ func (s *Server) createIndexForSegment(ctx context.Context, segment *SegmentInfo
 }
 
 func (s *Server) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
-	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsSorted() && !segment.GetIsImporting() {
+	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsSorted() {
 		log.Ctx(ctx).Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
@@ -709,6 +706,9 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 		pendingIndexRows = int64(0)
 	)
 
+	minIndexVersion := int32(math.MaxInt32)
+	maxIndexVersion := int32(math.MinInt32)
+
 	for segID, seg := range segments {
 		if seg.state != commonpb.SegmentState_Flushed && seg.state != commonpb.SegmentState_Flushing {
 			continue
@@ -745,6 +745,12 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 		case commonpb.IndexState_Finished:
 			cntFinished++
 			indexedRows += seg.numRows
+			if segIdx.IndexVersion < minIndexVersion {
+				minIndexVersion = segIdx.IndexVersion
+			}
+			if segIdx.IndexVersion > maxIndexVersion {
+				maxIndexVersion = segIdx.IndexVersion
+			}
 		case commonpb.IndexState_Failed:
 			cntFailed++
 			failReason += fmt.Sprintf("%d: %s;", segID, segIdx.FailReason)
@@ -758,6 +764,8 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 	}
 	indexInfo.TotalRows = totalRows
 	indexInfo.PendingIndexRows = pendingIndexRows
+	indexInfo.MinIndexVersion = minIndexVersion
+	indexInfo.MaxIndexVersion = maxIndexVersion
 	switch {
 	case cntFailed > 0:
 		indexInfo.State = commonpb.IndexState_Failed
@@ -773,7 +781,8 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 	log.RatedInfo(60, "completeIndexInfo success", zap.Int64("collectionID", index.CollectionID), zap.Int64("indexID", index.IndexID),
 		zap.Int64("totalRows", indexInfo.TotalRows), zap.Int64("indexRows", indexInfo.IndexedRows),
 		zap.Int64("pendingIndexRows", indexInfo.PendingIndexRows),
-		zap.String("state", indexInfo.State.String()), zap.String("failReason", indexInfo.IndexStateFailReason))
+		zap.String("state", indexInfo.State.String()), zap.String("failReason", indexInfo.IndexStateFailReason),
+		zap.Int32("minIndexVersion", indexInfo.MinIndexVersion), zap.Int32("maxIndexVersion", indexInfo.MaxIndexVersion))
 }
 
 // GetIndexBuildProgress get the index building progress by num rows.

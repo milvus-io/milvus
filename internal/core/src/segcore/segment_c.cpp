@@ -562,13 +562,6 @@ AddFieldDataInfoForSealed(CSegmentInterface c_segment,
     }
 }
 
-CStatus
-WarmupChunkCache(CSegmentInterface c_segment,
-                 int64_t field_id,
-                 bool mmap_enabled) {
-    return milvus::SuccessCStatus();
-}
-
 void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id) {
     auto segment = reinterpret_cast<milvus::segcore::SegmentSealed*>(c_segment);

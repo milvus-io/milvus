@@ -699,6 +699,7 @@ def gen_float_vec_field(name=ct.default_float_vec_field_name, is_primary=False, 
                                                                    description=description, dim=dim,
                                                                    is_primary=is_primary, **kwargs)
     else:
+         # no dim for sparse vector
         float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.SPARSE_FLOAT_VECTOR,
                                                                     description=description,
                                                                     is_primary=is_primary, **kwargs)
@@ -1117,39 +1118,6 @@ def gen_schema_multi_string_fields(string_fields):
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=ct.default_desc,
                                                                     primary_field=primary_field, auto_id=False)
     return schema
-
-
-def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
-    vectors = []
-    if vector_data_type == DataType.FLOAT_VECTOR:
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
-    elif vector_data_type == DataType.FLOAT16_VECTOR:
-        vectors = gen_fp16_vectors(nb, dim)[1]
-    elif vector_data_type == DataType.BFLOAT16_VECTOR:
-        vectors = gen_bf16_vectors(nb, dim)[1]
-    elif vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
-        vectors = gen_sparse_vectors(nb, dim)
-    elif vector_data_type == ct.text_sparse_vector:
-        vectors = gen_text_vectors(nb)
-    elif vector_data_type == DataType.BINARY_VECTOR:
-        vectors = gen_binary_vectors(nb, dim)[1]
-    else:
-        log.error(f"Invalid vector data type: {vector_data_type}")
-        raise Exception(f"Invalid vector data type: {vector_data_type}")
-    if dim > 1:
-        if vector_data_type == DataType.FLOAT_VECTOR:
-            vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
-            vectors = vectors.tolist()
-    return vectors
-
-
-def gen_text_vectors(nb, language="en"):
-
-    fake = Faker("en_US")
-    if language == "zh":
-        fake = Faker("zh_CN")
-    vectors = [" milvus " + fake.text() for _ in range(nb)]
-    return vectors
 
 
 def gen_string(nb):
@@ -2346,6 +2314,10 @@ def gen_search_param(index_type, metric_type="L2"):
         for search_list in [20, 300, 1500]:
             diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
             search_params.append(diskann_search_param)
+    elif index_type == "IVF_RABITQ":
+        for rbq_bits_query in [6, 7]:
+            ivf_rabitq_search_param = {"metric_type": metric_type, "params": {"rbq_bits_query": rbq_bits_query}}
+            search_params.append(ivf_rabitq_search_param)
     else:
         log.error("Invalid index_type.")
         raise Exception("Invalid index_type.")
@@ -2872,6 +2844,11 @@ def get_search_params_params(index_type):
     return params
 
 
+def get_default_metric_for_vector_type(vector_type=DataType.FLOAT_VECTOR):
+    """get default metric for vector type"""
+    return ct.default_metric_for_vector_type[vector_type]
+
+
 def assert_json_contains(expr, list_data):
     opposite = False
     if expr.startswith("not"):
@@ -3317,28 +3294,49 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok", empty_percentage=0):
         ]
     return vectors
 
+def gen_int8_vectors(num, dim):
+    raw_vectors = []
+    int8_vectors = []
+    for _ in range(num):
+        raw_vector = [random.randint(-128, 127) for _ in range(dim)]
+        raw_vectors.append(raw_vector)
+        int8_vector = np.array(raw_vector, dtype=np.int8)
+        int8_vectors.append(int8_vector)
+    return raw_vectors, int8_vectors
 
-def gen_vectors_based_on_vector_type(num, dim, vector_data_type=DataType.FLOAT_VECTOR):
-    """
-    generate float16 vector data
-    raw_vectors : the vectors
-    fp16_vectors: the bytes used for insert
-    return: raw_vectors and fp16_vectors
-    """
+def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
+    vectors = []
     if vector_data_type == DataType.FLOAT_VECTOR:
-        vectors = [[random.random() for _ in range(dim)] for _ in range(num)]
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
     elif vector_data_type == DataType.FLOAT16_VECTOR:
-        vectors = gen_fp16_vectors(num, dim)[1]
+        vectors = gen_fp16_vectors(nb, dim)[1]
     elif vector_data_type == DataType.BFLOAT16_VECTOR:
-        vectors = gen_bf16_vectors(num, dim)[1]
+        vectors = gen_bf16_vectors(nb, dim)[1]
     elif vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
-        vectors = gen_sparse_vectors(num, dim)
+        vectors = gen_sparse_vectors(nb, dim)
     elif vector_data_type == ct.text_sparse_vector:
-        vectors = gen_text_vectors(num)
+        vectors = gen_text_vectors(nb)    # for Full Text Search
+    elif vector_data_type == DataType.BINARY_VECTOR:
+        vectors = gen_binary_vectors(nb, dim)[1]
+    elif vector_data_type == DataType.INT8_VECTOR:
+        vectors = gen_int8_vectors(nb, dim)[1]
     else:
-        raise Exception("vector_data_type is invalid")
+        log.error(f"Invalid vector data type: {vector_data_type}")
+        raise Exception(f"Invalid vector data type: {vector_data_type}")
+    if dim > 1:
+        if vector_data_type == DataType.FLOAT_VECTOR:
+            vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
+            vectors = vectors.tolist()
     return vectors
 
+
+def gen_text_vectors(nb, language="en"):
+
+    fake = Faker("en_US")
+    if language == "zh":
+        fake = Faker("zh_CN")
+    vectors = [" milvus " + fake.text() for _ in range(nb)]
+    return vectors
 
 def field_types() -> dict:
     return dict(sorted(dict(DataType.__members__).items(), key=lambda item: item[0], reverse=True))

@@ -74,6 +74,11 @@ class ListNode {
     ResourceUsage&
     size();
 
+    // Manually evicts the cell if it is not pinned.
+    // Returns true if the cell ends up in a state other than LOADED.
+    bool
+    manual_evict();
+
     // TODO(tiered storage 1): pin on ERROR should re-trigger loading.
     // NOT_LOADED ---> LOADING ---> ERROR
     //      ^            |

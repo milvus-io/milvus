@@ -17,30 +17,30 @@
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/Chunk.h"
+#include "common/type_c.h"
 #include "mmap/Types.h"
 
 namespace milvus::segcore::storagev1translator {
 
 struct CTMeta : public milvus::cachinglayer::Meta {
     std::vector<int64_t> num_rows_until_chunk_;
-    CTMeta(milvus::cachinglayer::StorageType storage_type)
-        : milvus::cachinglayer::Meta(storage_type) {
+    CTMeta(milvus::cachinglayer::StorageType storage_type,
+           CacheWarmupPolicy cache_warmup_policy,
+           bool support_eviction)
+        : milvus::cachinglayer::Meta(
+              storage_type, cache_warmup_policy, support_eviction) {
     }
 };
 
-// This class will load all cells(Chunks) in ctor, and move them out during get_cells.
-// This should be used only in storagev1(no eviction allowed), thus trying to get a
-// same cell a second time will result in exception.
-// For this translator each Chunk is a CacheCell, cid_t and uid_ is the same.
+// For this translator each Chunk is a CacheCell, cid_t == uid_t.
 class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
  public:
-    ChunkTranslator(int64_t segment_id,
-                    FieldMeta field_meta,
-                    FieldDataInfo field_data_info,
-                    std::vector<std::string> insert_files,
-                    bool use_mmap);
-
-    ~ChunkTranslator() override;
+    ChunkTranslator(
+        int64_t segment_id,
+        FieldMeta field_meta,
+        FieldDataInfo field_data_info,
+        std::vector<std::pair<std::string, int64_t>>&& files_and_rows,
+        bool use_mmap);
 
     size_t
     num_cells() const override;
@@ -54,18 +54,23 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
     get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
-    // TODO: info other than get_cels() should all be in meta()
     milvus::cachinglayer::Meta*
     meta() override {
         return &meta_;
     }
 
  private:
+    std::unique_ptr<milvus::Chunk>
+    load_chunk(milvus::cachinglayer::cid_t cid);
+
+    std::vector<std::pair<std::string, int64_t>> files_and_rows_;
     int64_t segment_id_;
+    int64_t field_id_;
     std::string key_;
     bool use_mmap_;
-    std::vector<milvus::Chunk*> chunks_;
     CTMeta meta_;
+    FieldMeta field_meta_;
+    std::string mmap_dir_path_;
 };
 
 }  // namespace milvus::segcore::storagev1translator

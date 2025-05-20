@@ -20,6 +20,7 @@
 #include "cachinglayer/Translator.h"
 #include "common/Chunk.h"
 #include "common/GroupChunk.h"
+#include "common/type_c.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "cachinglayer/lrucache/DList.h"
@@ -36,7 +37,10 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
         : Translator<milvus::Chunk>(),
           num_cells_(num_rows_per_chunk.size()),
           chunks_(std::move(chunks)),
-          meta_(segcore::storagev1translator::CTMeta(StorageType::MEMORY)) {
+          meta_(segcore::storagev1translator::CTMeta(
+              StorageType::MEMORY,
+              CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+              true)) {
         meta_.num_rows_until_chunk_.reserve(num_cells_ + 1);
         meta_.num_rows_until_chunk_.push_back(0);
         int total_rows = 0;
@@ -96,14 +100,18 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
 
 class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
  public:
-    TestGroupChunkTranslator(std::vector<int64_t> num_rows_per_chunk,
+    TestGroupChunkTranslator(size_t num_fields,
+                             std::vector<int64_t> num_rows_per_chunk,
                              std::string key,
                              std::vector<std::unique_ptr<GroupChunk>>&& chunks)
         : Translator<milvus::GroupChunk>(),
           num_cells_(num_rows_per_chunk.size()),
           chunks_(std::move(chunks)),
-          meta_(
-              segcore::storagev2translator::GroupCTMeta(StorageType::MEMORY)) {
+          meta_(segcore::storagev2translator::GroupCTMeta(
+              num_fields,
+              StorageType::MEMORY,
+              CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+              true)) {
         meta_.num_rows_until_chunk_.reserve(num_cells_ + 1);
         meta_.num_rows_until_chunk_.push_back(0);
         for (int i = 0; i < num_cells_; ++i) {
@@ -166,7 +174,10 @@ class TestIndexTranslator : public Translator<milvus::index::IndexBase> {
         : Translator<milvus::index::IndexBase>(),
           key_(key),
           index_(std::move(index)),
-          meta_(milvus::cachinglayer::Meta(StorageType::MEMORY)) {
+          meta_(milvus::cachinglayer::Meta(
+              StorageType::MEMORY,
+              CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+              false)) {
     }
     ~TestIndexTranslator() override = default;
 

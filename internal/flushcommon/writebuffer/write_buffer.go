@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -117,7 +118,6 @@ type writeBufferBase struct {
 
 	metaWriter       syncmgr.MetaWriter
 	allocator        allocator.Interface
-	collSchema       *schemapb.CollectionSchema
 	estSizePerRecord int
 	metaCache        metacache.MetaCache
 
@@ -153,7 +153,6 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 	wb := &writeBufferBase{
 		channelName:          channel,
 		collectionID:         metacache.Collection(),
-		collSchema:           schema,
 		estSizePerRecord:     estSize,
 		syncMgr:              syncMgr,
 		metaWriter:           option.metaWriter,
@@ -361,7 +360,7 @@ func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64) *segmentBuffer {
 	buffer, ok := wb.buffers[segmentID]
 	if !ok {
 		var err error
-		buffer, err = newSegmentBuffer(segmentID, wb.collSchema)
+		buffer, err = newSegmentBuffer(segmentID, wb.metaCache.Schema())
 		if err != nil {
 			// TODO avoid panic here
 			panic(err)
@@ -372,19 +371,19 @@ func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64) *segmentBuffer {
 	return buffer
 }
 
-func (wb *writeBufferBase) yieldBuffer(segmentID int64) ([]*storage.InsertData, map[int64]*storage.BM25Stats, *storage.DeleteData, *TimeRange, *msgpb.MsgPosition) {
+func (wb *writeBufferBase) yieldBuffer(segmentID int64) ([]*storage.InsertData, map[int64]*storage.BM25Stats, *storage.DeleteData, *schemapb.CollectionSchema, *TimeRange, *msgpb.MsgPosition) {
 	buffer, ok := wb.buffers[segmentID]
 	if !ok {
-		return nil, nil, nil, nil, nil
+		return nil, nil, nil, nil, nil, nil
 	}
 
 	// remove buffer and move it to sync manager
 	delete(wb.buffers, segmentID)
 	start := buffer.EarliestPosition()
 	timeRange := buffer.GetTimeRange()
-	insert, bm25, delta := buffer.Yield()
+	insert, bm25, delta, schema := buffer.Yield()
 
-	return insert, bm25, delta, timeRange, start
+	return insert, bm25, delta, schema, timeRange, start
 }
 
 type InsertData struct {
@@ -544,7 +543,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 	var totalMemSize float64 = 0
 	var tsFrom, tsTo uint64
 
-	insert, bm25, delta, timeRange, startPos := wb.yieldBuffer(segmentID)
+	insert, bm25, delta, schema, timeRange, startPos := wb.yieldBuffer(segmentID)
 	if timeRange != nil {
 		tsFrom, tsTo = timeRange.timestampMin, timeRange.timestampMax
 	}
@@ -601,7 +600,9 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithAllocator(wb.allocator).
 		WithMetaWriter(wb.metaWriter).
 		WithMetaCache(wb.metaCache).
-		WithSyncPack(pack)
+		WithSchema(schema).
+		WithSyncPack(pack).
+		WithMultiPartUploadSize(packed.DefaultMultiPartUploadSize)
 	return task, nil
 }
 

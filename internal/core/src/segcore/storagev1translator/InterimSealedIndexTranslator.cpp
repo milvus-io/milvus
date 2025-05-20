@@ -1,5 +1,6 @@
 #include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
 #include "index/VectorMemIndex.h"
+#include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -19,7 +20,11 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
       dim_(dim),
       is_sparse_(is_sparse),
       index_key_(fmt::format("seg_{}_ii_{}", segment_id, field_id)),
-      meta_(milvus::cachinglayer::StorageType::MEMORY) {
+      meta_(milvus::cachinglayer::StorageType::MEMORY,
+            milvus::segcore::getCacheWarmupPolicy(
+                /* is_vector */ true,
+                /* is_index */ true),
+            /* support_eviction */ false) {
 }
 
 size_t
@@ -52,7 +57,8 @@ InterimSealedIndexTranslator::get_cells(
     auto vec_index = std::make_unique<index::VectorMemIndex<float>>(
         index_type_,
         metric_type_,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        false);
     auto num_chunk = vec_data_->num_chunks();
     for (int i = 0; i < num_chunk; ++i) {
         auto pw = vec_data_->GetChunk(i);

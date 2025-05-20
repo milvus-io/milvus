@@ -1573,6 +1573,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     size_t N = 10;
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
     std::cout << "pk_fid:" << pk_fid.get() << std::endl;
 
     //test for int64
@@ -1580,8 +1582,13 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     auto pk_field_data =
         storage::CreateFieldData(DataType::INT64, false, 1, 10);
     pk_field_data->FillFieldData(pks.data(), N);
-    segment->LoadPrimitiveSkipIndex(
-        pk_fid, 0, DataType::INT64, pk_field_data->Data(), nullptr, N);
+    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                    kPartitionID,
+                                                    kSegmentID,
+                                                    pk_fid.get(),
+                                                    {pk_field_data},
+                                                    cm);
+    segment->LoadFieldData(load_info);
     auto& skip_index = segment->GetSkipIndex();
     bool equal_5_skip =
         skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 5);
@@ -1622,8 +1629,13 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     auto int32_field_data =
         storage::CreateFieldData(DataType::INT32, false, 1, 10);
     int32_field_data->FillFieldData(int32s.data(), N);
-    segment->LoadPrimitiveSkipIndex(
-        i32_fid, 0, DataType::INT32, int32_field_data->Data(), nullptr, N);
+    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                               kPartitionID,
+                                               kSegmentID,
+                                               i32_fid.get(),
+                                               {int32_field_data},
+                                               cm);
+    segment->LoadFieldData(load_info);
     less_than_1_skip =
         skip_index.CanSkipUnaryRange<int32_t>(i32_fid, 0, OpType::LessThan, 1);
     ASSERT_TRUE(less_than_1_skip);
@@ -1633,8 +1645,13 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     auto int16_field_data =
         storage::CreateFieldData(DataType::INT16, false, 1, 10);
     int16_field_data->FillFieldData(int16s.data(), N);
-    segment->LoadPrimitiveSkipIndex(
-        i16_fid, 0, DataType::INT16, int16_field_data->Data(), nullptr, N);
+    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                               kPartitionID,
+                                               kSegmentID,
+                                               i16_fid.get(),
+                                               {int16_field_data},
+                                               cm);
+    segment->LoadFieldData(load_info);
     bool less_than_12_skip =
         skip_index.CanSkipUnaryRange<int16_t>(i16_fid, 0, OpType::LessThan, 12);
     ASSERT_FALSE(less_than_12_skip);
@@ -1644,8 +1661,13 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     auto int8_field_data =
         storage::CreateFieldData(DataType::INT8, false, 1, 10);
     int8_field_data->FillFieldData(int8s.data(), N);
-    segment->LoadPrimitiveSkipIndex(
-        i8_fid, 0, DataType::INT8, int8_field_data->Data(), nullptr, N);
+    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                               kPartitionID,
+                                               kSegmentID,
+                                               i8_fid.get(),
+                                               {int8_field_data},
+                                               cm);
+    segment->LoadFieldData(load_info);
     bool greater_than_12_skip = skip_index.CanSkipUnaryRange<int8_t>(
         i8_fid, 0, OpType::GreaterThan, 12);
     ASSERT_TRUE(greater_than_12_skip);
@@ -1656,8 +1678,13 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     auto float_field_data =
         storage::CreateFieldData(DataType::FLOAT, false, 1, 10);
     float_field_data->FillFieldData(floats.data(), N);
-    segment->LoadPrimitiveSkipIndex(
-        float_fid, 0, DataType::FLOAT, float_field_data->Data(), nullptr, N);
+    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                               kPartitionID,
+                                               kSegmentID,
+                                               float_fid.get(),
+                                               {float_field_data},
+                                               cm);
+    segment->LoadFieldData(load_info);
     greater_than_10_skip = skip_index.CanSkipUnaryRange<float>(
         float_fid, 0, OpType::GreaterThan, 10.0);
     ASSERT_TRUE(greater_than_10_skip);
@@ -1668,8 +1695,13 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     auto double_field_data =
         storage::CreateFieldData(DataType::DOUBLE, false, 1, 10);
     double_field_data->FillFieldData(doubles.data(), N);
-    segment->LoadPrimitiveSkipIndex(
-        double_fid, 0, DataType::DOUBLE, double_field_data->Data(), nullptr, N);
+    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                               kPartitionID,
+                                               kSegmentID,
+                                               double_fid.get(),
+                                               {double_field_data},
+                                               cm);
+    segment->LoadFieldData(load_info);
     greater_than_10_skip = skip_index.CanSkipUnaryRange<double>(
         double_fid, 0, OpType::GreaterThan, 10.0);
     ASSERT_TRUE(greater_than_10_skip);
@@ -1685,6 +1717,8 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
     size_t N = 10;
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
     std::cout << "pk_fid:" << pk_fid.get() << std::endl;
 
     //test for int64
@@ -1692,8 +1726,13 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
     auto pk_field_data =
         storage::CreateFieldData(DataType::INT64, false, 1, 10);
     pk_field_data->FillFieldData(pks.data(), N);
-    segment->LoadPrimitiveSkipIndex(
-        pk_fid, 0, DataType::INT64, pk_field_data->Data(), nullptr, N);
+    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                    kPartitionID,
+                                                    kSegmentID,
+                                                    pk_fid.get(),
+                                                    {pk_field_data},
+                                                    cm);
+    segment->LoadFieldData(load_info);
     auto& skip_index = segment->GetSkipIndex();
     ASSERT_FALSE(
         skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, -3, 1, true, true));
@@ -1721,21 +1760,23 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
 
     auto dataset = DataGen(schema, 5);
     auto segment = CreateSealedSegment(schema);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
 
     //test for int64
     std::vector<int64_t> int64s = {1, 2, 3, 4, 5};
     std::array<uint8_t, 1> valid_data = {0x03};
-    FixedVector<bool> valid_data_ = {true, true, false, false, false};
     auto int64s_field_data =
         storage::CreateFieldData(DataType::INT64, true, 1, 5);
 
     int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5);
-    segment->LoadPrimitiveSkipIndex(i64_fid,
-                                    0,
-                                    DataType::INT64,
-                                    int64s_field_data->Data(),
-                                    valid_data_.data(),
-                                    5);
+    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                    kPartitionID,
+                                                    kSegmentID,
+                                                    i64_fid.get(),
+                                                    {int64s_field_data},
+                                                    cm);
+    segment->LoadFieldData(load_info);
     auto& skip_index = segment->GetSkipIndex();
     bool equal_5_skip =
         skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 5);
@@ -1790,21 +1831,23 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
     auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
     auto dataset = DataGen(schema, 5);
     auto segment = CreateSealedSegment(schema);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
 
     //test for int64
     std::vector<int64_t> int64s = {1, 2, 3, 4, 5};
     std::array<uint8_t, 1> valid_data = {0x03};
-    FixedVector<bool> valid_data_ = {true, true, false, false, false};
     auto int64s_field_data =
         storage::CreateFieldData(DataType::INT64, true, 1, 5);
 
     int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5);
-    segment->LoadPrimitiveSkipIndex(i64_fid,
-                                    0,
-                                    DataType::INT64,
-                                    int64s_field_data->Data(),
-                                    valid_data_.data(),
-                                    5);
+    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                    kPartitionID,
+                                                    kSegmentID,
+                                                    i64_fid.get(),
+                                                    {int64s_field_data},
+                                                    cm);
+    segment->LoadFieldData(load_info);
     auto& skip_index = segment->GetSkipIndex();
     ASSERT_FALSE(
         skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, -3, 1, true, true));

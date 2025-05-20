@@ -170,8 +170,10 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 		}),
 		storage.WithVersion(w.storageVersion),
 	)
+	// TODO bucketName shall be passed via StorageConfig like index/stats task
+	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
 	rw, err := storage.NewBinlogRecordWriter(w.ctx, w.collectionID, w.partitionID, newSegmentID,
-		w.schema, w.allocator.logIDAlloc, chunkSize, rootPath, w.maxRows, w.rwOption...,
+		w.schema, w.allocator.logIDAlloc, chunkSize, bucketName, rootPath, w.maxRows, w.rwOption...,
 	)
 	if err != nil {
 		return err

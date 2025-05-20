@@ -64,7 +64,7 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:7]
+range_search_supported_indexes = ct.all_index_types[:8]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -282,7 +282,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                                     "[expected=COSINE][actual=L2]"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:8])
     def test_search_invalid_params_type(self, index):
         """
         target: test search with invalid search params
@@ -737,7 +737,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                  % collection_w.name)
         # err_msg = "collection" + collection_w.name + "was not loaded into memory"
         err_msg = "collection not loaded"
-        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim, vector_data_type)
+        vectors = cf.gen_vectors(default_nq, default_dim, vector_data_type)
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp, timeout=1,
                             check_task=CheckTasks.err_res,

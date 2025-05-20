@@ -23,6 +23,7 @@
 #include "cachinglayer/lrucache/DList.h"
 #include "cachinglayer/Utils.h"
 #include "common/EasyAssert.h"
+#include "log/Log.h"
 
 namespace milvus::cachinglayer::internal {
 
@@ -50,7 +51,7 @@ ListNode::NodePin::operator=(NodePin&& other) {
 
 ListNode::ListNode(DList* dlist, ResourceUsage size)
     : last_touch_(dlist ? (std::chrono::high_resolution_clock::now() -
-                           2 * dlist->touch_config().refresh_window)
+                           2 * dlist->eviction_config().cache_touch_window)
                         : std::chrono::high_resolution_clock::now()),
       dlist_(dlist),
       size_(size),
@@ -62,6 +63,31 @@ ListNode::~ListNode() {
         std::unique_lock<std::shared_mutex> lock(mtx_);
         dlist_->removeItem(this, size_);
     }
+}
+
+bool
+ListNode::manual_evict() {
+    std::unique_lock<std::shared_mutex> lock(mtx_);
+    if (state_ == State::ERROR || state_ == State::LOADING) {
+        LOG_ERROR("manual_evict() called on a {} cell",
+                  state_to_string(state_));
+        return true;
+    }
+    if (state_ == State::NOT_LOADED) {
+        return true;
+    }
+    if (pin_count_.load() > 0) {
+        LOG_ERROR(
+            "manual_evict() called on a LOADED and pinned cell, aborting "
+            "eviction.");
+        return false;
+    }
+    // cell is LOADED
+    clear_data();
+    if (dlist_) {
+        dlist_->removeItem(this, size_);
+    }
+    return true;
 }
 
 ResourceUsage&
@@ -181,7 +207,8 @@ ListNode::unpin() {
 void
 ListNode::touch(bool update_used_memory) {
     auto now = std::chrono::high_resolution_clock::now();
-    if (dlist_ && now - last_touch_ > dlist_->touch_config().refresh_window) {
+    if (dlist_ &&
+        now - last_touch_ > dlist_->eviction_config().cache_touch_window) {
         std::optional<ResourceUsage> size = std::nullopt;
         if (update_used_memory) {
             size = size_;
@@ -197,7 +224,7 @@ ListNode::clear_data() {
     // the cell should be inserted into the cache again.
     if (dlist_) {
         last_touch_ = std::chrono::high_resolution_clock::now() -
-                      2 * dlist_->touch_config().refresh_window;
+                      2 * dlist_->eviction_config().cache_touch_window;
     }
     unload();
     state_ = State::NOT_LOADED;

@@ -187,24 +187,24 @@ woodpecker:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
     segmentRollingPolicy:
-      maxSize: 2000000000 # Maximum entries count of a segment, default is 2GB
-      maxInterval: 600 # Maximum interval between two segments in seconds, default is 10 minutes.
+      maxSize: 2GB # Maximum entries count of a segment, default is 2GB
+      maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
     auditor:
-      maxInterval: 10 # Maximum interval between two auditing operations in seconds, default is 10 seconds.
+      maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
   logstore:
     logFileSyncPolicy:
-      maxInterval: 1000 # Maximum interval between two sync operations in milliseconds.
-      maxBytes: 64000000 # Maximum size of write buffer in bytes.
+      maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
+      maxBytes: 64M # Maximum size of write buffer in bytes.
       maxEntries: 100000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
-      retryInterval: 1000 # Maximum interval between two retries in milliseconds.
-      maxFlushSize: 8000000 # Maximum size of a fragment in bytes to flush, default is 8M.
+      retryInterval: 1000ms # Maximum interval between two retries. default is 1000 milliseconds.
+      maxFlushSize: 8M # Maximum size of a fragment in bytes to flush, default is 8M.
       maxFlushThreads: 4 # Maximum number of threads to flush data
     fragmentManager:
-      maxBytes: 1000000000 # Maximum size of fragment cached data in bytes.
-      maxInterval: 1000 # Maximum interval between two fragment evicts in milliseconds.
+      maxBytes: 512M # Maximum size of fragment cached data in bytes.
+      maxInterval: 1s # Maximum interval between two fragment evicts. default is 1 second
   storage:
-    type: minio # The Type of the storage provider. Valid values: [default, minio, local, service], default is minio.
+    type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
@@ -315,10 +315,10 @@ proxy:
       base:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
       query:
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [params: $query_params]"
         methods: "Query, Delete"
       search:
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [anns_field: $anns_field] [expr: $method_expr]"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [nq: $nq] [params: $search_params]"
         methods: "HybridSearch, Search"
     cacheSize: 0 # Size of log of write cache, in byte. (Close write cache if size was 0)
     cacheFlushInterval: 3 # time interval of auto flush write cache, in seconds. (Close auto flush if interval was 0)
@@ -366,7 +366,7 @@ queryCoord:
   rowCountFactor: 0.4 # the row count weight used when balancing segments among queryNodes
   segmentCountFactor: 0.4 # the segment count weight used when balancing segments among queryNodes
   globalSegmentCountFactor: 0.1 # the segment count weight used when balancing segments among queryNodes
-  # the channel count weight used when balancing channels among queryNodes, 
+  # the channel count weight used when balancing channels among queryNodes,
   # 		A higher value reduces the likelihood of assigning channels from the same collection to the same QueryNode. Set to 1 to disable this feature.
   collectionChannelCountFactor: 10
   segmentCountMaxSteps: 50 # segment count based plan generator max steps
@@ -430,9 +430,31 @@ queryNode:
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     tieredStorage:
-      enableGlobally: true # Whether or not to turn on Tiered Storage globally in this cluster.
-      memoryAllocationRatio: 0.8 # The ratio of memory allocation for Tiered Storage.
-      diskAllocationRatio: 0.8 # The ratio of disk allocation for Tiered Storage.
+      warmup:
+        # options: sync, async, disable.
+        # Specifies the timing for warming up the Tiered Storage cache.
+        # - "sync": data will be loaded into the cache before a segment is considered loaded.
+        # - "async": data will be loaded asynchronously into the cache after a segment is loaded.
+        # - "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
+        # Defaults to "sync", except for vector field which defaults to "disable".
+        scalarField: sync
+        scalarIndex: sync
+        vectorField: disable # cache warmup for vector field raw data is by default disabled.
+        vectorIndex: sync
+      # If evictionEnabled is true, a background thread will run every evictionIntervalMs to determine if an
+      # eviction is necessary and the amount of data to evict from memory/disk.
+      # - The max ratio is the max amount of memory/disk that can be used for cache.
+      # - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
+      #   until the memory/disk usage is below the low watermark.
+      memoryLowWatermarkRatio: 0.6
+      memoryHighWatermarkRatio: 0.8
+      memoryMaxRatio: 0.9
+      diskLowWatermarkRatio: 0.6
+      diskHighWatermarkRatio: 0.8
+      diskMaxRatio: 0.9
+      # Enable eviction for Tiered Storage. Defaults to false.
+      # Note that if eviction is enabled, cache data loaded during sync/async warmup is also subject to eviction.
+      evictionEnabled: false
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
@@ -441,21 +463,13 @@ queryNode:
   cache:
     memoryLimit: 2147483648 # Deprecated: 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
-    # options: async, sync, disable. 
-    # Specifies the necessity for warming up the chunk cache. 
-    # 1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the 
-    # chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
-    # for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
-    # 2. If set to "disable" original vector data will only be loaded into the chunk cache during search/query.
-    warmup: disable
   mmap:
     vectorField: false # Enable mmap for loading vector data
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
-    chunkCache: true # Enable mmap for chunk cache (raw vector retrieving).
-    # Enable memory mapping (mmap) to optimize the handling of growing raw data. 
-    # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized. 
+    # Enable memory mapping (mmap) to optimize the handling of growing raw data.
+    # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
     growingMmapEnabled: false
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
@@ -549,7 +563,7 @@ dataCoord:
     # The max idle time of segment in seconds, 10*60.
     maxIdleTime: 600
     minSizeFromIdleToSealed: 16 # The min size in MB of segment which can be idle from sealed.
-    # The max number of binlog (which is equal to the binlog file num of primary key) for one segment, 
+    # The max number of binlog (which is equal to the binlog file num of primary key) for one segment,
     # the segment will be sealed if the number of binlog file reaches to max value.
     maxBinlogFileNumber: 32
     smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
@@ -562,13 +576,13 @@ dataCoord:
     expansionRate: 1.25
   sealPolicy:
     channel:
-      # The size threshold in MB, if the total size of growing segments of each shard 
+      # The size threshold in MB, if the total size of growing segments of each shard
       # exceeds this threshold, the largest growing segment will be sealed.
       growingSegmentsMemSize: 4096
-      # If the total entry number of l0 logs of each shard 
+      # If the total entry number of l0 logs of each shard
       # exceeds this threshold, the earliest growing segments will be sealed.
       blockingL0EntryNum: 5000000
-      # The size threshold in MB, if the total entry number of l0 logs of each shard 
+      # The size threshold in MB, if the total entry number of l0 logs of each shard
       # exceeds this threshold, the earliest growing segments will be sealed.
       blockingL0SizeInMB: 64
   autoUpgradeSegmentIndex: false # whether auto upgrade segment index to index engine's version
@@ -578,7 +592,7 @@ dataCoord:
   # if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version 
   targetVecIndexVersion: -1
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
-  # Switch value to control if to enable segment compaction. 
+  # Switch value to control if to enable segment compaction.
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
   enableCompaction: true
   compaction:
@@ -586,7 +600,7 @@ dataCoord:
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true
     indexBasedCompaction: true
-    # compaction task prioritizer, options: [default, level, mix]. 
+    # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
     # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
@@ -786,7 +800,7 @@ msgChannel:
 
 # Configures the system log output.
 log:
-  # Milvus log level. Option: debug, info, warn, error, panic, and fatal. 
+  # Milvus log level. Option: debug, info, warn, error, panic, and fatal.
   # It is recommended to use debug level under test and development environments, and info level in production environment.
   level: info
   file:
@@ -861,7 +875,9 @@ common:
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
-    defaultRootPassword: "Milvus" # default password for root user. The maximum length is 72 characters, and double quotes are required.
+    # default password for root user. The maximum length is 72 characters. 
+    # Large numeric passwords require double quotes to avoid yaml parsing precision issues.
+    defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
     rbac:
@@ -903,8 +919,8 @@ common:
   storage:
     scheme: s3
     enablev2: false
-  # Whether to disable the internal time messaging mechanism for the system. 
-  # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches. 
+  # Whether to disable the internal time messaging mechanism for the system.
+  # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
   # This helps Milvus-CDC synchronize incremental data
   ttMsgEnabled: true
   traceLogMode: 0 # trace request info
@@ -922,6 +938,7 @@ common:
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
   enabledJSONKeyStats: false # Indicates sealedsegment whether to enable JSON key stats
   enabledGrowingSegmentJSONKeyStats: false # Indicates growingsegment whether to enable JSON key stats
+  enableConfigParamTypeCheck: true # Indicates whether to enable config param type check
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
@@ -1163,23 +1180,23 @@ streamingNode:
 # Any configuration related to the streaming service.
 streaming:
   walBalancer:
-    # The interval of balance task trigger at background, 1 min by default. 
+    # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     triggerInterval: 1m
-    # The initial interval of balance task trigger backoff, 50 ms by default. 
+    # The initial interval of balance task trigger backoff, 50 ms by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffInitialInterval: 50ms
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       vchannelFair:
-        # The weight of pchannel count in vchannelFair balance policy, 
+        # The weight of pchannel count in vchannelFair balance policy,
         # the pchannel count will more evenly distributed if the weight is greater, 0.4 by default
         pchannelWeight: 0.4
-        # The weight of vchannel count in vchannelFair balance policy, 
+        # The weight of vchannel count in vchannelFair balance policy,
         # the vchannel count will more evenly distributed if the weight is greater, 0.3 by default
         vchannelWeight: 0.3
-        # The weight of affinity in vchannelFair balance policy, 
+        # The weight of affinity in vchannelFair balance policy,
         # the fewer VChannels belonging to the same Collection between two PChannels, the higher the affinity,
         # the vchannel of one collection will more evenly distributed if the weight is greater, 0.01 by default
         antiAffinityWeight: 0.01
@@ -1187,7 +1204,7 @@ streaming:
         # the balance result will be ignored, the lower tolerance, the sensitive rebalance, 0.01 by default
         rebalanceTolerance: 0.01
         # Indicates how many pchannels will be considered as a batch for rebalancing,
-        # the larger step, more aggressive and accurate rebalance, 
+        # the larger step, more aggressive and accurate rebalance,
         # it also determine the depth of depth first search method that is used to find the best balance result, 3 by default
         rebalanceMaxStep: 3
   walBroadcaster:
@@ -1201,6 +1218,41 @@ streaming:
     # The threshold of slow log, 1s by default. 
     # If the wal implementation is woodpecker, the minimum threshold is 3s
     appendSlowThreshold: 1s
+  flush:
+    # The threshold of memory usage for one streaming node,
+    # If the memory usage is higher than this threshold, the node will try to trigger flush action to decrease the total of growing segment until growingSegmentBytesLwmThreshold,
+    # the value should be in the range of (0, 1), 0.6 by default.
+    memoryThreshold: 0.6
+    # The high watermark of total growing segment bytes for one streaming node,
+    # If the total bytes of growing segment is greater than this threshold,
+    # a flush process will be triggered to decrease total bytes of growing segment until growingSegmentBytesLwmThreshold, 0.4 by default
+    growingSegmentBytesHwmThreshold: 0.4
+    # The lower watermark of total growing segment bytes for one streaming node,
+    # growing segment flush process will try to flush some growing segment into sealed 
+    # until the total bytes of growing segment is less than this threshold, 0.2 by default.
+    growingSegmentBytesLwmThreshold: 0.2
+  walRecovery:
+    # The interval of persist recovery info, 10s by default. 
+    # Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.
+    # Currently it only affect the recovery of wal, but not affect the recovery of data flush into object storage
+    persistInterval: 10s
+    # The max dirty message count of wal recovery, 100 by default.
+    # If there are more than this count of dirty message in wal recovery info, it will be persisted immediately, 
+    # but not wait for the persist interval.
+    maxDirtyMessage: 100
+    # The graceful close timeout for wal recovery, 3s by default.
+    # When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
+    # If that persist operation exceeds this timeout, the wal recovery module will close right now.
+    gracefulCloseTimeout: 3s
+  walTruncate:
+    # The interval of sampling wal checkpoint when truncate, 1m by default.
+    # Every time the checkpoint is persisted, the checkpoint will be sampled and used to be a candidate of truncate checkpoint.
+    # More samples, more frequent truncate, more memory usage.
+    sampleInterval: 1m
+    # The retention interval of wal truncate, 5m by default.
+    # If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
+    # Greater the interval, more wal storage usage, more redundant data in wal
+    retentionInterval: 5m
 
 # Any configuration related to the knowhere vector search engine
 knowhere:

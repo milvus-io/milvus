@@ -125,8 +125,38 @@ func (f *testOneWALImplsFramework) Run() {
 		assert.Panics(f.t, func() {
 			w.Append(ctx, nil)
 		})
-		w.Close()
+		assert.Panics(f.t, func() {
+			w.Truncate(ctx, nil)
+		})
 	}
+
+	// Test truncate on a wal that is not in read-write mode.
+	pChannel := types.PChannelInfo{
+		Name:       f.pchannel,
+		Term:       int64(f.term),
+		AccessMode: types.AccessModeRW,
+	}
+	// crea
+	w, err := f.opener.Open(ctx, &OpenOption{
+		Channel: pChannel,
+	})
+	assert.NoError(f.t, err)
+	f.testTruncate(ctx, w)
+	w.Close()
+	w, err = f.opener.Open(ctx, &OpenOption{
+		Channel: pChannel,
+	})
+	assert.NoError(f.t, err)
+	w.Close()
+}
+
+// testTruncate tests the truncate function of walimpls.
+func (f *testOneWALImplsFramework) testTruncate(ctx context.Context, w WALImpls) {
+	msgID, err := w.Append(ctx, message.CreateTestEmptyInsertMesage(0, map[string]string{}))
+	assert.NoError(f.t, err)
+	assert.NotNil(f.t, msgID)
+	err = w.Truncate(ctx, msgID)
+	assert.NoError(f.t, err)
 }
 
 func (f *testOneWALImplsFramework) testReadAndWrite(ctx context.Context, w WALImpls) {

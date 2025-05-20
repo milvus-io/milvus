@@ -82,17 +82,7 @@ message FlushMessageBody {}
 message ManualFlushMessageBody {}
 
 // CreateSegmentMessageBody is the body of create segment message.
-message CreateSegmentMessageBody {
-    int64 collection_id = 1;
-    repeated CreateSegmentInfo segments = 2;
-}
-
-// CreateSegmentInfo is the info of create segment.
-message CreateSegmentInfo {
-    int64 partition_id  = 1;
-    int64 segment_id    = 2;
-    int64 storage_version = 3;
-}
+message CreateSegmentMessageBody {}
 
 // BeginTxnMessageBody is the body of begin transaction message.
 // Just do nothing now.
@@ -152,18 +142,23 @@ message DeleteMessageHeader {
 // FlushMessageHeader just nothing.
 message FlushMessageHeader {
     int64 collection_id = 1;
-    repeated int64 segment_ids = 2;
+    int64 partition_id = 2;
+    int64 segment_id = 3;
 }
 
 // CreateSegmentMessageHeader just nothing.
 message CreateSegmentMessageHeader {
-    int64 collection_id = 1;
-    repeated int64 segment_ids = 2;
+    int64 collection_id     = 1;
+    int64 partition_id      = 2;
+    int64 segment_id        = 3;
+    int64 storage_version   = 4;        // the storage version of the segment.
+    uint64 max_segment_size = 5; // the max size bytes of the segment.
 }
 
 message ManualFlushMessageHeader {
     int64 collection_id = 1;
     uint64 flush_ts     = 2;
+    repeated int64 segment_ids   = 3; // the segment ids to be flushed, will be filled by wal shard manager.
 }
 
 // CreateCollectionMessageHeader is the header of create collection message.
@@ -216,6 +211,7 @@ message ImportMessageHeader {}
 // SchemaChangeMessageHeader is the header of CollectionSchema update message.
 message SchemaChangeMessageHeader{
     int64 collection_id = 1;
+    repeated int64 flushed_segment_ids = 2; // will be filled by wal shard manager.
 }
 
 // SchemaChangeMessageBody is the body of CollectionSchema update message.
@@ -249,18 +245,16 @@ message TxnContext {
 enum TxnState {
     // should never be used.
     TxnUnknown = 0;
-    // the transaction begin.
-    TxnBegin = 1;
     // the transaction is in flight.
-    TxnInFlight = 2;
+    TxnInFlight = 1;
     // the transaction is on commit.
-    TxnOnCommit = 3;
+    TxnOnCommit = 2;
     // the transaction is committed.
-    TxnCommitted = 4;
+    TxnCommitted = 3;
     // the transaction is on rollback.
-    TxnOnRollback = 5;
+    TxnOnRollback = 4;
     // the transaction is rollbacked.
-    TxnRollbacked = 6;
+    TxnRollbacked = 5;
 }
 
 // RMQMessageLayout is the layout of message for RMQ.

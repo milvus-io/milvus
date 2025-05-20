@@ -180,7 +180,8 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		st.req.GetSchema(),
 		alloc,
 		st.req.GetBinlogMaxSize(),
-		st.req.GetStorageConfig().RootPath,
+		st.req.GetStorageConfig().GetBucketName(),
+		st.req.GetStorageConfig().GetRootPath(),
 		numRows,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return st.binlogIO.Upload(ctx, kvs)
@@ -229,7 +230,9 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 
 	rr, err := storage.NewBinlogRecordReader(ctx, st.req.InsertLogs, st.req.Schema,
 		storage.WithVersion(st.req.StorageVersion),
-		storage.WithDownloader(st.binlogIO.Download))
+		storage.WithDownloader(st.binlogIO.Download),
+		storage.WithBucketName(st.req.StorageConfig.BucketName),
+	)
 	if err != nil {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
 		return nil, err
@@ -602,7 +605,7 @@ func buildIndexParams(
 	if req.GetStorageVersion() == storage.StorageV2 {
 		params.SegmentInsertFiles = GetSegmentInsertFiles(
 			req.GetInsertLogs(),
-			req.GetStorageConfig().RootPath,
+			req.GetStorageConfig(),
 			req.GetCollectionID(),
 			req.GetPartitionID(),
 			req.GetTargetSegmentID())

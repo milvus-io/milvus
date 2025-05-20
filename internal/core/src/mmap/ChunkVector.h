@@ -15,6 +15,8 @@
 // limitations under the License.
 #pragma once
 
+#include "common/Utils.h"
+#include "common/Span.h"
 #include "mmap/ChunkData.h"
 #include "storage/MmapManager.h"
 

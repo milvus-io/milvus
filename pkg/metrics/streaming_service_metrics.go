@@ -30,10 +30,10 @@ const (
 	WALInterceptorLabelName           = "interceptor_name"
 	WALTxnStateLabelName              = "state"
 	WALFlusherStateLabelName          = "state"
+	WALRecoveryStorageStateLabelName  = "state"
 	WALStateLabelName                 = "state"
 	WALChannelLabelName               = channelNameLabelName
 	WALSegmentSealPolicyNameLabelName = "policy"
-	WALSegmentAllocStateLabelName     = "state"
 	WALMessageTypeLabelName           = "message_type"
 	WALChannelTermLabelName           = "term"
 	WALNameLabelName                  = "wal_name"
@@ -232,15 +232,41 @@ var (
 	}, WALChannelLabelName, WALTxnStateLabelName)
 
 	// Segment related metrics
+	WALGrowingSegmentRowsTotal = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "growing_segment_rows_total",
+		Help: "Rows of segment growing on wal",
+	}, WALChannelLabelName)
+
+	WALGrowingSegmentBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "growing_segment_bytes",
+		Help: "Bytes of segment growing on wal",
+	}, WALChannelLabelName)
+
+	WALGrowingSegmentHWMBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "growing_segment_hwm_bytes",
+		Help: "HWM of segment growing bytes on node",
+	})
+
+	WALGrowingSegmentLWMBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "growing_segment_lwm_bytes",
+		Help: "LWM of segment growing bytes on node",
+	})
+
 	WALSegmentAllocTotal = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "segment_assign_segment_alloc_total",
 		Help: "Total of segment alloc on wal",
-	}, WALChannelLabelName, WALSegmentAllocStateLabelName)
+	}, WALChannelLabelName)
 
 	WALSegmentFlushedTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "segment_assign_flushed_segment_total",
 		Help: "Total of segment sealed on wal",
 	}, WALChannelLabelName, WALSegmentSealPolicyNameLabelName)
+
+	WALSegmentRowsTotal = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "segment_assign_segment_rows_total",
+		Help:    "Total rows of segment alloc on wal",
+		Buckets: prometheus.ExponentialBucketsRange(128, 1048576, 10), // 5MB -> 1024MB
+	}, WALChannelLabelName)
 
 	WALSegmentBytes = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "segment_assign_segment_bytes",
@@ -281,6 +307,11 @@ var (
 		Help:    "Intercept duration after wal append message",
 		Buckets: secondsBuckets,
 	}, WALChannelLabelName, WALInterceptorLabelName)
+
+	WALImplsAppendRetryTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "impls_append_message_retry_total",
+		Help: "Total of append message retry",
+	}, WALChannelLabelName)
 
 	WALAppendMessageDurationSeconds = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "append_message_duration_seconds",
@@ -381,6 +412,36 @@ var (
 		Name: "flusher_time_tick",
 		Help: "the final timetick tick of flusher seen",
 	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryInfo = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_info",
+		Help: "Current info of recovery storage on current wal",
+	}, WALChannelLabelName, WALChannelTermLabelName, WALRecoveryStorageStateLabelName)
+
+	WALRecoveryInMemTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_in_mem_time_tick",
+		Help: "the final timetick tick of recovery storage seen",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryPersistedTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_persisted_time_tick",
+		Help: "the final persisted timetick tick of recovery storage seen",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryInconsistentEventTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "recovery_inconsistent_event_total",
+		Help: "Total of recovery inconsistent event",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryIsOnPersisting = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_is_on_persisting",
+		Help: "Is recovery storage on persisting",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALTruncateTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "truncate_time_tick",
+		Help: "the final timetick tick of truncator seen",
+	}, WALChannelLabelName, WALChannelTermLabelName)
 )
 
 // RegisterStreamingServiceClient registers streaming service client metrics
@@ -434,8 +495,13 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALTimeTickSyncTimeTick)
 	registry.MustRegister(WALInflightTxn)
 	registry.MustRegister(WALTxnDurationSeconds)
+	registry.MustRegister(WALGrowingSegmentBytes)
+	registry.MustRegister(WALGrowingSegmentRowsTotal)
+	registry.MustRegister(WALGrowingSegmentHWMBytes)
+	registry.MustRegister(WALGrowingSegmentLWMBytes)
 	registry.MustRegister(WALSegmentAllocTotal)
 	registry.MustRegister(WALSegmentFlushedTotal)
+	registry.MustRegister(WALSegmentRowsTotal)
 	registry.MustRegister(WALSegmentBytes)
 	registry.MustRegister(WALPartitionTotal)
 	registry.MustRegister(WALCollectionTotal)
@@ -443,6 +509,7 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALAppendMessageTotal)
 	registry.MustRegister(WALAppendMessageBeforeInterceptorDurationSeconds)
 	registry.MustRegister(WALAppendMessageAfterInterceptorDurationSeconds)
+	registry.MustRegister(WALImplsAppendRetryTotal)
 	registry.MustRegister(WALAppendMessageDurationSeconds)
 	registry.MustRegister(WALImplsAppendMessageDurationSeconds)
 	registry.MustRegister(WALWriteAheadBufferEntryTotal)
@@ -462,6 +529,12 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALScannerTxnBufBytes)
 	registry.MustRegister(WALFlusherInfo)
 	registry.MustRegister(WALFlusherTimeTick)
+	registry.MustRegister(WALRecoveryInfo)
+	registry.MustRegister(WALRecoveryInMemTimeTick)
+	registry.MustRegister(WALRecoveryPersistedTimeTick)
+	registry.MustRegister(WALRecoveryInconsistentEventTotal)
+	registry.MustRegister(WALRecoveryIsOnPersisting)
+	registry.MustRegister(WALTruncateTimeTick)
 }
 
 func newStreamingCoordGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prometheus.GaugeVec {

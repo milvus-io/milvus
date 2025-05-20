@@ -26,8 +26,11 @@
 #include "cachinglayer/lrucache/ListNode.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
+#include "common/EasyAssert.h"
+#include "common/type_c.h"
 #include "log/Log.h"
 #include "monitor/prometheus_client.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::cachinglayer {
 
@@ -68,6 +71,49 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     CacheSlot&
     operator=(CacheSlot&&) = delete;
 
+    void
+    Warmup() {
+        auto warmup_policy = translator_->meta()->cache_warmup_policy;
+
+        if (warmup_policy == CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
+            return;
+        }
+
+        std::vector<cid_t> cids;
+        cids.reserve(translator_->num_cells());
+        for (cid_t i = 0; i < translator_->num_cells(); ++i) {
+            cids.push_back(i);
+        }
+
+        switch (warmup_policy) {
+            case CacheWarmupPolicy::CacheWarmupPolicy_Sync:
+                SemiInlineGet(PinCells(std::move(cids)));
+                break;
+            case CacheWarmupPolicy::CacheWarmupPolicy_Async:
+                auto& pool = milvus::ThreadPools::GetThreadPool(
+                    milvus::ThreadPoolPriority::MIDDLE);
+                pool.Submit([this, cids = std::move(cids)]() mutable {
+                    SemiInlineGet(PinCells(std::move(cids)));
+                });
+                break;
+        }
+    }
+
+    folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>
+    PinAllCells() {
+        return folly::makeSemiFuture().deferValue([this](auto&&) {
+            size_t index = 0;
+            return PinInternal(
+                [this, index]() mutable -> std::pair<cid_t, bool> {
+                    if (index >= cells_.size()) {
+                        return std::make_pair(cells_.size(), true);
+                    }
+                    return std::make_pair(index++, false);
+                },
+                cells_.size());
+        });
+    }
+
     folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>
     PinCells(std::vector<uid_t> uids) {
         return folly::makeSemiFuture().deferValue([this,
@@ -92,35 +138,51 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
                 }
                 involved_cids.insert(cid);
             }
+            auto reserve_size = involved_cids.size();
 
-            std::vector<folly::SemiFuture<internal::ListNode::NodePin>> futures;
-            std::unordered_set<cid_t> need_load_cids;
-            futures.reserve(involved_cids.size());
-            need_load_cids.reserve(involved_cids.size());
-            for (auto cid : involved_cids) {
-                auto [need_load, future] = cells_[cid].pin();
-                futures.push_back(std::move(future));
-                if (need_load) {
-                    need_load_cids.insert(cid);
-                }
-            }
-            auto load_future = folly::makeSemiFuture();
-            if (!need_load_cids.empty()) {
-                load_future = RunLoad(std::move(need_load_cids));
-            }
-            return std::move(load_future)
-                .deferValue(
-                    [this, futures = std::move(futures)](auto&&) mutable
-                    -> folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>> {
-                        return folly::collect(futures).deferValue(
-                            [this](std::vector<internal::ListNode::NodePin>&&
-                                       pins) mutable
-                            -> std::shared_ptr<CellAccessor<CellT>> {
-                                return std::make_shared<CellAccessor<CellT>>(
-                                    this->shared_from_this(), std::move(pins));
-                            });
-                    });
+            // must be captured by value.
+            // theoretically, we can initialize it outside, and it will not be invalidated
+            // even though we moved involved_cids afterwards, but for safety we initialize it
+            // inside the lambda.
+            decltype(involved_cids.begin()) it;
+            bool initialized = false;
+
+            return PinInternal(
+                [this,
+                 cids = std::move(involved_cids),
+                 it,
+                 initialized]() mutable -> std::pair<cid_t, bool> {
+                    if (!initialized) {
+                        it = cids.begin();
+                        initialized = true;
+                    }
+                    if (it == cids.end()) {
+                        return std::make_pair(0, true);
+                    }
+                    auto cid = *it++;
+                    return std::make_pair(cid, false);
+                },
+                reserve_size);
         });
+    }
+
+    // Manually evicts the cell if it is not pinned.
+    // Returns true if the cell ends up in a state other than LOADED.
+    bool
+    ManualEvict(cid_t cid) {
+        return cells_[cid].manual_evict();
+    }
+
+    // Returns true if any cell is evicted.
+    bool
+    ManualEvictAll() {
+        bool evicted = false;
+        for (cid_t cid = 0; cid < cells_.size(); ++cid) {
+            if (cells_[cid].manual_evict()) {
+                evicted = true;
+            }
+        }
+        return evicted;
     }
 
     size_t
@@ -147,6 +209,40 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
 
  private:
     friend class CellAccessor<CellT>;
+
+    template <typename Fn>
+    folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>
+    PinInternal(Fn&& cid_iterator, size_t reserve_size) {
+        std::vector<folly::SemiFuture<internal::ListNode::NodePin>> futures;
+        std::unordered_set<cid_t> need_load_cids;
+        futures.reserve(reserve_size);
+        need_load_cids.reserve(reserve_size);
+        auto [cid, end] = cid_iterator();
+        while (!end) {
+            auto [need_load, future] = cells_[cid].pin();
+            futures.push_back(std::move(future));
+            if (need_load) {
+                need_load_cids.insert(cid);
+            }
+            std::tie(cid, end) = cid_iterator();
+        }
+        auto load_future = folly::makeSemiFuture();
+        if (!need_load_cids.empty()) {
+            load_future = RunLoad(std::move(need_load_cids));
+        }
+        return std::move(load_future)
+            .deferValue(
+                [this, futures = std::move(futures)](auto&&) mutable
+                -> folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>> {
+                    return folly::collect(futures).deferValue(
+                        [this](std::vector<internal::ListNode::NodePin>&&
+                                   pins) mutable
+                        -> std::shared_ptr<CellAccessor<CellT>> {
+                            return std::make_shared<CellAccessor<CellT>>(
+                                this->shared_from_this(), std::move(pins));
+                        });
+                });
+    }
 
     cid_t
     cell_id_of(uid_t uid) const {
@@ -336,8 +432,8 @@ class PinWrapper {
     PinWrapper&
     operator=(PinWrapper&& other) noexcept {
         if (this != &other) {
-            raii_ = std::move(other.raii_);
-            content_ = std::move(other.content_);
+            std::swap(raii_, other.raii_);
+            std::swap(content_, other.content_);
         }
         return *this;
     }

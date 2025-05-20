@@ -28,6 +28,8 @@ package index
 import "C"
 
 import (
+	"path"
+
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -35,15 +37,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func getCurrentIndexVersion(v int32) int32 {
-	cCurrent := int32(C.GetCurrentIndexVersion())
-	if cCurrent < v {
-		return cCurrent
+	cMaximum := int32(C.GetMaximumIndexVersion())
+	if cMaximum < v {
+		return cMaximum
 	}
 	return v
 }
@@ -91,17 +95,25 @@ func CalculateNodeSlots() int64 {
 	if slot > memorySlot {
 		slot = memorySlot
 	}
-	return max(slot, 1) * paramtable.Get().DataNodeCfg.WorkerSlotUnit.GetAsInt64() * paramtable.Get().DataNodeCfg.BuildParallel.GetAsInt64()
+
+	totalSlot := max(slot, 1) * paramtable.Get().DataNodeCfg.WorkerSlotUnit.GetAsInt64() * paramtable.Get().DataNodeCfg.BuildParallel.GetAsInt64()
+	if paramtable.GetRole() == typeutil.StandaloneRole {
+		totalSlot = max(totalSlot/2, 1)
+	}
+	return totalSlot
 }
 
-func GetSegmentInsertFiles(fieldBinlogs []*datapb.FieldBinlog, rootPath string, collectionID int64, partitionID int64, segmentID int64) *indexcgopb.SegmentInsertFiles {
+func GetSegmentInsertFiles(fieldBinlogs []*datapb.FieldBinlog, storageConfig *indexpb.StorageConfig, collectionID int64, partitionID int64, segmentID int64) *indexcgopb.SegmentInsertFiles {
 	insertLogs := make([]*indexcgopb.FieldInsertFiles, 0)
 	for _, insertLog := range fieldBinlogs {
 		filePaths := make([]string, 0)
 		columnGroupID := insertLog.GetFieldID()
 		for _, binlog := range insertLog.GetBinlogs() {
-			filePaths = append(filePaths,
-				metautil.BuildInsertLogPath(rootPath, collectionID, partitionID, segmentID, columnGroupID, binlog.GetLogID()))
+			filePath := metautil.BuildInsertLogPath(storageConfig.GetRootPath(), collectionID, partitionID, segmentID, columnGroupID, binlog.GetLogID())
+			if storageConfig.StorageType != "local" {
+				filePath = path.Join(storageConfig.GetBucketName(), filePath)
+			}
+			filePaths = append(filePaths, filePath)
 		}
 		insertLogs = append(insertLogs, &indexcgopb.FieldInsertFiles{
 			FilePaths: filePaths,

@@ -213,7 +213,7 @@ TEST_F(ChunkedColumnGroupTest, ChunkedColumnGroup) {
     std::vector<std::unique_ptr<GroupChunk>> group_chunks;
     group_chunks.push_back(std::move(group_chunk));
     auto translator = std::make_unique<TestGroupChunkTranslator>(
-        std::vector<int64_t>{5}, "test_key", std::move(group_chunks));
+        2, std::vector<int64_t>{5}, "test_key", std::move(group_chunks));
     auto column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -250,7 +250,7 @@ TEST_F(ChunkedColumnGroupTest, ProxyChunkColumn) {
     std::vector<std::unique_ptr<GroupChunk>> group_chunks;
     group_chunks.push_back(std::move(group_chunk));
     auto translator = std::make_unique<TestGroupChunkTranslator>(
-        std::vector<int64_t>{5}, "test_key", std::move(group_chunks));
+        2, std::vector<int64_t>{5}, "test_key", std::move(group_chunks));
     auto column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -261,9 +261,15 @@ TEST_F(ChunkedColumnGroupTest, ProxyChunkColumn) {
     EXPECT_EQ(proxy_int64->num_chunks(), 1);
     EXPECT_FALSE(proxy_int64->IsNullable());
     EXPECT_NE(proxy_int64->DataOfChunk(0).get(), nullptr);
-    EXPECT_NE(proxy_int64->ValueAt(0), nullptr);
-    EXPECT_TRUE(proxy_int64->IsValid(0));
-    EXPECT_TRUE(proxy_int64->IsValid(0, 0));
+    int64_t offset = 0;
+    proxy_int64->BulkValueAt(
+        [&](const char* value, size_t size) { EXPECT_NE(value, nullptr); },
+        &offset,
+        1);
+    proxy_int64->BulkIsValid(
+        [&](bool is_valid, size_t offset) { EXPECT_TRUE(is_valid); },
+        &offset,
+        1);
 
     // Test string proxy
     auto proxy_string = std::make_shared<ProxyChunkColumn>(

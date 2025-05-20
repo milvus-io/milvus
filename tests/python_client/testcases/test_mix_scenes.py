@@ -898,7 +898,8 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         expr_count = len([i for i in self.insert_data.get(expr_field, []) if len(i) == length])
 
         # query count(*)
-        self.collection_wrap.query(expr=expr, output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+        self.collection_wrap.query(expr=expr, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": expr_count}]})
 
 
@@ -1223,7 +1224,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         expr_count = len([i for i in self.insert_data.get(expr_field, []) if len(i) == length])
 
         # query count(*)
-        self.collection_wrap.query(expr=expr, output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+        self.collection_wrap.query(expr=expr, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": expr_count}]})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1239,7 +1241,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
             1. query response equal to insert nb
         """
         # query count(*)
-        self.collection_wrap.query(expr='', output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+        self.collection_wrap.query(expr='', output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": self.nb}]})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1637,7 +1640,8 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         expr_count = len([i for i in self.insert_data.get(expr_field, []) if len(i) == length])
 
         # query count(*)
-        self.collection_wrap.query(expr=expr, output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+        self.collection_wrap.query(expr=expr, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": expr_count}]})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1653,7 +1657,8 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
             1. query response equal to insert nb
         """
         # query count(*)
-        self.collection_wrap.query(expr='', output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+        self.collection_wrap.query(expr='', output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": self.nb}]})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1908,7 +1913,8 @@ class TestBitmapIndexMmap(TestCaseClassBase):
             1. query response equal to insert nb
         """
         # query count(*)
-        self.collection_wrap.query(expr='', output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+        self.collection_wrap.query(expr='', output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": self.nb}]})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2132,8 +2138,10 @@ class TestMixScenes(TestcaseBase):
 
         # query before upsert
         expected_res = [{k: v[10] for k, v in insert_data.items() if k != DataType.FLOAT_VECTOR.name}]
-        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": expected_res, "primary_field": primary_field})
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": expected_res, 
+                                                "pk_name": primary_field})
 
         # upsert int64_pk = 10
         upsert_data = cf.gen_field_values(self.collection_wrap.schema, nb=1,
@@ -2141,14 +2149,18 @@ class TestMixScenes(TestcaseBase):
         self.collection_wrap.upsert(data=list(upsert_data.values()))
         # re-query
         expected_upsert_res = [{k: v[0] for k, v in upsert_data.items() if k != DataType.FLOAT_VECTOR.name}]
-        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": expected_upsert_res, "primary_field": primary_field})
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": expected_upsert_res, 
+                                                "pk_name": primary_field})
 
         # delete int64_pk = 10
         self.collection_wrap.delete(expr=expr)
         # re-query
-        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": []})
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [],
+                                                "pk_name": primary_field})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_bitmap_offset_cache_and_mmap(self, request):
@@ -2207,8 +2219,10 @@ class TestMixScenes(TestcaseBase):
         self.collection_wrap.load()
 
         # query before upsert
-        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": []})
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [],
+                                                "pk_name": primary_field})
 
         # upsert int64_pk = 33333
         upsert_data = cf.gen_field_values(self.collection_wrap.schema, nb=1,
@@ -2216,14 +2230,18 @@ class TestMixScenes(TestcaseBase):
         self.collection_wrap.upsert(data=list(upsert_data.values()))
         # re-query
         expected_upsert_res = [{k: v[0] for k, v in upsert_data.items() if k != DataType.FLOAT_VECTOR.name}]
-        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": expected_upsert_res, "primary_field": primary_field})
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": expected_upsert_res, 
+                                                "pk_name": primary_field})
 
         # delete int64_pk = 33333
         self.collection_wrap.delete(expr=expr)
         # re-query
-        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": []})
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [],
+                                                "pk_name": primary_field})
 
         # search
         expr_left, expr_right = Expr.GT(Expr.SUB('INT64', 37).subset, 13).value, Expr.LIKE('VARCHAR', '%a').value

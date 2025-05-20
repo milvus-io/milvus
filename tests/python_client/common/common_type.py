@@ -19,6 +19,7 @@ default_batch_size = 1000
 min_limit = 1
 max_limit = 16384
 max_top_k = 16384
+max_nq = 16384
 max_partition_num = 1024
 max_role_num = 10
 default_partition_num = 16   # default num_partitions for partition key feature
@@ -27,6 +28,7 @@ default_server_segment_row_limit = 1024 * 512
 default_alias = "default"
 default_user = "root"
 default_password = "Milvus"
+default_primary_field_name = 'pk'
 default_bool_field_name = "bool"
 default_int8_field_name = "int8"
 default_int16_field_name = "int16"
@@ -46,9 +48,29 @@ default_bfloat16_vec_field_name = "bfloat16_vector"
 another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
 text_sparse_vector = "TEXT_SPARSE_VECTOR"
-append_vector_type = [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR]
+
+all_vector_types = [
+        DataType.FLOAT_VECTOR,
+        DataType.FLOAT16_VECTOR,
+        DataType.BFLOAT16_VECTOR,
+        DataType.SPARSE_FLOAT_VECTOR,
+        DataType.INT8_VECTOR,
+        DataType.BINARY_VECTOR,
+    ]
+
+default_metric_for_vector_type = {
+    DataType.FLOAT_VECTOR: "COSINE",
+    DataType.FLOAT16_VECTOR: "L2",
+    DataType.BFLOAT16_VECTOR: "IP",
+    DataType.SPARSE_FLOAT_VECTOR: "IP",
+    DataType.INT8_VECTOR: "COSINE",
+    DataType.BINARY_VECTOR: "HAMMING",
+}
+
 all_dense_vector_types = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR]
 all_float_vector_dtypes = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR]
+
+append_vector_type = [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR]
 default_sparse_vec_field_name = "sparse_vector"
 default_partition_name = "_default"
 default_resource_group_name = '__default_resource_group'
@@ -223,6 +245,7 @@ get_all_kind_data_distribution = [
 """ Specially defined list """
 L0_index_types = ["IVF_SQ8", "HNSW", "DISKANN"]
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
+                   "IVF_RABITQ",
                    "HNSW", "SCANN", "DISKANN",
                    "BIN_FLAT", "BIN_IVF_FLAT",
                    "SPARSE_INVERTED_INDEX", "SPARSE_WAND",
@@ -231,12 +254,14 @@ all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
 inverted_index_algo = ['TAAT_NAIVE', 'DAAT_WAND', 'DAAT_MAXSCORE']
 
 default_all_indexes_params = [{}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
+                              {"nlist": 128, "refine": 'true', "refine_type": "SQ8"},
                               {"M": 32, "efConstruction": 360}, {"nlist": 128}, {},
                               {}, {"nlist": 64},
                               {}, {"drop_ratio_build": 0.2},
                               {"nlist": 64}, {"nlist": 64, "m": 16, "nbits": 8}]
 
 default_all_search_params_params = [{}, {"nprobe": 32}, {"nprobe": 32}, {"nprobe": 32},
+                                    {"nprobe": 8, "rbq_bits_query": 6, "refine_k": 1.0},
                                     {"ef": 100}, {"nprobe": 32, "reorder_k": 100}, {"search_list": 30},
                                     {}, {"nprobe": 32},
                                     {"drop_ratio_search": "0.2"}, {"drop_ratio_search": "0.2"},
@@ -259,7 +284,7 @@ default_bin_flat_index = {"index_type": "BIN_FLAT", "params": {}, "metric_type":
 default_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP",
                                  "params": {"drop_ratio_build": 0.2}}
 default_text_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25",
-                                 "params": {"drop_ratio_build": 0.2, "bm25_k1": 1.5, "bm25_b": 0.75,}}
+                                      "params": {"drop_ratio_build": 0.2, "bm25_k1": 1.5, "bm25_b": 0.75,}}
 default_search_params = {"params": {"nlist": 128}}
 default_search_ip_params = {"metric_type": "IP", "params": {"nlist": 128}}
 default_search_binary_params = {"metric_type": "JACCARD", "params": {"nprobe": 32}}

@@ -24,7 +24,8 @@ class TestPartitionKeyIsolation(TestcaseBase):
     def test_par_key_isolation_with_valid_expr(self):
         # create
         self._connect()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 128
         partition_key = "scalar_6"
         enable_isolation = "true"
         if collection_name in list_collections():
@@ -42,7 +43,7 @@ class TestPartitionKeyIsolation(TestcaseBase):
                         is_partition_key=bool(partition_key == "scalar_12")),
             FieldSchema(name="scalar_5_linear", dtype=DataType.VARCHAR, max_length=1000,
                         is_partition_key=bool(partition_key == "scalar_5_linear")),
-            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=768)
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim)
         ]
         schema = CollectionSchema(fields=fields, description="test collection", enable_dynamic_field=True,
                                   num_partitions=1)
@@ -72,12 +73,14 @@ class TestPartitionKeyIsolation(TestcaseBase):
                 "scalar_9": [str(i % 9) for i in range(start_idx, end_idx)],
                 "scalar_12": [str(i % 12) for i in range(start_idx, end_idx)],
                 "scalar_5_linear": [str(i % 5) for i in range(start_idx, end_idx)],
-                "emb": [[random.random() for _ in range(768)] for _ in range(batch_size)]
+                "emb": [[random.random() for _ in range(dim)] for _ in range(batch_size)]
             }
             df = pd.DataFrame(data)
             all_data.append(df)
             log.info(f"generate test data {batch_size} cost time {time.time() - t0}")
             collection.insert(df)
+        num = collection.num_entities
+        log.info(f"collection {collection_name} loaded, num_entities: {num}")
         all_df = pd.concat(all_data)
         collection.compact()
         collection.wait_for_compaction_completed()
@@ -98,8 +101,6 @@ class TestPartitionKeyIsolation(TestcaseBase):
         t0 = time.time()
         collection.load()
         log.info(f"load collection cost time {time.time() - t0}")
-        num = collection.num_entities
-        log.info(f"collection {collection_name} loaded, num_entities: {num}")
 
         valid_expressions = [
             "scalar_6 == '1' and scalar_12 == '1'",
@@ -111,17 +112,15 @@ class TestPartitionKeyIsolation(TestcaseBase):
         ]
         for expr in valid_expressions:
             res = collection.search(
-                data=[[random.random() for _ in range(768)]],
+                data=[[random.random() for _ in range(dim)]],
                 anns_field="emb",
                 expr=expr,
-                param={"metric_type": "L2", "params": {"nprobe": 16}},
+                param={"metric_type": "L2", "params": {}},
                 limit=10000,
                 output_fields=["scalar_3", "scalar_6", "scalar_12"],
                 consistency_level="Strong"
             )
-            log.info(f"search res {res}")
             true_res = all_df.query(expr)
-            log.info(f"true res {true_res}")
             assert len(res[0]) == len(true_res)
 
     def test_par_key_isolation_with_unsupported_expr(self):

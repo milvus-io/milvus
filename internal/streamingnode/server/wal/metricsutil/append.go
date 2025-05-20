@@ -6,9 +6,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
+
+const maxRedoLogged = 3
 
 type InterceptorMetrics struct {
 	Before    time.Duration
@@ -22,9 +25,8 @@ func (im *InterceptorMetrics) String() string {
 
 // AppendMetrics is the metrics for append operation.
 type AppendMetrics struct {
-	wm    *WriteMetrics
-	bytes int
-	msg   message.MutableMessage
+	wm  *WriteMetrics
+	msg message.MutableMessage
 
 	result             *types.AppendResult
 	err                error
@@ -64,22 +66,24 @@ func (m *AppendMetrics) StartAppendGuard() *AppendMetricsGuard {
 // IntoLogFields convert the metrics to log fields.
 func (m *AppendMetrics) IntoLogFields() []zap.Field {
 	fields := []zap.Field{
-		zap.Object("message", m.msg),
-		zap.Duration("append_duration", m.appendDuration),
-		zap.Duration("impl_append_duration", m.implAppendDuration),
+		log.FieldMessage(m.msg),
+		zap.Duration("appendDuration", m.appendDuration),
+		zap.Duration("implAppendDuration", m.implAppendDuration),
 	}
 	for name, ims := range m.interceptors {
 		for i, im := range ims {
-			fields = append(fields, zap.Any(fmt.Sprintf("%s_%d", name, i), im))
+			if i <= maxRedoLogged {
+				fields = append(fields, zap.Any(fmt.Sprintf("%s_%d", name, i), im))
+			}
 		}
 	}
 	if m.err != nil {
 		fields = append(fields, zap.Error(m.err))
 	} else {
-		fields = append(fields, zap.String("message_id", m.result.MessageID.String()))
-		fields = append(fields, zap.Uint64("time_tick", m.result.TimeTick))
+		fields = append(fields, zap.String("messageID", m.result.MessageID.String()))
+		fields = append(fields, zap.Uint64("timetick", m.result.TimeTick))
 		if m.result.TxnCtx != nil {
-			fields = append(fields, zap.Int64("txn_id", int64(m.result.TxnCtx.TxnID)))
+			fields = append(fields, zap.Int64("txnID", int64(m.result.TxnCtx.TxnID)))
 		}
 	}
 	return fields

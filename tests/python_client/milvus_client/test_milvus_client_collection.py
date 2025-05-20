@@ -349,7 +349,8 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
-                                 "limit": default_limit})
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue 25110")
@@ -382,13 +383,14 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 4. query
         self.query(client, collection_name, filter="id in [0, 1]",
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -419,6 +421,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         self.drop_collection(client, collection_name)
 
@@ -452,6 +455,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         self.drop_collection(client, collection_name)
 
@@ -487,13 +491,14 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
-                                 "limit": limit})
+                                 "limit": limit,
+                                 "pk_name": default_primary_key_field_name})
         # 5. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows[delete_num:],
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -528,13 +533,14 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
-                                 "limit": limit})
+                                 "limit": limit,
+                                 "pk_name": default_primary_key_field_name})
         # 5. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows[delete_num:],
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)

@@ -258,6 +258,7 @@ func (node *DataNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2
 			zap.String("fieldType", indexRequest.GetFieldType().String()),
 			zap.Any("field", indexRequest.GetField()),
 			zap.Int64("taskSlot", indexRequest.GetTaskSlot()),
+			zap.Int64("lackBinlogRows", indexRequest.GetLackBinlogRows()),
 		)
 		taskCtx, taskCancel := context.WithCancel(node.ctx)
 		if oldInfo := node.taskManager.LoadOrStoreIndexTask(indexRequest.GetClusterID(), indexRequest.GetBuildID(), &index.IndexTaskInfo{

@@ -64,7 +64,7 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:7]
+range_search_supported_indexes = ct.all_index_types[:8]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -141,6 +141,7 @@ class TestSearchString(TestcaseBase):
                                      check_task=CheckTasks.check_search_results,
                                      check_items={"nq": default_nq,
                                                   "ids": insert_ids,
+                                                  "pk_name": default_int64_field_name,
                                                   "limit": 1,
                                                   "_async": _async})
         if _async:
@@ -177,6 +178,7 @@ class TestSearchString(TestcaseBase):
                                      check_task=CheckTasks.check_search_results,
                                      check_items={"nq": default_nq,
                                                   "ids": insert_ids,
+                                                  "pk_name": default_int64_field_name,
                                                   "limit": 1,
                                                   "_async": _async})
         if _async:
@@ -216,6 +218,7 @@ class TestSearchString(TestcaseBase):
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
                                              "ids": insert_ids,
+                                             "pk_name": ct.default_string_field_name,
                                              "limit": default_limit,
                                              "_async": _async})
 
@@ -259,6 +262,7 @@ class TestSearchString(TestcaseBase):
                                 check_items={"nq": default_nq,
                                              "ids": insert_ids,
                                              "limit": default_limit,
+                                             "pk_name": ct.default_string_field_name,
                                              "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -291,6 +295,7 @@ class TestSearchString(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
+                                         "pk_name": default_int64_field_name,
                                          "limit": default_limit,
                                          "_async": _async})
 
@@ -363,6 +368,7 @@ class TestSearchString(TestcaseBase):
                                             check_task=CheckTasks.check_search_results,
                                             check_items={"nq": default_nq,
                                                          "ids": insert_ids,
+                                                         "pk_name": default_int64_field_name,
                                                          "limit": min(nb, len(filter_ids)),
                                                          "_async": _async})
         if _async:
@@ -404,6 +410,7 @@ class TestSearchString(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": 2,
+                                         "pk_name": ct.default_string_field_name,
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -436,6 +443,7 @@ class TestSearchString(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": 2,
+                                         "pk_name": default_int64_field_name,
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -472,6 +480,7 @@ class TestSearchString(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
+                                         "pk_name": default_int64_field_name,
                                          "limit": default_limit,
                                          "_async": _async})
 
@@ -512,6 +521,7 @@ class TestSearchString(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": 1,
+                                         "pk_name": default_int64_field_name,
                                          "_async": _async}
                             )
 
@@ -552,6 +562,7 @@ class TestSearchString(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": 1,
+                                         "pk_name": default_int64_field_name,
                                          "_async": _async}
                             )
 
@@ -597,6 +608,7 @@ class TestSearchString(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": default_limit,
+                                         "pk_name": ct.default_string_field_name,
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -683,6 +695,7 @@ class TestSearchString(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
+                                         "pk_name": default_int64_field_name,
                                          "limit": default_limit,
                                          "_async": _async})
 
@@ -722,6 +735,7 @@ class TestSearchString(TestcaseBase):
                                      check_items={"nq": default_nq,
                                                   "ids": insert_ids,
                                                   "limit": 1,
+                                                  "pk_name": default_int64_field_name,
                                                   "_async": _async})
         if _async:
             res.done()

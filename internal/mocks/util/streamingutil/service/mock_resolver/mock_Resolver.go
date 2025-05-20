@@ -5,7 +5,7 @@ package mock_resolver
 import (
 	context "context"
 
-	discoverer "github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
+	resolver "github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -23,22 +23,22 @@ func (_m *MockResolver) EXPECT() *MockResolver_Expecter {
 }
 
 // GetLatestState provides a mock function with given fields: ctx
-func (_m *MockResolver) GetLatestState(ctx context.Context) (discoverer.VersionedState, error) {
+func (_m *MockResolver) GetLatestState(ctx context.Context) (resolver.VersionedState, error) {
 	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetLatestState")
 	}
 
-	var r0 discoverer.VersionedState
+	var r0 resolver.VersionedState
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (discoverer.VersionedState, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) (resolver.VersionedState, error)); ok {
 		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) discoverer.VersionedState); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) resolver.VersionedState); ok {
 		r0 = rf(ctx)
 	} else {
-		r0 = ret.Get(0).(discoverer.VersionedState)
+		r0 = ret.Get(0).(resolver.VersionedState)
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
@@ -68,18 +68,18 @@ func (_c *MockResolver_GetLatestState_Call) Run(run func(ctx context.Context)) *
 	return _c
 }
 
-func (_c *MockResolver_GetLatestState_Call) Return(_a0 discoverer.VersionedState, _a1 error) *MockResolver_GetLatestState_Call {
+func (_c *MockResolver_GetLatestState_Call) Return(_a0 resolver.VersionedState, _a1 error) *MockResolver_GetLatestState_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockResolver_GetLatestState_Call) RunAndReturn(run func(context.Context) (discoverer.VersionedState, error)) *MockResolver_GetLatestState_Call {
+func (_c *MockResolver_GetLatestState_Call) RunAndReturn(run func(context.Context) (resolver.VersionedState, error)) *MockResolver_GetLatestState_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Watch provides a mock function with given fields: ctx, cb
-func (_m *MockResolver) Watch(ctx context.Context, cb func(discoverer.VersionedState) error) error {
+func (_m *MockResolver) Watch(ctx context.Context, cb func(resolver.VersionedState) error) error {
 	ret := _m.Called(ctx, cb)
 
 	if len(ret) == 0 {
@@ -87,7 +87,7 @@ func (_m *MockResolver) Watch(ctx context.Context, cb func(discoverer.VersionedS
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, func(discoverer.VersionedState) error) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, func(resolver.VersionedState) error) error); ok {
 		r0 = rf(ctx, cb)
 	} else {
 		r0 = ret.Error(0)
@@ -103,14 +103,14 @@ type MockResolver_Watch_Call struct {
 
 // Watch is a helper method to define mock.On call
 //   - ctx context.Context
-//   - cb func(discoverer.VersionedState) error
+//   - cb func(resolver.VersionedState) error
 func (_e *MockResolver_Expecter) Watch(ctx interface{}, cb interface{}) *MockResolver_Watch_Call {
 	return &MockResolver_Watch_Call{Call: _e.mock.On("Watch", ctx, cb)}
 }
 
-func (_c *MockResolver_Watch_Call) Run(run func(ctx context.Context, cb func(discoverer.VersionedState) error)) *MockResolver_Watch_Call {
+func (_c *MockResolver_Watch_Call) Run(run func(ctx context.Context, cb func(resolver.VersionedState) error)) *MockResolver_Watch_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(func(discoverer.VersionedState) error))
+		run(args[0].(context.Context), args[1].(func(resolver.VersionedState) error))
 	})
 	return _c
 }
@@ -120,7 +120,7 @@ func (_c *MockResolver_Watch_Call) Return(_a0 error) *MockResolver_Watch_Call {
 	return _c
 }
 
-func (_c *MockResolver_Watch_Call) RunAndReturn(run func(context.Context, func(discoverer.VersionedState) error) error) *MockResolver_Watch_Call {
+func (_c *MockResolver_Watch_Call) RunAndReturn(run func(context.Context, func(resolver.VersionedState) error) error) *MockResolver_Watch_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -12,6 +12,7 @@
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
 
 #include "common/ChunkWriter.h"
+#include "segcore/Utils.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -26,7 +27,11 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
       use_mmap_(use_mmap),
       field_meta_(field_meta),
       meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
-                     : milvus::cachinglayer::StorageType::MEMORY) {
+                     : milvus::cachinglayer::StorageType::MEMORY,
+            milvus::segcore::getCacheWarmupPolicy(
+                IsVectorDataType(field_meta.get_data_type()),
+                /* is_index */ false),
+            /* support_eviction */ false) {
     meta_.num_rows_until_chunk_.push_back(0);
     meta_.num_rows_until_chunk_.push_back(field_data_info.row_count);
 }

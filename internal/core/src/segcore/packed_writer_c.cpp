@@ -52,6 +52,7 @@ NewPackedWriter(struct ArrowSchema* schema,
 
         auto writer = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
             trueFs, truePaths, trueSchema, conf, columnGroups, buffer_size);
+        AssertInfo(writer, "write must not be null");
 
         *c_packed_writer = writer.release();
         return milvus::SuccessCStatus();

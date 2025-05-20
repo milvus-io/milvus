@@ -782,13 +782,22 @@ func matchCountRule(outputs []string) bool {
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*QueryReqV2)
 	req := &milvuspb.QueryRequest{
-		DbName:                dbName,
-		CollectionName:        httpReq.CollectionName,
-		Expr:                  httpReq.Filter,
-		OutputFields:          httpReq.OutputFields,
-		PartitionNames:        httpReq.PartitionNames,
-		QueryParams:           []*commonpb.KeyValuePair{},
-		UseDefaultConsistency: true,
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Expr:           httpReq.Filter,
+		OutputFields:   httpReq.OutputFields,
+		PartitionNames: httpReq.PartitionNames,
+		QueryParams:    []*commonpb.KeyValuePair{},
+	}
+	var err error
+	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
+	if err != nil {
+		log.Ctx(ctx).Warn("high level restful api, query with consistency_level invalid", zap.Error(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
+		})
+		return nil, err
 	}
 	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
 	c.Set(ContextRequest, req)
@@ -838,12 +847,20 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		return nil, err
 	}
 	req := &milvuspb.QueryRequest{
-		DbName:                dbName,
-		CollectionName:        httpReq.CollectionName,
-		OutputFields:          httpReq.OutputFields,
-		PartitionNames:        httpReq.PartitionNames,
-		Expr:                  filter,
-		UseDefaultConsistency: true,
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		OutputFields:   httpReq.OutputFields,
+		PartitionNames: httpReq.PartitionNames,
+		Expr:           filter,
+	}
+	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
+	if err != nil {
+		log.Ctx(ctx).Warn("high level restful api, query with consistency_level invalid", zap.Error(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
+		})
+		return nil, err
 	}
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Query", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
@@ -2263,6 +2280,8 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 				HTTPReturnIndexIndexedRows:     indexDescription.IndexedRows,
 				HTTPReturnIndexState:           indexDescription.State.String(),
 				HTTPReturnIndexFailReason:      indexDescription.IndexStateFailReason,
+				HTTPReturnMinIndexVersion:      indexDescription.MinIndexVersion,
+				HTTPReturnMaxIndexVersion:      indexDescription.MaxIndexVersion,
 			}
 			indexInfos = append(indexInfos, indexInfo)
 		}

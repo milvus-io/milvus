@@ -22,6 +22,40 @@ import (
 
 var _ wal.Scanner = (*scannerAdaptorImpl)(nil)
 
+// newRecoveryScannerAdaptor creates a new recovery scanner adaptor.
+func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
+	startMessageID message.MessageID,
+	scanMetrics *metricsutil.ScannerMetrics,
+) *scannerAdaptorImpl {
+	name := "recovery"
+	logger := resource.Resource().Logger().With(
+		log.FieldComponent("scanner"),
+		zap.String("name", name),
+		zap.String("channel", l.Channel().String()),
+		zap.String("startMessageID", startMessageID.String()),
+	)
+	readOption := wal.ReadOption{
+		DeliverPolicy:  options.DeliverPolicyStartFrom(startMessageID),
+		MesasgeHandler: adaptor.ChanMessageHandler(make(chan message.ImmutableMessage)),
+	}
+
+	s := &scannerAdaptorImpl{
+		logger:        logger,
+		recovery:      true,
+		innerWAL:      l,
+		readOption:    readOption,
+		filterFunc:    func(message.ImmutableMessage) bool { return true },
+		reorderBuffer: utility.NewReOrderBuffer(),
+		pendingQueue:  utility.NewPendingQueue(),
+		txnBuffer:     utility.NewTxnBuffer(logger, scanMetrics),
+		cleanup:       func() {},
+		ScannerHelper: helper.NewScannerHelper(name),
+		metrics:       scanMetrics,
+	}
+	go s.execute()
+	return s
+}
+
 // newScannerAdaptor creates a new scanner adaptor.
 func newScannerAdaptor(
 	name string,
@@ -29,7 +63,7 @@ func newScannerAdaptor(
 	readOption wal.ReadOption,
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
-) wal.Scanner {
+) *scannerAdaptorImpl {
 	if readOption.MesasgeHandler == nil {
 		readOption.MesasgeHandler = adaptor.ChanMessageHandler(make(chan message.ImmutableMessage))
 	}
@@ -41,6 +75,7 @@ func newScannerAdaptor(
 	)
 	s := &scannerAdaptorImpl{
 		logger:        logger,
+		recovery:      false,
 		innerWAL:      l,
 		readOption:    readOption,
 		filterFunc:    options.GetFilterFunc(readOption.MessageFilter),
@@ -58,6 +93,7 @@ func newScannerAdaptor(
 // scannerAdaptorImpl is a wrapper of ScannerImpls to extend it into a Scanner interface.
 type scannerAdaptorImpl struct {
 	*helper.ScannerHelper
+	recovery      bool
 	logger        *log.MLogger
 	innerWAL      walimpls.ROWALImpls
 	readOption    wal.ReadOption
@@ -125,7 +161,9 @@ func (s *scannerAdaptorImpl) execute() {
 func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMessage) error {
 	var wb wab.ROWriteAheadBuffer
 	var err error
-	if s.Channel().AccessMode == types.AccessModeRW {
+	if s.Channel().AccessMode == types.AccessModeRW && !s.recovery {
+		// recovery scanner can not use the write ahead buffer, should not trigger sync.
+
 		// Trigger a persisted time tick to make sure the timetick is pushed forward.
 		// because the underlying wal may be deleted because of retention policy.
 		// So we cannot get the timetick from the wal.
@@ -195,8 +233,11 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 		if len(msgs) > 0 {
 			// Push the confirmed messages into pending queue for consuming.
 			s.pendingQueue.Add(msgs)
-		} else if s.pendingQueue.Len() == 0 {
-			// If there's no new message incoming and there's no pending message in the queue.
+		}
+		if msg.IsPersisted() || s.pendingQueue.Len() == 0 {
+			// If the ts message is persisted, it must can be seen by the consumer.
+			//
+			// Otherwise if there's no new message incoming and there's no pending message in the queue.
 			// Add current timetick message into pending queue to make timetick push forward.
 			// TODO: current milvus can only run on timetick pushing,
 			// after qview is applied, those trival time tick message can be erased.
@@ -223,11 +264,17 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 			s.metrics.ObserveTimeTickViolation(isTailing, msg.MessageType())
 		}
 		s.logger.Warn("failed to push message into reorder buffer",
-			zap.Object("message", msg),
+			log.FieldMessage(msg),
 			zap.Bool("tailing", isTailing),
 			zap.Error(err))
 	}
 	// Observe the filtered message.
 	s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
 	s.metrics.ObservePassedMessage(isTailing, msg.MessageType(), msg.EstimateSize())
+	if s.logger.Level().Enabled(zap.DebugLevel) {
+		// Log the message if the log level is debug.
+		s.logger.Debug("push message into reorder buffer",
+			log.FieldMessage(msg),
+			zap.Bool("tailing", isTailing))
+	}
 }

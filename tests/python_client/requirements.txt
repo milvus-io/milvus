@@ -28,9 +28,11 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.6.0rc119
-pymilvus[bulk_writer]==2.6.0rc119
+pymilvus==2.6.0rc123
+pymilvus[bulk_writer]==2.6.0rc123
 
+# for protobuf
+protobuf==5.27.2
 
 # for customize config test
 python-benedict==0.24.3

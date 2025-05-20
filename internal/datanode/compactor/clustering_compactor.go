@@ -777,6 +777,12 @@ func (t *clusteringCompactionTask) uploadPartitionStats(ctx context.Context, col
 
 // cleanUp try best to clean all temp datas
 func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
+	if t.mappingPool != nil {
+		t.mappingPool.Release()
+	}
+	if t.flushPool != nil {
+		t.flushPool.Release()
+	}
 }
 
 func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[interface{}]int64, error) {
