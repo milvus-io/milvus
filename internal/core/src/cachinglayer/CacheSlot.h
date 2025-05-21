@@ -62,6 +62,8 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             .Increment();
         internal::cache_cell_count(translator_->meta()->storage_type)
             .Increment(translator_->num_cells());
+        internal::cache_memory_overhead_bytes(translator_->meta()->storage_type)
+            .Increment(memory_overhead());
     }
 
     CacheSlot(const CacheSlot&) = delete;
@@ -205,6 +207,8 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             .Decrement();
         internal::cache_cell_count(translator_->meta()->storage_type)
             .Decrement(translator_->num_cells());
+        internal::cache_memory_overhead_bytes(translator_->meta()->storage_type)
+            .Decrement(memory_overhead());
     }
 
  private:
@@ -363,6 +367,12 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         std::unique_ptr<CellT> cell_{nullptr};
         std::chrono::steady_clock::time_point life_start_{};
     };
+
+    size_t
+    memory_overhead() const {
+        return sizeof(*this) + cells_.size() * sizeof(CacheCell);
+    }
+
     const std::unique_ptr<Translator<CellT>> translator_;
     // Each CacheCell's cid_t is its index in vector
     // Once initialized, cells_ should never be resized.

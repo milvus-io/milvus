@@ -219,7 +219,6 @@ DECLARE_PROMETHEUS_COUNTER(internal_cache_load_count_fail_memory);
 DECLARE_PROMETHEUS_COUNTER(internal_cache_load_count_fail_disk);
 DECLARE_PROMETHEUS_COUNTER(internal_cache_load_count_fail_mixed);
 
-// TODO(tiered storage 1): not added
 DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_cache_memory_overhead_bytes);
 DECLARE_PROMETHEUS_GAUGE(internal_cache_memory_overhead_bytes_memory);
 DECLARE_PROMETHEUS_GAUGE(internal_cache_memory_overhead_bytes_disk);
