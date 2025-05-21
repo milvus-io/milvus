@@ -569,9 +569,29 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		}, nil
 	}
 
+	var (
+		totalSlots     = node.totalSlot
+		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
+		compactionUsed = node.compactionExecutor.Slots()
+		importUsed     = node.importScheduler.Slots()
+	)
+
+	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
+	if availableSlots < 0 {
+		availableSlots = 0
+	}
+
+	log.Ctx(ctx).Info("query slots done",
+		zap.Int64("totalSlots", totalSlots),
+		zap.Int64("availableSlots", availableSlots),
+		zap.Int64("indexStatsUsed", indexStatsUsed),
+		zap.Int64("compactionUsed", compactionUsed),
+		zap.Int64("importUsed", importUsed),
+	)
+
 	return &datapb.QuerySlotResponse{
-		Status:   merr.Success(),
-		NumSlots: node.compactionExecutor.Slots(),
+		Status:         merr.Success(),
+		AvailableSlots: availableSlots,
 	}, nil
 }
 
@@ -749,12 +769,6 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			resProperties.AppendReason(results[0].GetFailReason())
 		}
 		return wrapQueryTaskResult(resp, resProperties)
-	case taskcommon.QuerySlot:
-		resp, err := node.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
-		if err != nil {
-			return nil, err
-		}
-		return wrapQueryTaskResult(resp, nil)
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("QueryTask failed", zap.Error(err))

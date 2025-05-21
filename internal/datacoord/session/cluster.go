@@ -37,7 +37,6 @@ import (
 // WorkerSlots represents the slot information for a worker node
 type WorkerSlots struct {
 	NodeID         int64
-	TotalSlots     int64
 	AvailableSlots int64
 }
 
@@ -161,42 +160,39 @@ func (c *cluster) dropTask(nodeID int64, properties taskcommon.Properties) error
 
 func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 	var (
-		mu        = &sync.Mutex{}
-		wg        = &sync.WaitGroup{}
-		nodeSlots = make(map[int64]*WorkerSlots)
+		mu                 = &sync.Mutex{}
+		wg                 = &sync.WaitGroup{}
+		availableNodeSlots = make(map[int64]*WorkerSlots)
 	)
-	properties := taskcommon.NewProperties(nil)
-	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
-	properties.AppendTaskID(-1)
-	properties.AppendType(taskcommon.QuerySlot)
 	for _, nodeID := range c.nm.GetClientIDs() {
 		wg.Add(1)
 		nodeID := nodeID
 		go func() {
 			defer wg.Done()
-			resp, err := c.queryTask(nodeID, properties)
-			if err = merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
-				log.Ctx(context.TODO()).Warn("failed to get node slot", zap.Int64("nodeID", nodeID), zap.Error(err))
+			timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			cli, err := c.nm.GetClient(nodeID)
+			if err != nil {
+				log.Ctx(ctx).Warn("failed to get client", zap.Error(err))
 				return
 			}
-			result := &workerpb.GetJobStatsResponse{}
-			err = proto.Unmarshal(resp.GetPayload(), result)
-			if err != nil {
-				log.Ctx(context.TODO()).Warn("failed to unmarshal result", zap.Int64("nodeID", nodeID), zap.Error(err))
+			resp, err := cli.QuerySlot(ctx, &datapb.QuerySlotRequest{})
+			if err = merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
+				log.Ctx(ctx).Warn("failed to get node slot", zap.Int64("nodeID", nodeID), zap.Error(err))
 				return
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			nodeSlots[nodeID] = &WorkerSlots{
+			availableNodeSlots[nodeID] = &WorkerSlots{
 				NodeID:         nodeID,
-				TotalSlots:     result.GetTotalSlots(),
-				AvailableSlots: result.GetAvailableSlots(),
+				AvailableSlots: resp.GetAvailableSlots(),
 			}
 		}()
 	}
 	wg.Wait()
-	log.Ctx(context.TODO()).Debug("query slot done", zap.Any("nodeSlots", nodeSlots))
-	return nodeSlots
+	log.Ctx(context.TODO()).Debug("query slot done", zap.Any("nodeSlots", availableNodeSlots))
+	return availableNodeSlots
 }
 
 func (c *cluster) CreateCompaction(nodeID int64, in *datapb.CompactionPlan) error {

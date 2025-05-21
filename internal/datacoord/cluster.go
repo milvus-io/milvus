@@ -196,7 +196,7 @@ func (c *ClusterImpl) QuerySlots() map[int64]int64 {
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			nodeSlots[nodeID] = resp.GetNumSlots()
+			nodeSlots[nodeID] = resp.GetAvailableSlots()
 		}(nodeID)
 	}
 	wg.Wait()

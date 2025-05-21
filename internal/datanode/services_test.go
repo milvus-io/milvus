@@ -1399,18 +1399,6 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		s.True(strings.Contains(resp.GetStatus().GetReason(), "not found"))
 	})
 
-	s.Run("query slot task", func() {
-		req := &workerpb.QueryTaskRequest{
-			Properties: map[string]string{
-				taskcommon.ClusterIDKey: "cluster-0",
-				taskcommon.TypeKey:      taskcommon.QuerySlot,
-				taskcommon.TaskIDKey:    "1",
-			},
-		}
-		resp, err := s.node.QueryTask(s.ctx, req)
-		s.NoError(merr.CheckRPCCall(resp, err))
-	})
-
 	s.Run("invalid task type", func() {
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{

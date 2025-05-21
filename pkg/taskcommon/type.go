@@ -20,7 +20,6 @@ type Type = string
 
 const (
 	TypeNone   Type = "None"
-	QuerySlot  Type = "QuerySlot"
 	PreImport  Type = "PreImport"
 	Import     Type = "Import"
 	Compaction Type = "Compaction"

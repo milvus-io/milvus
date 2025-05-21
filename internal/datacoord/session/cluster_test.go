@@ -158,15 +158,9 @@ func TestCluster_QuerySlot(t *testing.T) {
 		mockNodeManager.EXPECT().GetClientIDs().Return([]int64{1, 2})
 		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
 
-		// Mock response
-		expectedSlots := &workerpb.GetJobStatsResponse{
-			TotalSlots:     10,
+		mockClient.EXPECT().QuerySlot(mock.Anything, mock.Anything).Return(&datapb.QuerySlotResponse{
+			Status:         merr.Success(),
 			AvailableSlots: 5,
-		}
-		payload, _ := proto.Marshal(expectedSlots)
-		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
-			Status:  merr.Success(),
-			Payload: payload,
 		}, nil)
 
 		// Test
@@ -174,7 +168,6 @@ func TestCluster_QuerySlot(t *testing.T) {
 		assert.NotNil(t, result)
 		assert.Len(t, result, 2)
 		for _, slots := range result {
-			assert.Equal(t, int64(10), slots.TotalSlots)
 			assert.Equal(t, int64(5), slots.AvailableSlots)
 		}
 	})
@@ -769,7 +762,6 @@ func TestCluster_QueryProperties(t *testing.T) {
 	cluster := NewCluster(mockNodeManager)
 	mockClient := mocks.NewMockDataNodeClient(t)
 	mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
-	mockNodeManager.EXPECT().GetClientIDs().Return([]int64{1})
 
 	// Set up common mock response
 	expectedResponse := &workerpb.QueryTaskResponse{
@@ -793,8 +785,6 @@ func TestCluster_QueryProperties(t *testing.T) {
 
 		// Verify specific properties based on task type
 		switch taskType {
-		case taskcommon.QuerySlot:
-			assert.Equal(t, taskcommon.QuerySlot, taskType)
 		case taskcommon.Compaction:
 			assert.Equal(t, taskcommon.Compaction, taskType)
 		case taskcommon.PreImport:
@@ -813,10 +803,6 @@ func TestCluster_QueryProperties(t *testing.T) {
 
 		return true
 	})).Return(expectedResponse, nil)
-
-	t.Run("QuerySlot", func(t *testing.T) {
-		cluster.QuerySlot()
-	})
 
 	t.Run("QueryCompaction", func(t *testing.T) {
 		req := &datapb.CompactionStateRequest{

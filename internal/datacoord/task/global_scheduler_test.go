@@ -21,12 +21,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/datacoord/session"
-	taskcommon "github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
+
+	"github.com/milvus-io/milvus/internal/datacoord/session"
+	taskcommon "github.com/milvus-io/milvus/pkg/v2/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func init() {
@@ -87,12 +88,10 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 	nodeID := scheduler.pickNode(map[int64]*session.WorkerSlots{
 		1: {
 			NodeID:         1,
-			TotalSlots:     30,
 			AvailableSlots: 30,
 		},
 		2: {
 			NodeID:         2,
-			TotalSlots:     30,
 			AvailableSlots: 30,
 		},
 	}, 1)
@@ -101,12 +100,10 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 	nodeID = scheduler.pickNode(map[int64]*session.WorkerSlots{
 		1: {
 			NodeID:         1,
-			TotalSlots:     30,
 			AvailableSlots: 20,
 		},
 		2: {
 			NodeID:         2,
-			TotalSlots:     30,
 			AvailableSlots: 30,
 		},
 	}, 100)
@@ -115,12 +112,10 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 	nodeID = scheduler.pickNode(map[int64]*session.WorkerSlots{
 		1: {
 			NodeID:         1,
-			TotalSlots:     30,
 			AvailableSlots: 0,
 		},
 		2: {
 			NodeID:         2,
-			TotalSlots:     30,
 			AvailableSlots: 0,
 		},
 	}, 1)
@@ -132,12 +127,10 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
 		1: {
 			NodeID:         1,
-			TotalSlots:     100,
 			AvailableSlots: 100,
 		},
 		2: {
 			NodeID:         2,
-			TotalSlots:     100,
 			AvailableSlots: 100,
 		},
 	})
