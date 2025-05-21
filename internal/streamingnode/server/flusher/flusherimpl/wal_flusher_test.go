@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/mock"
-	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -34,6 +33,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	defaultCollectionNotFoundTolerance = 2
+
 	paramtable.Init()
 	if code := m.Run(); code != 0 {
 		os.Exit(code)
@@ -77,6 +78,11 @@ func TestWALFlusher(t *testing.T) {
 						CollectionId: 100,
 					},
 				},
+				"vchannel-3": {
+					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+						CollectionId: 100,
+					},
+				},
 			},
 			Checkpoint: &recovery.WALCheckpoint{
 				TimeTick: 0,
@@ -92,14 +98,17 @@ func TestWALFlusher(t *testing.T) {
 
 func newMockMixcoord(t *testing.T, maybe bool) *mocks.MockMixCoordClient {
 	mixcoord := mocks.NewMockMixCoordClient(t)
-	failureCnt := atomic.NewInt32(2)
 	mixcoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 	}, nil)
 	expect := mixcoord.EXPECT().GetChannelRecoveryInfo(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, request *datapb.GetChannelRecoveryInfoRequest, option ...grpc.CallOption,
 		) (*datapb.GetChannelRecoveryInfoResponse, error) {
-			if failureCnt.Dec() > 0 {
+			if request.Vchannel == "vchannel-3" {
+				return &datapb.GetChannelRecoveryInfoResponse{
+					Status: merr.Status(merr.ErrCollectionNotFound),
+				}, nil
+			} else if request.Vchannel == "vchannel-2" {
 				return &datapb.GetChannelRecoveryInfoResponse{
 					Status: merr.Status(merr.ErrChannelNotAvailable),
 				}, nil
