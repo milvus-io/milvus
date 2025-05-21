@@ -57,6 +57,8 @@ type LevelZeroCompactionTask struct {
 
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
+
+	compactionParams compaction.Params
 }
 
 // make sure compactionTask implements compactor interface
@@ -120,6 +122,12 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 		return nil, ctx.Err()
 	}
 
+	var err error
+	t.compactionParams, err = compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
+	if err != nil {
+		return nil, err
+	}
+
 	l0Segments := lo.Filter(t.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
 		return s.Level == datapb.SegmentLevel_L0
 	})
@@ -131,7 +139,7 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 		log.Warn("compact wrong, not target sealed segments")
 		return nil, errors.New("illegal compaction plan with empty target segments")
 	}
-	err := binlog.DecompressCompactionBinlogs(l0Segments)
+	err = binlog.DecompressCompactionBinlogs(l0Segments)
 	if err != nil {
 		log.Warn("DecompressCompactionBinlogs failed", zap.Error(err))
 		return nil, err
@@ -285,7 +293,7 @@ type BatchApplyRet = struct {
 func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context, deltaData *storage.DeleteData, pool *conc.Pool[any], segmentBfs map[int64]*pkoracle.BloomFilterSet) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact applyBFInParallel")
 	defer span.End()
-	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+	batchSize := t.compactionParams.BloomFilterApplyBatchSize
 
 	batchPredict := func(pks []storage.PrimaryKey) map[int64][]bool {
 		segment2Hits := make(map[int64][]bool, 0)
