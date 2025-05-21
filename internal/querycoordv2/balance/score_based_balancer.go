@@ -67,7 +67,7 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 			}
 			return normalNode
 		})
-		balanceBatchSize = paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
+		balanceBatchSize = paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
 	}
 
 	// calculate each node's score
@@ -159,7 +159,7 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 			}
 			return normalNode
 		})
-		balanceBatchSize = paramtable.Get().QueryCoordCfg.CollectionBalanceChannelBatchSize.GetAsInt()
+		balanceBatchSize = paramtable.Get().QueryCoordCfg.BalanceChannelBatchSize.GetAsInt()
 	}
 
 	// calculate each node's score
@@ -605,7 +605,7 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 		channelDist[node] = b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
 	}
 
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
 	// find the segment from the node which has more score than the average
 	channelsToMove := make([]*meta.DmChannel, 0)
 	for node, channels := range channelDist {
