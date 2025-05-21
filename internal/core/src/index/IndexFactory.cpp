@@ -438,7 +438,8 @@ IndexFactory::CreateScalarIndex(
             return CreateJsonIndex(create_index_info.index_type,
                                    create_index_info.json_cast_type,
                                    create_index_info.json_path,
-                                   file_manager_context);
+                                   file_manager_context,
+                                   create_index_info.json_cast_function);
         }
         default:
             PanicInfo(DataTypeInvalid, "Invalid data type:{}", data_type);
