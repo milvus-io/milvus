@@ -2215,6 +2215,21 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 			BaseMsg:                   getBaseMsg(ctx, ts),
 			OperatePrivilegeV2Request: r,
 		}
+	case *milvuspb.CreatePrivilegeGroupRequest:
+		tsMsg = &msgstream.CreatePrivilegeGroupMsg{
+			BaseMsg:                     getBaseMsg(ctx, ts),
+			CreatePrivilegeGroupRequest: r,
+		}
+	case *milvuspb.DropPrivilegeGroupRequest:
+		tsMsg = &msgstream.DropPrivilegeGroupMsg{
+			BaseMsg:                   getBaseMsg(ctx, ts),
+			DropPrivilegeGroupRequest: r,
+		}
+	case *milvuspb.OperatePrivilegeGroupRequest:
+		tsMsg = &msgstream.OperatePrivilegeGroupMsg{
+			BaseMsg:                      getBaseMsg(ctx, ts),
+			OperatePrivilegeGroupRequest: r,
+		}
 	case *milvuspb.CreateAliasRequest:
 		tsMsg = &msgstream.CreateAliasMsg{
 			BaseMsg:            getBaseMsg(ctx, ts),
