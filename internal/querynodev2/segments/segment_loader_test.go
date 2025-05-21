@@ -634,8 +634,10 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key)
 
 	msgLength := 4
+	memorySize := int64(100)
+	diskSize := int64(100)
 
-	// Load sealed
+	// test set segment to delegator, load empty segment
 	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
 		suite.collectionID,
 		suite.partitionID,
@@ -645,6 +647,35 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 		suite.chunkManager,
 	)
 	suite.NoError(err)
+
+	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		SegmentID:     suite.segmentID - 1,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	})
+	suite.NoError(err)
+
+	// Load sealed
+	binlogs, statsLogs, err = mock_segcore.SaveBinLog(ctx,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		msgLength,
+		suite.schema,
+		suite.chunkManager,
+	)
+	suite.NoError(err)
+
+	for _, binlog := range binlogs {
+		for _, log := range binlog.Binlogs {
+			log.MemorySize = memorySize
+			log.LogSize = diskSize
+		}
+	}
 
 	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
 		SegmentID:     suite.segmentID,
@@ -667,6 +698,13 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 		suite.chunkManager,
 	)
 	suite.NoError(err)
+
+	for _, binlog := range binlogs {
+		for _, log := range binlog.Binlogs {
+			log.MemorySize = memorySize
+			log.LogSize = diskSize
+		}
+	}
 
 	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
 		SegmentID:     suite.segmentID + 1,

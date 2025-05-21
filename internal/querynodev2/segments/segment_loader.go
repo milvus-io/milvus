@@ -1424,7 +1424,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		tempSegmentIndexFactor:   paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
 		deltaDataExpansionFactor: paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
 	}
-	maxSegmentSize := uint64(0)
+	maxSegmentMemSize := uint64(0)
 	predictMemUsage := memUsage
 	predictDiskUsage := diskUsage
 	var predictGpuMemUsage []uint64
@@ -1451,13 +1451,13 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		predictDiskUsage += usage.DiskSize
 		predictMemUsage += usage.MemorySize
 		predictGpuMemUsage = usage.FieldGpuMemorySize
-		if usage.MemorySize > maxSegmentSize {
-			maxSegmentSize = usage.MemorySize
+		if usage.MemorySize > maxSegmentMemSize {
+			maxSegmentMemSize = usage.MemorySize
 		}
 	}
 
 	log.Info("predict memory and disk usage while loading (in MiB)",
-		zap.Float64("maxSegmentSize(MB)", toMB(maxSegmentSize)),
+		zap.Float64("maxSegmentSize(MB)", toMB(maxSegmentMemSize)),
 		zap.Float64("committedMemSize(MB)", toMB(loader.committedResource.MemorySize)),
 		zap.Float64("memLimit(MB)", toMB(totalMem)),
 		zap.Float64("memUsage(MB)", toMB(memUsage)),
@@ -1468,16 +1468,20 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		zap.Int("mmapFieldCount", mmapFieldCount),
 	)
 
-	if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
+	// set segment to delegator may not consume memory, skip check
+	memCost := predictMemUsage - memUsage
+	if memCost > 0 && predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
 		return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB,  memUsage = %v MB, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
-			toMB(maxSegmentSize),
+			toMB(maxSegmentMemSize),
 			toMB(memUsage),
 			toMB(predictMemUsage),
 			toMB(totalMem),
 			paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
 	}
 
-	if predictDiskUsage > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
+	// set segment to delegator may not consume disk, skip check
+	diskCost := predictDiskUsage - diskUsage
+	if diskCost > 0 && predictDiskUsage > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
 		return 0, 0, merr.WrapErrServiceDiskLimitExceeded(float32(predictDiskUsage), float32(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()), fmt.Sprintf("load segment failed, disk space is not enough, diskUsage = %v MB, predictDiskUsage = %v MB, totalDisk = %v MB, thresholdFactor = %f",
 			toMB(diskUsage),
 			toMB(predictDiskUsage),
@@ -1489,7 +1493,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	if err != nil {
 		return 0, 0, err
 	}
-	return predictMemUsage - memUsage, predictDiskUsage - diskUsage, nil
+	return memCost, diskCost, nil
 }
 
 // getResourceUsageEstimateOfSegment estimates the resource usage of the segment
