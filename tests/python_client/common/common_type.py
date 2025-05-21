@@ -261,7 +261,7 @@ default_all_indexes_params = [{}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128,
                               {"nlist": 64}, {"nlist": 64, "m": 16, "nbits": 8}]
 
 default_all_search_params_params = [{}, {"nprobe": 32}, {"nprobe": 32}, {"nprobe": 32},
-                                    {"nprobe": 8, "rbq_bits_query": 6, "refine_k": 1.0},
+                                    {"nprobe": 8, "rbq_bits_query": 8, "refine_k": 10.0},
                                     {"ef": 100}, {"nprobe": 32, "reorder_k": 100}, {"search_list": 30},
                                     {}, {"nprobe": 32},
                                     {"drop_ratio_search": "0.2"}, {"drop_ratio_search": "0.2"},

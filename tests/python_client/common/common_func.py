@@ -2315,8 +2315,9 @@ def gen_search_param(index_type, metric_type="L2"):
             diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
             search_params.append(diskann_search_param)
     elif index_type == "IVF_RABITQ":
-        for rbq_bits_query in [6, 7]:
-            ivf_rabitq_search_param = {"metric_type": metric_type, "params": {"rbq_bits_query": rbq_bits_query}}
+        for rbq_bits_query in [7]:
+            ivf_rabitq_search_param = {"metric_type": metric_type,
+                                       "params": {"rbq_bits_query": rbq_bits_query, "nprobe": 8, "refine_k": 10.0}}
             search_params.append(ivf_rabitq_search_param)
     else:
         log.error("Invalid index_type.")
