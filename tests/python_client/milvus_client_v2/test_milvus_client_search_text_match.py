@@ -1,27 +1,14 @@
-import numpy as np
-from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
-from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
 from pymilvus import (
     FieldSchema, CollectionSchema, DataType,
     Collection
 )
-from common.constants import *
 from utils.util_pymilvus import *
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
 from utils.util_log import test_log as log
 from base.client_base import TestcaseBase
-import heapq
-from time import sleep
-from decimal import Decimal, getcontext
-import decimal
-import multiprocessing
-import numbers
 import random
-import math
-import numpy
-import threading
 import pytest
 import pandas as pd
 from faker import Faker
@@ -64,7 +51,6 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:8]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
