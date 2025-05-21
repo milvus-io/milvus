@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
@@ -166,7 +165,7 @@ func (p *preImportTask) GetTR() *timerecord.TimeRecorder {
 }
 
 func (p *preImportTask) GetSlots() int64 {
-	return int64(funcutil.Min(len(p.GetFileStats()), paramtable.Get().DataNodeCfg.MaxTaskSlotNum.GetAsInt()))
+	return int64(len(p.GetFileStats()))
 }
 
 func (p *preImportTask) Clone() ImportTask {
@@ -212,7 +211,7 @@ func (t *importTask) GetSlots() int64 {
 	//    making segment count unsuitable as a slot number.
 	// Taking these factors into account, we've decided to use the
 	// minimum value between segment count and file count as the slot number.
-	return int64(funcutil.Min(len(t.GetFileStats()), len(t.GetSegmentIDs()), paramtable.Get().DataNodeCfg.MaxTaskSlotNum.GetAsInt()))
+	return int64(funcutil.Min(len(t.GetFileStats()), len(t.GetSegmentIDs())))
 }
 
 func (t *importTask) Clone() ImportTask {

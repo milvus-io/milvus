@@ -102,7 +102,7 @@ func (s *importScheduler) process() {
 		for _, task := range tasks {
 			switch task.GetState() {
 			case datapb.ImportTaskStateV2_Pending:
-				nodeID := s.getNodeID(task, nodeSlots)
+				nodeID := s.pickNode(task, nodeSlots)
 				switch task.GetType() {
 				case PreImportTaskType:
 					s.processPendingPreImport(task, nodeID)
@@ -151,23 +151,30 @@ func (s *importScheduler) peekSlots() map[int64]int64 {
 	return nodeSlots
 }
 
-func (s *importScheduler) getNodeID(task ImportTask, nodeSlots map[int64]int64) int64 {
+func (s *importScheduler) pickNode(task ImportTask, nodeSlots map[int64]int64) int64 {
 	var (
-		nodeID   int64 = NullNodeID
-		maxSlots int64 = -1
+		fallbackNodeID    int64 = NullNodeID
+		maxAvailableSlots int64 = -1
 	)
 	require := task.GetSlots()
-	for id, slots := range nodeSlots {
-		// find the most idle datanode
-		if slots > 0 && slots >= require && slots > maxSlots {
-			nodeID = id
-			maxSlots = slots
+	for id, availableSlots := range nodeSlots {
+		// if the node has enough slots, assign the task to the node
+		if availableSlots >= require {
+			nodeSlots[id] -= require
+			return id
+		}
+		// find the node with the most available slots
+		if availableSlots > 0 && availableSlots > maxAvailableSlots {
+			fallbackNodeID = id
+			maxAvailableSlots = availableSlots
 		}
 	}
-	if nodeID != NullNodeID {
-		nodeSlots[nodeID] -= require
+	if fallbackNodeID != NullNodeID {
+		// if no node has enough slots, assign the task to the node with the most available slots
+		nodeSlots[fallbackNodeID] = 0
+		return fallbackNodeID
 	}
-	return nodeID
+	return NullNodeID
 }
 
 func (s *importScheduler) processPendingPreImport(task ImportTask, nodeID int64) {
