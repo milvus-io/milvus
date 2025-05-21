@@ -631,6 +631,8 @@ func (opt *runAnalyzerOption) Request() (*milvuspb.RunAnalyzerRequest, error) {
 	return &milvuspb.RunAnalyzerRequest{
 		Placeholder:    lo.Map(opt.text, func(str string, _ int) []byte { return []byte(str) }),
 		AnalyzerParams: opt.analyzerParams,
+		WithDetail:     opt.withDetail,
+		WithHash:       opt.withHash,		
 	}, nil
 }
 
