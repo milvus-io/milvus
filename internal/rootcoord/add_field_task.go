@@ -65,8 +65,8 @@ func (t *addCollectionFieldTask) Execute(ctx context.Context) error {
 
 	newField := model.UnmarshalFieldModel(t.fieldSchema)
 
-	// ts := t.GetTs()
-	return executeAddCollectionFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req)
+	ts := t.GetTs()
+	return executeAddCollectionFieldTaskSteps(ctx, t.core, oldColl, newField, t.Req, ts)
 }
 
 func (t *addCollectionFieldTask) nextFieldID(coll *model.Collection) int64 {
@@ -93,7 +93,7 @@ func executeAddCollectionFieldTaskSteps(ctx context.Context,
 	col *model.Collection,
 	newField *model.Field,
 	req *milvuspb.AddCollectionFieldRequest,
-	// ts Timestamp,
+	ts Timestamp,
 ) error {
 	redoTask := newBaseRedoTask(core.stepExecutor)
 
@@ -130,6 +130,7 @@ func executeAddCollectionFieldTaskSteps(ctx context.Context,
 		dbName:          req.GetDbName(),
 		collectionNames: append(aliases, req.GetCollectionName()),
 		collectionID:    oldColl.CollectionID,
+		ts:              ts,
 		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_AddCollectionField)},
 	})
 
