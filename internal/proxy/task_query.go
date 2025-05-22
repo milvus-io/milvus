@@ -481,9 +481,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
 		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
 	}
-	if collectionInfo.schema != nil {
-		t.CollectionTtl, _ = getCollectionTTL(collectionInfo.schema.GetProperties())
-	}
+	t.CollectionTtl = collectionInfo.collectionTTL
 	deadline, ok := t.TraceCtx().Deadline()
 	if ok {
 		t.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
@@ -493,7 +491,8 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	log.Debug("Query PreExecute done.",
 		zap.Uint64("guarantee_ts", guaranteeTs),
 		zap.Uint64("mvcc_ts", t.GetMvccTimestamp()),
-		zap.Uint64("timeout_ts", t.GetTimeoutTimestamp()))
+		zap.Uint64("timeout_ts", t.GetTimeoutTimestamp()),
+		zap.Uint64("collection_ttl", t.CollectionTtl))
 	return nil
 }
 

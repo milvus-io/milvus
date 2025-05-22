@@ -104,6 +104,7 @@ type collectionInfo struct {
 	partitionKeyIsolation bool
 	replicateID           string
 	updateTimestamp       uint64
+	collectionTTL         uint64
 }
 
 type databaseInfo struct {
@@ -475,6 +476,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			consistencyLevel:      collection.ConsistencyLevel,
 			partitionKeyIsolation: isolation,
 			updateTimestamp:       collection.UpdateTimestamp,
+			collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
 		}, nil
 	}
 	_, dbOk := m.collInfo[database]
@@ -493,6 +495,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		partitionKeyIsolation: isolation,
 		replicateID:           replicateID,
 		updateTimestamp:       collection.UpdateTimestamp,
+		collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
 	}
 
 	log.Ctx(ctx).Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName),
