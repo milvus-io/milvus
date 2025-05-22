@@ -311,11 +311,11 @@ func (b *ScoreBasedBalancer) convertToNodeItemsBySegment(br *balanceReport, coll
 			nodeScoreMap[node].setAssignedScore(average)
 		}
 		// use assignedScore * delegatorOverloadFactor * delegator_num, to preserve fixed memory size for delegator
-		collectionViews := b.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(collectionID), meta.WithNodeID2LeaderView(node))
-		if len(collectionViews) > 0 {
-			delegatorDelta := nodeScoreMap[node].getAssignedScore() * delegatorOverloadFactor * float64(len(collectionViews))
+		collDelegator := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID), meta.WithNodeID2Channel(node))
+		if len(collDelegator) > 0 {
+			delegatorDelta := nodeScoreMap[node].getAssignedScore() * delegatorOverloadFactor * float64(len(collDelegator))
 			nodeScoreMap[node].AddCurrentScoreDelta(delegatorDelta)
-			br.SetDeletagorScore(node, delegatorDelta)
+			br.SetDelegatorScore(node, delegatorDelta)
 		}
 	}
 	return nodeScoreMap
@@ -376,9 +376,9 @@ func (b *ScoreBasedBalancer) calculateScoreBySegment(br *balanceReport, collecti
 	}
 
 	// calculate global growing segment row count
-	views := b.dist.LeaderViewManager.GetByFilter(meta.WithNodeID2LeaderView(nodeID))
-	for _, view := range views {
-		nodeRowCount += int(float64(view.NumOfGrowingRows))
+	delegatorList := b.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))
+	for _, d := range delegatorList {
+		nodeRowCount += int(float64(d.View.NumOfGrowingRows))
 	}
 
 	// calculate executing task cost in scheduler
@@ -392,9 +392,9 @@ func (b *ScoreBasedBalancer) calculateScoreBySegment(br *balanceReport, collecti
 	}
 
 	// calculate collection growing segment row count
-	collectionViews := b.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(collectionID), meta.WithNodeID2LeaderView(nodeID))
-	for _, view := range collectionViews {
-		collectionRowCount += int(float64(view.NumOfGrowingRows))
+	collDelegatorList := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID), meta.WithNodeID2Channel(nodeID))
+	for _, d := range collDelegatorList {
+		collectionRowCount += int(float64(d.View.NumOfGrowingRows))
 	}
 
 	// calculate executing task cost in scheduler

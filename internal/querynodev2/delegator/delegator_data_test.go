@@ -414,9 +414,12 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
+		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
 
+	// sync target version, make delegator serviceable
+	s.delegator.SyncTargetVersion(time.Now().UnixNano(), []int64{500}, []int64{1001}, []int64{1000}, nil, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
 	s.delegator.ProcessDelete([]*DeleteData{
 		{
 			PartitionID: 500,
@@ -471,7 +474,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
-		Version: 1,
+		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
 	s.True(s.delegator.distribution.Serviceable())
@@ -506,7 +509,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
-		Version: 2,
+		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
 	s.True(s.delegator.distribution.Serviceable())
@@ -1409,7 +1412,7 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 	}
 
 	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
-	s.Equal(int64(5), s.delegator.GetTargetVersion())
+	s.Equal(int64(5), s.delegator.GetQueryView().GetVersion())
 }
 
 func (s *DelegatorDataSuite) TestLevel0Deletions() {
