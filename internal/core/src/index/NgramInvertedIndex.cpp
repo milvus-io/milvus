@@ -118,31 +118,26 @@ NgramInvertedIndex::InnerMatchQuery(const std::string& literal,
         TargetBitmap valid(res.size(), true);
         TargetBitmapView valid_res(valid.data(), valid.size());
 
-        auto execute_sub_batch = [&bitset, &bitset_off, &literal](
-                                     const std::string_view* data,
-                                     const bool* valid_data,
-                                     const int32_t* offsets,
-                                     const int size,
-                                     TargetBitmapView res,
-                                     TargetBitmapView valid_res) {
-            auto next_off_option = bitset_off > 0
-                                       ? res.find_next(bitset_off - 1)
-                                       : res.find_first();
+        auto execute_sub_batch = [&literal](const std::string_view* data,
+                                            const bool* valid_data,
+                                            const int32_t* offsets,
+                                            const int size,
+                                            TargetBitmapView res,
+                                            TargetBitmapView valid_res) {
+            auto next_off_option = res.find_first();
             while (next_off_option.has_value()) {
                 auto next_off = next_off_option.value();
-                if (next_off >= bitset_off + size) {
+                if (next_off >= size) {
                     break;
                 }
-                auto data_pos = next_off - bitset_off;
-                if (data[data_pos].find(literal) == std::string::npos) {
+                if (data[next_off].find(literal) == std::string::npos) {
                     res[next_off] = false;
                 }
                 next_off_option = res.find_next(next_off);
             }
-            bitset_off += size;
         };
 
-        segment->ProcessAllDataChunkWithoutFootprint<std::string_view>(
+        segment->ProcessAllDataChunk<std::string_view>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res);
     }
 

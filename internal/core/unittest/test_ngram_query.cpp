@@ -149,7 +149,10 @@ generate_local_storage_config(const std::string& root_path)
     return ret;
 }
 
-TEST(NgramIndex, TestNgramWikiEpisode) {
+void
+test_ngram_with_data(const boost::container::vector<std::string>& data,
+                     const std::string& literal,
+                     const std::vector<bool>& expected_result) {
     int64_t collection_id = 1;
     int64_t partition_id = 2;
     int64_t segment_id = 3;
@@ -177,33 +180,6 @@ TEST(NgramIndex, TestNgramWikiEpisode) {
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> distrib(1, 100);
 
-    boost::container::vector<std::string> data;
-
-    // not hit
-    data.push_back(
-        "'Indira Davelba Murillo Alvarado (Tegucigalpa, "
-        "the youngest of eight siblings. She attended primary school at the "
-        "Escuela 14 de Julio, and her secondary studies at the Instituto "
-        "school called \"Indi del Bosque\", where she taught the children of "
-        "Honduran women'");
-    // hit
-    data.push_back(
-        "Richmond Green Secondary School is a public secondary school in "
-        "Richmond Hill, Ontario, Canada.");
-    // hit
-    data.push_back(
-        "The Gymnasium in 2002 Gymnasium Philippinum or Philippinum High "
-        "School is an almost 500-year-old secondary school in Marburg, Hesse, "
-        "Germany.");
-    // hit
-    data.push_back(
-        "Sir Winston Churchill Secondary School is a Canadian secondary school "
-        "located in St. Catharines, Ontario.");
-    // not hit
-    data.push_back("Sir Winston Churchill Secondary School");
-
-    std::vector<bool> expected_result{false, true, true, true, false};
-
     size_t nb = data.size();
 
     auto field_data = storage::CreateFieldData(DataType::VARCHAR, false);
@@ -218,7 +194,6 @@ TEST(NgramIndex, TestNgramWikiEpisode) {
         std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
     segment->LoadFieldData(field_id, field_data_info);
 
-    // std::cout << "length:" << field_data->get_num_rows() << std::endl;
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
     storage::InsertData insert_data(payload_reader);
@@ -278,12 +253,6 @@ TEST(NgramIndex, TestNgramWikiEpisode) {
         auto cnt = index->Count();
         ASSERT_EQ(cnt, nb);
 
-        boost::container::vector<std::string> test_data{
-            "secondary school",
-        };
-
-        std::string literal = "secondary school";
-
         exec::SegmentExpr segment_expr(std::move(std::vector<exec::ExprPtr>{}),
                                        "SegmentExpr",
                                        segment.get(),
@@ -317,4 +286,43 @@ TEST(NgramIndex, TestNgramWikiEpisode) {
             ASSERT_EQ(final[i], expected_result[i]);
         }
     }
+}
+
+TEST(NgramIndex, TestNgramWikiEpisode) {
+    boost::container::vector<std::string> data;
+    // not hit
+    data.push_back(
+        "'Indira Davelba Murillo Alvarado (Tegucigalpa, "
+        "the youngest of eight siblings. She attended primary school at the "
+        "Escuela 14 de Julio, and her secondary studies at the Instituto "
+        "school called \"Indi del Bosque\", where she taught the children of "
+        "Honduran women'");
+    // hit
+    data.push_back(
+        "Richmond Green Secondary School is a public secondary school in "
+        "Richmond Hill, Ontario, Canada.");
+    // hit
+    data.push_back(
+        "The Gymnasium in 2002 Gymnasium Philippinum or Philippinum High "
+        "School is an almost 500-year-old secondary school in Marburg, Hesse, "
+        "Germany.");
+    // hit
+    data.push_back(
+        "Sir Winston Churchill Secondary School is a Canadian secondary school "
+        "located in St. Catharines, Ontario.");
+    // not hit
+    data.push_back("Sir Winston Churchill Secondary School");
+
+    std::vector<bool> expected_result{false, true, true, true, false};
+
+    test_ngram_with_data(data, "secondary school", expected_result);
+}
+
+TEST(NgramIndex, TestNgramAllFalse) {
+    boost::container::vector<std::string> data(10000,
+                                               "elementary school secondary");
+
+    // all can be hit by ngram tantivy but will be filterred out by the second phase
+    test_ngram_with_data(
+        data, "secondary school", std::vector<bool>(10000, false));
 }
