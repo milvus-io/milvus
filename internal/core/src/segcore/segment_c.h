@@ -132,9 +132,9 @@ LoadJsonKeyIndex(CTraceContext c_trace,
 
 CStatus
 LoadNgramIndex(CTraceContext c_trace,
-                 CSegmentInterface c_segment,
-                 const uint8_t* serialied_load_ngram_index_info,
-                 const uint64_t len);
+               CSegmentInterface c_segment,
+               const uint8_t* serialied_load_ngram_index_info,
+               const uint64_t len);
 
 CStatus
 UpdateFieldRawDataSize(CSegmentInterface c_segment,

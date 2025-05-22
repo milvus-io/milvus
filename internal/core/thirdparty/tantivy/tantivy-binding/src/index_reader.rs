@@ -32,15 +32,7 @@ pub(crate) struct IndexReaderWrapper {
 impl IndexReaderWrapper {
     pub fn load(path: &str, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
         init_log();
-
         let index = Index::open_in_dir(path)?;
-
-        info!(
-            "debug=== load index, path: {:?}, schema: {:?}",
-            path,
-            index.schema()
-        );
-
         IndexReaderWrapper::from_index(Arc::new(index), set_bitset)
     }
 
@@ -304,11 +296,6 @@ impl IndexReaderWrapper {
         max_gram: usize,
         bitset: *mut c_void,
     ) -> Result<()> {
-        info!(
-            "debug=== inner_match_ngram, literal: {:?}, min_gram: {}, max_gram: {}",
-            literal, min_gram, max_gram
-        );
-
         // literal length should be larger or equal to min_gram.
         if literal.len() < min_gram {
             unreachable!("literal length should be larger or equal to min_gram.");
@@ -329,7 +316,6 @@ impl IndexReaderWrapper {
             term_queries.push(Box::new(TermQuery::new(term, IndexRecordOption::Basic)));
             terms.push(token.text.clone());
         });
-        info!("debug=== terms: {:?}", terms);
         let query = BooleanQuery::intersection(term_queries);
         self.search(&query, bitset)
     }

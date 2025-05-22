@@ -63,6 +63,25 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 						},
 					},
 				},
+				{
+					FieldID:  102,
+					Name:     "ngram",
+					DataType: schemapb.DataType_String,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "enable_ngram_index",
+							Value: "true",
+						},
+						{
+							Key:   "min_gram",
+							Value: "2",
+						},
+						{
+							Key:   "max_gram",
+							Value: "3",
+						},
+					},
+				},
 			},
 		},
 	})
@@ -123,5 +142,5 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 
 	jm.loopWg.Wait()
 
-	s.Equal(2, jm.scheduler.pendingTasks.TaskCount())
+	s.Equal(3, jm.scheduler.pendingTasks.TaskCount())
 }

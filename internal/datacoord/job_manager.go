@@ -86,6 +86,7 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 			jm.triggerTextStatsTask()
 			jm.triggerBM25StatsTask()
 			lastJSONStatsLastTrigger, maxJSONStatsTaskCount = jm.triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger, maxJSONStatsTaskCount)
+			jm.triggerNgramIndexStatsTask()
 
 		case segID := <-getStatsTaskChSingleton():
 			log.Info("receive new segment to trigger stats task", zap.Int64("segmentID", segID))

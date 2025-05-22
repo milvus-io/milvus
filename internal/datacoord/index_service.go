@@ -1057,8 +1057,6 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		}
 	}
 
-	log.Info("deubg=== GetIndexInfos", zap.Any("ret", ret))
-
 	log.Debug("GetIndexInfos successfully", zap.String("indexName", req.GetIndexName()))
 
 	return ret, nil

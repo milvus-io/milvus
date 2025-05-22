@@ -1,3 +1,14 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
 #include "index/NgramInvertedIndex.h"
 #include "exec/expression/Expr.h"
 
@@ -93,13 +104,6 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
 std::optional<TargetBitmap>
 NgramInvertedIndex::InnerMatchQuery(const std::string& literal,
                                     exec::SegmentExpr* segment) {
-    LOG_INFO(
-        "debug=== InnerMatchQuery, literal: {}, min_gram: {}, max_gram: {}, "
-        "Count {}",
-        literal,
-        min_gram_,
-        max_gram_,
-        Count());
     if (literal.length() < min_gram_) {
         return std::nullopt;
     }
@@ -110,9 +114,6 @@ NgramInvertedIndex::InnerMatchQuery(const std::string& literal,
     // Post filtering: if the literal length is larger than the max_gram
     // we need to filter out the bitset
     if (literal.length() > max_gram_) {
-        LOG_INFO("debug=== post filtering, literal length: {}, max_gram: {}",
-                 literal.length(),
-                 max_gram_);
         auto bitset_off = 0;
         TargetBitmapView res(bitset);
         TargetBitmap valid(res.size(), true);

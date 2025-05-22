@@ -242,19 +242,11 @@ pub extern "C" fn tantivy_inner_match_ngram(
     let literal = cstr_to_str!(literal);
 
     let now = std::time::Instant::now();
-    let res = unsafe {
+    unsafe {
         (*real)
             .inner_match_ngram(literal, min_gram, max_gram, bitset)
             .into()
-    };
-
-    let duration = now.elapsed();
-    info!(
-        "debug=== tantivy_inner_match_ngram, duration: {:?}",
-        duration
-    );
-
-    res
+    }
 }
 
 #[no_mangle]
