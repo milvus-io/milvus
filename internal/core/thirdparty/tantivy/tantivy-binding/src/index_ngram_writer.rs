@@ -100,6 +100,7 @@ mod tests {
         writer.add("history", Some(3)).unwrap();
         writer.add("victoria", Some(4)).unwrap();
         writer.add("basics", Some(5)).unwrap();
+        writer.add("economiCs", Some(6)).unwrap();
 
         writer.commit().unwrap();
 

@@ -310,7 +310,8 @@ JsonKeyStatsInvertedIndex::Upload(const Config& config) {
     index_build_timestamps_.index_build_done_ =
         std::chrono::system_clock::now();
     LOG_INFO(
-        "build json key index done for field id:{}, json parse duration: {}s, "
+        "index build done for json key index, field id:{}, json parse "
+        "duration: {}s, "
         "tantivy document add schedule duration : {}s, "
         "tantivy total duration : {}s, "
         "total duration : {}s",

@@ -6,6 +6,7 @@ constexpr const char* TMP_NGRAM_INVERTED_LOG_PREFIX =
     "/tmp/milvus/ngram-inverted-index-log/";
 
 NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
+                                       bool for_loading_index,
                                        uintptr_t min_gram,
                                        uintptr_t max_gram)
     : min_gram_(min_gram), max_gram_(max_gram) {
@@ -14,7 +15,7 @@ NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
 
-    if (ctx.for_loading_index) {
+    if (for_loading_index) {
         path_ = disk_file_manager_->GetLocalNgramIndexPrefix();
     } else {
         auto prefix = disk_file_manager_->GetNgramIndexIdentifier();
@@ -34,7 +35,21 @@ NgramInvertedIndex::BuildWithFieldData(const std::vector<FieldDataPtr>& datas) {
                    schema_.data_type() == proto::schema::DataType::VarChar,
                "schema data type is {}",
                schema_.data_type());
+    index_build_begin_ = std::chrono::system_clock::now();
     InvertedIndexTantivy<std::string>::BuildWithFieldData(datas);
+}
+
+IndexStatsPtr
+NgramInvertedIndex::Upload(const Config& config) {
+    finish();
+    auto index_build_end = std::chrono::system_clock::now();
+    auto index_build_duration =
+        std::chrono::duration<double>(index_build_end - index_build_begin_)
+            .count();
+    LOG_INFO("index build done for ngram index, field id: {}, duration: {}s",
+             field_id_,
+             index_build_duration);
+    return InvertedIndexTantivy<std::string>::Upload(config);
 }
 
 void
@@ -110,7 +125,9 @@ NgramInvertedIndex::InnerMatchQuery(const std::string& literal,
                                      const int size,
                                      TargetBitmapView res,
                                      TargetBitmapView valid_res) {
-            auto next_off_option = res.find_next(bitset_off);
+            auto next_off_option = bitset_off > 0
+                                       ? res.find_next(bitset_off - 1)
+                                       : res.find_first();
             while (next_off_option.has_value()) {
                 auto next_off = next_off_option.value();
                 if (next_off >= bitset_off + size) {

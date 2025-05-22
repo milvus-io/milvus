@@ -438,7 +438,7 @@ BuildNgramIndex(ProtoLayoutInterface result,
                            .value());
 
         auto index = std::make_unique<index::NgramInvertedIndex>(
-            fileManagerContext, min_gram, max_gram);
+            fileManagerContext, false, min_gram, max_gram);
         index->Build(config);
         auto create_index_result = index->Upload(config);
 

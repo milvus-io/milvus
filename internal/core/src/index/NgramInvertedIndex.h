@@ -9,20 +9,21 @@ namespace milvus {
 namespace exec {
 class SegmentExpr;
 }
-}
+}  // namespace milvus
 
 namespace milvus::index {
 class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
     explicit NgramInvertedIndex(const storage::FileManagerContext& ctx,
+                                bool for_loading_index,
                                 uintptr_t min_gram,
                                 uintptr_t max_gram);
 
     ~NgramInvertedIndex() override{};
 
  public:
-    //  IndexStatsPtr
-    //  Upload(const Config& config) override;
+    IndexStatsPtr
+    Upload(const Config& config = {}) override;
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config) override;
@@ -37,5 +38,6 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     uintptr_t min_gram_{0};
     uintptr_t max_gram_{0};
     int64_t field_id_{0};
+    std::chrono::time_point<std::chrono::system_clock> index_build_begin_;
 };
 }  // namespace milvus::index

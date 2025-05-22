@@ -587,9 +587,8 @@ LoadNgramIndex(CTraceContext c_trace,
             LOG_INFO("debug=== index_file: {}", f);
         }
 
-        file_ctx.set_for_loading_index(true);
         auto index = std::make_unique<milvus::index::NgramInvertedIndex>(
-            file_ctx, info_proto->min_gram(), info_proto->max_gram());
+            file_ctx, true, info_proto->min_gram(), info_proto->max_gram());
         index->Load(ctx, config);
 
         segment->LoadNgramIndex(milvus::FieldId(info_proto->fieldid()),

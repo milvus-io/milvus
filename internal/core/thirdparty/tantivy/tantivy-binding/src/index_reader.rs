@@ -296,6 +296,7 @@ impl IndexReaderWrapper {
         self.search_i64(&q)
     }
 
+    // **Note**: literal length must be larger or equal to min_gram.
     pub fn inner_match_ngram(
         &self,
         literal: &str,

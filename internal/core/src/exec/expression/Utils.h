@@ -199,7 +199,7 @@ parse_ngram_pattern(const std::string& pattern) {
         if (c == '%' && !was_escaped) {
             percent_indices.push_back(i);
         } else if (c == '_' && !was_escaped) {
-            // todo: now not support '_'
+            // todo(SpadeA): now not support '_'
             return std::nullopt;
         }
         was_escaped = (c == '\\' && !was_escaped);
@@ -208,13 +208,13 @@ parse_ngram_pattern(const std::string& pattern) {
     MatchType match_type;
     size_t core_start = 0;
     size_t core_length = 0;
-    size_t n = percent_indices.size();
+    size_t percent_count = percent_indices.size();
 
-    if (n == 0) {
+    if (percent_count == 0) {
         match_type = MatchType::ExactMatch;
         core_start = 0;
         core_length = pattern.length();
-    } else if (n == 1) {
+    } else if (percent_count == 1) {
         if (pattern.length() == 1) {
             return std::nullopt;
         }
@@ -234,7 +234,7 @@ parse_ngram_pattern(const std::string& pattern) {
             // case: xxx%xxx
             match_type = MatchType::Match;
         }
-    } else if (n == 2) {
+    } else if (percent_count == 2) {
         size_t idx1 = percent_indices[0];
         size_t idx2 = percent_indices[1];
         if (idx1 == 0 && idx2 == pattern.length() - 1 && pattern.length() > 2) {
@@ -273,9 +273,9 @@ parse_ngram_pattern(const std::string& pattern) {
             if (c == '\\') {
                 escape_mode = true;
             } else if (c == '%') {
-                // unreachable
+                // should be unreachable
             } else if (c == '_') {
-                // unreachable
+                // should be unreachable
                 return std::nullopt;
             } else {
                 if (is_special(c)) {

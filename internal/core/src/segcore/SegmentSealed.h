@@ -86,7 +86,7 @@ class SegmentSealed : public SegmentInternalInterface {
                    std::unique_ptr<index::NgramInvertedIndex> index) = 0;
 
     virtual index::NgramInvertedIndex*
-    GetNgramIndex(FieldId field_id) const = 0;
+    GetNgramIndex(FieldId field_id) const override = 0;
 
     SegmentType
     type() const override {
