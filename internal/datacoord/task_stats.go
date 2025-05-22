@@ -96,6 +96,10 @@ func (st *statsTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 	return timeType.GetTaskTime(st.times)
 }
 
+func (st *statsTask) GetTaskVersion() int64 {
+	return st.GetVersion()
+}
+
 func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
 	st.State = state
 	st.FailReason = failReason

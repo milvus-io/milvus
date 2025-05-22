@@ -57,6 +57,10 @@ func (t *mixCompactionTask) GetTaskTime(timeType taskcommon.TimeType) time.Time 
 	return timeType.GetTaskTime(t.times)
 }
 
+func (t *mixCompactionTask) GetTaskVersion() int64 {
+	return int64(t.GetTaskProto().GetRetryTimes())
+}
+
 func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		zap.Int64("PlanID", t.GetTaskProto().GetPlanID()),

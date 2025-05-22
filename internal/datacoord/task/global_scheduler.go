@@ -251,6 +251,8 @@ func (s *globalTaskScheduler) updateTaskTimeMetrics() {
 		if !ok || maxQueueingTime < queueingTime.Milliseconds() {
 			maxTaskQueueingTime[task.GetTaskType()] = queueingTime.Milliseconds()
 		}
+
+		metrics.TaskVersion.WithLabelValues(task.GetTaskType()).Observe(float64(task.GetTaskVersion()))
 	}
 
 	collectRunningMetricsFunc := func(task Task) {

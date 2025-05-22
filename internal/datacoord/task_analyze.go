@@ -56,6 +56,10 @@ func (at *analyzeTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 	return timeType.GetTaskTime(at.times)
 }
 
+func (at *analyzeTask) GetTaskVersion() int64 {
+	return at.GetVersion()
+}
+
 func (at *analyzeTask) GetTaskType() taskcommon.Type {
 	return taskcommon.Analyze
 }
