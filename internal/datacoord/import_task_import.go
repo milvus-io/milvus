@@ -45,11 +45,12 @@ var _ ImportTask = (*importTask)(nil)
 type importTask struct {
 	task atomic.Pointer[datapb.ImportTaskV2]
 
-	alloc allocator.Allocator
-	meta  *meta
-	imeta ImportMeta
-	tr    *timerecord.TimeRecorder
-	times *taskcommon.Times
+	alloc      allocator.Allocator
+	meta       *meta
+	imeta      ImportMeta
+	tr         *timerecord.TimeRecorder
+	times      *taskcommon.Times
+	retryTimes int64
 }
 
 func (t *importTask) GetJobID() int64 {
@@ -78,6 +79,10 @@ func (t *importTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
 
 func (t *importTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 	return timeType.GetTaskTime(t.times)
+}
+
+func (t *importTask) GetTaskVersion() int64 {
+	return t.retryTimes
 }
 
 func (t *importTask) GetReason() string {
@@ -142,6 +147,7 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
 	if err != nil {
 		log.Warn("import failed", WrapTaskLog(t, zap.Error(err))...)
+		t.retryTimes++
 		return
 	}
 	err = t.imeta.UpdateTask(context.TODO(), t.GetTaskID(),
