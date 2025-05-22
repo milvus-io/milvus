@@ -38,15 +38,16 @@ func TestFlushMsgHandler_HandleFlush(t *testing.T) {
 	wbMgr := writebuffer.NewMockBufferManager(t)
 	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
 
-	msg, err := message.NewFlushMessageBuilderV2().
-		WithVChannel(vchannel).
+	msg := message.NewFlushMessageBuilderV2().
+		WithBroadcast([]string{vchannel}).
 		WithHeader(&message.FlushMessageHeader{
 			CollectionId: 0,
 			SegmentId:    1,
 		}).
 		WithBody(&message.FlushMessageBody{}).
-		BuildMutable()
-	assert.NoError(t, err)
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()[0]
 
 	handler := newMsgHandler(wbMgr)
 	msgID := mock_message.NewMockMessageID(t)
@@ -72,15 +73,16 @@ func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
 	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
 	wbMgr.EXPECT().FlushChannel(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
 
-	msg, err := message.NewManualFlushMessageBuilderV2().
-		WithVChannel(vchannel).
+	msg := message.NewManualFlushMessageBuilderV2().
+		WithBroadcast([]string{vchannel}).
 		WithHeader(&message.ManualFlushMessageHeader{
 			CollectionId: 0,
 			FlushTs:      1000,
 		}).
 		WithBody(&message.ManualFlushMessageBody{}).
-		BuildMutable()
-	assert.NoError(t, err)
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()[0]
 
 	handler := newMsgHandler(wbMgr)
 	msgID := mock_message.NewMockMessageID(t)
@@ -115,20 +117,21 @@ func TestFlushMsgHandler_HandlSchemaChange(t *testing.T) {
 	wbMgr := writebuffer.NewMockBufferManager(t)
 	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
 
-	msg, err := message.NewSchemaChangeMessageBuilderV2().
-		WithVChannel(vchannel).
+	msg := message.NewSchemaChangeMessageBuilderV2().
+		WithBroadcast([]string{vchannel}).
 		WithHeader(&message.SchemaChangeMessageHeader{
 			CollectionId:      0,
 			FlushedSegmentIds: []int64{1},
 		}).
 		WithBody(&message.SchemaChangeMessageBody{}).
-		BuildMutable()
-	assert.NoError(t, err)
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()[0]
 
 	handler := newMsgHandler(wbMgr)
 	msgID := mock_message.NewMockMessageID(t)
 	im := message.MustAsImmutableCollectionSchemaChangeV2(msg.IntoImmutableMessage(msgID))
-	err = handler.HandleSchemaChange(context.Background(), im)
+	err := handler.HandleSchemaChange(context.Background(), im)
 	assert.Error(t, err)
 
 	// test normal

@@ -137,6 +137,7 @@ message SegmentAssignment {
 // DeleteMessageHeader
 message DeleteMessageHeader {
     int64 collection_id = 1;
+    uint64 rows = 2;
 }
 
 // FlushMessageHeader just nothing.
