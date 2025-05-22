@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
@@ -281,6 +282,64 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 	s.Equal(datapb.ImportTaskStateV2_Failed, task.GetState())
 	s.Equal(0, len(task.(*importTask).GetSegmentIDs()))
 	s.Equal(int64(NullNodeID), task.GetNodeID())
+}
+
+func (s *ImportSchedulerSuite) TestPickNode() {
+	task := &importTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			JobID:        0,
+			TaskID:       1,
+			CollectionID: s.collectionID,
+			State:        datapb.ImportTaskStateV2_Pending,
+			FileStats: []*datapb.ImportFileStats{
+				{ImportFile: &internalpb.ImportFile{Id: 1}},
+				{ImportFile: &internalpb.ImportFile{Id: 2}},
+				{ImportFile: &internalpb.ImportFile{Id: 3}},
+				{ImportFile: &internalpb.ImportFile{Id: 4}},
+			},
+			SegmentIDs: []int64{1, 2, 3, 4},
+		},
+		tr: timerecord.NewTimeRecorder("import task"),
+	}
+	s.Equal(int64(4), task.GetSlots())
+
+	// Test case 1: Node with sufficient slots
+	nodeSlots := map[int64]int64{
+		1: 5,
+		2: 3,
+		3: 10,
+	}
+	nodeID := s.scheduler.pickNode(task, nodeSlots)
+	s.True(nodeID == int64(1) || nodeID == int64(3)) // Should select node 1 or 3 as it has sufficient slots
+	if nodeID == int64(1) {
+		s.Equal(int64(1), nodeSlots[1])
+	} else {
+		s.Equal(int64(6), nodeSlots[3])
+	}
+
+	// Test case 2: No node has sufficient slots, select node with most slots
+	nodeSlots = map[int64]int64{
+		1: 2,
+		2: 3,
+		3: 1,
+	}
+	nodeID = s.scheduler.pickNode(task, nodeSlots)
+	s.Equal(int64(2), nodeID)       // Should select node 2 as it has the most slots
+	s.Equal(int64(0), nodeSlots[2]) // Node 2's slots should be exhausted
+
+	// Test case 3: All nodes have no slots
+	nodeSlots = map[int64]int64{
+		1: 0,
+		2: 0,
+		3: 0,
+	}
+	nodeID = s.scheduler.pickNode(task, nodeSlots)
+	s.Equal(int64(NullNodeID), nodeID) // Should return NullNodeID
+
+	// Test case 4: Empty node list
+	nodeSlots = map[int64]int64{}
+	nodeID = s.scheduler.pickNode(task, nodeSlots)
+	s.Equal(int64(NullNodeID), nodeID) // Should return NullNodeID
 }
 
 func TestImportScheduler(t *testing.T) {
