@@ -218,6 +218,9 @@ func (c *shardClientMgrImpl) PurgeClient() {
 		case <-c.closeCh:
 			return
 		case <-ticker.C:
+			if globalMetaCache == nil {
+				continue
+			}
 			shardLocations := globalMetaCache.ListShardLocation()
 			c.clients.Range(func(key UniqueID, value *shardClient) bool {
 				if _, ok := shardLocations[key]; !ok {
