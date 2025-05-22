@@ -48,9 +48,11 @@ class ThreadPool {
         if (max_threads_size_.load() > 16) {
             max_threads_size_.store(16);
         }
-        LOG_INFO("Init thread pool:{}", name_)
-            << " with min worker num:" << min_threads_size_
-            << " and max worker num:" << max_threads_size_.load();
+        LOG_INFO(
+            "Init thread pool:{} with min worker num:{} and max worker num:{}",
+            name_,
+            min_threads_size_,
+            max_threads_size_.load());
         Init();
     }
 
