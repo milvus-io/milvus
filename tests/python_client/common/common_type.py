@@ -48,6 +48,7 @@ default_bfloat16_vec_field_name = "bfloat16_vector"
 another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
 text_sparse_vector = "TEXT_SPARSE_VECTOR"
+default_reranker_field_name = "reranker_field"
 
 all_vector_types = [
         DataType.FLOAT_VECTOR,
