@@ -160,9 +160,10 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
             usageInfo(actively_pinned));
     }
 
+    internal::cache_eviction_event_count().Increment();
     for (auto* list_node : to_evict) {
         auto size = list_node->size();
-        internal::cache_eviction_count(size.storage_type()).Increment();
+        internal::cache_cell_eviction_count(size.storage_type()).Increment();
         popItem(list_node);
         list_node->clear_data();
         used_memory_ -= size;
