@@ -323,19 +323,6 @@ struct TantivyIndexWrapper {
     }
 
     void
-    add_json_by_single_segment_writer(const Json* array, uintptr_t len) {
-        assert(!finished_);
-        for (uintptr_t i = 0; i < len; i++) {
-            auto res = RustResultWrapper(
-                tantivy_index_add_json_by_single_segment_writer(
-                    writer_, array[i].data().data()));
-            AssertInfo(res.result_->success,
-                       "failed to add json: {}",
-                       res.result_->error);
-        }
-    }
-
-    void
     add_json_array_data(const Json* array,
                         uintptr_t len,
                         int64_t offset_begin) {
@@ -346,21 +333,6 @@ struct TantivyIndexWrapper {
         }
         auto res = RustResultWrapper(tantivy_index_add_array_json(
             writer_, views.data(), len, offset_begin));
-        AssertInfo(res.result_->success,
-                   "failed to add multi json: {}",
-                   res.result_->error);
-    }
-
-    void
-    add_array_json_by_single_segment_writer(const Json* array, uintptr_t len) {
-        assert(!finished_);
-        std::vector<const char*> views;
-        for (uintptr_t i = 0; i < len; i++) {
-            views.push_back(array[i].c_str());
-        }
-        auto res = RustResultWrapper(
-            tantivy_index_add_array_json_by_single_segment_writer(
-                writer_, views.data(), len));
         AssertInfo(res.result_->success,
                    "failed to add multi json: {}",
                    res.result_->error);

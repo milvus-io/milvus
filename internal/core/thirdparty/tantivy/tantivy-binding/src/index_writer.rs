@@ -113,14 +113,24 @@ impl IndexWriterWrapper {
 
     pub fn add_json(&mut self, data: &str, offset: Option<i64>) -> Result<()> {
         match self {
-            IndexWriterWrapper::V5(writer) => writer.add_json(data, offset),
+            IndexWriterWrapper::V5(_) => {
+                return Err(TantivyBindingError::InternalError(
+                    "add json with tantivy index version 5 is not supported from tantivy with version 7"
+                        .into(),
+                ));
+            }
             IndexWriterWrapper::V7(writer) => writer.add_json(data, offset.unwrap() as u32),
         }
     }
 
     pub fn add_array_json(&mut self, datas: &[*const c_char], offset: Option<i64>) -> Result<()> {
         match self {
-            IndexWriterWrapper::V5(writer) => writer.add_array_json(datas, offset),
+            IndexWriterWrapper::V5(_) => {
+                return Err(TantivyBindingError::InternalError(
+                    "add array json with tantivy index version 5 is not supported from tantivy with version 7"
+                        .into(),
+                ));
+            }
             IndexWriterWrapper::V7(writer) => writer.add_array_json(datas, offset.unwrap() as u32),
         }
     }
