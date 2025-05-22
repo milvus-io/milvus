@@ -304,17 +304,22 @@ cache_op_result_count_miss(StorageType storage_type) {
 }
 
 inline prometheus::Counter&
-cache_eviction_count(StorageType storage_type) {
+cache_cell_eviction_count(StorageType storage_type) {
     switch (storage_type) {
         case StorageType::MEMORY:
-            return monitor::internal_cache_eviction_count_memory;
+            return monitor::internal_cache_cell_eviction_count_memory;
         case StorageType::DISK:
-            return monitor::internal_cache_eviction_count_disk;
+            return monitor::internal_cache_cell_eviction_count_disk;
         case StorageType::MIXED:
-            return monitor::internal_cache_eviction_count_mixed;
+            return monitor::internal_cache_cell_eviction_count_mixed;
         default:
             PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
+}
+
+inline prometheus::Counter&
+cache_eviction_event_count() {
+    return monitor::internal_cache_eviction_event_count_all;
 }
 
 inline prometheus::Histogram&
