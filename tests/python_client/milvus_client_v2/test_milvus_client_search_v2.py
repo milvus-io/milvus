@@ -1,6 +1,6 @@
 import numpy as np
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
-from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
+from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker, Function, FunctionType
 from pymilvus import (
     FieldSchema, CollectionSchema, DataType,
     Collection
