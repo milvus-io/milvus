@@ -85,7 +85,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
-	checker := NewImportChecker(meta, broker, s.alloc, importMeta, sjm, l0CompactionTrigger).(*importChecker)
+	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, sjm, l0CompactionTrigger).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -575,7 +575,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
-	checker := NewImportChecker(meta, broker, alloc, importMeta, sjm, l0CompactionTrigger).(*importChecker)
+	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, sjm, l0CompactionTrigger).(*importChecker)
 
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{

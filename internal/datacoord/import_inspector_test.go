@@ -78,7 +78,7 @@ func (s *ImportInspectorSuite) SetupTest() {
 	s.importMeta, err = NewImportMeta(context.TODO(), s.catalog, s.alloc, s.meta)
 	s.NoError(err)
 	scheduler := task2.NewMockGlobalScheduler(s.T())
-	s.inspector = NewImportInspector(s.meta, s.importMeta, scheduler).(*importInspector)
+	s.inspector = NewImportInspector(context.TODO(), s.meta, s.importMeta, scheduler).(*importInspector)
 }
 
 func (s *ImportInspectorSuite) TestProcessPreImport() {
