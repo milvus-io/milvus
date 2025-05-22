@@ -1274,14 +1274,18 @@ const (
 	MmapEnabledKey = "mmap_enabled"
 )
 
-var allowedProps = []string{
+var allowedAlterProps = []string{
 	common.MaxLengthKey,
 	common.MmapEnabledKey,
 	common.MaxCapacityKey,
 }
 
-func IsKeyAllowed(key string) bool {
-	for _, allowedKey := range allowedProps {
+var allowedDropProps = []string{
+	common.MmapEnabledKey,
+}
+
+func IsKeyAllowAlter(key string) bool {
+	for _, allowedKey := range allowedAlterProps {
 		if key == allowedKey {
 			return true
 		}
@@ -1289,15 +1293,29 @@ func IsKeyAllowed(key string) bool {
 	return false
 }
 
+func IsKeyAllowDrop(key string) bool {
+	for _, allowedKey := range allowedDropProps {
+		if key == allowedKey {
+			return true
+		}
+	}
+	return false
+}
+
+func updateKey(key string) string {
+	var updatedKey string
+	if key == MmapEnabledKey {
+		updatedKey = common.MmapEnabledKey
+	} else {
+		updatedKey = key
+	}
+	return updatedKey
+}
+
 func updatePropertiesKeys(oldProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
 	props := make(map[string]string)
 	for _, prop := range oldProps {
-		var updatedKey string
-		if prop.Key == MmapEnabledKey {
-			updatedKey = common.MmapEnabledKey
-		} else {
-			updatedKey = prop.Key
-		}
+		updatedKey := updateKey(prop.Key)
 		props[updatedKey] = prop.Value
 	}
 
@@ -1317,21 +1335,30 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	isCollectionLoadedFn := func() (bool, error) {
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+		if err != nil {
+			return false, err
+		}
+		loaded, err1 := isCollectionLoaded(ctx, t.mixCoord, collectionID)
+		if err1 != nil {
+			return false, err1
+		}
+		return loaded, nil
+	}
+
 	t.Properties = updatePropertiesKeys(t.Properties)
 	for _, prop := range t.Properties {
-		if !IsKeyAllowed(prop.Key) {
+		if !IsKeyAllowAlter(prop.Key) {
 			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
 		}
 		// Check the value type based on the key
 		switch prop.Key {
 		case common.MmapEnabledKey:
-			collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+			loaded, err := isCollectionLoadedFn()
 			if err != nil {
 				return err
-			}
-			loaded, err1 := isCollectionLoaded(ctx, t.mixCoord, collectionID)
-			if err1 != nil {
-				return err1
 			}
 			if loaded {
 				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter collection field properties if collection loaded")
@@ -1382,6 +1409,27 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	}
+
+	deleteKeys := make([]string, 0)
+	for _, key := range t.DeleteKeys {
+		updatedKey := updateKey(key)
+		if !IsKeyAllowDrop(updatedKey) {
+			return merr.WrapErrParameterInvalidMsg("%s is not allowed to drop in collection field param", key)
+		}
+
+		if updatedKey == common.MmapEnabledKey {
+			loaded, err := isCollectionLoadedFn()
+			if err != nil {
+				return err
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not drop collection field properties if collection loaded")
+			}
+		}
+
+		deleteKeys = append(deleteKeys, updatedKey)
+	}
+	t.DeleteKeys = deleteKeys
 
 	return nil
 }
