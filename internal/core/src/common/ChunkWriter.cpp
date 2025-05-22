@@ -85,7 +85,8 @@ StringChunkWriter::finish() {
     char padding[MMAP_STRING_PADDING];
     target_->write(padding, MMAP_STRING_PADDING);
     auto [data, size] = target_->get();
-    return std::make_unique<StringChunk>(row_nums_, data, size, nullable_);
+    return std::make_unique<StringChunk>(
+        row_nums_, data, size, nullable_, mcm_ != nullptr);
 }
 
 void
@@ -144,7 +145,8 @@ JSONChunkWriter::finish() {
     target_->write(padding, simdjson::SIMDJSON_PADDING);
 
     auto [data, size] = target_->get();
-    return std::make_unique<JSONChunk>(row_nums_, data, size, nullable_);
+    return std::make_unique<JSONChunk>(
+        row_nums_, data, size, nullable_, mcm_ != nullptr);
 }
 
 void
@@ -230,7 +232,7 @@ ArrayChunkWriter::finish() {
 
     auto [data, size] = target_->get();
     return std::make_unique<ArrayChunk>(
-        row_nums_, data, size, element_type_, nullable_);
+        row_nums_, data, size, element_type_, nullable_, mcm_ != nullptr);
 }
 
 // 1. Deserialize VectorFieldProto (proto::schema::VectorField) from arrow::ArrayVector
@@ -364,7 +366,7 @@ std::unique_ptr<Chunk>
 SparseFloatVectorChunkWriter::finish() {
     auto [data, size] = target_->get();
     return std::make_unique<SparseFloatVectorChunk>(
-        row_nums_, data, size, nullable_);
+        row_nums_, data, size, nullable_, mcm_ != nullptr);
 }
 
 std::unique_ptr<Chunk>

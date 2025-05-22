@@ -38,8 +38,16 @@ constexpr uint64_t MMAP_ARRAY_PADDING = 1;
 class Chunk {
  public:
     Chunk() = default;
-    Chunk(int64_t row_nums, char* data, uint64_t size, bool nullable)
-        : data_(data), row_nums_(row_nums), size_(size), nullable_(nullable) {
+    Chunk(int64_t row_nums,
+          char* data,
+          uint64_t size,
+          bool nullable,
+          bool is_mmap = false)
+        : data_(data),
+          row_nums_(row_nums),
+          size_(size),
+          nullable_(nullable),
+          is_mmap_(is_mmap) {
         if (nullable) {
             valid_.reserve(row_nums);
             for (int i = 0; i < row_nums; i++) {
@@ -48,7 +56,9 @@ class Chunk {
         }
     }
     virtual ~Chunk() {
-        munmap(data_, size_);
+        if (!is_mmap_) {
+            munmap(data_, size_);
+        }
     }
 
     uint64_t
@@ -94,6 +104,7 @@ class Chunk {
     bool nullable_;
     FixedVector<bool>
         valid_;  // parse null bitmap to valid_ to be compatible with SpanBase
+    bool is_mmap_;
 };
 // for fixed size data, includes fixed size array
 class FixedWidthChunk : public Chunk {
@@ -103,8 +114,9 @@ class FixedWidthChunk : public Chunk {
                     char* data,
                     uint64_t size,
                     uint64_t element_size,
-                    bool nullable)
-        : Chunk(row_nums, data, size, nullable),
+                    bool nullable,
+                    bool is_mmap = false)
+        : Chunk(row_nums, data, size, nullable, is_mmap),
           dim_(dim),
           element_size_(element_size) {
         auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
@@ -159,8 +171,12 @@ class FixedWidthChunk : public Chunk {
 class StringChunk : public Chunk {
  public:
     StringChunk() = default;
-    StringChunk(int32_t row_nums, char* data, uint64_t size, bool nullable)
-        : Chunk(row_nums, data, size, nullable) {
+    StringChunk(int32_t row_nums,
+                char* data,
+                uint64_t size,
+                bool nullable,
+                bool is_mmap = false)
+        : Chunk(row_nums, data, size, nullable, is_mmap) {
         auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
         offsets_ = reinterpret_cast<uint32_t*>(data + null_bitmap_bytes_num);
     }
@@ -252,8 +268,10 @@ class ArrayChunk : public Chunk {
                char* data,
                uint64_t size,
                milvus::DataType element_type,
-               bool nullable)
-        : Chunk(row_nums, data, size, nullable), element_type_(element_type) {
+               bool nullable,
+               bool is_mmap = false)
+        : Chunk(row_nums, data, size, nullable, is_mmap),
+          element_type_(element_type) {
         auto null_bitmap_bytes_num = 0;
         if (nullable) {
             null_bitmap_bytes_num = (row_nums + 7) / 8;
@@ -398,8 +416,9 @@ class SparseFloatVectorChunk : public Chunk {
     SparseFloatVectorChunk(int32_t row_nums,
                            char* data,
                            uint64_t size,
-                           bool nullable)
-        : Chunk(row_nums, data, size, nullable) {
+                           bool nullable,
+                           bool is_mmap = false)
+        : Chunk(row_nums, data, size, nullable, is_mmap) {
         vec_.resize(row_nums);
         auto null_bitmap_bytes_num = (row_nums + 7) / 8;
         auto offsets_ptr =
