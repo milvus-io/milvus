@@ -30,6 +30,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -77,7 +79,7 @@ type ShardDelegator interface {
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
-	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema) error
+	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, version uint64) error
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -87,7 +89,7 @@ type ShardDelegator interface {
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
 	SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition, deleteSeekPos *msgpb.MsgPosition)
-	GetTargetVersion() int64
+	GetQueryView() *channelQueryView
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
 
 	// manage exclude segments
@@ -321,13 +323,18 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
 	}
-	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifySearchRequest)
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifySearchRequest)
 	if err != nil {
 		log.Warn("Search organizeSubTask failed", zap.Error(err))
 		return nil, err
 	}
 	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
-		return worker.SearchSegments(ctx, req)
+		resp, err := worker.SearchSegments(ctx, req)
+		status, ok := status.FromError(err)
+		if ok && status.Code() == codes.Unavailable {
+			sd.markSegmentOffline(req.GetSegmentIDs()...)
+		}
+		return resp, err
 	}, "Search", log)
 	if err != nil {
 		log.Warn("Delegator search failed", zap.Error(err))
@@ -508,14 +515,19 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		zap.Int("sealedNum", len(sealed)),
 		zap.Int("growingNum", len(growing)),
 	)
-	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifyQueryRequest)
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifyQueryRequest)
 	if err != nil {
 		log.Warn("query organizeSubTask failed", zap.Error(err))
 		return err
 	}
 
 	_, err = executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		return nil, worker.QueryStreamSegments(ctx, req, srv)
+		err := worker.QueryStreamSegments(ctx, req, srv)
+		status, ok := status.FromError(err)
+		if ok && status.Code() == codes.Unavailable {
+			sd.markSegmentOffline(req.GetSegmentIDs()...)
+		}
+		return nil, err
 	}, "Query", log)
 	if err != nil {
 		log.Warn("Delegator query failed", zap.Error(err))
@@ -588,14 +600,19 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),
 	)
-	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifyQueryRequest)
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifyQueryRequest)
 	if err != nil {
 		log.Warn("query organizeSubTask failed", zap.Error(err))
 		return nil, err
 	}
 
 	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		return worker.QuerySegments(ctx, req)
+		resp, err := worker.QuerySegments(ctx, req)
+		status, ok := status.FromError(err)
+		if ok && status.Code() == codes.Unavailable {
+			sd.markSegmentOffline(req.GetSegmentIDs()...)
+		}
+		return resp, err
 	}, "Query", log)
 	if err != nil {
 		log.Warn("Delegator query failed", zap.Error(err))
@@ -636,7 +653,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	}
 	defer sd.distribution.Unpin(version)
 
-	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, func(req *querypb.GetStatisticsRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.GetStatisticsRequest {
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, func(req *querypb.GetStatisticsRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.GetStatisticsRequest {
 		nodeReq := proto.Clone(req).(*querypb.GetStatisticsRequest)
 		nodeReq.GetReq().GetBase().TargetID = targetID
 		nodeReq.Scope = scope
@@ -670,7 +687,14 @@ type subTask[T any] struct {
 	worker   cluster.Worker
 }
 
-func organizeSubTask[T any](ctx context.Context, req T, sealed []SnapshotItem, growing []SegmentEntry, sd *shardDelegator, modify func(T, querypb.DataScope, []int64, int64) T) ([]subTask[T], error) {
+func organizeSubTask[T any](ctx context.Context,
+	req T,
+	sealed []SnapshotItem,
+	growing []SegmentEntry,
+	sd *shardDelegator,
+	skipEmpty bool,
+	modify func(T, querypb.DataScope, []int64, int64) T,
+) ([]subTask[T], error) {
 	log := sd.getLogger(ctx)
 	result := make([]subTask[T], 0, len(sealed)+1)
 
@@ -678,7 +702,7 @@ func organizeSubTask[T any](ctx context.Context, req T, sealed []SnapshotItem, g
 		segmentIDs := lo.Map(segments, func(item SegmentEntry, _ int) int64 {
 			return item.SegmentID
 		})
-		if len(segmentIDs) == 0 {
+		if skipEmpty && len(segmentIDs) == 0 {
 			return nil
 		}
 		// update request
@@ -858,7 +882,7 @@ func (sd *shardDelegator) GetTSafe() uint64 {
 	return sd.latestTsafe.Load()
 }
 
-func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema) error {
+func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schVersion uint64) error {
 	log := sd.getLogger(ctx)
 	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
 		return err
@@ -874,17 +898,28 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	}
 	defer sd.distribution.Unpin(version)
 
+	log.Info("update schema targets...",
+		zap.Int("sealedNum", len(sealed)),
+		zap.Int("growingNum", len(growing)),
+	)
+
 	tasks, err := organizeSubTask(ctx, &querypb.UpdateSchemaRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		CollectionID: sd.collectionID,
 		Schema:       schema,
-	}, sealed, growing, sd, func(req *querypb.UpdateSchemaRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.UpdateSchemaRequest {
-		nodeReq := typeutil.Clone(req)
-		nodeReq.GetBase().TargetID = targetID
-		return nodeReq
-	})
+		Version:      schVersion,
+	},
+		sealed,
+		growing,
+		sd,
+		false, // don't skip empty
+		func(req *querypb.UpdateSchemaRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.UpdateSchemaRequest {
+			nodeReq := typeutil.Clone(req)
+			nodeReq.GetBase().TargetID = targetID
+			return nodeReq
+		})
 	if err != nil {
 		return err
 	}
@@ -914,7 +949,7 @@ func (sd *shardDelegator) Close() {
 	// clean up l0 segment in delete buffer
 	start := time.Now()
 	sd.deleteBuffer.Clear()
-	log.Info("unregister all  l0 segments", zap.Duration("cost", time.Since(start)))
+	log.Info("unregister all l0 segments", zap.Duration("cost", time.Since(start)))
 
 	metrics.QueryNodeDeleteBufferSize.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
 	metrics.QueryNodeDeleteBufferRowNum.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
@@ -1001,7 +1036,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		segmentManager: manager.Segment,
 		workerManager:  workerManager,
 		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
-		distribution:   NewDistribution(),
+		distribution:   NewDistribution(channel),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
 		pkOracle:         pkoracle.NewPkOracle(),

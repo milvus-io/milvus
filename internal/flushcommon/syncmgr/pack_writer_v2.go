@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -48,17 +49,18 @@ type BulkPackWriterV2 struct {
 	multiPartUploadSize int64
 }
 
-func NewBulkPackWriterV2(metaCache metacache.MetaCache, chunkManager storage.ChunkManager,
+func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
 	allocator allocator.Interface, bufferSize, multiPartUploadSize int64, writeRetryOpts ...retry.Option,
 ) *BulkPackWriterV2 {
 	return &BulkPackWriterV2{
 		BulkPackWriter: &BulkPackWriter{
 			metaCache:      metaCache,
+			schema:         schema,
 			chunkManager:   chunkManager,
 			allocator:      allocator,
 			writeRetryOpts: writeRetryOpts,
 		},
-		schema:              metaCache.Schema(),
+		schema:              schema,
 		bufferSize:          bufferSize,
 		multiPartUploadSize: multiPartUploadSize,
 	}
@@ -135,7 +137,9 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		}
 	}
 
-	w, err := storage.NewPackedRecordWriter(paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups)
+	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+
+	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups)
 	if err != nil {
 		return nil, err
 	}

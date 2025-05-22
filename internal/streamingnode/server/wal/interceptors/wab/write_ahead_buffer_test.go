@@ -17,7 +17,7 @@ import (
 
 func TestWriteAheadBufferWithOnlyTrivialTimeTick(t *testing.T) {
 	ctx := context.Background()
-	wb := NewWriteAheadBuffer("pchannel", log.With(), 5*1024*1024, 30*time.Second, createTimeTickMessage(0))
+	wb := NewWriteAheadBuffer("pchannel", log.With(), 5*1024*1024, 30*time.Second, createTimeTickMessage(0, true))
 
 	// Test timeout
 	ctx, cancel := context.WithTimeout(ctx, 1*time.Millisecond)
@@ -54,7 +54,7 @@ func TestWriteAheadBufferWithOnlyTrivialTimeTick(t *testing.T) {
 
 	// Current the cache last timetick will be push to 100,
 	// But we make a exclusive read, so the read operation should be blocked.
-	wb.Append(nil, createTimeTickMessage(100))
+	wb.Append(nil, createTimeTickMessage(100, false))
 	ctx, cancel = context.WithTimeout(ctx, 5*time.Millisecond)
 	defer cancel()
 	_, err = readErr.GetWithContext(ctx)
@@ -63,7 +63,7 @@ func TestWriteAheadBufferWithOnlyTrivialTimeTick(t *testing.T) {
 	nextTimeTick := uint64(100)
 	for {
 		nextTimeTick += uint64(rand.Int31n(1000) + 1)
-		wb.Append(nil, createTimeTickMessage(nextTimeTick))
+		wb.Append(nil, createTimeTickMessage(nextTimeTick, false))
 		if nextTimeTick > expectedLastTimeTick {
 			break
 		}
@@ -81,7 +81,7 @@ func TestWriteAheadBufferWithOnlyTrivialTimeTick(t *testing.T) {
 func TestWriteAheadBuffer(t *testing.T) {
 	// Concurrent add message into bufffer and make syncup.
 	// The reader should never lost any message if no eviction happen.
-	wb := NewWriteAheadBuffer("pchannel", log.With(), 5*1024*1024, 30*time.Second, createTimeTickMessage(1))
+	wb := NewWriteAheadBuffer("pchannel", log.With(), 5*1024*1024, 30*time.Second, createTimeTickMessage(1, true))
 	expectedLastTimeTick := uint64(10000)
 	ch := make(chan struct{})
 	totalCnt := 0
@@ -97,7 +97,7 @@ func TestWriteAheadBuffer(t *testing.T) {
 					break
 				}
 			}
-			wb.Append(msgs, createTimeTickMessage(msgs[len(msgs)-1].TimeTick()))
+			wb.Append(msgs, createTimeTickMessage(msgs[len(msgs)-1].TimeTick(), true))
 			totalCnt += (len(msgs) + 1)
 			if nextTimeTick > expectedLastTimeTick {
 				break
@@ -173,7 +173,7 @@ func TestWriteAheadBuffer(t *testing.T) {
 	defer cancel()
 	_, err = r2.Next(ctx)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
-	wb.Append(nil, createTimeTickMessage(timeticks[len(timeticks)-1]+1))
+	wb.Append(nil, createTimeTickMessage(timeticks[len(timeticks)-1]+1, false))
 	msg, err = r1.Next(ctx)
 	assert.Equal(t, message.MessageTypeTimeTick, msg.MessageType())
 	assert.NoError(t, err)
@@ -183,13 +183,13 @@ func TestWriteAheadBuffer(t *testing.T) {
 }
 
 func TestWriteAheadBufferEviction(t *testing.T) {
-	wb := NewWriteAheadBuffer("pchannel", log.With(), 5*1024*1024, 50*time.Millisecond, createTimeTickMessage(0))
+	wb := NewWriteAheadBuffer("pchannel", log.With(), 5*1024*1024, 50*time.Millisecond, createTimeTickMessage(0, true))
 
 	msgs := make([]message.ImmutableMessage, 0)
 	for i := 1; i < 100; i++ {
 		msgs = append(msgs, createInsertMessage(uint64(i)))
 	}
-	wb.Append(msgs, createTimeTickMessage(99))
+	wb.Append(msgs, createTimeTickMessage(99, true))
 
 	// We can read from 0 to 100 messages
 	r, err := wb.ReadFromExclusiveTimeTick(context.Background(), 0)
@@ -203,9 +203,9 @@ func TestWriteAheadBufferEviction(t *testing.T) {
 	for i := 100; i < 200; i++ {
 		msgs = append(msgs, createInsertMessage(uint64(i)))
 	}
-	wb.Append(msgs, createTimeTickMessage(199))
+	wb.Append(msgs, createTimeTickMessage(199, true))
 	time.Sleep(60 * time.Millisecond)
-	wb.Append(nil, createTimeTickMessage(200))
+	wb.Append(nil, createTimeTickMessage(200, false))
 	// wait for expiration.
 
 	lastTimeTick := uint64(0)
@@ -225,15 +225,15 @@ func TestWriteAheadBufferEviction(t *testing.T) {
 	assert.Equal(t, uint64(99), lastTimeTick)
 }
 
-func createTimeTickMessage(timetick uint64) message.ImmutableMessage {
-	msg, err := message.NewTimeTickMessageBuilderV1().
+func createTimeTickMessage(timetick uint64, persist bool) message.ImmutableMessage {
+	b := message.NewTimeTickMessageBuilderV1().
 		WithAllVChannel().
 		WithHeader(&message.TimeTickMessageHeader{}).
-		WithBody(&msgpb.TimeTickMsg{}).
-		BuildMutable()
-	if err != nil {
-		panic(err)
+		WithBody(&msgpb.TimeTickMsg{})
+	if !persist {
+		b.WithNotPersisted()
 	}
+	msg := b.MustBuildMutable()
 	return msg.WithTimeTick(timetick).IntoImmutableMessage(
 		walimplstest.NewTestMessageID(1),
 	)

@@ -28,7 +28,6 @@ type writeNode struct {
 	wbManager   writebuffer.BufferManager
 	updater     util.StatsUpdater
 	metacache   metacache.MetaCache
-	collSchema  *schemapb.CollectionSchema
 	pkField     *schemapb.FieldSchema
 }
 
@@ -83,7 +82,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	start, end := fgMsg.StartPositions[0], fgMsg.EndPositions[0]
 
 	if fgMsg.InsertData == nil {
-		insertData, err := writebuffer.PrepareInsert(wNode.collSchema, wNode.pkField, fgMsg.InsertMessages)
+		insertData, err := writebuffer.PrepareInsert(wNode.metacache.Schema(), wNode.pkField, fgMsg.InsertMessages)
 		if err != nil {
 			log.Error("failed to prepare data", zap.Error(err))
 			panic(err)
@@ -117,7 +116,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 
 	// update schema after all data processed
 	if fgMsg.updatedSchema != nil {
-		wNode.metacache.UpdateSchema(fgMsg.updatedSchema)
+		wNode.metacache.UpdateSchema(fgMsg.updatedSchema, fgMsg.schemaVersion)
 	}
 
 	res := FlowGraphMsg{
@@ -161,7 +160,6 @@ func newWriteNode(
 		wbManager:   writeBufferManager,
 		updater:     updater,
 		metacache:   config.metacache,
-		collSchema:  collSchema,
 		pkField:     pkField,
 	}, nil
 }

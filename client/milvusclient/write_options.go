@@ -91,6 +91,10 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 			dynamicColumns = append(dynamicColumns, col)
 			continue
 		}
+		// make non-nullable created column fit nullable field definition
+		if field.Nullable {
+			col.SetNullable(true)
+		}
 
 		mNameColumn[col.Name()] = col
 		if col.Type() != field.DataType {
@@ -130,6 +134,8 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 
 	fieldsData := make([]*schemapb.FieldData, 0, len(mNameColumn)+1)
 	for _, fixedColumn := range mNameColumn {
+		// make sure the field data in compact mode
+		fixedColumn.CompactNullableValues()
 		fieldsData = append(fieldsData, fixedColumn.FieldData())
 	}
 	if len(dynamicColumns) > 0 {

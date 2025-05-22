@@ -488,6 +488,38 @@ message StreamingNodeManagerCollectStatusResponse {
 }
 
 ///
+/// VChannelMeta 
+///
+// VChannelMeta is the meta information of a vchannel.
+// We need to add vchannel meta in wal meta, so the wal can recover the information of it.
+// The vchannel meta is also used to store the vchannel operation result, such as shard-splitting.
+message VChannelMeta {
+    string vchannel = 1; // vchannel name.
+    VChannelState state = 2; // vchannel state.
+    CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
+    uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
+}
+
+// CollectionInfoOfVChannel is the collection info in vchannel.
+message CollectionInfoOfVChannel {
+    int64 collection_id = 1; // collection id.
+    repeated PartitionInfoOfVChannel partitions  = 2; // partitions.
+}
+
+// PartitionInfoOfVChannel is the partition info in vchannel.
+message PartitionInfoOfVChannel {
+    int64 partition_id = 1; // partition id.
+}
+
+// VChannelState is the state of vchannel
+enum VChannelState {
+    VCHANNEL_STATE_UNKNOWN = 0;  // should never used.
+    VCHANNEL_STATE_NORMAL  = 1;  // vchannel is normal.
+    VCHANNEL_STATE_DROPPED = 2;  // vchannel is dropped.
+    // VCHANNEL_STATE_SPLITTED = 3; // TODO: vchannel is splitted to other vchannels, used to support shard-splitting.
+}
+
+///
 /// SegmentAssignment
 ///
 // SegmentAssignmentMeta is the stat of segment assignment.
@@ -503,18 +535,13 @@ message SegmentAssignmentMeta {
     SegmentAssignmentState state = 5;
     SegmentAssignmentStat stat   = 6;
     int64 storage_version        = 7;
+    uint64 checkpoint_time_tick  = 8; // The timetick of checkpoint, the meta already see the message at this timetick.
 }
 
-// SegmentAssignmentState is the state of segment assignment.
-// The state machine can be described as following:
-// 1. PENDING -> GROWING -> SEALED -> FLUSHED
 enum SegmentAssignmentState {
     SEGMENT_ASSIGNMENT_STATE_UNKNOWN = 0;  // should never used.
-    SEGMENT_ASSIGNMENT_STATE_PENDING = 1;
-    SEGMENT_ASSIGNMENT_STATE_GROWING = 2;
-    SEGMENT_ASSIGNMENT_STATE_SEALED  = 3;
-    SEGMENT_ASSIGNMENT_STATE_FLUSHED = 4;  // can never be seen, because it's
-    // removed physically when enter FLUSHED.
+    SEGMENT_ASSIGNMENT_STATE_GROWING = 1;
+    SEGMENT_ASSIGNMENT_STATE_FLUSHED = 2;
 }
 
 // SegmentAssignmentStat is the stat of segment assignment.
@@ -522,13 +549,20 @@ message SegmentAssignmentStat {
     uint64 max_binary_size                    = 1;
     uint64 inserted_rows                      = 2;
     uint64 inserted_binary_size               = 3;
-    int64 create_timestamp_nanoseconds        = 4;
-    int64 last_modified_timestamp_nanoseconds = 5;
+    int64 create_timestamp                    = 4;
+    int64 last_modified_timestamp             = 5;
     uint64 binlog_counter                     = 6;
     uint64 create_segment_time_tick           = 7; // The timetick of create segment message in wal.
 }
 
 // The WALCheckpoint that is used to recovery the wal scanner.
 message WALCheckpoint {
-    messages.MessageID messageID = 1;
+    messages.MessageID message_id = 1; // From here to recover all uncommited info.
+    // e.g., primary key index, segment assignment info, vchannel info...
+    // because current data path flush is slow, and managed by the coordinator, current current is not apply to it.
+    // 
+    // because the data path flush is slow, so we add a new checkpoint here to promise fast recover the wal state from log.
+    uint64 time_tick = 2; // The timetick of checkpoint, keep consistecy with message_id.
+    // It's a hint for easier debugging.
+    int64 recovery_magic = 3; // The recovery version of the checkpoint, it's used to hint the future recovery info upgrading.
 }

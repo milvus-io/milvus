@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -52,6 +53,7 @@ type LocalWorkerTestSuite struct {
 	// dependency
 	node       *QueryNode
 	worker     *LocalWorker
+	mockLoader *segments.MockLoader
 	etcdClient *clientv3.Client
 	// context
 	ctx    context.Context
@@ -105,6 +107,10 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 		CollectionID: suite.collectionID,
 	}
 	suite.node.manager.Collection.PutOrRef(suite.collectionID, collection.Schema(), suite.indexMeta, loadMata)
+
+	suite.mockLoader = segments.NewMockLoader(suite.T())
+	suite.node.loader = suite.mockLoader
+
 	suite.worker = NewLocalWorker(suite.node)
 }
 
@@ -115,6 +121,10 @@ func (suite *LocalWorkerTestSuite) AfterTest(suiteName, testName string) {
 }
 
 func (suite *LocalWorkerTestSuite) TestLoadSegment() {
+	suite.mockLoader.EXPECT().
+		Load(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return([]segments.Segment{}, nil).Once()
+
 	// load empty
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	req := &querypb.LoadSegmentsRequest{

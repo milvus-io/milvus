@@ -159,7 +159,8 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                  std::shared_ptr<ArrowReaderChannel> channel,
                  int64_t memory_limit,
                  std::unique_ptr<RowGroupSplitStrategy> strategy,
-                 const std::vector<std::vector<int64_t>>& row_group_lists) {
+                 const std::vector<std::vector<int64_t>>& row_group_lists,
+                 const std::shared_ptr<arrow::Schema> schema) {
     try {
         AssertInfo(
             remote_files.size() == row_group_lists.size(),
@@ -175,13 +176,6 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
             if (row_groups.empty()) {
                 continue;
             }
-
-            auto file_reader =
-                std::make_shared<milvus_storage::FileRowGroupReader>(
-                    fs, file, memory_limit);
-            auto metadata = file_reader->file_metadata();
-            milvus_storage::RowGroupMetadataVector row_group_metadatas =
-                metadata->GetRowGroupMetadataVector();
 
             // Use provided strategy to split row groups
             auto blocks = strategy->split(row_groups);
@@ -201,13 +195,16 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                 futures.emplace_back(pool.Submit([block,
                                                   fs,
                                                   file,
+                                                  schema,
                                                   memory_limit]() {
+                    AssertInfo(fs != nullptr, "file system is nullptr");
                     auto row_group_reader =
                         std::make_shared<milvus_storage::FileRowGroupReader>(
-                            fs, file, nullptr, memory_limit);
+                            fs, file, schema, memory_limit);
+                    AssertInfo(row_group_reader != nullptr,
+                               "row group reader is nullptr");
                     row_group_reader->SetRowGroupOffsetAndCount(block.offset,
                                                                 block.count);
-
                     auto ret = std::make_shared<ArrowDataWrapper>();
                     for (int64_t i = 0; i < block.count; ++i) {
                         std::shared_ptr<arrow::Table> table;

@@ -258,49 +258,90 @@ func (suite *CollectionObserverSuite) TestObserve() {
 
 	// Collection 100 loaded before timeout,
 	// collection 101 timeout
-	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
-		ID:           1,
-		CollectionID: 100,
-		Channel:      "100-dmc0",
-		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}},
-	})
-	view := &meta.LeaderView{
-		ID:           2,
-		CollectionID: 103,
-		Channel:      "103-dmc0",
-		Segments:     make(map[int64]*querypb.SegmentDist),
+	ch1 := &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 100,
+			ChannelName:  "100-dmc0",
+		},
+		Node: 1,
+		View: &meta.LeaderView{
+			ID:           1,
+			CollectionID: 100,
+			Channel:      "100-dmc0",
+			Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}},
+		},
 	}
-	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
-		ID:           2,
-		CollectionID: 100,
-		Channel:      "100-dmc1",
-		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}},
-	}, view)
+	suite.dist.ChannelDistManager.Update(1, ch1)
 
-	view1 := &meta.LeaderView{
-		ID:           3,
-		CollectionID: 102,
-		Channel:      "102-dmc0",
-		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 5, Version: 0}},
+	ch2 := &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 103,
+			ChannelName:  "103-dmc0",
+		},
+		Node: 2,
+		View: &meta.LeaderView{
+			ID:           2,
+			CollectionID: 103,
+			Channel:      "103-dmc0",
+			Segments:     make(map[int64]*querypb.SegmentDist),
+		},
+	}
+
+	ch3 := &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 100,
+			ChannelName:  "100-dmc1",
+		},
+		Node: 2,
+		View: &meta.LeaderView{
+			ID:           2,
+			CollectionID: 100,
+			Channel:      "100-dmc1",
+			Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}},
+		},
+	}
+	suite.dist.ChannelDistManager.Update(2, ch2, ch3)
+
+	ch4 := &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 102,
+			ChannelName:  "102-dmc0",
+		},
+		Node: 3,
+		View: &meta.LeaderView{
+			ID:           3,
+			CollectionID: 102,
+			Channel:      "102-dmc0",
+			Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 5, Version: 0}},
+		},
+	}
+
+	ch5 := &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 103,
+			ChannelName:  "103-dmc0",
+		},
+		Node: 3,
+		View: &meta.LeaderView{
+			ID:           3,
+			CollectionID: 103,
+			Channel:      "103-dmc0",
+			Segments:     make(map[int64]*querypb.SegmentDist),
+		},
 	}
 
 	segmentsInfo, ok := suite.segments[103]
 	suite.True(ok)
-	view2 := &meta.LeaderView{
-		ID:           3,
-		CollectionID: 103,
-		Channel:      "103-dmc0",
-		Segments:     make(map[int64]*querypb.SegmentDist),
-	}
 	for _, segment := range segmentsInfo {
-		view2.Segments[segment.GetID()] = &querypb.SegmentDist{
-			NodeID: 3, Version: 0,
-		}
-		view.Segments[segment.GetID()] = &querypb.SegmentDist{
+		ch2.View.Segments[segment.GetID()] = &querypb.SegmentDist{
 			NodeID: 2, Version: 0,
 		}
+		ch5.View.Segments[segment.GetID()] = &querypb.SegmentDist{
+			NodeID: 3, Version: 0,
+		}
 	}
-	suite.dist.LeaderViewManager.Update(3, view1, view2)
+
+	suite.dist.ChannelDistManager.Update(3, ch4, ch5)
 
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -331,23 +372,43 @@ func (suite *CollectionObserverSuite) TestObservePartition() {
 
 	// Partition 10 loaded
 	// Partition 11 timeout
-	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
-		ID:           1,
-		CollectionID: 100,
-		Channel:      "100-dmc0",
-		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}},
-	}, &meta.LeaderView{
-		ID:           1,
-		CollectionID: 101,
-		Channel:      "",
-
-		Segments: map[int64]*querypb.SegmentDist{},
+	suite.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 100,
+			ChannelName:  "100-dmc0",
+		},
+		Node: 1,
+		View: &meta.LeaderView{
+			ID:           1,
+			CollectionID: 100,
+			Channel:      "100-dmc0",
+			Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}},
+		},
+	}, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 101,
+			ChannelName:  "101-dmc0",
+		},
+		Node: 1,
+		View: &meta.LeaderView{
+			ID:           1,
+			CollectionID: 101,
+			Channel:      "101-dmc0",
+		},
 	})
-	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
-		ID:           2,
-		CollectionID: 100,
-		Channel:      "100-dmc1",
-		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}},
+
+	suite.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 100,
+			ChannelName:  "100-dmc1",
+		},
+		Node: 2,
+		View: &meta.LeaderView{
+			ID:           2,
+			CollectionID: 100,
+			Channel:      "100-dmc1",
+			Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}},
+		},
 	})
 
 	suite.Eventually(func() bool {

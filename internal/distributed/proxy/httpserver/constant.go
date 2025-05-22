@@ -159,6 +159,9 @@ const (
 	HTTPReturnIndexState           = "indexState"
 	HTTPReturnIndexFailReason      = "failReason"
 
+	HTTPReturnMinIndexVersion = "minIndexVersion"
+	HTTPReturnMaxIndexVersion = "maxIndexVersion"
+
 	HTTPReturnDistance = "distance"
 
 	HTTPReturnRowCount = "rowCount"

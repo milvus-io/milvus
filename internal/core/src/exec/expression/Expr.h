@@ -125,8 +125,6 @@ class Expr {
 
 using ExprPtr = std::shared_ptr<milvus::exec::Expr>;
 
-using SkipFunc = bool (*)(const milvus::SkipIndex&, FieldId, int);
-
 /*
  * The expr has only one column.
  */
@@ -144,7 +142,7 @@ class SegmentExpr : public Expr {
                 bool allow_any_json_cast_type = false)
 
         : Expr(DataType::BOOL, std::move(input), name),
-          segment_(segment),
+          segment_(const_cast<segcore::SegmentInternalInterface*>(segment)),
           field_id_(field_id),
           nested_path_(nested_path),
           value_type_(value_type),
@@ -344,8 +342,9 @@ class SegmentExpr : public Expr {
             std::min(active_count_ - current_data_chunk_pos_, batch_size_);
 
         auto& skip_index = segment_->GetSkipIndex();
-        auto views_info = segment_->get_batch_views<T>(
+        auto pw = segment_->get_batch_views<T>(
             field_id_, 0, current_data_chunk_pos_, need_size);
+        auto views_info = pw.get();
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             // first is the raw data, second is valid_data
             // use valid_data to see if raw data is null
@@ -381,8 +380,8 @@ class SegmentExpr : public Expr {
         Assert(num_data_chunk_ == 1);
 
         auto& skip_index = segment_->GetSkipIndex();
-        auto [data_vec, valid_data] =
-            segment_->get_views_by_offsets<T>(field_id_, 0, *input);
+        auto pw = segment_->get_views_by_offsets<T>(field_id_, 0, *input);
+        auto [data_vec, valid_data] = pw.get();
         if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             func(data_vec.data(),
                  valid_data.data(),
@@ -403,15 +402,14 @@ class SegmentExpr : public Expr {
                                 OffsetVector* input,
                                 ValTypes... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
-        typedef std::
-            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-                IndexInnerType;
+        using IndexInnerType = std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
         using Index = index::ScalarIndex<IndexInnerType>;
         TargetBitmap valid_res(input->size());
 
-        const Index& index =
-            segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
-        auto* index_ptr = const_cast<Index*>(&index);
+        auto pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
+        auto* index_ptr = const_cast<Index*>(pw.get());
+
         auto valid_result = index_ptr->IsNotNull();
         for (auto i = 0; i < input->size(); ++i) {
             valid_res[i] = valid_result[(*input)[i]];
@@ -435,13 +433,11 @@ class SegmentExpr : public Expr {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         auto& skip_index = segment_->GetSkipIndex();
 
-        typedef std::
-            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-                IndexInnerType;
+        using IndexInnerType = std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
         using Index = index::ScalarIndex<IndexInnerType>;
-        const Index& index =
-            segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
-        auto* index_ptr = const_cast<Index*>(&index);
+        auto pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
+        auto* index_ptr = const_cast<Index*>(pw.get());
         auto valid_result = index_ptr->IsNotNull();
         auto batch_size = input->size();
 
@@ -504,9 +500,9 @@ class SegmentExpr : public Expr {
                         int64_t offset = (*input)[i];
                         auto [chunk_id, chunk_offset] =
                             segment_->get_chunk_by_offset(field_id_, offset);
-                        auto [data_vec, valid_data] =
-                            segment_->get_views_by_offsets<T>(
-                                field_id_, chunk_id, {int32_t(chunk_offset)});
+                        auto pw = segment_->get_views_by_offsets<T>(
+                            field_id_, chunk_id, {int32_t(chunk_offset)});
+                        auto [data_vec, valid_data] = pw.get();
                         if (!skip_func ||
                             !skip_func(skip_index, field_id_, chunk_id)) {
                             func.template operator()<FilterType::random>(
@@ -529,7 +525,8 @@ class SegmentExpr : public Expr {
                     int64_t offset = (*input)[i];
                     auto [chunk_id, chunk_offset] =
                         segment_->get_chunk_by_offset(field_id_, offset);
-                    auto chunk = segment_->chunk_data<T>(field_id_, chunk_id);
+                    auto pw = segment_->chunk_data<T>(field_id_, chunk_id);
+                    auto chunk = pw.get();
                     const T* data = chunk.data() + chunk_offset;
                     const bool* valid_data = chunk.valid_data();
                     if (valid_data != nullptr) {
@@ -560,7 +557,8 @@ class SegmentExpr : public Expr {
                     return ProcessDataByOffsetsForSealedSeg<T>(
                         func, skip_func, input, res, valid_res, values...);
                 }
-                auto chunk = segment_->chunk_data<T>(field_id_, 0);
+                auto pw = segment_->chunk_data<T>(field_id_, 0);
+                auto chunk = pw.get();
                 const T* data = chunk.data();
                 const bool* valid_data = chunk.valid_data();
                 if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
@@ -582,7 +580,8 @@ class SegmentExpr : public Expr {
                 int64_t offset = (*input)[i];
                 auto chunk_id = offset / size_per_chunk_;
                 auto chunk_offset = offset % size_per_chunk_;
-                auto chunk = segment_->chunk_data<T>(field_id_, chunk_id);
+                auto pw = segment_->chunk_data<T>(field_id_, chunk_id);
+                auto chunk = pw.get();
                 const T* data = chunk.data() + chunk_offset;
                 const bool* valid_data = chunk.valid_data();
                 if (valid_data != nullptr) {
@@ -642,7 +641,8 @@ class SegmentExpr : public Expr {
             size = std::min(size, batch_size_ - processed_size);
 
             auto& skip_index = segment_->GetSkipIndex();
-            auto chunk = segment_->chunk_data<T>(field_id_, i);
+            auto pw = segment_->chunk_data<T>(field_id_, i);
+            auto chunk = pw.get();
             const bool* valid_data = chunk.valid_data();
             if (valid_data != nullptr) {
                 valid_data += data_pos;
@@ -683,22 +683,15 @@ class SegmentExpr : public Expr {
         ValTypes... values) {
         int64_t processed_size = 0;
 
-        // if constexpr (std::is_same_v<T, std::string_view> ||
-        //               std::is_same_v<T, Json>) {
-        //     if (segment_->type() == SegmentType::Sealed) {
-        //         return ProcessChunkForSealedSeg<T>(
-        //             func, skip_func, res, values...);
-        //     }
-        // }
-
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
 
             // if segment is chunked, type won't be growing
             int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
-
             size = std::min(size, batch_size_ - processed_size);
+            if (size == 0)
+                continue;  //do not go empty-loop at the bound of the chunk
 
             auto& skip_index = segment_->GetSkipIndex();
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
@@ -709,9 +702,10 @@ class SegmentExpr : public Expr {
                     if (segment_->type() == SegmentType::Sealed) {
                         // first is the raw data, second is valid_data
                         // use valid_data to see if raw data is null
-                        auto [data_vec, valid_data] =
-                            segment_->get_batch_views<T>(
-                                field_id_, i, data_pos, size);
+                        auto pw = segment_->get_batch_views<T>(
+                            field_id_, i, data_pos, size);
+                        auto [data_vec, valid_data] = pw.get();
+
                         func(data_vec.data(),
                              valid_data.data(),
                              nullptr,
@@ -723,7 +717,8 @@ class SegmentExpr : public Expr {
                     }
                 }
                 if (!is_seal) {
-                    auto chunk = segment_->chunk_data<T>(field_id_, i);
+                    auto pw = segment_->chunk_data<T>(field_id_, i);
+                    auto chunk = pw.get();
                     const T* data = chunk.data() + data_pos;
                     const bool* valid_data = chunk.valid_data();
                     if (valid_data != nullptr) {
@@ -741,15 +736,16 @@ class SegmentExpr : public Expr {
                 const bool* valid_data;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json>) {
-                    auto batch_views = segment_->get_batch_views<T>(
+                    auto pw = segment_->get_batch_views<T>(
                         field_id_, i, data_pos, size);
-                    valid_data = batch_views.second.data();
+                    valid_data = pw.get().second.data();
                     ApplyValidData(valid_data,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    size);
                 } else {
-                    auto chunk = segment_->chunk_data<T>(field_id_, i);
+                    auto pw = segment_->chunk_data<T>(field_id_, i);
+                    auto chunk = pw.get();
                     valid_data = chunk.valid_data();
                     if (valid_data != nullptr) {
                         valid_data += data_pos;
@@ -802,6 +798,8 @@ class SegmentExpr : public Expr {
         for (size_t i = 0; i < num_data_chunk_; i++) {
             // process one chunk at once per loop
             int64_t size = segment_->chunk_size(field_id_, i);
+            if (size == 0)
+                continue;  //do not go empty-loop at the bound of the chunk
 
             auto& skip_index = segment_->GetSkipIndex();
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
@@ -812,8 +810,10 @@ class SegmentExpr : public Expr {
                     if (segment_->type() == SegmentType::Sealed) {
                         // first is the raw data, second is valid_data
                         // use valid_data to see if raw data is null
-                        auto [data_vec, valid_data] =
-                            segment_->get_batch_views<T>(field_id_, i, 0, size);
+                        auto pw = segment_->get_batch_views<T>(
+                            field_id_, i, 0, size);
+                        auto [data_vec, valid_data] = pw.get();
+
                         func(data_vec.data(),
                              valid_data.data(),
                              nullptr,
@@ -825,7 +825,8 @@ class SegmentExpr : public Expr {
                     }
                 }
                 if (!is_seal) {
-                    auto chunk = segment_->chunk_data<T>(field_id_, i);
+                    auto pw = segment_->chunk_data<T>(field_id_, i);
+                    auto chunk = pw.get();
                     const T* data = chunk.data();
                     const bool* valid_data = chunk.valid_data();
                     func(data,
@@ -840,15 +841,15 @@ class SegmentExpr : public Expr {
                 const bool* valid_data;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json>) {
-                    auto batch_views =
-                        segment_->get_batch_views<T>(field_id_, i, 0, size);
-                    valid_data = batch_views.second.data();
+                    auto pw = segment_->get_batch_views<T>(field_id_, i, 0, size);
+                    valid_data = pw.get().second.data();
                     ApplyValidData(valid_data,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    size);
                 } else {
-                    auto chunk = segment_->chunk_data<T>(field_id_, i);
+                    auto pw = segment_->chunk_data<T>(field_id_, i);
+                    auto chunk = pw.get();
                     valid_data = chunk.valid_data();
                     ApplyValidData(valid_data,
                                    res + processed_size,
@@ -917,19 +918,18 @@ class SegmentExpr : public Expr {
             // executing costs quite much time.
             if (cached_index_chunk_id_ != i) {
                 Index* index_ptr = nullptr;
+                PinWrapper<const Index*> pw;
 
                 if (field_type_ == DataType::JSON) {
                     auto pointer = milvus::Json::pointer(nested_path_);
 
-                    const Index& index =
-                        segment_->chunk_scalar_index<IndexInnerType>(
-                            field_id_, pointer, i);
-                    index_ptr = const_cast<Index*>(&index);
+                    pw = segment_->chunk_scalar_index<IndexInnerType>(
+                        field_id_, pointer, i);
+                    index_ptr = const_cast<Index*>(pw.get());
                 } else {
-                    const Index& index =
-                        segment_->chunk_scalar_index<IndexInnerType>(field_id_,
-                                                                     i);
-                    index_ptr = const_cast<Index*>(&index);
+                    pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_,
+                                                                      i);
+                    index_ptr = const_cast<Index*>(pw.get());
                 }
                 cached_index_chunk_res_ = std::move(func(index_ptr, values...));
                 auto valid_result = index_ptr->IsNotNull();
@@ -1062,9 +1062,9 @@ class SegmentExpr : public Expr {
                                   element_type);
                 }
             }
-            const Index& index =
+            auto pw =
                 segment_->chunk_scalar_index<IndexInnerType>(field_id_, 0);
-            auto* index_ptr = const_cast<Index*>(&index);
+            auto* index_ptr = const_cast<Index*>(pw.get());
             const auto& res = index_ptr->IsNotNull();
             for (auto i = 0; i < batch_size; ++i) {
                 valid_result[i] = res[input[i]];
@@ -1083,7 +1083,8 @@ class SegmentExpr : public Expr {
                         return {0, offset};
                     }
                 }();
-                auto chunk = segment_->chunk_data<T>(field_id_, chunk_id);
+                auto pw = segment_->chunk_data<T>(field_id_, chunk_id);
+                auto chunk = pw.get();
                 const bool* valid_data = chunk.valid_data();
                 if (valid_data != nullptr) {
                     valid_result[i] = valid_data[chunk_offset];
@@ -1119,14 +1120,16 @@ class SegmentExpr : public Expr {
             }
 
             size = std::min(size, batch_size_ - processed_size);
-
+            if (size == 0)
+                continue;  //do not go empty-loop at the bound of the chunk
             bool access_sealed_variable_column = false;
             if constexpr (std::is_same_v<T, std::string_view> ||
                           std::is_same_v<T, Json> ||
                           std::is_same_v<T, ArrayView>) {
                 if (segment_->type() == SegmentType::Sealed) {
-                    auto [data_vec, valid_data] = segment_->get_batch_views<T>(
+                    auto pw = segment_->get_batch_views<T>(
                         field_id_, i, data_pos, size);
+                    auto [data_vec, valid_data] = pw.get();
                     ApplyValidData(valid_data.data(),
                                    valid_result + processed_size,
                                    valid_result + processed_size,
@@ -1136,7 +1139,8 @@ class SegmentExpr : public Expr {
             }
 
             if (!access_sealed_variable_column) {
-                auto chunk = segment_->chunk_data<T>(field_id_, i);
+                auto pw = segment_->chunk_data<T>(field_id_, i);
+                auto chunk = pw.get();
                 const bool* valid_data = chunk.valid_data();
                 if (valid_data == nullptr) {
                     return valid_result;
@@ -1176,9 +1180,8 @@ class SegmentExpr : public Expr {
     template <typename T>
     TargetBitmap
     ProcessIndexChunksForValid() {
-        typedef std::
-            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-                IndexInnerType;
+        using IndexInnerType = std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
         using Index = index::ScalarIndex<IndexInnerType>;
         int processed_rows = 0;
         TargetBitmap valid_result;
@@ -1189,9 +1192,9 @@ class SegmentExpr : public Expr {
             // It avoids indexing execute for every batch because indexing
             // executing costs quite much time.
             if (cached_index_chunk_id_ != i) {
-                const Index& index =
+                auto pw =
                     segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-                auto* index_ptr = const_cast<Index*>(&index);
+                auto* index_ptr = const_cast<Index*>(pw.get());
                 auto execute_sub_batch = [](Index* index_ptr) {
                     TargetBitmap res = index_ptr->IsNotNull();
                     return res;
@@ -1261,9 +1264,9 @@ class SegmentExpr : public Expr {
         using Index = index::ScalarIndex<IndexInnerType>;
 
         for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-            const Index& index =
+            auto pw =
                 segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-            auto* index_ptr = const_cast<Index*>(&index);
+            auto* index_ptr = const_cast<Index*>(pw.get());
             func(index_ptr, values...);
         }
     }
@@ -1279,20 +1282,17 @@ class SegmentExpr : public Expr {
         }
 
         using Index = index::ScalarIndex<IndexInnerType>;
-        if (op == OpType::Match) {
-            for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-                const Index& index =
-                    segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-                // 1, index support regex query, then index handles the query;
-                // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
-                if (!index.SupportRegexQuery() && !index.HasRawData()) {
-                    return false;
-                }
-                // all chunks have same index.
-                return true;
-            }
+        if (op == OpType::Match || op == OpType::InnerMatch ||
+            op == OpType::PostfixMatch) {
+            auto pw = segment_->chunk_scalar_index<IndexInnerType>(
+                field_id_, current_index_chunk_);
+            auto* index_ptr = const_cast<Index*>(pw.get());
+            // 1, index support regex query and try use it, then index handles the query;
+            // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
+            return (index_ptr->TryUseRegexQuery() &&
+                    index_ptr->SupportRegexQuery()) ||
+                   index_ptr->HasRawData();
         }
-
         return true;
     }
 
@@ -1305,9 +1305,10 @@ class SegmentExpr : public Expr {
 
         using Index = index::ScalarIndex<IndexInnerType>;
         for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-            const Index& index =
+            auto pw =
                 segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-            if (!index.HasRawData()) {
+            auto* index_ptr = const_cast<Index*>(pw.get());
+            if (!index_ptr->HasRawData()) {
                 return false;
             }
         }

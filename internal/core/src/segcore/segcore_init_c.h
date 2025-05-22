@@ -14,6 +14,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "common/type_c.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -59,8 +61,26 @@ GetCurrentIndexVersion();
 int32_t
 GetMinimalIndexVersion();
 
+int32_t
+GetMaximumIndexVersion();
+
 void
 SetThreadName(const char*);
+
+void
+ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
+                       const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
+                       const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
+                       const CacheWarmupPolicy vectorIndexCacheWarmupPolicy,
+                       const int64_t memory_low_watermark_bytes,
+                       const int64_t memory_high_watermark_bytes,
+                       const int64_t memory_max_bytes,
+                       const int64_t disk_low_watermark_bytes,
+                       const int64_t disk_high_watermark_bytes,
+                       const int64_t disk_max_bytes,
+                       const bool evictionEnabled,
+                       const int64_t cache_touch_window_ms,
+                       const int64_t eviction_interval_ms);
 
 #ifdef __cplusplus
 }

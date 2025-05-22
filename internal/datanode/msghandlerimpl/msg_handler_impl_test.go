@@ -37,13 +37,13 @@ func TestMsgHandlerImpl(t *testing.T) {
 	b := broker.NewMockBroker(t)
 	m := NewMsgHandlerImpl(b)
 	assert.Panics(t, func() {
-		m.HandleCreateSegment(nil, "", nil)
+		m.HandleCreateSegment(nil, nil)
 	})
 	assert.Panics(t, func() {
-		m.HandleFlush("", nil)
+		m.HandleFlush(nil)
 	})
 	assert.Panics(t, func() {
-		m.HandleManualFlush("", nil)
+		m.HandleManualFlush(nil)
 	})
 	t.Run("HandleImport success", func(t *testing.T) {
 		wal := mock_streaming.NewMockWALAccesser(t)

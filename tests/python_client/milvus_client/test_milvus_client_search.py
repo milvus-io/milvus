@@ -7,7 +7,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
 from common.constants import *
-from pymilvus import DataType
+from pymilvus import DataType, Function, FunctionType, AnnSearchRequest
 
 prefix = "client_search"
 partition_prefix = "client_partition"
@@ -61,7 +61,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -83,7 +83,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -104,7 +104,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -125,7 +125,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -146,7 +146,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -167,7 +167,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -189,7 +189,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -211,7 +211,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -232,7 +232,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -254,7 +254,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -276,7 +276,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -299,7 +299,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         error = {ct.err_code: 1, ct.err_msg: f"Param id_type must be int or string"}
         self.create_collection(client, collection_name, default_dim, id_type="invalid",
@@ -313,7 +313,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for the "
                                                  f"field({default_primary_key_field_name}) of collection {collection_name}"}
@@ -329,7 +329,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
                   2. Report errors for creating collection with same name and different params
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. create collection with same params
@@ -349,7 +349,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         error = {ct.err_code: 1100,
                  ct.err_msg: "float vector index does not support metric type: invalid: "
@@ -366,7 +366,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: Raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
         # 2. search
@@ -389,7 +389,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -408,7 +408,6 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         # 3. search
         vectors_to_search = rng.random((1, dim))
         null_expr = default_vector_field_name + " " + null_expr_op
-        log.info(null_expr)
         error = {ct.err_code: 65535,
                  ct.err_msg: f"unsupported data type: VECTOR_FLOAT"}
         self.search(client, collection_name, vectors_to_search,
@@ -424,7 +423,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -444,7 +443,6 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         not_exist_field_name = "not_exist_field"
         null_expr = not_exist_field_name + " " + null_expr_op
-        log.info(null_expr)
         error = {ct.err_code: 1100,
                  ct.err_msg: f"failed to create query plan: cannot parse expression: "
                              f"{null_expr}, error: field {not_exist_field_name} not exist: invalid parameter"}
@@ -462,7 +460,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -486,7 +484,6 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
             null_expr = nullable_field_name + "['b']" + " " + null_expr_op
         self.insert(client, collection_name, rows)
         # 3. search
-        log.info(null_expr)
         self.search(client, collection_name, [vectors[0]],
                     filter=null_expr)
 
@@ -500,7 +497,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -524,11 +521,1121 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. search
         null_expr = nullable_field_name + "[0]" + " " + null_expr_op
-        log.info(null_expr)
         error = {ct.err_code: 65535,
                  ct.err_msg: f"unsupported data type: ARRAY"}
         self.search(client, collection_name, [vectors[0]],
                     filter=null_expr,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("not_support_datatype", [DataType.VARCHAR, DataType.JSON])
+    def test_milvus_client_search_reranker_not_supported_field_type(self, not_support_datatype):
+        """
+        target: test search with reranker on not supported field type
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, not_support_datatype, max_length=64)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_rerank_fn",
+            input_field_names=[default_string_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        if not_support_datatype == DataType.VARCHAR:
+            field_type = "VarChar"
+        if not_support_datatype == DataType.JSON:
+            field_type = "JSON"
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Decay rerank: unsupported input field type:{field_type}, only support numberic field"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_not_supported_field_type_array(self):
+        """
+        target: test search with reranker on not supported field type
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=12,
+                         max_length=64)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 "array_field": [i, i +1]} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_rerank_fn",
+            input_field_names=["array_field"],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Decay rerank: unsupported input field type:Array, only support numberic field"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_not_supported_field_type_vector(self):
+        """
+        target: test search with reranker on not supported field type
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_rerank_fn",
+            input_field_names=[default_vector_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Decay rerank: unsupported input field type:FloatVector, only support numberic field"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_not_supported_nullable_field(self):
+        """
+        target: test search with reranker on not supported nullable field
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_rerank_fn",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Function input field cannot be nullable: field reranker_field"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_invalid_reranker(self):
+        """
+        target: test search with reranker with invalid reranker
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = "Function"
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"The search ranker must be a Function"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_invalid_name(self):
+        """
+        target: test search with reranker with invalid reranker name
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        try:
+            my_rerank_fn = Function(
+                name=1,
+                input_field_names=[ct.default_reranker_field_name],
+                function_type=FunctionType.RERANK,
+                params={
+                    "reranker": "decay",
+                    "function": "gauss",
+                    "origin": 0,
+                    "offset": 0,
+                    "decay": 0.5,
+                    "scale": 100
+                }
+            )
+        except Exception as e:
+            log.info(e)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_invalid_input_field_names(self):
+        """
+        target: test search with reranker with invalid input field names
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        try:
+            my_rerank_fn = Function(
+                name="my_reranker",
+                input_field_names=1,
+                function_type=FunctionType.RERANK,
+                params={
+                    "reranker": "decay",
+                    "function": "gauss",
+                    "origin": 0,
+                    "offset": 0,
+                    "decay": 0.5,
+                    "scale": 100
+                }
+            )
+        except Exception as e:
+            log.info(e)
+        try:
+            my_rerank_fn = Function(
+                name="my_reranker",
+                input_field_names=[1],
+                function_type=FunctionType.RERANK,
+                params={
+                    "reranker": "decay",
+                    "function": "gauss",
+                    "origin": 0,
+                    "offset": 0,
+                    "decay": 0.5,
+                    "scale": 100
+                }
+            )
+        except Exception as e:
+            log.info(e)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_not_exist_field(self):
+        """
+        target: test search with reranker with not exist field
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=["not_exist_field"],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Function input field not found: not_exist_field"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_not_single_field(self):
+        """
+        target: test search with reranker with multiple fields
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name, default_primary_key_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Decay function only supoorts single input, but gets [[reranker_field id]] input"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_duplicate_fields(self):
+        """
+        target: test search with reranker with multiple duplicate fields
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        try:
+            my_rerank_fn = Function(
+                name="my_reranker",
+                input_field_names=[ct.default_reranker_field_name, ct.default_reranker_field_name],
+                function_type=FunctionType.RERANK,
+                params={
+                    "reranker": "decay",
+                    "function": "gauss",
+                    "origin": 0,
+                    "offset": 0,
+                    "decay": 0.5,
+                    "scale": 100
+                }
+            )
+        except Exception as e:
+            log.info(e)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_invalid_function_type(self):
+        """
+        target: test search with reranker with invalid function type
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        try:
+            my_rerank_fn = Function(
+                name="my_reranker",
+                input_field_names=[ct.default_reranker_field_name],
+                function_type=1,
+                params={
+                    "reranker": "decay",
+                    "function": "gauss",
+                    "origin": 0,
+                    "offset": 0,
+                    "decay": 0.5,
+                    "scale": 100
+                }
+            )
+        except Exception as e:
+            log.info(e)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_invalid_reranker(self):
+        """
+        target: test search with reranker with multiple fields
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": 1,
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Unsupported rerank function: [1] , list of supported [decay]"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("not_supported_reranker", ["invalid", "rrf", "weights"])
+    def test_milvus_client_search_reranker_not_supported_reranker_value(self, not_supported_reranker):
+        """
+        target: test search with reranker with multiple fields
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": not_supported_reranker,
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Unsupported rerank function: [{not_supported_reranker}] , list of supported [decay]"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("not_supported_function", [1, "invalid"])
+    def test_milvus_client_search_reranker_not_supported_reranker_value(self, not_supported_function):
+        """
+        target: test search with reranker with multiple fields
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": not_supported_function,
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Invaild decay function: decay, only support [gauss,linear,exp]"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_origin", ["invalid", [1]])
+    def test_milvus_client_search_reranker_invalid_origin(self, invalid_origin):
+        """
+        target: test search with reranker with invalid origin
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": invalid_origin,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Param origin:{invalid_origin} is not a number"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_without_origin(self):
+        """
+        target: test search with reranker with no origin
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Decay function lost param: origin"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_scale", ["invalid", [1]])
+    def test_milvus_client_search_reranker_invalid_scale(self, invalid_scale):
+        """
+        target: test search with reranker with invalid scale
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": invalid_scale
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Param scale:{invalid_scale} is not a number"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_reranker_without_scale(self):
+        """
+        target: test search with reranker with invalid scale
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Decay function lost param: scale"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_scale", [0, -1.0])
+    def test_milvus_client_search_reranker_scale_out_of_range(self, invalid_scale):
+        """
+        target: test search with reranker with invalid scale (out of range)
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": invalid_scale
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Decay function param: scale must > 0, but got {invalid_scale}"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_offset", ["invalid", [1]])
+    def test_milvus_client_search_reranker_invalid_offset(self, invalid_offset):
+        """
+        target: test search with reranker with invalid scale (out of range)
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": invalid_offset,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Param offset:{invalid_offset} is not a number"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_offset", [-1.0])
+    def test_milvus_client_search_reranker_offset_out_of_range(self, invalid_offset):
+        """
+        target: test search with reranker with invalid scale (out of range)
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": invalid_offset,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Decay function param: offset must >= 0, but got {invalid_offset}"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="pymilvus issue 41533")
+    @pytest.mark.parametrize("invalid_decay", [-1.0, 0, 1, 2.0])
+    def test_milvus_client_search_reranker_decay_out_of_range(self, invalid_decay):
+        """
+        target: test search with reranker with invalid decay (out of range)
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": invalid_decay,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Decay function param: decay must 0 < decay < 1, but got {invalid_decay}"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_decay", ["invalid", [1]])
+    def test_milvus_client_search_reranker_invalid_decay(self, invalid_decay):
+        """
+        target: test search with reranker with invalid decay (out of range)
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": invalid_decay,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Param decay:{invalid_decay} is not a number"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_group_by_search_with_reranker(self):
+        """
+        target: test group search with reranker
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"Current rerank does not support grouping search: invalid parameter"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    group_by_field=ct.default_reranker_field_name,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_with_reranker_on_dynamic_fields(self):
+        """
+        target: test group search with reranker on dynamic fields
+        method: create connection, collection, insert and search
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i, "dynamic_fields": i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=["dynamic_fields"],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"Function input field not found: dynamic_fields"}
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -557,7 +1664,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         self.using_database(client, "default")
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
@@ -583,13 +1690,14 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 4. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
@@ -603,7 +1711,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 128
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -634,7 +1742,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
         collections = self.list_collections(client)[0]
@@ -662,13 +1770,14 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 4. query
         self.query(client, new_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.release_collection(client, new_name)
         self.drop_collection(client, new_name)
 
@@ -680,7 +1789,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         collections = self.list_collections(client)[0]
@@ -703,6 +1812,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -714,7 +1824,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, id_type="string", max_length=ct.default_length)
         self.describe_collection(client, collection_name,
@@ -735,13 +1845,14 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 4. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -752,7 +1863,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search successfully with limit(topK)
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, metric_type=metric_type, auto_id=auto_id,
                                consistency_level="Strong")
@@ -772,6 +1883,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         self.drop_collection(client, collection_name)
 
@@ -784,7 +1896,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search successfully with limit(topK)
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, metric_type=metric_type, auto_id=auto_id,
                                consistency_level="Strong")
@@ -805,6 +1917,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         self.drop_collection(client, collection_name)
 
@@ -816,7 +1929,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -840,13 +1953,14 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
         # 5. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows[delete_num:],
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -857,7 +1971,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -881,13 +1995,14 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
         # 5. query
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows[delete_num:],
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -898,7 +2013,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         dim = 32
@@ -951,7 +2066,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: raise error
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         dim = 5
@@ -1023,7 +2138,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1049,7 +2164,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1070,6 +2184,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1082,7 +2197,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1110,7 +2225,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1131,6 +2245,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1143,7 +2258,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1171,7 +2286,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1192,6 +2306,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1204,7 +2319,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1232,7 +2347,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1253,6 +2367,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1265,7 +2380,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1291,7 +2406,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1312,6 +2426,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1324,7 +2439,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1350,7 +2465,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1371,6 +2485,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1383,7 +2498,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1409,7 +2524,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1430,6 +2544,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1442,7 +2557,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1468,7 +2583,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1489,6 +2603,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1501,7 +2616,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1534,7 +2649,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1556,6 +2670,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1568,7 +2683,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1609,7 +2724,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1631,6 +2745,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1643,7 +2758,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1670,7 +2785,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1692,6 +2806,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
 
@@ -1732,7 +2847,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         expected: Search successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -1812,6 +2927,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 6. search with filter on json without output_fields
         expr = f"{json_field_name}['a']['b'] == {default_nb / 2}"
@@ -1823,6 +2939,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 1})[0]
         expr = f"{json_field_name} == {default_nb + 5}"
         insert_ids = [default_nb+5]
@@ -1833,6 +2950,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 1})
         expr = f"{json_field_name}['a'][0] == 1"
         insert_ids = [i for i in range(default_nb + 20, default_nb + 30)]
@@ -1843,6 +2961,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         expr = f"{json_field_name}['a'][0]['b'] == 1"
         insert_ids = [i for i in range(default_nb + 30, default_nb + 40)]
@@ -1853,6 +2972,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         expr = f"{json_field_name}['a'] == 1"
         insert_ids = [i for i in range(default_nb + 50, default_nb + 60)]
@@ -1863,6 +2983,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1875,7 +2996,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         expected: successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -1913,6 +3034,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 1})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1925,7 +3047,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         expected: successfully with original inverted index
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
@@ -1969,6 +3091,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1984,7 +3107,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         if enable_dynamic_field:
             pytest.skip('need to fix the field name when enabling dynamic field')
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -2034,6 +3157,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2048,7 +3172,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         expected: Search successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -2102,6 +3226,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         expr = f"{json_field_name}1['a']['b'] >= 0"
         vectors_to_search = [vectors[0]]
@@ -2114,6 +3239,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2137,7 +3263,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         expected: Search successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -2217,6 +3343,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name, 
                                  "limit": 1})
         expr = f"{json_field_name} == {default_nb + 5}"
         insert_ids = [default_nb + 5]
@@ -2227,6 +3354,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 1})
         expr = f"{json_field_name}['a'][0] == 1"
         insert_ids = [i for i in range(default_nb + 20, default_nb + 30)]
@@ -2237,6 +3365,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         expr = f"{json_field_name}['a'][0]['b'] == 1"
         insert_ids = [i for i in range(default_nb + 30, default_nb + 40)]
@@ -2247,6 +3376,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2271,7 +3401,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         expected: Search successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
@@ -2353,6 +3483,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 1})
         expr = f"{json_field_name} == {default_nb + 5}"
         insert_ids = [default_nb + 5]
@@ -2363,6 +3494,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": 1})
         expr = f"{json_field_name}['a'][0] == 1"
         insert_ids = [i for i in range(default_nb + 20, default_nb + 30)]
@@ -2373,6 +3505,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         expr = f"{json_field_name}['a'][0]['b'] == 1"
         insert_ids = [i for i in range(default_nb + 30, default_nb + 40)]
@@ -2383,4 +3516,485 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
+
+
+class TestMilvusClientSearchRerankValid(TestMilvusClientV2Base):
+    """ Test case of search interface """
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def auto_id(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["COSINE", "L2"])
+    def metric_type(self, request):
+        yield request.param
+
+    """
+    ******************************************************************
+    #  The following are valid base cases
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("function", ["gauss", "linear", "exp"])
+    @pytest.mark.parametrize("scale", [100, 10000, 100.0])
+    @pytest.mark.parametrize("origin", [-1, 0, 200, 2000])
+    @pytest.mark.parametrize("offset", [0, 10, 1.2, 2000])
+    @pytest.mark.parametrize("decay", [0.5])
+    @pytest.mark.parametrize("is_flush", [True, False])
+    def test_milvus_client_search_with_reranker(self, function, scale, origin, offset, decay, is_flush):
+        """
+        target: test search with reranker
+        method: create connection, collection, insert and search
+        expected: search successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        if is_flush:
+            self.flush(client,collection_name)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": function,
+                "origin": origin,
+                "offset": offset,
+                "decay": decay,
+                "scale": scale
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        # search without output_fields
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+        # search with output_fields
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    output_fields=[ct.default_reranker_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+        # range search
+        params = {"radius": 0, "range_filter": 1}
+        self.search(client, collection_name, vectors_to_search, search_params=params, ranker=my_rerank_fn,
+                    output_fields=[ct.default_reranker_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("function", ["gauss", "linear", "exp"])
+    def test_milvus_client_search_with_reranker_default_offset_decay(self, function):
+        """
+        target: test search with reranker with default offset(0) and decay(0.5) value
+        method: create connection, collection, insert and search
+        expected: search successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": function,
+                "origin": 0,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    filter=f"{ct.default_reranker_field_name}>=9 and {ct.default_reranker_field_name}<=4",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0}
+                    )
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    filter=f"{ct.default_reranker_field_name}>=0 and {ct.default_reranker_field_name}<=10",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_search_with_reranker_default_value_field(self):
+        """
+        target: test search with reranker with default offset(0) and decay(0.5) value
+        method: create connection, collection, insert and search
+        expected: search successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False, default_value=0)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    filter=f"{ct.default_reranker_field_name}>=9 and {ct.default_reranker_field_name}<=4",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0}
+                    )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("is_clustering", [True, False])
+    def test_milvus_client_search_with_reranker_partition_key_field(self, enable_dynamic_field, is_clustering):
+        """
+        target: test search with reranker with partition key field
+        method: create connection, collection, insert and search
+        expected: search successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, DataType.INT64, nullable=False, is_partition_key=True,
+                         is_clustering_key=is_clustering)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: i} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. compact
+        self.compact(client, collection_name, is_clustering=is_clustering)
+        # 4. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    filter=f"{ct.default_reranker_field_name}>=9 and {ct.default_reranker_field_name}<=4",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0}
+                    )
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    filter=f"{ct.default_reranker_field_name}>=0 and {ct.default_reranker_field_name}<=10",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("rerank_fields", [DataType.INT8, DataType.INT16, DataType.INT32,
+                                               DataType.FLOAT, DataType.DOUBLE])
+    def test_milvus_client_search_with_reranker_all_supported_datatype_field(self, rerank_fields):
+        """
+        target: test search with reranker with partition key field
+        method: create connection, collection, insert and search
+        expected: search successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, rerank_fields)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = []
+        for i in range(default_nb):
+            if rerank_fields == DataType.INT8:
+                value = np.int8(i)
+            elif rerank_fields == DataType.INT16:
+                value = np.int16(i)
+            elif rerank_fields == DataType.INT32:
+                value = np.int32(i)
+            elif rerank_fields == DataType.FLOAT:
+                value = np.float32(i)
+            elif rerank_fields == DataType.DOUBLE:
+                value = np.float64(i)
+            single_row = {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: value}
+            rows.append(single_row)
+        self.insert(client, collection_name, rows)
+        # 3. compact
+        self.compact(client, collection_name)
+        # 4. flush
+        self.flush(client, collection_name)
+        # 5. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    filter=f"{ct.default_reranker_field_name}>=9 and {ct.default_reranker_field_name}<=4",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0}
+                    )
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    filter=f"{ct.default_reranker_field_name}>=0 and {ct.default_reranker_field_name}<=10",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="pymilvus issue 42011")
+    @pytest.mark.parametrize("rerank_fields", [DataType.INT8, DataType.INT16, DataType.INT32,
+                                               DataType.FLOAT, DataType.DOUBLE])
+    @pytest.mark.parametrize("index", ["STL_SORT", "INVERTED", "AUTOINDEX", ""])
+    @pytest.mark.parametrize("mmap", [True, False])
+    def test_milvus_client_search_with_reranker_scalar_index(self, rerank_fields, index, mmap):
+        """
+        target: test search with reranker with scalar index
+        method: create connection, collection, insert and search
+        expected: search successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 5
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(ct.default_reranker_field_name, rerank_fields, mmap_enabled=mmap)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = []
+        for i in range(default_nb):
+            if rerank_fields == DataType.INT8:
+                value = np.int8(i)
+            elif rerank_fields == DataType.INT16:
+                value = np.int16(i)
+            elif rerank_fields == DataType.INT32:
+                value = np.int32(i)
+            elif rerank_fields == DataType.INT64:
+                value = i
+            elif rerank_fields == DataType.FLOAT:
+                value = np.float32(i)
+            elif rerank_fields == DataType.DOUBLE:
+                value = np.float64(i)
+            single_row = {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
+                 ct.default_reranker_field_name: value}
+            rows.append(single_row)
+        self.insert(client, collection_name, rows)
+        # 2. prepare index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_reranker_field_name, index_type=index, params={})
+        # 3. create index
+        self.create_index(client, collection_name, index_params)
+        # 3. compact
+        self.compact(client, collection_name)
+        # 4. flush
+        self.flush(client, collection_name)
+        # 5. search
+        my_rerank_fn = Function(
+            name="my_reranker",
+            input_field_names=[ct.default_reranker_field_name],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "scale": 100
+            }
+        )
+        vectors_to_search = rng.random((1, dim))
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    filter=f"{ct.default_reranker_field_name}>=9 and {ct.default_reranker_field_name}<=4",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0}
+                    )
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    filter=f"{ct.default_reranker_field_name}>=0 and {ct.default_reranker_field_name}<=10",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+        # 5. release collection
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, ct.default_reranker_field_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # 6. create index
+        params = {"metric_type": "L2"}
+        if index != "STL_SORT":
+            params['mmap.enabled'] = mmap
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_reranker_field_name, index_type=index, params=params)
+        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", params=params)
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        vectors_to_search = rng.random((1, dim))
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    filter=f"{ct.default_reranker_field_name}>=9 and {ct.default_reranker_field_name}<=4",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0}
+                    )
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    filter=f"{ct.default_reranker_field_name}>=0 and {ct.default_reranker_field_name}<=10",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit}
+                    )

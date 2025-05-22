@@ -212,6 +212,7 @@ class TestMilvusClientPartitionValid(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
         # 4. query
         res = self.query(client, collection_name, filter=default_search_exp,
@@ -219,7 +220,7 @@ class TestMilvusClientPartitionValid(TestMilvusClientV2Base):
                          check_task=CheckTasks.check_query_results,
                          check_items={exp_res: rows,
                                       "with_vec": True,
-                                      "primary_field": default_primary_key_field_name})[0]
+                                      "pk_name": default_primary_key_field_name})[0]
 
         assert set(res[0].keys()) == {"ids", "vector"}
         partition_number = self.get_partition_stats(client, collection_name, "_default")[0]

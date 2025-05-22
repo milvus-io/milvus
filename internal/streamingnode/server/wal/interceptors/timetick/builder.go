@@ -3,7 +3,6 @@ package timetick
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 )
 
 var _ interceptors.InterceptorBuilder = (*interceptorBuilder)(nil)
@@ -23,8 +22,9 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	operator := newTimeTickSyncOperator(param)
 	// initialize operation can be async to avoid block the build operation.
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
+
 	return &timeTickAppendInterceptor{
 		operator:   operator,
-		txnManager: txn.NewTxnManager(param.ChannelInfo),
+		txnManager: param.TxnManager,
 	}
 }

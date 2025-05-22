@@ -89,7 +89,11 @@ func NewSyncTask(ctx context.Context,
 		syncPack.WithBM25Stats(bm25Stats)
 	}
 
-	task := syncmgr.NewSyncTask().WithAllocator(allocator).WithMetaCache(metaCache).WithSyncPack(syncPack)
+	task := syncmgr.NewSyncTask().
+		WithAllocator(allocator).
+		WithMetaCache(metaCache).
+		WithSchema(metaCache.Schema()). // TODO specify import schema if needed
+		WithSyncPack(syncPack)
 	return task, nil
 }
 
@@ -228,13 +232,17 @@ func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 		if err != nil {
 			return err
 		}
+
 		if runner == nil {
 			continue
 		}
-		inputDatas := make([]any, 0, len(fn.InputFieldIds))
-		for _, inputFieldID := range fn.InputFieldIds {
+
+		inputFieldIDs := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
+		inputDatas := make([]any, 0, len(inputFieldIDs))
+		for _, inputFieldID := range inputFieldIDs {
 			inputDatas = append(inputDatas, data.Data[inputFieldID].GetDataRows())
 		}
+
 		outputFieldData, err := runner.BatchRun(inputDatas...)
 		if err != nil {
 			return err

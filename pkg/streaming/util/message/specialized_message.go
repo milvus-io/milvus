@@ -67,6 +67,26 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&SchemaChangeMessageHeader{}):     MessageTypeSchemaChange,
 }
 
+// messageTypeToCustomHeaderMap maps the message type to the proto message type.
+var messageTypeToCustomHeaderMap = map[MessageType]reflect.Type{
+	MessageTypeTimeTick:         reflect.TypeOf(&TimeTickMessageHeader{}),
+	MessageTypeInsert:           reflect.TypeOf(&InsertMessageHeader{}),
+	MessageTypeDelete:           reflect.TypeOf(&DeleteMessageHeader{}),
+	MessageTypeCreateCollection: reflect.TypeOf(&CreateCollectionMessageHeader{}),
+	MessageTypeDropCollection:   reflect.TypeOf(&DropCollectionMessageHeader{}),
+	MessageTypeCreatePartition:  reflect.TypeOf(&CreatePartitionMessageHeader{}),
+	MessageTypeDropPartition:    reflect.TypeOf(&DropPartitionMessageHeader{}),
+	MessageTypeCreateSegment:    reflect.TypeOf(&CreateSegmentMessageHeader{}),
+	MessageTypeFlush:            reflect.TypeOf(&FlushMessageHeader{}),
+	MessageTypeManualFlush:      reflect.TypeOf(&ManualFlushMessageHeader{}),
+	MessageTypeBeginTxn:         reflect.TypeOf(&BeginTxnMessageHeader{}),
+	MessageTypeCommitTxn:        reflect.TypeOf(&CommitTxnMessageHeader{}),
+	MessageTypeRollbackTxn:      reflect.TypeOf(&RollbackTxnMessageHeader{}),
+	MessageTypeTxn:              reflect.TypeOf(&TxnMessageHeader{}),
+	MessageTypeImport:           reflect.TypeOf(&ImportMessageHeader{}),
+	MessageTypeSchemaChange:     reflect.TypeOf(&SchemaChangeMessageHeader{}),
+}
+
 // A system preserved message, should not allowed to provide outside of the streaming system.
 var systemMessageType = map[MessageType]struct{}{
 	MessageTypeTimeTick:    {},
@@ -79,6 +99,15 @@ var systemMessageType = map[MessageType]struct{}{
 var cipherMessageType = map[MessageType]struct{}{
 	MessageTypeInsert: {},
 	MessageTypeDelete: {},
+}
+
+var exclusiveRequiredMessageType = map[MessageType]struct{}{
+	MessageTypeCreateCollection: {},
+	MessageTypeDropCollection:   {},
+	MessageTypeCreatePartition:  {},
+	MessageTypeDropPartition:    {},
+	MessageTypeManualFlush:      {},
+	MessageTypeSchemaChange:     {},
 }
 
 // List all specialized message types.
@@ -132,6 +161,22 @@ var (
 	AsMutableCommitTxnMessageV2        = asSpecializedMutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 	AsMutableRollbackTxnMessageV2      = asSpecializedMutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
 
+	MustAsMutableTimeTickMessageV1         = mustAsSpecializedMutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
+	MustAsMutableInsertMessageV1           = mustAsSpecializedMutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
+	MustAsMutableDeleteMessageV1           = mustAsSpecializedMutableMessage[*DeleteMessageHeader, *msgpb.DeleteRequest]
+	MustAsMutableCreateCollectionMessageV1 = mustAsSpecializedMutableMessage[*CreateCollectionMessageHeader, *msgpb.CreateCollectionRequest]
+	MustAsMutableDropCollectionMessageV1   = mustAsSpecializedMutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
+	MustAsMutableCreatePartitionMessageV1  = mustAsSpecializedMutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
+	MustAsMutableDropPartitionMessageV1    = mustAsSpecializedMutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
+	MustAsMutableImportMessageV1           = mustAsSpecializedMutableMessage[*ImportMessageHeader, *msgpb.ImportMsg]
+	MustAsMutableCreateSegmentMessageV2    = mustAsSpecializedMutableMessage[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]
+	MustAsMutableFlushMessageV2            = mustAsSpecializedMutableMessage[*FlushMessageHeader, *FlushMessageBody]
+	MustAsMutableManualFlushMessageV2      = mustAsSpecializedMutableMessage[*ManualFlushMessageHeader, *ManualFlushMessageBody]
+	MustAsMutableBeginTxnMessageV2         = mustAsSpecializedMutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
+	MustAsMutableCommitTxnMessageV2        = mustAsSpecializedMutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
+	MustAsMutableRollbackTxnMessageV2      = mustAsSpecializedMutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
+	MustAsMutableCollectionSchemaChangeV2  = mustAsSpecializedMutableMessage[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
+
 	AsImmutableTimeTickMessageV1         = asSpecializedImmutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
 	AsImmutableInsertMessageV1           = asSpecializedImmutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
 	AsImmutableDeleteMessageV1           = asSpecializedImmutableMessage[*DeleteMessageHeader, *msgpb.DeleteRequest]
@@ -147,7 +192,22 @@ var (
 	AsImmutableCommitTxnMessageV2        = asSpecializedImmutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 	AsImmutableRollbackTxnMessageV2      = asSpecializedImmutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
 	AsImmutableCollectionSchemaChangeV2  = asSpecializedImmutableMessage[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
-	AsImmutableTxnMessage                = func(msg ImmutableMessage) ImmutableTxnMessage {
+
+	MustAsImmutableTimeTickMessageV1         = mustAsSpecializedImmutableMessage[*TimeTickMessageHeader, *msgpb.TimeTickMsg]
+	MustAsImmutableInsertMessageV1           = mustAsSpecializedImmutableMessage[*InsertMessageHeader, *msgpb.InsertRequest]
+	MustAsImmutableDeleteMessageV1           = mustAsSpecializedImmutableMessage[*DeleteMessageHeader, *msgpb.DeleteRequest]
+	MustAsImmutableCreateCollectionMessageV1 = mustAsSpecializedImmutableMessage[*CreateCollectionMessageHeader, *msgpb.CreateCollectionRequest]
+	MustAsImmutableDropCollectionMessageV1   = mustAsSpecializedImmutableMessage[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]
+	MustAsImmutableCreatePartitionMessageV1  = mustAsSpecializedImmutableMessage[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]
+	MustAsImmutableDropPartitionMessageV1    = mustAsSpecializedImmutableMessage[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]
+	MustAsImmutableImportMessageV1           = mustAsSpecializedImmutableMessage[*ImportMessageHeader, *msgpb.ImportMsg]
+	MustAsImmutableCreateSegmentMessageV2    = mustAsSpecializedImmutableMessage[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]
+	MustAsImmutableFlushMessageV2            = mustAsSpecializedImmutableMessage[*FlushMessageHeader, *FlushMessageBody]
+	MustAsImmutableManualFlushMessageV2      = mustAsSpecializedImmutableMessage[*ManualFlushMessageHeader, *ManualFlushMessageBody]
+	MustAsImmutableBeginTxnMessageV2         = mustAsSpecializedImmutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
+	MustAsImmutableCommitTxnMessageV2        = mustAsSpecializedImmutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
+	MustAsImmutableCollectionSchemaChangeV2  = mustAsSpecializedImmutableMessage[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
+	AsImmutableTxnMessage                    = func(msg ImmutableMessage) ImmutableTxnMessage {
 		underlying, ok := msg.(*immutableTxnMessageImpl)
 		if !ok {
 			return nil
@@ -156,8 +216,23 @@ var (
 	}
 )
 
+// mustAsSpecializedMutableMessage converts a MutableMessage to a specialized MutableMessage.
+// It will panic if the message is not the target specialized message or failed to decode the specialized header.
+func mustAsSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMessage) specializedMutableMessage[H, B] {
+	smsg, err := asSpecializedMutableMessage[H, B](msg)
+	if err != nil {
+		panic(
+			fmt.Sprintf("failed to parse immutable message: %s @ %s, %d, %d",
+				err.Error(),
+				msg.MessageType(),
+				msg.TimeTick(),
+				msg.Version(),
+			))
+	}
+	return smsg
+}
+
 // asSpecializedMutableMessage converts a MutableMessage to a specialized MutableMessage.
-// Return nil, nil if the message is not the target specialized message.
 // Return nil, error if the message is the target specialized message but failed to decode the specialized header.
 // Return specializedMutableMessage, nil if the message is the target specialized message and successfully decoded the specialized header.
 func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMessage) (specializedMutableMessage[H, B], error) {
@@ -167,7 +242,7 @@ func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMess
 	msgType := mustGetMessageTypeFromHeader(header)
 	if underlying.MessageType() != msgType {
 		// The message type do not match the specialized header.
-		return nil, nil
+		return nil, errors.New("message type do not match specialized header")
 	}
 
 	// Get the specialized header from the message.
@@ -192,22 +267,39 @@ func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMess
 	}, nil
 }
 
+// mustAsSpecializedMutableMessage converts a ImmutableMutableMessage to a specialized ImmutableMutableMessage.
+// It will panic if the message is not the target specialized message or failed to decode the specialized header.
+func mustAsSpecializedImmutableMessage[H proto.Message, B proto.Message](msg ImmutableMessage) specializedImmutableMessage[H, B] {
+	smsg, err := asSpecializedImmutableMessage[H, B](msg)
+	if err != nil {
+		panic(
+			fmt.Sprintf("failed to parse immutable message: %s @ %s, %s, %s, %d, %d",
+				err.Error(),
+				msg.MessageID(),
+				msg.MessageType(),
+				msg.LastConfirmedMessageID(),
+				msg.TimeTick(),
+				msg.Version(),
+			))
+	}
+	return smsg
+}
+
 // asSpecializedImmutableMessage converts a ImmutableMessage to a specialized ImmutableMessage.
-// Return nil, nil if the message is not the target specialized message.
 // Return nil, error if the message is the target specialized message but failed to decode the specialized header.
 // Return asSpecializedImmutableMessage, nil if the message is the target specialized message and successfully decoded the specialized header.
 func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg ImmutableMessage) (specializedImmutableMessage[H, B], error) {
 	underlying, ok := msg.(*immutableMessageImpl)
 	if !ok {
 		// maybe a txn message.
-		return nil, nil
+		return nil, errors.New("not a specialized immutable message, txn message maybe")
 	}
 
 	var header H
 	msgType := mustGetMessageTypeFromHeader(header)
 	if underlying.MessageType() != msgType {
 		// The message type do not match the specialized header.
-		return nil, nil
+		return nil, errors.New("message type do not match specialized header")
 	}
 
 	// Get the specialized header from the message.
@@ -219,7 +311,6 @@ func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg Immutab
 	// Decode the specialized header.
 	// Must be pointer type.
 	t := reflect.TypeOf(header)
-	t.Elem()
 	header = reflect.New(t.Elem()).Interface().(H)
 
 	// must be a pointer to a proto message
@@ -282,6 +373,15 @@ func (m *specializedImmutableMessageImpl[H, B]) Header() H {
 // Body returns the message body.
 func (m *specializedImmutableMessageImpl[H, B]) Body() (B, error) {
 	return unmarshalProtoB[B](m.Payload())
+}
+
+// Must Body returns the message body.
+func (m *specializedImmutableMessageImpl[H, B]) MustBody() B {
+	b, err := m.Body()
+	if err != nil {
+		panic(fmt.Sprintf("failed to unmarshal specialized body, %s, %s", m.MessageID().String(), err.Error()))
+	}
+	return b
 }
 
 func unmarshalProtoB[B proto.Message](data []byte) (B, error) {

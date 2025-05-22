@@ -394,3 +394,215 @@ func (c *OperatePrivilegeMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 func (c *OperatePrivilegeMsg) Size() int {
 	return proto.Size(c.OperatePrivilegeRequest)
 }
+
+type OperatePrivilegeV2Msg struct {
+	BaseMsg
+	*milvuspb.OperatePrivilegeV2Request
+}
+
+var _ TsMsg = &OperatePrivilegeV2Msg{}
+
+func (c *OperatePrivilegeV2Msg) ID() UniqueID {
+	return c.Base.MsgID
+}
+
+func (c *OperatePrivilegeV2Msg) SetID(id UniqueID) {
+	c.Base.MsgID = id
+}
+
+func (c *OperatePrivilegeV2Msg) Type() MsgType {
+	return c.Base.MsgType
+}
+
+func (c *OperatePrivilegeV2Msg) SourceID() int64 {
+	return c.Base.SourceID
+}
+
+func (c *OperatePrivilegeV2Msg) Marshal(input TsMsg) (MarshalType, error) {
+	operatePrivilegeV2Msg := input.(*OperatePrivilegeV2Msg)
+	operatePrivilegeV2Request := operatePrivilegeV2Msg.OperatePrivilegeV2Request
+	mb, err := proto.Marshal(operatePrivilegeV2Request)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (c *OperatePrivilegeV2Msg) Unmarshal(input MarshalType) (TsMsg, error) {
+	operatePrivilegeV2Request := &milvuspb.OperatePrivilegeV2Request{}
+	in, err := convertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, operatePrivilegeV2Request)
+	if err != nil {
+		return nil, err
+	}
+	operatePrivilegeV2Msg := &OperatePrivilegeV2Msg{OperatePrivilegeV2Request: operatePrivilegeV2Request}
+	operatePrivilegeV2Msg.BeginTimestamp = operatePrivilegeV2Msg.GetBase().GetTimestamp()
+	operatePrivilegeV2Msg.EndTimestamp = operatePrivilegeV2Msg.GetBase().GetTimestamp()
+	return operatePrivilegeV2Msg, nil
+}
+
+func (c *OperatePrivilegeV2Msg) Size() int {
+	return proto.Size(c.OperatePrivilegeV2Request)
+}
+
+type CreatePrivilegeGroupMsg struct {
+	BaseMsg
+	*milvuspb.CreatePrivilegeGroupRequest
+}
+
+var _ TsMsg = &CreatePrivilegeGroupMsg{}
+
+func (c *CreatePrivilegeGroupMsg) ID() UniqueID {
+	return c.Base.MsgID
+}
+
+func (c *CreatePrivilegeGroupMsg) SetID(id UniqueID) {
+	c.Base.MsgID = id
+}
+
+func (c *CreatePrivilegeGroupMsg) Type() MsgType {
+	return c.Base.MsgType
+}
+
+func (c *CreatePrivilegeGroupMsg) SourceID() int64 {
+	return c.Base.SourceID
+}
+
+func (c *CreatePrivilegeGroupMsg) Marshal(input TsMsg) (MarshalType, error) {
+	createPrivilegeGroupMsg := input.(*CreatePrivilegeGroupMsg)
+	createPrivilegeGroupRequest := createPrivilegeGroupMsg.CreatePrivilegeGroupRequest
+	mb, err := proto.Marshal(createPrivilegeGroupRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (c *CreatePrivilegeGroupMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	createPrivilegeGroupRequest := &milvuspb.CreatePrivilegeGroupRequest{}
+	in, err := convertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, createPrivilegeGroupRequest)
+	if err != nil {
+		return nil, err
+	}
+	createPrivilegeGroupMsg := &CreatePrivilegeGroupMsg{CreatePrivilegeGroupRequest: createPrivilegeGroupRequest}
+	createPrivilegeGroupMsg.BeginTimestamp = createPrivilegeGroupMsg.GetBase().GetTimestamp()
+	createPrivilegeGroupMsg.EndTimestamp = createPrivilegeGroupMsg.GetBase().GetTimestamp()
+	return createPrivilegeGroupMsg, nil
+}
+
+func (c *CreatePrivilegeGroupMsg) Size() int {
+	return proto.Size(c.CreatePrivilegeGroupRequest)
+}
+
+type DropPrivilegeGroupMsg struct {
+	BaseMsg
+	*milvuspb.DropPrivilegeGroupRequest
+}
+
+var _ TsMsg = &DropPrivilegeGroupMsg{}
+
+func (c *DropPrivilegeGroupMsg) ID() UniqueID {
+	return c.Base.MsgID
+}
+
+func (c *DropPrivilegeGroupMsg) SetID(id UniqueID) {
+	c.Base.MsgID = id
+}
+
+func (c *DropPrivilegeGroupMsg) Type() MsgType {
+	return c.Base.MsgType
+}
+
+func (c *DropPrivilegeGroupMsg) SourceID() int64 {
+	return c.Base.SourceID
+}
+
+func (c *DropPrivilegeGroupMsg) Marshal(input TsMsg) (MarshalType, error) {
+	dropPrivilegeGroupMsg := input.(*DropPrivilegeGroupMsg)
+	dropPrivilegeGroupRequest := dropPrivilegeGroupMsg.DropPrivilegeGroupRequest
+	mb, err := proto.Marshal(dropPrivilegeGroupRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (c *DropPrivilegeGroupMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	dropPrivilegeGroupRequest := &milvuspb.DropPrivilegeGroupRequest{}
+	in, err := convertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, dropPrivilegeGroupRequest)
+	if err != nil {
+		return nil, err
+	}
+	dropPrivilegeGroupMsg := &DropPrivilegeGroupMsg{DropPrivilegeGroupRequest: dropPrivilegeGroupRequest}
+	dropPrivilegeGroupMsg.BeginTimestamp = dropPrivilegeGroupMsg.GetBase().GetTimestamp()
+	dropPrivilegeGroupMsg.EndTimestamp = dropPrivilegeGroupMsg.GetBase().GetTimestamp()
+	return dropPrivilegeGroupMsg, nil
+}
+
+func (c *DropPrivilegeGroupMsg) Size() int {
+	return proto.Size(c.DropPrivilegeGroupRequest)
+}
+
+type OperatePrivilegeGroupMsg struct {
+	BaseMsg
+	*milvuspb.OperatePrivilegeGroupRequest
+}
+
+var _ TsMsg = &OperatePrivilegeGroupMsg{}
+
+func (c *OperatePrivilegeGroupMsg) ID() UniqueID {
+	return c.Base.MsgID
+}
+
+func (c *OperatePrivilegeGroupMsg) SetID(id UniqueID) {
+	c.Base.MsgID = id
+}
+
+func (c *OperatePrivilegeGroupMsg) Type() MsgType {
+	return c.Base.MsgType
+}
+
+func (c *OperatePrivilegeGroupMsg) SourceID() int64 {
+	return c.Base.SourceID
+}
+
+func (c *OperatePrivilegeGroupMsg) Marshal(input TsMsg) (MarshalType, error) {
+	operatePrivilegeGroupMsg := input.(*OperatePrivilegeGroupMsg)
+	operatePrivilegeGroupRequest := operatePrivilegeGroupMsg.OperatePrivilegeGroupRequest
+	mb, err := proto.Marshal(operatePrivilegeGroupRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (c *OperatePrivilegeGroupMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	operatePrivilegeGroupRequest := &milvuspb.OperatePrivilegeGroupRequest{}
+	in, err := convertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, operatePrivilegeGroupRequest)
+	if err != nil {
+		return nil, err
+	}
+	operatePrivilegeGroupMsg := &OperatePrivilegeGroupMsg{OperatePrivilegeGroupRequest: operatePrivilegeGroupRequest}
+	operatePrivilegeGroupMsg.BeginTimestamp = operatePrivilegeGroupMsg.GetBase().GetTimestamp()
+	operatePrivilegeGroupMsg.EndTimestamp = operatePrivilegeGroupMsg.GetBase().GetTimestamp()
+	return operatePrivilegeGroupMsg, nil
+}
+
+func (c *OperatePrivilegeGroupMsg) Size() int {
+	return proto.Size(c.OperatePrivilegeGroupRequest)
+}

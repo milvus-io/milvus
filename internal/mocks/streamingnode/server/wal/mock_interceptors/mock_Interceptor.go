@@ -5,6 +5,7 @@ package mock_interceptors
 import (
 	context "context"
 
+	interceptors "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 
 	mock "github.com/stretchr/testify/mock"
@@ -56,7 +57,7 @@ func (_c *MockInterceptor_Close_Call) RunAndReturn(run func()) *MockInterceptor_
 }
 
 // DoAppend provides a mock function with given fields: ctx, msg, append
-func (_m *MockInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append func(context.Context, message.MutableMessage) (message.MessageID, error)) (message.MessageID, error) {
+func (_m *MockInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
 	ret := _m.Called(ctx, msg, append)
 
 	if len(ret) == 0 {
@@ -65,10 +66,10 @@ func (_m *MockInterceptor) DoAppend(ctx context.Context, msg message.MutableMess
 
 	var r0 message.MessageID
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, message.MutableMessage, func(context.Context, message.MutableMessage) (message.MessageID, error)) (message.MessageID, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, message.MutableMessage, interceptors.Append) (message.MessageID, error)); ok {
 		return rf(ctx, msg, append)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, message.MutableMessage, func(context.Context, message.MutableMessage) (message.MessageID, error)) message.MessageID); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, message.MutableMessage, interceptors.Append) message.MessageID); ok {
 		r0 = rf(ctx, msg, append)
 	} else {
 		if ret.Get(0) != nil {
@@ -76,7 +77,7 @@ func (_m *MockInterceptor) DoAppend(ctx context.Context, msg message.MutableMess
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, message.MutableMessage, func(context.Context, message.MutableMessage) (message.MessageID, error)) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, message.MutableMessage, interceptors.Append) error); ok {
 		r1 = rf(ctx, msg, append)
 	} else {
 		r1 = ret.Error(1)
@@ -93,14 +94,14 @@ type MockInterceptor_DoAppend_Call struct {
 // DoAppend is a helper method to define mock.On call
 //   - ctx context.Context
 //   - msg message.MutableMessage
-//   - append func(context.Context , message.MutableMessage)(message.MessageID , error)
+//   - append interceptors.Append
 func (_e *MockInterceptor_Expecter) DoAppend(ctx interface{}, msg interface{}, append interface{}) *MockInterceptor_DoAppend_Call {
 	return &MockInterceptor_DoAppend_Call{Call: _e.mock.On("DoAppend", ctx, msg, append)}
 }
 
-func (_c *MockInterceptor_DoAppend_Call) Run(run func(ctx context.Context, msg message.MutableMessage, append func(context.Context, message.MutableMessage) (message.MessageID, error))) *MockInterceptor_DoAppend_Call {
+func (_c *MockInterceptor_DoAppend_Call) Run(run func(ctx context.Context, msg message.MutableMessage, append interceptors.Append)) *MockInterceptor_DoAppend_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(message.MutableMessage), args[2].(func(context.Context, message.MutableMessage) (message.MessageID, error)))
+		run(args[0].(context.Context), args[1].(message.MutableMessage), args[2].(interceptors.Append))
 	})
 	return _c
 }
@@ -110,7 +111,7 @@ func (_c *MockInterceptor_DoAppend_Call) Return(_a0 message.MessageID, _a1 error
 	return _c
 }
 
-func (_c *MockInterceptor_DoAppend_Call) RunAndReturn(run func(context.Context, message.MutableMessage, func(context.Context, message.MutableMessage) (message.MessageID, error)) (message.MessageID, error)) *MockInterceptor_DoAppend_Call {
+func (_c *MockInterceptor_DoAppend_Call) RunAndReturn(run func(context.Context, message.MutableMessage, interceptors.Append) (message.MessageID, error)) *MockInterceptor_DoAppend_Call {
 	_c.Call.Return(run)
 	return _c
 }

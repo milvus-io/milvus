@@ -28,6 +28,7 @@
 #include "segcore/InsertRecord.h"
 #include "mmap/ChunkedColumn.h"
 #include "test_utils/DataGen.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -47,16 +48,10 @@ constexpr size_t kHnswEf = 128;
 const MetricType kMetricType = knowhere::metric::L2;
 }  // namespace
 
-enum class ConstructorType {
-    VectorIndex = 0,
-    RawData,
-    VectorBase,
-    ChunkedColumn
-};
+enum class ConstructorType { VectorIndex = 0, VectorBase, ChunkedColumn };
 
 static const std::vector<ConstructorType> kConstructorTypes = {
     ConstructorType::VectorIndex,
-    ConstructorType::RawData,
     ConstructorType::VectorBase,
     ConstructorType::ChunkedColumn,
 };
@@ -103,6 +98,8 @@ class CachedSearchIteratorTest
     static std::unique_ptr<ConcurrentVector<milvus::FloatVector>> vector_base_;
     static std::shared_ptr<ChunkedColumn> column_;
     static std::vector<std::vector<char>> column_data_;
+    static std::shared_ptr<Schema> schema_;
+    static FieldId fakevec_id_;
 
     IndexBase* index_hnsw_ = nullptr;
     MetricType metric_type_ = kMetricType;
@@ -119,15 +116,6 @@ class CachedSearchIteratorTest
                     search_info,
                     bitset);
 
-            case ConstructorType::RawData:
-                return std::make_unique<CachedSearchIterator>(
-                    search_dataset_,
-                    dataset::RawDataset{0, dim_, nb_, base_dataset_.data()},
-                    search_info,
-                    std::map<std::string, std::string>{},
-                    bitset,
-                    data_type_);
-
             case ConstructorType::VectorBase:
                 return std::make_unique<CachedSearchIterator>(
                     search_dataset_,
@@ -140,7 +128,7 @@ class CachedSearchIteratorTest
 
             case ConstructorType::ChunkedColumn:
                 return std::make_unique<CachedSearchIterator>(
-                    column_,
+                    column_.get(),
                     search_dataset_,
                     search_info,
                     std::map<std::string, std::string>{},
@@ -245,35 +233,42 @@ class CachedSearchIteratorTest
 
     static void
     SetUpChunkedColumn() {
-        column_ = std::make_unique<ChunkedColumn>();
+        auto field_meta = schema_->operator[](fakevec_id_);
         const size_t num_chunks_ = (nb_ + kSizePerChunk - 1) / kSizePerChunk;
         column_data_.resize(num_chunks_);
 
         size_t offset = 0;
+        std::vector<std::unique_ptr<Chunk>> chunks;
+        std::vector<int64_t> num_rows_per_chunk;
         for (size_t i = 0; i < num_chunks_; ++i) {
             const size_t rows =
                 std::min(static_cast<size_t>(nb_ - offset), kSizePerChunk);
+            num_rows_per_chunk.push_back(rows);
             const size_t buf_size = rows * dim_ * sizeof(float);
             auto& chunk_data = column_data_[i];
             chunk_data.resize(buf_size);
             memcpy(chunk_data.data(),
                    base_dataset_.cbegin() + offset * dim_,
                    rows * dim_ * sizeof(float));
-            column_->AddChunk(std::make_shared<FixedWidthChunk>(
+            chunks.emplace_back(std::make_unique<FixedWidthChunk>(
                 rows, dim_, chunk_data.data(), buf_size, sizeof(float), false));
             offset += rows;
         }
+        auto translator = std::make_unique<TestChunkTranslator>(
+            num_rows_per_chunk, "", std::move(chunks));
+        column_ =
+            std::make_shared<ChunkedColumn>(std::move(translator), field_meta);
     }
 
     static void
     SetUpTestSuite() {
-        auto schema = std::make_shared<Schema>();
-        auto fakevec_id = schema->AddDebugField(
+        schema_ = std::make_shared<Schema>();
+        fakevec_id_ = schema_->AddDebugField(
             "fakevec", DataType::VECTOR_FLOAT, dim_, kMetricType);
 
         // generate base dataset
         base_dataset_ =
-            segcore::DataGen(schema, nb_).get_col<float>(fakevec_id);
+            segcore::DataGen(schema_, nb_).get_col<float>(fakevec_id_);
 
         // generate query dataset
         query_dataset_ = {base_dataset_.cbegin(),
@@ -348,6 +343,8 @@ std::unique_ptr<ConcurrentVector<milvus::FloatVector>>
     CachedSearchIteratorTest::vector_base_ = nullptr;
 std::shared_ptr<ChunkedColumn> CachedSearchIteratorTest::column_ = nullptr;
 std::vector<std::vector<char>> CachedSearchIteratorTest::column_data_;
+std::shared_ptr<Schema> CachedSearchIteratorTest::schema_{nullptr};
+FieldId CachedSearchIteratorTest::fakevec_id_(0);
 
 /********* Testcases Start **********/
 
@@ -605,7 +602,6 @@ TEST_P(CachedSearchIteratorTest, NextBatchtAllBatchesNormal) {
     SearchInfo search_info = GetDefaultNormalSearchInfo();
     const std::vector<size_t> kBatchSizes = {
         1, 7, 43, 99, 100, 101, 1000, 1005};
-    // const std::vector<size_t> kBatchSizes = {1005};
 
     for (size_t batch_size : kBatchSizes) {
         search_info.iterator_v2_info_->batch_size = batch_size;
@@ -695,16 +691,6 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          search_info,
                          nullptr),
                      SegcoreError);
-    } else if (std::get<0>(GetParam()) == ConstructorType::RawData) {
-        EXPECT_THROW(
-            auto iterator = std::make_unique<CachedSearchIterator>(
-                dataset::SearchDataset{},
-                dataset::RawDataset{0, dim_, nb_, base_dataset_.data()},
-                search_info,
-                std::map<std::string, std::string>{},
-                nullptr,
-                data_type_),
-            SegcoreError);
     } else if (std::get<0>(GetParam()) == ConstructorType::VectorBase) {
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
                          dataset::SearchDataset{},
@@ -745,7 +731,7 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          data_type_),
                      SegcoreError);
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
-                         column_,
+                         column_.get(),
                          dataset::SearchDataset{},
                          search_info,
                          std::map<std::string, std::string>{},
@@ -770,9 +756,6 @@ INSTANTIATE_TEST_SUITE_P(
         switch (constructor_type) {
             case ConstructorType::VectorIndex:
                 constructor_type_str = "VectorIndex";
-                break;
-            case ConstructorType::RawData:
-                constructor_type_str = "RawData";
                 break;
             case ConstructorType::VectorBase:
                 constructor_type_str = "VectorBase";

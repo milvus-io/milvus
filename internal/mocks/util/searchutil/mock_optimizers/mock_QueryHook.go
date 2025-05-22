@@ -156,7 +156,7 @@ func (_c *MockQueryHook_InitTuningConfig_Call) RunAndReturn(run func(map[string]
 }
 
 // Run provides a mock function with given fields: _a0
-func (_m *MockQueryHook) Run(_a0 map[string]interface{}) error {
+func (_m *MockQueryHook) Run(_a0 map[string]any) error {
 	ret := _m.Called(_a0)
 
 	if len(ret) == 0 {
@@ -164,7 +164,7 @@ func (_m *MockQueryHook) Run(_a0 map[string]interface{}) error {
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(map[string]interface{}) error); ok {
+	if rf, ok := ret.Get(0).(func(map[string]any) error); ok {
 		r0 = rf(_a0)
 	} else {
 		r0 = ret.Error(0)
@@ -179,14 +179,14 @@ type MockQueryHook_Run_Call struct {
 }
 
 // Run is a helper method to define mock.On call
-//   - _a0 map[string]interface{}
+//   - _a0 map[string]any
 func (_e *MockQueryHook_Expecter) Run(_a0 interface{}) *MockQueryHook_Run_Call {
 	return &MockQueryHook_Run_Call{Call: _e.mock.On("Run", _a0)}
 }
 
-func (_c *MockQueryHook_Run_Call) Run(run func(_a0 map[string]interface{})) *MockQueryHook_Run_Call {
+func (_c *MockQueryHook_Run_Call) Run(run func(_a0 map[string]any)) *MockQueryHook_Run_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(map[string]interface{}))
+		run(args[0].(map[string]any))
 	})
 	return _c
 }
@@ -196,7 +196,7 @@ func (_c *MockQueryHook_Run_Call) Return(_a0 error) *MockQueryHook_Run_Call {
 	return _c
 }
 
-func (_c *MockQueryHook_Run_Call) RunAndReturn(run func(map[string]interface{}) error) *MockQueryHook_Run_Call {
+func (_c *MockQueryHook_Run_Call) RunAndReturn(run func(map[string]any) error) *MockQueryHook_Run_Call {
 	_c.Call.Return(run)
 	return _c
 }

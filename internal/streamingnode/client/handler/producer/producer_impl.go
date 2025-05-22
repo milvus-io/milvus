@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
@@ -15,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -65,6 +67,8 @@ func CreateProducer(
 		idAllocator:      typeutil.NewIDAllocator(),
 		grpcStreamClient: produceClient,
 		pendingRequests:  sync.Map{},
+		isFenced:         atomic.NewBool(false),
+		available:        lifetime.NewSafeChan(),
 		requestCh:        make(chan *produceRequest),
 		sendExitCh:       make(chan struct{}),
 		recvExitCh:       make(chan struct{}),
@@ -101,6 +105,8 @@ type producerImpl struct {
 	grpcStreamClient *produceGrpcClient
 
 	pendingRequests sync.Map
+	isFenced        *atomic.Bool
+	available       lifetime.SafeChan
 	requestCh       chan *produceRequest
 	sendExitCh      chan struct{}
 	recvExitCh      chan struct{}
@@ -125,6 +131,10 @@ func (p *producerImpl) Append(ctx context.Context, msg message.MutableMessage) (
 	}
 	defer p.lifetime.Done()
 
+	// reject the message if the producer is fenced.
+	if p.isFenced.Load() {
+		return nil, status.NewChannelFenced(p.assignment.Channel.Name)
+	}
 	respCh := make(chan produceResponse, 1)
 	req := &produceRequest{
 		ctx:    ctx,
@@ -148,6 +158,14 @@ func (p *producerImpl) Append(ctx context.Context, msg message.MutableMessage) (
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case resp := <-respCh:
+		if resp.err != nil {
+			if s := status.AsStreamingError(resp.err); s.IsFenced() {
+				if p.isFenced.CompareAndSwap(false, true) {
+					p.logger.Warn("producer client is fenced", zap.Error(resp.err))
+					p.available.Close()
+				}
+			}
+		}
 		return resp.result, resp.err
 	}
 }
@@ -174,12 +192,7 @@ func (p *producerImpl) execute() {
 
 // IsAvailable returns whether the producer is available.
 func (p *producerImpl) IsAvailable() bool {
-	select {
-	case <-p.Available():
-		return false
-	default:
-		return true
-	}
+	return !p.available.IsClosed()
 }
 
 // IsLocal returns if the producer is local.
@@ -189,7 +202,7 @@ func (p *producerImpl) IsLocal() bool {
 
 // Available returns a channel that will be closed when the producer is unavailable.
 func (p *producerImpl) Available() <-chan struct{} {
-	return p.sendExitCh
+	return p.available.CloseCh()
 }
 
 // Close close the producer client.
@@ -234,6 +247,7 @@ func (p *producerImpl) sendLoop() (err error) {
 			p.logger.Warn("failed to close send", zap.Error(err))
 		}
 		close(p.sendExitCh)
+		p.available.Close()
 	}()
 
 	for {

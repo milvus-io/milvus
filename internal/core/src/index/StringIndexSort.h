@@ -31,7 +31,7 @@ class StringIndexSort : public ScalarIndexSort<std::string> {
     Query(const DatasetPtr& dataset) override {
         auto op = dataset->Get<OpType>(OPERATOR_TYPE);
         if (op == OpType::PrefixMatch) {
-            auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
+            auto prefix = dataset->Get<std::string>(MATCH_VALUE);
             return PrefixMatch(prefix);
         }
         return ScalarIndex<std::string>::Query(dataset);

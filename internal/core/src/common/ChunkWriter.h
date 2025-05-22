@@ -35,7 +35,7 @@ class ChunkWriterBase {
     virtual void
     write(const arrow::ArrayVector& data) = 0;
 
-    virtual std::shared_ptr<Chunk>
+    virtual std::unique_ptr<Chunk>
     finish() = 0;
 
     std::pair<char*, size_t>
@@ -121,10 +121,10 @@ class ChunkWriter final : public ChunkWriterBase {
         }
     }
 
-    std::shared_ptr<Chunk>
+    std::unique_ptr<Chunk>
     finish() override {
         auto [data, size] = target_->get();
-        return std::make_shared<FixedWidthChunk>(
+        return std::make_unique<FixedWidthChunk>(
             row_nums_, dim_, data, size, sizeof(T), nullable_);
     }
 
@@ -182,7 +182,7 @@ class StringChunkWriter : public ChunkWriterBase {
     void
     write(const arrow::ArrayVector& array_vec) override;
 
-    std::shared_ptr<Chunk>
+    std::unique_ptr<Chunk>
     finish() override;
 };
 
@@ -193,7 +193,7 @@ class JSONChunkWriter : public ChunkWriterBase {
     void
     write(const arrow::ArrayVector& array_vec) override;
 
-    std::shared_ptr<Chunk>
+    std::unique_ptr<Chunk>
     finish() override;
 };
 
@@ -212,7 +212,7 @@ class ArrayChunkWriter : public ChunkWriterBase {
     void
     write(const arrow::ArrayVector& array_vec) override;
 
-    std::shared_ptr<Chunk>
+    std::unique_ptr<Chunk>
     finish() override;
 
  private:
@@ -226,16 +226,16 @@ class SparseFloatVectorChunkWriter : public ChunkWriterBase {
     void
     write(const arrow::ArrayVector& array_vec) override;
 
-    std::shared_ptr<Chunk>
+    std::unique_ptr<Chunk>
     finish() override;
 };
 
-std::shared_ptr<Chunk>
+std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              int dim,
              const arrow::ArrayVector& array_vec);
 
-std::shared_ptr<Chunk>
+std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              int dim,
              File& file,

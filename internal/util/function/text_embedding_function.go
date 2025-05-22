@@ -99,7 +99,7 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 	var embP textEmbeddingProvider
 	var newProviderErr error
 	conf := paramtable.Get().FunctionCfg.GetTextEmbeddingProviderConfig(base.provider)
-	credentials := credentials.NewCredentialsManager(paramtable.Get().CredentialCfg.GetCredentials())
+	credentials := credentials.NewCredentials(paramtable.Get().CredentialCfg.GetCredentials())
 	switch base.provider {
 	case openAIProvider:
 		embP, newProviderErr = NewOpenAIEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials)

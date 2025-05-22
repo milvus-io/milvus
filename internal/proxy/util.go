@@ -1522,24 +1522,36 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 			} else {
 				if schema.EnableDynamicField {
 					if schema.IsFieldLoaded(dynamicField.GetFieldID()) {
-						schemaH, err := typeutil.CreateSchemaHelper(schema.CollectionSchema)
-						if err != nil {
-							return nil, nil, nil, false, err
-						}
-						err = planparserv2.ParseIdentifier(schemaH, outputFieldName, func(expr *planpb.Expr) error {
-							if len(expr.GetColumnExpr().GetInfo().GetNestedPath()) == 1 &&
-								expr.GetColumnExpr().GetInfo().GetNestedPath()[0] == outputFieldName {
-								return nil
+						dynamicNestedPath := outputFieldName
+						err := planparserv2.ParseIdentifier(schema.schemaHelper, outputFieldName, func(expr *planpb.Expr) error {
+							columnInfo := expr.GetColumnExpr().GetInfo()
+							// there must be no error here
+							dynamicField, _ := schema.schemaHelper.GetDynamicField()
+							// only $meta["xxx"] is allowed for now
+							if dynamicField.GetFieldID() != columnInfo.GetFieldId() {
+								return errors.New("not support getting subkeys of json field yet")
 							}
-							return errors.New("not support getting subkeys of json field yet")
+							nestedPaths := columnInfo.GetNestedPath()
+							// $meta["A"]["B"] not allowed for now
+							if len(nestedPaths) != 1 {
+								return errors.New("not support getting multiple level of dynamic field for now")
+							}
+							// $meta["dyn_field"], output field name could be:
+							// 1. "dyn_field", outputFieldName == nestedPath
+							// 2. `$meta["dyn_field"]` explicit form
+							if nestedPaths[0] != outputFieldName {
+								// use "dyn_field" as userDynamicFieldsMap when outputField = `$meta["dyn_field"]`
+								dynamicNestedPath = nestedPaths[0]
+							}
+							return nil
 						})
 						if err != nil {
-							log.Info("parse output field name failed", zap.String("field name", outputFieldName))
+							log.Info("parse output field name failed", zap.String("field name", outputFieldName), zap.Error(err))
 							return nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
 						}
 						resultFieldNameMap[common.MetaFieldName] = true
 						userOutputFieldsMap[outputFieldName] = true
-						userDynamicFieldsMap[outputFieldName] = true
+						userDynamicFieldsMap[dynamicNestedPath] = true
 					} else {
 						// TODO after cold field be able to fetched with chunk cache, this check shall be removed
 						return nil, nil, nil, false, fmt.Errorf("field %s cannot be returned since dynamic field not loaded", outputFieldName)
@@ -2135,6 +2147,21 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 
 	var tsMsg msgstream.TsMsg
 	switch r := request.(type) {
+	case *milvuspb.AlterCollectionRequest:
+		tsMsg = &msgstream.AlterCollectionMsg{
+			BaseMsg:                getBaseMsg(ctx, ts),
+			AlterCollectionRequest: r,
+		}
+	case *milvuspb.AlterCollectionFieldRequest:
+		tsMsg = &msgstream.AlterCollectionFieldMsg{
+			BaseMsg:                     getBaseMsg(ctx, ts),
+			AlterCollectionFieldRequest: r,
+		}
+	case *milvuspb.RenameCollectionRequest:
+		tsMsg = &msgstream.RenameCollectionMsg{
+			BaseMsg:                 getBaseMsg(ctx, ts),
+			RenameCollectionRequest: r,
+		}
 	case *milvuspb.CreateDatabaseRequest:
 		tsMsg = &msgstream.CreateDatabaseMsg{
 			BaseMsg:               getBaseMsg(ctx, ts),
@@ -2224,6 +2251,41 @@ func SendReplicateMessagePack(ctx context.Context, replicateMsgStream msgstream.
 		tsMsg = &msgstream.OperatePrivilegeMsg{
 			BaseMsg:                 getBaseMsg(ctx, ts),
 			OperatePrivilegeRequest: r,
+		}
+	case *milvuspb.OperatePrivilegeV2Request:
+		tsMsg = &msgstream.OperatePrivilegeV2Msg{
+			BaseMsg:                   getBaseMsg(ctx, ts),
+			OperatePrivilegeV2Request: r,
+		}
+	case *milvuspb.CreatePrivilegeGroupRequest:
+		tsMsg = &msgstream.CreatePrivilegeGroupMsg{
+			BaseMsg:                     getBaseMsg(ctx, ts),
+			CreatePrivilegeGroupRequest: r,
+		}
+	case *milvuspb.DropPrivilegeGroupRequest:
+		tsMsg = &msgstream.DropPrivilegeGroupMsg{
+			BaseMsg:                   getBaseMsg(ctx, ts),
+			DropPrivilegeGroupRequest: r,
+		}
+	case *milvuspb.OperatePrivilegeGroupRequest:
+		tsMsg = &msgstream.OperatePrivilegeGroupMsg{
+			BaseMsg:                      getBaseMsg(ctx, ts),
+			OperatePrivilegeGroupRequest: r,
+		}
+	case *milvuspb.CreateAliasRequest:
+		tsMsg = &msgstream.CreateAliasMsg{
+			BaseMsg:            getBaseMsg(ctx, ts),
+			CreateAliasRequest: r,
+		}
+	case *milvuspb.DropAliasRequest:
+		tsMsg = &msgstream.DropAliasMsg{
+			BaseMsg:          getBaseMsg(ctx, ts),
+			DropAliasRequest: r,
+		}
+	case *milvuspb.AlterAliasRequest:
+		tsMsg = &msgstream.AlterAliasMsg{
+			BaseMsg:           getBaseMsg(ctx, ts),
+			AlterAliasRequest: r,
 		}
 	default:
 		log.Warn("unknown request", zap.Any("request", request))

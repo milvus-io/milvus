@@ -129,18 +129,24 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 
 	rowNum := GetInsertDataRowCount(rows, schema)
 	if pkField.GetAutoID() {
-		id := int64(0)
-		num := int64(channelNum)
-		fn1 := hashByID()
-		fn2 := hashByPartition(int64(partitionNum), partKeyField)
+		fn := hashByPartition(int64(partitionNum), partKeyField)
 		rows.Data = lo.PickBy(rows.Data, func(fieldID int64, _ storage.FieldData) bool {
 			return fieldID != pkField.GetFieldID()
 		})
+		hashByPartRowsCount := make([]int, partitionNum)
+		hashByPartDataSize := make([]int, partitionNum)
 		for i := 0; i < rowNum; i++ {
-			p1, p2 := fn1(id, num), fn2(rows.GetRow(i)[id2])
-			hashRowsCount[p1][p2]++
-			hashDataSize[p1][p2] += rows.GetRowSize(i)
-			id++
+			p := fn(rows.GetRow(i)[id2])
+			hashByPartRowsCount[p]++
+			hashByPartDataSize[p] += rows.GetRowSize(i)
+		}
+		// When autoID is enabled, the generated IDs will be evenly hashed across all channels.
+		// Therefore, here we just assign an average number of rows to each channel.
+		for i := 0; i < channelNum; i++ {
+			for j := 0; j < partitionNum; j++ {
+				hashRowsCount[i][j] = hashByPartRowsCount[j] / channelNum
+				hashDataSize[i][j] = hashByPartDataSize[j] / channelNum
+			}
 		}
 	} else {
 		f1 := hashByVChannel(int64(channelNum), pkField)

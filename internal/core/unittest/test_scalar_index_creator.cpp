@@ -12,20 +12,12 @@
 #include <gtest/gtest.h>
 #include <knowhere/comp/index_param.h>
 
-#include "indexbuilder/index_c.h"
-#include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
 #define private public
 #include "indexbuilder/ScalarIndexCreator.h"
-#include "indexbuilder/IndexFactory.h"
-
-TEST(Dummy, Aha) {
-    std::cout << "aha" << std::endl;
-}
 
 constexpr int64_t nb = 100;
-namespace indexcgo = milvus::proto::indexcgo;
 namespace schemapb = milvus::proto::schema;
 using milvus::indexbuilder::ScalarIndexCreatorPtr;
 using ScalarTestParams = std::pair<MapParams, MapParams>;

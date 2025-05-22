@@ -35,6 +35,7 @@ import (
 type reader struct {
 	ctx    context.Context
 	cm     storage.ChunkManager
+	cmrs   map[int64]storage.FileReader
 	schema *schemapb.CollectionSchema
 
 	fileSize *atomic.Int64
@@ -72,6 +73,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	return &reader{
 		ctx:      ctx,
 		cm:       cm,
+		cmrs:     readers,
 		schema:   schema,
 		fileSize: atomic.NewInt64(0),
 		paths:    paths,
@@ -119,13 +121,13 @@ func (r *reader) Size() (int64, error) {
 }
 
 func (r *reader) Close() {
-	for _, cr := range r.frs {
-		cr.Close()
+	for _, cmr := range r.cmrs {
+		cmr.Close()
 	}
 }
 
-func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (map[int64]io.Reader, error) {
-	readers := make(map[int64]io.Reader)
+func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (map[int64]storage.FileReader, error) {
+	readers := make(map[int64]storage.FileReader)
 	nameToPath := lo.SliceToMap(paths, func(path string) (string, string) {
 		nameWithExt := filepath.Base(path)
 		name := strings.TrimSuffix(nameWithExt, filepath.Ext(nameWithExt))

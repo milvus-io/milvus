@@ -19,8 +19,8 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -52,124 +52,6 @@ func (s *Server) serverID() int64 {
 	}
 	// return 0 if no session exist, only for UT
 	return 0
-}
-
-func (s *Server) startIndexService(ctx context.Context) {
-	s.serverLoopWg.Add(1)
-	go s.createIndexForSegmentLoop(ctx)
-}
-
-func (s *Server) createIndexForSegment(ctx context.Context, segment *SegmentInfo, indexID UniqueID) error {
-	if !segment.GetIsSorted() && Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsImporting() && segment.Level != datapb.SegmentLevel_L0 {
-		log.Info("segment not sorted, skip create index", zap.Int64("segmentID", segment.GetID()))
-		return nil
-	}
-	log.Info("create index for segment", zap.Int64("segmentID", segment.ID), zap.Int64("indexID", indexID))
-	buildID, err := s.allocator.AllocID(context.Background())
-	if err != nil {
-		return err
-	}
-	taskSlot := calculateIndexTaskSlot(segment.getSegmentSize())
-	segIndex := &model.SegmentIndex{
-		SegmentID:      segment.ID,
-		CollectionID:   segment.CollectionID,
-		PartitionID:    segment.PartitionID,
-		NumRows:        segment.NumOfRows,
-		IndexID:        indexID,
-		BuildID:        buildID,
-		CreatedUTCTime: uint64(time.Now().Unix()),
-		WriteHandoff:   false,
-	}
-	if err = s.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
-		return err
-	}
-	s.taskScheduler.enqueue(newIndexBuildTask(buildID, taskSlot))
-	return nil
-}
-
-func (s *Server) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
-	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsSorted() && !segment.GetIsImporting() {
-		log.Ctx(ctx).Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
-		return nil
-	}
-	if segment.GetLevel() == datapb.SegmentLevel_L0 {
-		log.Ctx(ctx).Debug("segment is level zero, skip create indexes", zap.Int64("segmentID", segment.GetID()))
-		return nil
-	}
-
-	indexes := s.meta.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
-	indexIDToSegIndexes := s.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
-	for _, index := range indexes {
-		if _, ok := indexIDToSegIndexes[index.IndexID]; !ok {
-			if err := s.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
-				log.Ctx(ctx).Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
-					zap.Int64("indexID", index.IndexID))
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (s *Server) getUnIndexTaskSegments(ctx context.Context) []*SegmentInfo {
-	flushedSegments := s.meta.SelectSegments(ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg)
-	}))
-
-	unindexedSegments := make([]*SegmentInfo, 0)
-	for _, segment := range flushedSegments {
-		if s.meta.indexMeta.IsUnIndexedSegment(segment.CollectionID, segment.GetID()) {
-			unindexedSegments = append(unindexedSegments, segment)
-		}
-	}
-	return unindexedSegments
-}
-
-func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
-	log := log.Ctx(ctx)
-	log.Info("start create index for segment loop...",
-		zap.Int64("TaskCheckInterval", Params.DataCoordCfg.TaskCheckInterval.GetAsInt64()))
-	defer s.serverLoopWg.Done()
-
-	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Warn("DataCoord context done, exit...")
-			return
-		case <-ticker.C:
-			segments := s.getUnIndexTaskSegments(ctx)
-			for _, segment := range segments {
-				if err := s.createIndexesForSegment(ctx, segment); err != nil {
-					log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
-					continue
-				}
-			}
-		case collectionID := <-s.notifyIndexChan:
-			log.Info("receive create index notify", zap.Int64("collectionID", collectionID))
-			segments := s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-				return isFlush(info) && (!Params.DataCoordCfg.EnableStatsTask.GetAsBool() || info.GetIsSorted())
-			}))
-			for _, segment := range segments {
-				if err := s.createIndexesForSegment(ctx, segment); err != nil {
-					log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
-					continue
-				}
-			}
-		case segID := <-getBuildIndexChSingleton():
-			log.Info("receive new flushed segment", zap.Int64("segmentID", segID))
-			segment := s.meta.GetSegment(ctx, segID)
-			if segment == nil {
-				log.Warn("segment is not exist, no need to build index", zap.Int64("segmentID", segID))
-				continue
-			}
-			if err := s.createIndexesForSegment(ctx, segment); err != nil {
-				log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
-				continue
-			}
-		}
-	}
 }
 
 func (s *Server) getFieldNameByID(schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
@@ -709,6 +591,9 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 		pendingIndexRows = int64(0)
 	)
 
+	minIndexVersion := int32(math.MaxInt32)
+	maxIndexVersion := int32(math.MinInt32)
+
 	for segID, seg := range segments {
 		if seg.state != commonpb.SegmentState_Flushed && seg.state != commonpb.SegmentState_Flushing {
 			continue
@@ -745,6 +630,12 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 		case commonpb.IndexState_Finished:
 			cntFinished++
 			indexedRows += seg.numRows
+			if segIdx.IndexVersion < minIndexVersion {
+				minIndexVersion = segIdx.IndexVersion
+			}
+			if segIdx.IndexVersion > maxIndexVersion {
+				maxIndexVersion = segIdx.IndexVersion
+			}
 		case commonpb.IndexState_Failed:
 			cntFailed++
 			failReason += fmt.Sprintf("%d: %s;", segID, segIdx.FailReason)
@@ -758,6 +649,8 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 	}
 	indexInfo.TotalRows = totalRows
 	indexInfo.PendingIndexRows = pendingIndexRows
+	indexInfo.MinIndexVersion = minIndexVersion
+	indexInfo.MaxIndexVersion = maxIndexVersion
 	switch {
 	case cntFailed > 0:
 		indexInfo.State = commonpb.IndexState_Failed
@@ -773,7 +666,8 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 	log.RatedInfo(60, "completeIndexInfo success", zap.Int64("collectionID", index.CollectionID), zap.Int64("indexID", index.IndexID),
 		zap.Int64("totalRows", indexInfo.TotalRows), zap.Int64("indexRows", indexInfo.IndexedRows),
 		zap.Int64("pendingIndexRows", indexInfo.PendingIndexRows),
-		zap.String("state", indexInfo.State.String()), zap.String("failReason", indexInfo.IndexStateFailReason))
+		zap.String("state", indexInfo.State.String()), zap.String("failReason", indexInfo.IndexStateFailReason),
+		zap.Int32("minIndexVersion", indexInfo.MinIndexVersion), zap.Int32("maxIndexVersion", indexInfo.MaxIndexVersion))
 }
 
 // GetIndexBuildProgress get the index building progress by num rows.

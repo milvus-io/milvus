@@ -149,19 +149,6 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 			err := task.Execute(context.Background())
 			assert.Error(t, err)
 		})
-
-		t.Run("write_flush_failed", func(t *testing.T) {
-			b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{
-				AppendResults: map[string]*types.AppendResult{
-					"dml_ch_01": {TimeTick: 100},
-					"dml_ch_02": {TimeTick: 101},
-				},
-			}, nil).Once()
-			b.EXPECT().Append(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
-
-			err := task.Execute(context.Background())
-			assert.Error(t, err)
-		})
 	})
 
 	t.Run("add field step failed", func(t *testing.T) {
@@ -170,7 +157,7 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 				"dml_ch_01": {TimeTick: 100},
 				"dml_ch_02": {TimeTick: 101},
 			},
-		}, nil).Times(2)
+		}, nil).Times(1)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByName(
 			mock.Anything,
@@ -209,7 +196,7 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 				"dml_ch_01": {TimeTick: 100},
 				"dml_ch_02": {TimeTick: 101},
 			},
-		}, nil).Times(2)
+		}, nil).Times(1)
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByName(
@@ -254,7 +241,7 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 				"dml_ch_01": {TimeTick: 100},
 				"dml_ch_02": {TimeTick: 101},
 			},
-		}, nil).Times(2)
+		}, nil).Times(1)
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByName(
@@ -300,7 +287,7 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 				"dml_ch_01": {TimeTick: 100},
 				"dml_ch_02": {TimeTick: 101},
 			},
-		}, nil).Times(2)
+		}, nil).Times(1)
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByName(

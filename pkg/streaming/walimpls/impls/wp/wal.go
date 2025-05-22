@@ -3,11 +3,14 @@ package wp
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+	"github.com/zilliztech/woodpecker/common/werr"
 	wp "github.com/zilliztech/woodpecker/woodpecker/log"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
 )
@@ -21,10 +24,14 @@ type walImpl struct {
 }
 
 func (w *walImpl) WALName() string {
-	return walName
+	return WALName
 }
 
 func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+	if w.Channel().AccessMode != types.AccessModeRW {
+		panic("write on a wal that is not in read-write mode")
+	}
+
 	r := w.p.Write(ctx,
 		&wp.WriterMessage{
 			Payload:    msg.Payload(),
@@ -32,6 +39,10 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 		},
 	)
 	if r.Err != nil {
+		if werr.ErrWriterLockLost.Is(r.Err) {
+			w.Log().RatedWarn(1, "wp writer fenced", zap.Error(r.Err))
+			return nil, errors.Mark(r.Err, walimpls.ErrFenced)
+		}
 		w.Log().RatedWarn(1, "write message to woodpecker failed", zap.Error(r.Err))
 		return nil, r.Err
 	}
@@ -62,11 +73,18 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (walimpls.S
 		from.EntryId = id.logMsgId.EntryId + 1
 	}
 
-	reader, err := w.l.OpenLogReader(ctx, &from)
+	reader, err := w.l.OpenLogReader(ctx, &from, opt.Name)
 	if err != nil {
 		return nil, err
 	}
 	return newScanner(opt.Name, reader), nil
+}
+
+func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
+	if w.Channel().AccessMode != types.AccessModeRW {
+		panic("truncate on a wal that is not in read-write mode")
+	}
+	return w.l.Truncate(ctx, id.(wpID).logMsgId)
 }
 
 func (w *walImpl) Close() {

@@ -14,10 +14,10 @@
 #include <string>
 
 #include "bitset/detail/element_wise.h"
+#include "cachinglayer/Utils.h"
 #include "common/BitsetView.h"
 #include "common/QueryInfo.h"
 #include "common/Types.h"
-#include "mmap/Column.h"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
@@ -54,8 +54,11 @@ SearchOnSealedIndex(const Schema& schema,
 
     auto dataset = knowhere::GenDataSet(num_queries, dim, query_data);
     dataset->SetIsSparse(is_sparse);
+    auto accessor = field_indexing->indexing_->PinCells({0})
+                        .via(&folly::InlineExecutor::instance())
+                        .get();
     auto vec_index =
-        dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+        dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
     if (search_info.iterator_v2_info_.has_value()) {
         CachedSearchIterator cached_iter(
@@ -86,15 +89,15 @@ SearchOnSealedIndex(const Schema& schema,
 }
 
 void
-SearchOnSealed(const Schema& schema,
-               std::shared_ptr<ChunkedColumnBase> column,
-               const SearchInfo& search_info,
-               const std::map<std::string, std::string>& index_info,
-               const void* query_data,
-               int64_t num_queries,
-               int64_t row_count,
-               const BitsetView& bitview,
-               SearchResult& result) {
+SearchOnSealedColumn(const Schema& schema,
+                     ChunkedColumnInterface* column,
+                     const SearchInfo& search_info,
+                     const std::map<std::string, std::string>& index_info,
+                     const void* query_data,
+                     int64_t num_queries,
+                     int64_t row_count,
+                     const BitsetView& bitview,
+                     SearchResult& result) {
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
 
@@ -129,7 +132,8 @@ SearchOnSealed(const Schema& schema,
 
     auto offset = 0;
     for (int i = 0; i < num_chunk; ++i) {
-        auto vec_data = column->Data(i);
+        auto pw = column->DataOfChunk(i);
+        auto vec_data = pw.get();
         auto chunk_size = column->chunk_row_nums(i);
         auto raw_dataset =
             query::dataset::RawDataset{offset, dim, chunk_size, vec_data};
@@ -161,66 +165,6 @@ SearchOnSealed(const Schema& schema,
     } else {
         result.distances_ = std::move(final_qr.mutable_distances());
         result.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
-    }
-    result.unity_topK_ = query_dataset.topk;
-    result.total_nq_ = query_dataset.num_queries;
-}
-
-void
-SearchOnSealed(const Schema& schema,
-               const void* vec_data,
-               const SearchInfo& search_info,
-               const std::map<std::string, std::string>& index_info,
-               const void* query_data,
-               int64_t num_queries,
-               int64_t row_count,
-               const BitsetView& bitset,
-               SearchResult& result) {
-    auto field_id = search_info.field_id_;
-    auto& field = schema[field_id];
-
-    // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
-    auto dim = field.get_data_type() == DataType::VECTOR_SPARSE_FLOAT
-                   ? 0
-                   : field.get_dim();
-
-    query::dataset::SearchDataset query_dataset{search_info.metric_type_,
-                                                num_queries,
-                                                search_info.topk_,
-                                                search_info.round_decimal_,
-                                                dim,
-                                                query_data};
-
-    auto data_type = field.get_data_type();
-    CheckBruteForceSearchParam(field, search_info);
-    auto raw_dataset = query::dataset::RawDataset{0, dim, row_count, vec_data};
-    if (milvus::exec::UseVectorIterator(search_info)) {
-        auto sub_qr = PackBruteForceSearchIteratorsIntoSubResult(query_dataset,
-                                                                 raw_dataset,
-                                                                 search_info,
-                                                                 index_info,
-                                                                 bitset,
-                                                                 data_type);
-        result.AssembleChunkVectorIterators(
-            num_queries, 1, {0}, sub_qr.chunk_iterators());
-    } else if (search_info.iterator_v2_info_.has_value()) {
-        CachedSearchIterator cached_iter(query_dataset,
-                                         raw_dataset,
-                                         search_info,
-                                         index_info,
-                                         bitset,
-                                         data_type);
-        cached_iter.NextBatch(search_info, result);
-        return;
-    } else {
-        auto sub_qr = BruteForceSearch(query_dataset,
-                                       raw_dataset,
-                                       search_info,
-                                       index_info,
-                                       bitset,
-                                       data_type);
-        result.distances_ = std::move(sub_qr.mutable_distances());
-        result.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
     }
     result.unity_topK_ = query_dataset.topk;
     result.total_nq_ = query_dataset.num_queries;

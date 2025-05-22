@@ -103,7 +103,9 @@ func (st *statsTask) Name() string {
 func (st *statsTask) OnEnqueue(ctx context.Context) error {
 	st.queueDur = 0
 	st.tr.RecordSpan()
-	log.Ctx(ctx).Info("statsTask enqueue", zap.Int64("collectionID", st.req.GetCollectionID()),
+	log.Ctx(ctx).Info("statsTask enqueue",
+		zap.Int64("taskID", st.req.GetTaskID()),
+		zap.Int64("collectionID", st.req.GetCollectionID()),
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()))
 	return nil
@@ -181,7 +183,8 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		st.req.GetSchema(),
 		alloc,
 		st.req.GetBinlogMaxSize(),
-		st.req.GetStorageConfig().RootPath,
+		st.req.GetStorageConfig().GetBucketName(),
+		st.req.GetStorageConfig().GetRootPath(),
 		numRows,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return st.binlogIO.Upload(ctx, kvs)
@@ -230,7 +233,9 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 
 	rr, err := storage.NewBinlogRecordReader(ctx, st.req.InsertLogs, st.req.Schema,
 		storage.WithVersion(st.req.StorageVersion),
-		storage.WithDownloader(st.binlogIO.Download))
+		storage.WithDownloader(st.binlogIO.Download),
+		storage.WithBucketName(st.req.StorageConfig.BucketName),
+	)
 	if err != nil {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
 		return nil, err
@@ -429,6 +434,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		zap.Int64("collectionID", st.req.GetCollectionID()),
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
+		zap.Int64("storageVersion", st.req.GetStorageVersion()),
 	)
 
 	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
@@ -467,16 +473,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			return err
 		}
 
-		buildIndexParams := &indexcgopb.BuildIndexInfo{
-			BuildID:       taskID,
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			SegmentID:     segmentID,
-			IndexVersion:  version,
-			InsertFiles:   files,
-			FieldSchema:   field,
-			StorageConfig: newStorageConfig,
-		}
+		buildIndexParams := buildIndexParams(st.req, files, field, newStorageConfig, 0)
 
 		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
 		if err != nil {
@@ -566,17 +563,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			return err
 		}
 
-		buildIndexParams := &indexcgopb.BuildIndexInfo{
-			BuildID:                   taskID,
-			CollectionID:              collectionID,
-			PartitionID:               partitionID,
-			SegmentID:                 segmentID,
-			IndexVersion:              version,
-			InsertFiles:               files,
-			FieldSchema:               field,
-			StorageConfig:             newStorageConfig,
-			JsonKeyStatsTantivyMemory: tantivyMemory,
-		}
+		buildIndexParams := buildIndexParams(st.req, files, field, newStorageConfig, tantivyMemory)
 
 		uploaded, err := indexcgowrapper.CreateJSONKeyStats(ctx, buildIndexParams)
 		if err != nil {
@@ -612,6 +599,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	return nil
 }
 
+<<<<<<< HEAD
 func (st *statsTask) createNgramIndex(ctx context.Context,
 	storageConfig *indexpb.StorageConfig,
 	collectionID int64,
@@ -714,4 +702,37 @@ func (st *statsTask) createNgramIndex(ctx context.Context,
 		st.req.GetInsertChannel(),
 		ngramIndexStats)
 	return nil
+=======
+func buildIndexParams(
+	req *workerpb.CreateStatsRequest,
+	files []string,
+	field *schemapb.FieldSchema,
+	storageConfig *indexcgopb.StorageConfig,
+	tantivyMemory int64,
+) *indexcgopb.BuildIndexInfo {
+	params := &indexcgopb.BuildIndexInfo{
+		BuildID:                   req.GetTaskID(),
+		CollectionID:              req.GetCollectionID(),
+		PartitionID:               req.GetPartitionID(),
+		SegmentID:                 req.GetTargetSegmentID(),
+		IndexVersion:              req.GetTaskVersion(),
+		InsertFiles:               files,
+		FieldSchema:               field,
+		StorageConfig:             storageConfig,
+		CurrentScalarIndexVersion: req.GetCurrentScalarIndexVersion(),
+		StorageVersion:            req.GetStorageVersion(),
+		JsonKeyStatsTantivyMemory: tantivyMemory,
+	}
+
+	if req.GetStorageVersion() == storage.StorageV2 {
+		params.SegmentInsertFiles = GetSegmentInsertFiles(
+			req.GetInsertLogs(),
+			req.GetStorageConfig(),
+			req.GetCollectionID(),
+			req.GetPartitionID(),
+			req.GetTargetSegmentID())
+	}
+
+	return params
+>>>>>>> master
 }

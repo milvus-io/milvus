@@ -316,6 +316,51 @@ func (_c *MockSegment_ExistIndex_Call) RunAndReturn(run func(int64) bool) *MockS
 	return _c
 }
 
+// FinishLoad provides a mock function with no fields
+func (_m *MockSegment) FinishLoad() error {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for FinishLoad")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func() error); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSegment_FinishLoad_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FinishLoad'
+type MockSegment_FinishLoad_Call struct {
+	*mock.Call
+}
+
+// FinishLoad is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) FinishLoad() *MockSegment_FinishLoad_Call {
+	return &MockSegment_FinishLoad_Call{Call: _e.mock.On("FinishLoad")}
+}
+
+func (_c *MockSegment_FinishLoad_Call) Run(run func()) *MockSegment_FinishLoad_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_FinishLoad_Call) Return(_a0 error) *MockSegment_FinishLoad_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_FinishLoad_Call) RunAndReturn(run func() error) *MockSegment_FinishLoad_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetBM25Stats provides a mock function with no fields
 func (_m *MockSegment) GetBM25Stats() map[int64]*storage.BM25Stats {
 	ret := _m.Called()

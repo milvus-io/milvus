@@ -1,5 +1,7 @@
 package log
 
+import "go.uber.org/atomic"
+
 var (
 	_ WithLogger   = &Binder{}
 	_ LoggerBinder = &Binder{}
@@ -17,21 +19,19 @@ type LoggerBinder interface {
 
 // Binder is a embedding type to help access local logger.
 type Binder struct {
-	logger *MLogger
+	logger atomic.Pointer[MLogger]
 }
 
 // SetLogger sets logger to Binder.
 func (w *Binder) SetLogger(logger *MLogger) {
-	if w.logger != nil {
-		panic("logger already set")
-	}
-	w.logger = logger
+	w.logger.Store(logger)
 }
 
 // Logger returns the logger of Binder.
 func (w *Binder) Logger() *MLogger {
-	if w.logger == nil {
+	l := w.logger.Load()
+	if l == nil {
 		return With()
 	}
-	return w.logger
+	return l
 }

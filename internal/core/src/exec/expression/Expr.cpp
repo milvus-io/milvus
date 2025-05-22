@@ -33,6 +33,7 @@
 #include "exec/expression/UnaryExpr.h"
 #include "exec/expression/ValueExpr.h"
 #include "expr/ITypeExpr.h"
+#include "monitor/prometheus_client.h"
 
 #include <memory>
 
@@ -320,6 +321,7 @@ IsLikeExpr(std::shared_ptr<Expr> input) {
         switch (optype) {
             case proto::plan::PrefixMatch:
             case proto::plan::PostfixMatch:
+            case proto::plan::InnerMatch:
             case proto::plan::Match:
                 return true;
             default:

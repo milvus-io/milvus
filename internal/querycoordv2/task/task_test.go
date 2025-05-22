@@ -98,7 +98,13 @@ func (suite *TaskSuite) SetupSuite() {
 	params.Save(params.EtcdCfg.Endpoints.Key, strings.Join(addressList, ","))
 
 	suite.collection = 1000
-	suite.replica = newReplicaDefaultRG(10)
+	suite.replica = meta.NewReplica(&querypb.Replica{
+		CollectionID:  suite.collection,
+		ID:            10,
+		ResourceGroup: meta.DefaultResourceGroupName,
+		Nodes:         []int64{1, 2, 3},
+	}, typeutil.NewUniqueSet(1, 2, 3))
+
 	suite.subChannels = []string{
 		"sub-0",
 		"sub-1",
@@ -289,15 +295,23 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 
 	// Process tasks done
 	// Dist contains channels
-	views := make([]*meta.LeaderView, 0)
+	channels := []*meta.DmChannel{}
 	for _, channel := range suite.subChannels {
-		views = append(views, &meta.LeaderView{
-			ID:           targetNode,
-			CollectionID: suite.collection,
-			Channel:      channel,
+		channels = append(channels, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: suite.collection,
+				ChannelName:  channel,
+			},
+			Node:    targetNode,
+			Version: 1,
+			View: &meta.LeaderView{
+				ID:           targetNode,
+				CollectionID: suite.collection,
+				Channel:      channel,
+			},
 		})
 	}
-	suite.dist.LeaderViewManager.Update(targetNode, views...)
+	suite.dist.ChannelDistManager.Update(targetNode, channels...)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
@@ -327,15 +341,23 @@ func (suite *TaskSuite) TestSubmitDuplicateSubscribeChannelTask() {
 		tasks = append(tasks, task)
 	}
 
-	views := make([]*meta.LeaderView, 0)
+	channels := []*meta.DmChannel{}
 	for _, channel := range suite.subChannels {
-		views = append(views, &meta.LeaderView{
-			ID:           targetNode,
-			CollectionID: suite.collection,
-			Channel:      channel,
+		channels = append(channels, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: suite.collection,
+				ChannelName:  channel,
+			},
+			Node:    targetNode,
+			Version: 1,
+			View: &meta.LeaderView{
+				ID:           targetNode,
+				CollectionID: suite.collection,
+				Channel:      channel,
+			},
 		})
 	}
-	suite.dist.LeaderViewManager.Update(targetNode, views...)
+	suite.dist.ChannelDistManager.Update(targetNode, channels...)
 
 	for _, task := range tasks {
 		err := suite.scheduler.Add(task)
@@ -378,10 +400,18 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
 
 	// Only first channel exists
-	suite.dist.LeaderViewManager.Update(targetNode, &meta.LeaderView{
-		ID:           targetNode,
-		CollectionID: suite.collection,
-		Channel:      suite.unsubChannels[0],
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  suite.unsubChannels[0],
+		},
+		Node:    targetNode,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Channel:      suite.unsubChannels[0],
+		},
 	})
 	suite.AssertTaskNum(0, len(suite.unsubChannels), len(suite.unsubChannels), 0)
 
@@ -390,7 +420,7 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 	suite.AssertTaskNum(1, 0, 1, 0)
 
 	// Update dist
-	suite.dist.LeaderViewManager.Update(targetNode)
+	suite.dist.ChannelDistManager.Update(targetNode)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
@@ -440,11 +470,17 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
 
 	// Test load segment task
-	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
-		CollectionID: suite.collection,
-		ChannelName:  channel.ChannelName,
-	}))
-	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Channel:      channel.ChannelName,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
 	tasks := []Task{}
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
@@ -490,7 +526,15 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 	distSegments := lo.Map(segments, func(info *datapb.SegmentInfo, _ int) *meta.Segment {
 		return meta.SegmentFromInfo(info)
 	})
-	suite.dist.LeaderViewManager.Update(targetNode, view)
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  channel.ChannelName,
+		},
+		Node:    targetNode,
+		Version: 1,
+		View:    view,
+	})
 	suite.dist.SegmentDistManager.Update(targetNode, distSegments...)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
@@ -541,11 +585,15 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
 
 	// Test load segment task
-	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
-		CollectionID: suite.collection,
-		ChannelName:  channel.ChannelName,
-	}))
-	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  channel.ChannelName,
+		},
+		Node:    targetNode,
+		Version: 1,
+		View:    &meta.LeaderView{ID: targetNode, CollectionID: suite.collection, Channel: channel.ChannelName, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
 	tasks := []Task{}
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
@@ -590,7 +638,6 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 	distSegments := lo.Map(segments, func(info *datapb.SegmentInfo, _ int) *meta.Segment {
 		return meta.SegmentFromInfo(info)
 	})
-	suite.dist.LeaderViewManager.Update(targetNode, view)
 	suite.dist.SegmentDistManager.Update(targetNode, distSegments...)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
@@ -635,11 +682,16 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 	}
 
 	// Test load segment task
-	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
-		CollectionID: suite.collection,
-		ChannelName:  channel.ChannelName,
-	}))
-	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  channel.ChannelName,
+		},
+		Node:    targetNode,
+		Version: 1,
+		View:    &meta.LeaderView{ID: targetNode, CollectionID: suite.collection, Channel: channel.ChannelName, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
+
 	tasks := []Task{}
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
@@ -727,7 +779,6 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 		suite.NoError(err)
 	}
 	suite.dist.SegmentDistManager.Update(targetNode, segments...)
-	suite.dist.LeaderViewManager.Update(targetNode, view)
 
 	segmentsNum := len(suite.releaseSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
@@ -737,7 +788,6 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
 	// Process tasks done
-	suite.dist.LeaderViewManager.Update(targetNode)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
@@ -833,12 +883,23 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}
-	suite.dist.ChannelDistManager.Update(leader, meta.DmChannelFromVChannel(vchannel))
+	suite.dist.ChannelDistManager.Update(leader, &meta.DmChannel{
+		VchannelInfo: vchannel,
+		Node:         leader,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID:           leader,
+			CollectionID: suite.collection,
+			Channel:      channel.ChannelName,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
 	view := &meta.LeaderView{
 		ID:           leader,
 		CollectionID: suite.collection,
 		Channel:      channel.ChannelName,
 		Segments:     make(map[int64]*querypb.SegmentDist),
+		Status:       &querypb.LeaderViewStatus{Serviceable: true},
 	}
 	tasks := []Task{}
 	segments := make([]*meta.Segment, 0)
@@ -869,7 +930,14 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
 	suite.target.UpdateCollectionCurrentTarget(ctx, suite.collection)
 	suite.dist.SegmentDistManager.Update(sourceNode, segments...)
-	suite.dist.LeaderViewManager.Update(leader, view)
+	suite.dist.ChannelDistManager.Update(leader, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  channel.ChannelName,
+		},
+		Node: leader,
+		View: view,
+	})
 	for _, task := range tasks {
 		err := suite.scheduler.Add(task)
 		suite.NoError(err)
@@ -891,7 +959,6 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		return meta.SegmentFromInfo(info)
 	})
 
-	suite.dist.LeaderViewManager.Update(leader, view)
 	suite.dist.SegmentDistManager.Update(targetNode, distSegments...)
 	// First action done, execute the second action
 	suite.dispatchAndWait(leader)
@@ -920,7 +987,17 @@ func (suite *TaskSuite) TestMoveSegmentTaskStale() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}
-	suite.dist.ChannelDistManager.Update(leader, meta.DmChannelFromVChannel(vchannel))
+	suite.dist.ChannelDistManager.Update(leader, &meta.DmChannel{
+		VchannelInfo: vchannel,
+		Node:         leader,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID:           leader,
+			CollectionID: suite.collection,
+			Channel:      channel.ChannelName,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
 	view := &meta.LeaderView{
 		ID:           leader,
 		CollectionID: suite.collection,
@@ -952,7 +1029,6 @@ func (suite *TaskSuite) TestMoveSegmentTaskStale() {
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{vchannel}, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
 	suite.target.UpdateCollectionCurrentTarget(ctx, suite.collection)
-	suite.dist.LeaderViewManager.Update(leader, view)
 	for _, task := range tasks {
 		err := suite.scheduler.Add(task)
 		suite.Error(err)
@@ -1002,11 +1078,16 @@ func (suite *TaskSuite) TestTaskCanceled() {
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
 
 	// Test load segment task
-	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
-		CollectionID: suite.collection,
-		ChannelName:  channel.ChannelName,
-	}))
-	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  channel.ChannelName,
+		},
+		Node:    targetNode,
+		Version: 1,
+		View:    &meta.LeaderView{ID: targetNode, CollectionID: suite.collection, Channel: channel.ChannelName, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
+
 	tasks := []Task{}
 	segmentInfos := []*datapb.SegmentInfo{}
 	for _, segment := range suite.loadSegments {
@@ -1092,12 +1173,15 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
 
 	// Test load segment task
-	suite.meta.ReplicaManager.Put(ctx, createReplica(suite.collection, targetNode))
-	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
-		CollectionID: suite.collection,
-		ChannelName:  channel.ChannelName,
-	}))
-	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  channel.ChannelName,
+		},
+		Node:    targetNode,
+		Version: 1,
+		View:    &meta.LeaderView{ID: targetNode, CollectionID: suite.collection, Channel: channel.ChannelName, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
 	tasks := []Task{}
 	for _, segment := range suite.loadSegments {
 		task, err := NewSegmentTask(
@@ -1244,10 +1328,12 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
 
 	// Test load segment task
-	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
-		CollectionID: suite.collection,
-		ChannelName:  channel.ChannelName,
-	}))
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View:         &meta.LeaderView{ID: targetNode, CollectionID: suite.collection, Channel: channel.ChannelName, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
 	tasks := []Task{}
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
@@ -1278,8 +1364,16 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 		CollectionID: suite.collection,
 		Channel:      channel.GetChannelName(),
 		Segments:     map[int64]*querypb.SegmentDist{},
+		Status:       &querypb.LeaderViewStatus{Serviceable: true},
 	}
-	suite.dist.LeaderViewManager.Update(targetNode, view)
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  channel.GetChannelName(),
+		},
+		Node: targetNode,
+		View: view,
+	})
 
 	// Process tasks
 	suite.dispatchAndWait(targetNode)
@@ -1299,7 +1393,14 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 	distSegments := lo.Map(segments, func(info *datapb.SegmentInfo, _ int) *meta.Segment {
 		return meta.SegmentFromInfo(info)
 	})
-	suite.dist.LeaderViewManager.Update(targetNode, view)
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  channel.GetChannelName(),
+		},
+		Node: targetNode,
+		View: view,
+	})
 	suite.dist.SegmentDistManager.Update(targetNode, distSegments...)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
@@ -1418,10 +1519,12 @@ func (suite *TaskSuite) TestNoExecutor() {
 	suite.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(suite.replica.GetID(), suite.collection, []int64{1, 2, 3, -1}))
 
 	// Test load segment task
-	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
-		CollectionID: suite.collection,
-		ChannelName:  channel.ChannelName,
-	}))
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View:         &meta.LeaderView{ID: targetNode, CollectionID: suite.collection, Channel: channel.ChannelName, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
 		segments = append(segments, &datapb.SegmentInfo{
@@ -1517,6 +1620,7 @@ func (suite *TaskSuite) TestLeaderTaskRemove() {
 		CollectionID: suite.collection,
 		Channel:      channel.ChannelName,
 		Segments:     make(map[int64]*querypb.SegmentDist),
+		Status:       &querypb.LeaderViewStatus{Serviceable: true},
 	}
 	segments := make([]*meta.Segment, 0)
 	tasks := []Task{}
@@ -1543,7 +1647,15 @@ func (suite *TaskSuite) TestLeaderTaskRemove() {
 		suite.NoError(err)
 	}
 	suite.dist.SegmentDistManager.Update(targetNode, segments...)
-	suite.dist.LeaderViewManager.Update(targetNode, view)
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collection,
+			ChannelName:  channel.ChannelName,
+		},
+		Node:    targetNode,
+		Version: 1,
+		View:    view,
+	})
 
 	segmentsNum := len(suite.releaseSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
@@ -1552,10 +1664,9 @@ func (suite *TaskSuite) TestLeaderTaskRemove() {
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
+	// mock leader view which has removed all segments
 	view.Segments = make(map[int64]*querypb.SegmentDist)
-	suite.dist.LeaderViewManager.Update(targetNode, view)
 	// Process tasks done
-	// suite.dist.LeaderViewManager.Update(targetNode)
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
@@ -1590,7 +1701,7 @@ func createReplica(collection int64, nodes ...int64) *meta.Replica {
 
 func (suite *TaskSuite) TestBalanceChannelTask() {
 	ctx := context.Background()
-	collectionID := int64(1)
+	collectionID := suite.collection
 	partitionID := int64(1)
 	channel := "channel-1"
 	vchannel := &datapb.VchannelInfo{
@@ -1625,27 +1736,25 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 	suite.target.UpdateCollectionCurrentTarget(ctx, collectionID)
 	suite.target.UpdateCollectionNextTarget(ctx, collectionID)
 
-	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
-		ID:           2,
-		CollectionID: collectionID,
-		Channel:      channel,
-		Segments: map[int64]*querypb.SegmentDist{
-			1: {},
-			2: {},
-			3: {},
+	suite.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
 		},
-	})
-	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
-		ID:                 1,
-		CollectionID:       collectionID,
-		Channel:            channel,
-		UnServiceableError: merr.ErrSegmentLack,
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:           2,
+			CollectionID: collectionID,
+			Channel:      channel,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
 	})
 	task, err := NewChannelTask(context.Background(),
 		10*time.Second,
 		WrapIDSource(2),
 		collectionID,
-		meta.NilReplica,
+		suite.replica,
 		NewChannelAction(1, ActionTypeGrow, channel),
 		NewChannelAction(2, ActionTypeReduce, channel),
 	)
@@ -1655,14 +1764,19 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 	suite.scheduler.preProcess(task)
 	suite.Equal(0, task.step)
 
-	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
-		ID:           1,
-		CollectionID: collectionID,
-		Channel:      channel,
-		Segments: map[int64]*querypb.SegmentDist{
-			1: {},
-			2: {},
-			3: {},
+	suite.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node:    1,
+		Version: 2,
+		View: &meta.LeaderView{
+			ID:           1,
+			CollectionID: collectionID,
+			Channel:      channel,
+			Version:      2,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
 		},
 	})
 
@@ -1670,7 +1784,7 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 	suite.scheduler.preProcess(task)
 	suite.Equal(1, task.step)
 
-	suite.dist.LeaderViewManager.Update(2)
+	suite.dist.ChannelDistManager.Update(2)
 	// old delegator removed
 	suite.scheduler.preProcess(task)
 	suite.Equal(2, task.step)

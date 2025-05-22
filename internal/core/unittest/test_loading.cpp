@@ -173,7 +173,7 @@ INSTANTIATE_TEST_SUITE_P(
             {{"index_type", "INVERTED"},
              {"mmap", "false"},
              {"field_type", "string"}},
-            {2.0f, 0.0f, 1.0f, 0.0f, false}),
+            {1.0f, 1.0f, 0.0f, 1.0f, false}),
         std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
             {{"index_type", "INVERTED"},
              {"mmap", "true"},
@@ -183,7 +183,7 @@ INSTANTIATE_TEST_SUITE_P(
             {{"index_type", "BITMAP"},
              {"mmap", "false"},
              {"field_type", "string"}},
-            {2.0f, 0.0f, 1.0f, 0.0f, true}),
+            {2.0f, 0.0f, 1.0f, 0.0f, false}),
         std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
             {{"index_type", "BITMAP"},
              {"mmap", "true"},
@@ -211,6 +211,7 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     loadIndexInfo.index_params = index_params;
     loadIndexInfo.index_files = {"/tmp/index/1"};
     loadIndexInfo.index = nullptr;
+    loadIndexInfo.cache_index = nullptr;
     loadIndexInfo.uri = "";
     loadIndexInfo.index_store_version = 1;
     loadIndexInfo.index_engine_version =

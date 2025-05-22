@@ -19,9 +19,11 @@
 #include "segcore/load_field_data_c.h"
 
 CStatus
-NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info) {
+NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info,
+                     int64_t storage_version) {
     try {
         auto load_field_data_info = std::make_unique<LoadFieldDataInfo>();
+        load_field_data_info->storage_version = storage_version;
         *c_load_field_data_info = load_field_data_info.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -87,12 +89,6 @@ AppendMMapDirPath(CLoadFieldDataInfo c_load_field_data_info,
     auto load_field_data_info =
         static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
     load_field_data_info->mmap_dir_path = std::string(c_dir_path);
-}
-
-void
-SetUri(CLoadFieldDataInfo c_load_field_data_info, const char* uri) {
-    auto load_field_data_info = (LoadFieldDataInfo*)c_load_field_data_info;
-    load_field_data_info->url = std::string(uri);
 }
 
 void

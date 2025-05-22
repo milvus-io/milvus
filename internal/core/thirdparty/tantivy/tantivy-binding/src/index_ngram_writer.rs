@@ -55,6 +55,8 @@ impl IndexWriterWrapper {
             field,
             index_writer,
             index: Arc::new(index),
+            enable_user_specified_doc_id: true,
+            id_field: None,
         }))
     }
 }

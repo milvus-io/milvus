@@ -24,7 +24,7 @@ impl IndexWriterWrapperImpl {
         let mut schema_builder = Schema::builder();
         let field =
             schema_builder_add_field(&mut schema_builder, field_name, TantivyDataType::Keyword);
-        let _ = schema_builder.add_i64_field("doc_id", FAST);
+        let id_field = schema_builder.add_i64_field("doc_id", FAST);
         let schema = schema_builder.build();
         let index = if in_ram {
             Index::create_in_ram(schema)
@@ -37,6 +37,8 @@ impl IndexWriterWrapperImpl {
             field,
             index_writer,
             index: Arc::new(index),
+            id_field: Some(id_field),
+            enable_user_specified_doc_id: false,
         })
     }
 }

@@ -17,6 +17,8 @@
 #pragma once
 
 #include <optional>
+
+#include "cachinglayer/CacheSlot.h"
 #include "common/QueryInfo.h"
 #include "common/Types.h"
 #include "knowhere/index/index_node.h"
@@ -78,9 +80,10 @@ class SealedDataGetter : public DataGetter<T> {
     const FieldId field_id_;
     bool from_data_;
 
-    mutable std::unordered_map<int64_t, std::vector<std::string_view>>
-        str_view_map_;
-    mutable std::unordered_map<int64_t, FixedVector<bool>> valid_map_;
+    mutable std::unordered_map<
+        int64_t,
+        PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>>
+        pw_map_;
     // Getting str_view from segment is cpu-costly, this map is to cache this view for performance
  public:
     SealedDataGetter(const segcore::SegmentSealed& segment, FieldId& field_id)
@@ -103,23 +106,22 @@ class SealedDataGetter : public DataGetter<T> {
             auto chunk_id = id_offset_pair.first;
             auto inner_offset = id_offset_pair.second;
             if constexpr (std::is_same_v<T, std::string>) {
-                if (str_view_map_.find(chunk_id) == str_view_map_.end()) {
-                    auto [str_chunk_view, valid_data] =
-                        segment_.chunk_view<std::string_view>(field_id_,
-                                                              chunk_id);
-                    valid_map_[chunk_id] = std::move(valid_data);
-                    str_view_map_[chunk_id] = std::move(str_chunk_view);
+                if (pw_map_.find(chunk_id) == pw_map_.end()) {
+                    // for now, search_group_by does not handle null values
+                    auto pw = segment_.chunk_view<std::string_view>(field_id_,
+                                                                    chunk_id);
+                    pw_map_[chunk_id] = std::move(pw);
                 }
-                auto valid_data = valid_map_[chunk_id];
-                if (!valid_data.empty()) {
-                    if (!valid_map_[chunk_id][inner_offset]) {
-                        return std::nullopt;
-                    }
+                auto& pw = pw_map_[chunk_id];
+                auto& [str_chunk_view, valid_data] = pw.get();
+                if (!valid_data.empty() && !valid_data[inner_offset]) {
+                    return std::nullopt;
                 }
-                auto str_val_view = str_view_map_[chunk_id][inner_offset];
+                std::string_view str_val_view = str_chunk_view[inner_offset];
                 return std::string(str_val_view.data(), str_val_view.length());
             } else {
-                Span<T> span = segment_.chunk_data<T>(field_id_, chunk_id);
+                auto pw = segment_.chunk_data<T>(field_id_, chunk_id);
+                auto& span = pw.get();
                 if (span.valid_data() && !span.valid_data()[inner_offset]) {
                     return std::nullopt;
                 }
@@ -128,8 +130,9 @@ class SealedDataGetter : public DataGetter<T> {
             }
         } else {
             // null is not supported for indexed fields
-            auto& chunk_index = segment_.chunk_scalar_index<T>(field_id_, 0);
-            auto raw = chunk_index.Reverse_Lookup(idx);
+            auto pw = segment_.chunk_scalar_index<T>(field_id_, 0);
+            auto* chunk_index = pw.get();
+            auto raw = chunk_index->Reverse_Lookup(idx);
             AssertInfo(raw.has_value(), "field data not found");
             return raw.value();
         }

@@ -172,6 +172,25 @@ GetValueFromProtoWithOverflow(
     return GetValueFromProtoInternal<T>(value_proto, overflowed);
 }
 
+template <typename T>
+T
+GetValueWithCastNumber(const milvus::proto::plan::GenericValue& value_proto) {
+    if constexpr (std::is_same_v<T, double> || std::is_same_v<T, float>) {
+        Assert(value_proto.val_case() ==
+                   milvus::proto::plan::GenericValue::kFloatVal ||
+               value_proto.val_case() ==
+                   milvus::proto::plan::GenericValue::kInt64Val);
+        if (value_proto.val_case() ==
+            milvus::proto::plan::GenericValue::kInt64Val) {
+            return static_cast<T>(value_proto.int64_val());
+        } else {
+            return static_cast<T>(value_proto.float_val());
+        }
+    } else {
+        return GetValueFromProto<T>(value_proto);
+    }
+}
+
 enum class MatchType {
     ExactMatch,
     PrefixMatch,

@@ -12,6 +12,7 @@
 #pragma once
 #include <cstdint>
 #include "common/FieldDataInterface.h"
+#include "common/JsonCastType.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/ScalarIndex.h"
 #include "storage/FileManager.h"
@@ -66,7 +67,7 @@ class JsonInvertedIndexParseErrorRecorder {
 template <typename T>
 class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
  public:
-    JsonInvertedIndex(const proto::schema::DataType cast_type,
+    JsonInvertedIndex(const JsonCastType& cast_type,
                       const std::string& nested_path,
                       const storage::FileManagerContext& ctx)
         : nested_path_(nested_path), cast_type_(cast_type) {
@@ -84,7 +85,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
             "/tmp/milvus/inverted-index/";
         this->path_ = std::string(TMP_INVERTED_INDEX_PREFIX) + prefix;
 
-        this->d_type_ = index::get_tantivy_data_type(cast_type);
+        this->d_type_ = cast_type_.ToTantivyType();
         boost::filesystem::create_directories(this->path_);
         std::string field_name = std::to_string(
             this->disk_file_manager_->GetFieldDataMeta().field_id);
@@ -109,20 +110,23 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         this->wrapper_->create_reader();
     }
 
-    enum DataType
-    JsonCastType() const override {
-        return static_cast<enum DataType>(cast_type_);
-    }
+    bool
+    IsDataTypeSupported(DataType data_type) const override;
 
     JsonInvertedIndexParseErrorRecorder&
     GetErrorRecorder() {
         return error_recorder_;
     }
 
+    JsonCastType
+    GetCastType() const override {
+        return cast_type_;
+    }
+
  private:
     std::string nested_path_;
-    proto::schema::DataType cast_type_;
     JsonInvertedIndexParseErrorRecorder error_recorder_;
+    JsonCastType cast_type_;
 };
 
 }  // namespace milvus::index

@@ -15,3 +15,6 @@ packages:
   github.com/milvus-io/milvus/internal/datanode/compaction:
     interfaces:
       Compactor:
+  github.com/milvus-io/milvus/internal/datanode/importv2:
+    interfaces:
+      Task:

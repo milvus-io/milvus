@@ -49,7 +49,7 @@ func TestNextID(t *testing.T) {
 		i++
 		return rt, nil
 	}
-	bw := NewBulkPackWriter(nil, nil, al)
+	bw := NewBulkPackWriter(nil, nil, nil, al)
 	bw.prefetchIDs(new(SyncPack).WithFlush())
 
 	t.Run("normal_next", func(t *testing.T) {
@@ -116,6 +116,7 @@ func TestBulkPackWriter_Write(t *testing.T) {
 
 	bw := &BulkPackWriter{
 		metaCache:    mc,
+		schema:       schema,
 		chunkManager: cm,
 		allocator:    allocator.NewLocalAllocator(10000, 100000),
 	}

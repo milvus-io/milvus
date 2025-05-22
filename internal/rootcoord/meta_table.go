@@ -237,7 +237,9 @@ func (mt *MetaTable) reload() error {
 	log.Ctx(mt.ctx).Info("rootcoord start to recover the channel stats for streaming coord balancer")
 	vchannels := make([]string, 0, len(mt.collID2Meta)*2)
 	for _, coll := range mt.collID2Meta {
-		vchannels = append(vchannels, coll.VirtualChannelNames...)
+		if coll.Available() {
+			vchannels = append(vchannels, coll.VirtualChannelNames...)
+		}
 	}
 	channel.RecoverPChannelStatsManager(vchannels)
 
@@ -485,6 +487,7 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(pn))
 	case pb.CollectionState_CollectionDropping:
 		mt.generalCnt -= pn * int(coll.ShardsNum)
+		channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
 		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
 	}
@@ -560,7 +563,6 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		zap.Int64("id", collectionID),
 		zap.Strings("aliases", aliases),
 	)
-	channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
 	return nil
 }
 

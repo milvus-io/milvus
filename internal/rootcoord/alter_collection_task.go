@@ -90,6 +90,21 @@ func (a *alterCollectionTask) GetLockerKey() LockerKey {
 	)
 }
 
+func getCollectionDescription(props ...*commonpb.KeyValuePair) (bool, string, []*commonpb.KeyValuePair) {
+	hasDesc := false
+	desc := ""
+	newProperties := make([]*commonpb.KeyValuePair, 0, len(props))
+	for _, p := range props {
+		if p.GetKey() == common.CollectionDescription {
+			hasDesc = true
+			desc = p.GetValue()
+		} else {
+			newProperties = append(newProperties, p)
+		}
+	}
+	return hasDesc, desc, newProperties
+}
+
 func getConsistencyLevel(props ...*commonpb.KeyValuePair) (bool, commonpb.ConsistencyLevel) {
 	for _, p := range props {
 		if p.GetKey() == common.ConsistencyLevel {
@@ -122,7 +137,12 @@ func executeAlterCollectionTaskSteps(ctx context.Context,
 	if ok, level := getConsistencyLevel(newProperties...); ok {
 		newColl.ConsistencyLevel = level
 	}
-	newColl.Properties = newProperties
+	if ok, desc, props := getCollectionDescription(newProperties...); ok {
+		newColl.Description = desc
+		newColl.Properties = props
+	} else {
+		newColl.Properties = newProperties
+	}
 	tso, err := core.tsoAllocator.GenerateTSO(1)
 	if err == nil {
 		newColl.UpdateTimestamp = tso

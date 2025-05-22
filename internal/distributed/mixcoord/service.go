@@ -209,6 +209,7 @@ func (s *Server) startGrpcLoop() {
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			logutil.UnaryTraceLoggerInterceptor,
+			streamingserviceinterceptor.NewStreamingServiceUnaryServerInterceptor(),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -216,10 +217,10 @@ func (s *Server) startGrpcLoop() {
 				}
 				return s.serverID.Load()
 			}),
-			streamingserviceinterceptor.NewStreamingServiceUnaryServerInterceptor(),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			logutil.StreamTraceLoggerInterceptor,
+			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -227,7 +228,6 @@ func (s *Server) startGrpcLoop() {
 				}
 				return s.serverID.Load()
 			}),
-			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
 		)),
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 	}

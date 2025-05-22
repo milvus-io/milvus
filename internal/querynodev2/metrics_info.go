@@ -116,10 +116,8 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(node.GetNodeID()),
 			fmt.Sprint(collection), segments.SegmentTypeSealed.String()).Set(float64(size))
 	}
-	sealedGroupByPartition := lo.GroupBy(sealedSegments, func(seg segments.Segment) int64 {
-		return seg.Partition()
-	})
-	for _, segs := range sealedGroupByPartition {
+
+	for _, segs := range sealedGroupByCollection {
 		numEntities := lo.SumBy(segs, func(seg segments.Segment) int64 {
 			return seg.RowNum()
 		})

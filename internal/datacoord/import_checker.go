@@ -45,10 +45,9 @@ type ImportChecker interface {
 type importChecker struct {
 	meta                *meta
 	broker              broker.Broker
-	cluster             Cluster
 	alloc               allocator.Allocator
 	imeta               ImportMeta
-	sjm                 StatsJobManager
+	si                  StatsInspector
 	l0CompactionTrigger TriggerManager
 
 	closeOnce sync.Once
@@ -57,19 +56,17 @@ type importChecker struct {
 
 func NewImportChecker(meta *meta,
 	broker broker.Broker,
-	cluster Cluster,
 	alloc allocator.Allocator,
 	imeta ImportMeta,
-	sjm StatsJobManager,
+	si StatsInspector,
 	l0CompactionTrigger TriggerManager,
 ) ImportChecker {
 	return &importChecker{
 		meta:                meta,
 		broker:              broker,
-		cluster:             cluster,
 		alloc:               alloc,
 		imeta:               imeta,
-		sjm:                 sjm,
+		si:                  si,
 		l0CompactionTrigger: l0CompactionTrigger,
 		closeChan:           make(chan struct{}),
 	}
@@ -219,7 +216,7 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 	}
 	fileGroups := lo.Chunk(lacks, Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt())
 
-	newTasks, err := NewPreImportTasks(fileGroups, job, c.alloc)
+	newTasks, err := NewPreImportTasks(fileGroups, job, c.alloc, c.imeta)
 	if err != nil {
 		log.Warn("new preimport tasks failed", zap.Error(err))
 		return
@@ -262,7 +259,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 
 	allDiskIndex := c.meta.indexMeta.AreAllDiskIndex(job.GetCollectionID(), job.GetSchema())
 	groups := RegroupImportFiles(job, lacks, allDiskIndex)
-	newTasks, err := NewImportTasks(groups, job, c.alloc, c.meta)
+	newTasks, err := NewImportTasks(groups, job, c.alloc, c.meta, c.imeta)
 	if err != nil {
 		log.Warn("new import tasks failed", zap.Error(err))
 		return
@@ -339,10 +336,10 @@ func (c *importChecker) checkStatsJob(job ImportJob) {
 		taskCnt += len(originSegmentIDs)
 		for i, originSegmentID := range originSegmentIDs {
 			taskLogFields := WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("stats", statsSegmentIDs[i]))
-			t := c.sjm.GetStatsTask(originSegmentID, indexpb.StatsSubJob_Sort)
+			t := c.si.GetStatsTask(originSegmentID, indexpb.StatsSubJob_Sort)
 			switch t.GetState() {
 			case indexpb.JobState_JobStateNone:
-				err := c.sjm.SubmitStatsTask(originSegmentID, statsSegmentIDs[i], indexpb.StatsSubJob_Sort, false)
+				err := c.si.SubmitStatsTask(originSegmentID, statsSegmentIDs[i], indexpb.StatsSubJob_Sort, false)
 				if err != nil {
 					log.Warn("submit stats task failed", zap.Error(err))
 					continue
@@ -381,7 +378,10 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		targetSegmentIDs = originSegmentIDs
 	}
 
-	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
+	healthySegments := c.meta.GetSegments(targetSegmentIDs, func(segment *SegmentInfo) bool {
+		return isSegmentHealthy(segment)
+	})
+	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
 	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !importutilv2.IsL0Import(job.GetOptions()) {
 		for _, segmentID := range unindexed {
 			select {
@@ -408,7 +408,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageWaitL0Import).Observe(float64(buildIndexDuration.Milliseconds()))
 	log.Info("import job l0 import done", zap.Duration("jobTimeCost/l0Import", waitL0ImportDuration))
 
-	if c.updateSegmentState(job, originSegmentIDs, statsSegmentIDs) {
+	if c.updateSegmentState(originSegmentIDs, statsSegmentIDs) {
 		return
 	}
 	// all finished, update import job state to `Completed`.
@@ -439,7 +439,7 @@ func (c *importChecker) waitL0ImortTaskDone(job ImportJob) bool {
 	return false
 }
 
-func (c *importChecker) updateSegmentState(job ImportJob, originSegmentIDs, statsSegmentIDs []int64) bool {
+func (c *importChecker) updateSegmentState(originSegmentIDs, statsSegmentIDs []int64) bool {
 	// Here, all segment indexes have been successfully built, try unset isImporting flag for all segments.
 	isImportingSegments := lo.Filter(append(originSegmentIDs, statsSegmentIDs...), func(segmentID int64, _ int) bool {
 		segment := c.meta.GetSegment(context.TODO(), segmentID)
@@ -478,7 +478,7 @@ func (c *importChecker) checkFailedJob(job ImportJob) {
 		return t.(*importTask).GetSegmentIDs()
 	})
 	for _, originSegmentID := range originSegmentIDs {
-		err := c.sjm.DropStatsTask(originSegmentID, indexpb.StatsSubJob_Sort)
+		err := c.si.DropStatsTask(originSegmentID, indexpb.StatsSubJob_Sort)
 		if err != nil {
 			log.Warn("Drop stats task failed", zap.Int64("jobID", job.GetJobID()))
 			return

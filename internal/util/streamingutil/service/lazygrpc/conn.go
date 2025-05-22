@@ -55,6 +55,7 @@ func (c *connImpl) initialize() {
 	newBackOff.InitialInterval = 100 * time.Millisecond
 	newBackOff.MaxInterval = 10 * time.Second
 	newBackOff.MaxElapsedTime = 0
+	newBackOff.Reset()
 
 	backoff.Retry(func() error {
 		conn, err := c.dialer(c.initializationNotifier.Context())

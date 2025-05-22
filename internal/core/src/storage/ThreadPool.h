@@ -85,7 +85,6 @@ class ThreadPool {
 
     template <typename F, typename... Args>
     auto
-    // Submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))>;
     Submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
         std::function<decltype(f(args...))()> func =
             std::bind(std::forward<F>(f), std::forward<Args>(args)...);
@@ -130,33 +129,6 @@ class ThreadPool {
     std::mutex mutex_;
     std::condition_variable condition_lock_;
     std::string name_;
-};
-
-class Worker {
- private:
-    int id_;
-    ThreadPool* pool_;
-
- public:
-    Worker(ThreadPool* pool, const int id) : pool_(pool), id_(id) {
-    }
-
-    void
-    operator()() {
-        std::function<void()> func;
-        bool dequeue;
-        while (!pool_->shutdown_) {
-            std::unique_lock<std::mutex> lock(pool_->mutex_);
-            if (pool_->work_queue_.empty()) {
-                pool_->condition_lock_.wait(lock);
-            }
-            dequeue = pool_->work_queue_.dequeue(func);
-            lock.unlock();
-            if (dequeue) {
-                func();
-            }
-        }
-    }
 };
 
 }  // namespace milvus

@@ -9,7 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
 	"github.com/milvus-io/milvus/internal/types"
@@ -67,7 +67,7 @@ func Apply(opts ...optResourceInit) {
 
 // Done finish all initialization of resources.
 func Done() {
-	r.segmentAssignStatsManager = stats.NewStatsManager()
+	r.segmentStatsManager = stats.NewStatsManager()
 	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()
 	r.syncMgr = syncmgr.NewSyncManager(r.chunkManager)
 	r.wbMgr = writebuffer.NewManager(r.syncMgr)
@@ -76,7 +76,7 @@ func Done() {
 	assertNotNil(r.TSOAllocator())
 	assertNotNil(r.MixCoordClient())
 	assertNotNil(r.StreamingNodeCatalog())
-	assertNotNil(r.SegmentAssignStatsManager())
+	assertNotNil(r.SegmentStatsManager())
 	assertNotNil(r.TimeTickInspector())
 	assertNotNil(r.SyncManager())
 	assertNotNil(r.WriteBufferManager())
@@ -96,16 +96,16 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
-	logger                    *log.MLogger
-	timestampAllocator        idalloc.Allocator
-	idAllocator               idalloc.Allocator
-	etcdClient                *clientv3.Client
-	chunkManager              storage.ChunkManager
-	mixCoordClient            *syncutil.Future[types.MixCoordClient]
-	streamingNodeCatalog      metastore.StreamingNodeCataLog
-	segmentAssignStatsManager *stats.StatsManager
-	timeTickInspector         tinspector.TimeTickSyncInspector
-	vchannelTempStorage       *vchantempstore.VChannelTempStorage
+	logger               *log.MLogger
+	timestampAllocator   idalloc.Allocator
+	idAllocator          idalloc.Allocator
+	etcdClient           *clientv3.Client
+	chunkManager         storage.ChunkManager
+	mixCoordClient       *syncutil.Future[types.MixCoordClient]
+	streamingNodeCatalog metastore.StreamingNodeCataLog
+	segmentStatsManager  *stats.StatsManager
+	timeTickInspector    tinspector.TimeTickSyncInspector
+	vchannelTempStorage  *vchantempstore.VChannelTempStorage
 
 	// TODO: Global flusher components, should be removed afteer flushering in wal refactoring.
 	syncMgr syncmgr.SyncManager
@@ -152,9 +152,8 @@ func (r *resourceImpl) StreamingNodeCatalog() metastore.StreamingNodeCataLog {
 	return r.streamingNodeCatalog
 }
 
-// SegmentAssignStatManager returns the segment assign stats manager.
-func (r *resourceImpl) SegmentAssignStatsManager() *stats.StatsManager {
-	return r.segmentAssignStatsManager
+func (r *resourceImpl) SegmentStatsManager() *stats.StatsManager {
+	return r.segmentStatsManager
 }
 
 func (r *resourceImpl) TimeTickInspector() tinspector.TimeTickSyncInspector {

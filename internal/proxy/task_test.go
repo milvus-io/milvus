@@ -644,14 +644,21 @@ func TestTranslateOutputFields(t *testing.T) {
 		assert.ElementsMatch(t, []string{"A"}, userDynamicFields)
 		assert.True(t, requestedPK)
 
-		// Test invalid dynamic field expressions
-		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[\"A\"]"}, schema, true)
-		assert.Error(t, err)
+		outputFields, userOutputFields, userDynamicFields, requestedPK, err = translateOutputFields([]string{"$meta[\"A\"]", idFieldName}, schema, true)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []string{common.MetaFieldName}, outputFields)
+		assert.ElementsMatch(t, []string{"$meta[\"A\"]"}, userOutputFields)
+		assert.ElementsMatch(t, []string{"A"}, userDynamicFields)
+		assert.True(t, requestedPK)
 
-		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[]"}, schema, true)
+		// Test invalid dynamic field expressions
+		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, `$meta["A"]["B"]`}, schema, true)
 		assert.Error(t, err)
 
 		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[\"\"]"}, schema, true)
+		assert.Error(t, err)
+
+		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[]"}, schema, true)
 		assert.Error(t, err)
 
 		_, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta["}, schema, true)
@@ -787,13 +794,6 @@ func TestAddFieldTask(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		// not support dynamic field
-		task.oldSchema.EnableDynamicField = true
-		err = task.PreExecute(ctx)
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		task.oldSchema.EnableDynamicField = false
-
 		// too many fields
 		Params.Save(Params.ProxyCfg.MaxFieldNum.Key, fmt.Sprint(task.oldSchema.Fields))
 		fSchema := &schemapb.FieldSchema{
@@ -862,7 +862,20 @@ func TestAddFieldTask(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		// not support partition key
+		// not support add partition key
+		fSchema = &schemapb.FieldSchema{
+			IsPartitionKey: true,
+			DataType:       schemapb.DataType_Bool,
+			Nullable:       true,
+			Name:           "new field",
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
 		Params.Save(Params.ProxyCfg.MustUsePartitionKey.Key, "true")
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)

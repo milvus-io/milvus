@@ -665,7 +665,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("metric_type", ct.float_metrics)
+    @pytest.mark.parametrize("metric_type", ct.dense_metrics)
     def test_milvus_client_search_iterator_default(self, metric_type):
         """
         target: test search iterator (high level api) normal case
@@ -694,6 +694,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                  default_string_field_name: str(i)} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
+        self.wait_for_index_ready(client, collection_name, index_name=default_vector_field_name)
         # 3. search iterator
         vectors_to_search = cf.gen_vectors(1, default_dim)
         search_params = {"params": {}}
@@ -706,7 +707,9 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         res = self.search(client, collection_name, vectors_to_search,
                           search_params=search_params, limit=200,
                           check_task=CheckTasks.check_search_results,
-                          check_items={"nq": 1, "limit": limit, "enable_milvus_client_api": True})[0]
+                          check_items={"nq": 1, "limit": limit, 
+                                       "enable_milvus_client_api": True,
+                                       "pk_name": default_primary_key_field_name})[0]
         for limit in [batch_size - 3, batch_size, batch_size * 2, -1]:
             if metric_type != "L2":
                 radius = res[0][limit // 2].get('distance', 0) - 0.1  # pick a radius to make sure there exists results
@@ -892,7 +895,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         pass
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("metric_type", ct.float_metrics)
+    @pytest.mark.parametrize("metric_type", ct.dense_metrics)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     def test_milvus_client_search_iterator_after_json_path_index(self, metric_type, enable_dynamic_field,
                                                                  supported_json_cast_type,
@@ -967,7 +970,8 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         res = self.search(client, collection_name, vectors_to_search,
                           search_params=search_params, limit=limit,
                           check_task=CheckTasks.check_search_results,
-                          check_items={"nq": 1, "limit": limit, "enable_milvus_client_api": True})[0]
+                          check_items={"nq": 1, "limit": limit, "pk_name": default_primary_key_field_name, 
+                                       "enable_milvus_client_api": True})[0]
         for limit in [batch_size - 3, batch_size, batch_size * 2, -1]:
             if metric_type != "L2":
                 radius = res[0][limit // 2].get('distance', 0) - 0.1  # pick a radius to make sure there exists results

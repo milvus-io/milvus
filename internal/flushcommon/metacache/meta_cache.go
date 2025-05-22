@@ -55,7 +55,7 @@ type MetaCache interface {
 	// UpdateSegmentView updates the segments BF from datacoord view.
 	UpdateSegmentView(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*pkoracle.BloomFilterSet, allSegments map[int64]struct{})
 	// UpdateSchema update the latest collection schema
-	UpdateSchema(updatedSchema *schemapb.CollectionSchema)
+	UpdateSchema(updatedSchema *schemapb.CollectionSchema, version uint64)
 }
 
 var _ MetaCache = (*metaCacheImpl)(nil)
@@ -319,6 +319,6 @@ func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 	}
 }
 
-func (c *metaCacheImpl) UpdateSchema(updatedSchema *schemapb.CollectionSchema) {
+func (c *metaCacheImpl) UpdateSchema(updatedSchema *schemapb.CollectionSchema, _ uint64) {
 	c.schema = updatedSchema
 }

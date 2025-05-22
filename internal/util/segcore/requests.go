@@ -34,9 +34,10 @@ type DeleteRequest struct {
 }
 
 type LoadFieldDataRequest struct {
-	Fields   []LoadFieldDataInfo
-	MMapDir  string
-	RowCount int64
+	Fields         []LoadFieldDataInfo
+	MMapDir        string
+	RowCount       int64
+	StorageVersion int64
 }
 
 type LoadFieldDataInfo struct {
@@ -46,7 +47,7 @@ type LoadFieldDataInfo struct {
 
 func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldDataRequest, err error) {
 	var cLoadFieldDataInfo C.CLoadFieldDataInfo
-	status := C.NewLoadFieldDataInfo(&cLoadFieldDataInfo)
+	status := C.NewLoadFieldDataInfo(&cLoadFieldDataInfo, C.int64_t(req.StorageVersion))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, errors.Wrap(err, "NewLoadFieldDataInfo failed")
 	}

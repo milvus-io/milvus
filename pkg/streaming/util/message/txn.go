@@ -12,7 +12,6 @@ type (
 )
 
 const (
-	TxnStateBegin      TxnState = messagespb.TxnState_TxnBegin
 	TxnStateInFlight   TxnState = messagespb.TxnState_TxnInFlight
 	TxnStateOnCommit   TxnState = messagespb.TxnState_TxnOnCommit
 	TxnStateCommitted  TxnState = messagespb.TxnState_TxnCommitted

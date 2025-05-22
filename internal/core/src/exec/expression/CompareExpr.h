@@ -295,12 +295,12 @@ class PhyCompareFilterExpr : public Expr {
                 auto [right_chunk_id, right_chunk_offset] =
                     get_chunk_id_and_offset(right_field_);
 
-                auto left_chunk = segment_chunk_reader_.segment_->chunk_data<T>(
+                auto pw_left = segment_chunk_reader_.segment_->chunk_data<T>(
                     left_field_, left_chunk_id);
-
-                auto right_chunk =
-                    segment_chunk_reader_.segment_->chunk_data<U>(
-                        right_field_, right_chunk_id);
+                auto left_chunk = pw_left.get();
+                auto pw_right = segment_chunk_reader_.segment_->chunk_data<U>(
+                    right_field_, right_chunk_id);
+                auto right_chunk = pw_right.get();
                 const T* left_data = left_chunk.data() + left_chunk_offset;
                 const U* right_data = right_chunk.data() + right_chunk_offset;
                 func.template operator()<FilterType::random>(
@@ -326,10 +326,12 @@ class PhyCompareFilterExpr : public Expr {
             }
             return processed_size;
         } else {
-            auto left_chunk =
+            auto pw_left =
                 segment_chunk_reader_.segment_->chunk_data<T>(left_field_, 0);
-            auto right_chunk =
+            auto left_chunk = pw_left.get();
+            auto pw_right =
                 segment_chunk_reader_.segment_->chunk_data<U>(right_field_, 0);
+            auto right_chunk = pw_right.get();
             const T* left_data = left_chunk.data();
             const U* right_data = right_chunk.data();
             func.template operator()<FilterType::random>(
@@ -363,10 +365,12 @@ class PhyCompareFilterExpr : public Expr {
 
         const auto active_count = segment_chunk_reader_.active_count_;
         for (size_t i = current_chunk_id_; i < num_chunk_; i++) {
-            auto left_chunk =
+            auto pw_left =
                 segment_chunk_reader_.segment_->chunk_data<T>(left_field_, i);
-            auto right_chunk =
+            auto left_chunk = pw_left.get();
+            auto pw_right =
                 segment_chunk_reader_.segment_->chunk_data<U>(right_field_, i);
+            auto right_chunk = pw_right.get();
             auto data_pos = (i == current_chunk_id_) ? current_chunk_pos_ : 0;
             auto size =
                 (i == (num_chunk_ - 1))
@@ -431,10 +435,12 @@ class PhyCompareFilterExpr : public Expr {
 
         // only call this function when left and right are not indexed, so they have the same number of chunks
         for (size_t i = left_current_chunk_id_; i < left_num_chunk_; i++) {
-            auto left_chunk =
+            auto pw_left =
                 segment_chunk_reader_.segment_->chunk_data<T>(left_field_, i);
-            auto right_chunk =
+            auto left_chunk = pw_left.get();
+            auto pw_right =
                 segment_chunk_reader_.segment_->chunk_data<U>(right_field_, i);
+            auto right_chunk = pw_right.get();
             auto data_pos =
                 (i == left_current_chunk_id_) ? left_current_chunk_pos_ : 0;
             auto size = 0;

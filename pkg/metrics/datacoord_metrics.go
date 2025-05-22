@@ -363,6 +363,18 @@ var (
 			Name:      "task_count",
 			Help:      "number of index tasks of each type",
 		}, []string{TaskTypeLabel, TaskStateLabel})
+
+	// TaskVersion records the version of task(retry times of task).
+	TaskVersion = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "task_version",
+			Help:      "version of task",
+			Buckets:   buckets,
+		}, []string{
+			TaskTypeLabel,
+		})
 )
 
 // RegisterDataCoord registers DataCoord metrics
@@ -389,11 +401,13 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(IndexRequestCounter)
 	registry.MustRegister(IndexTaskNum)
 	registry.MustRegister(IndexNodeNum)
+	registry.MustRegister(ImportJobs)
 	registry.MustRegister(ImportTasks)
 	registry.MustRegister(GarbageCollectorFileScanDuration)
 	registry.MustRegister(GarbageCollectorRunCount)
 	registry.MustRegister(DataCoordTaskExecuteLatency)
 	registry.MustRegister(TaskNum)
+	registry.MustRegister(TaskVersion)
 
 	registerStreamingCoord(registry)
 }

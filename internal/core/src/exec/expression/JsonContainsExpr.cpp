@@ -25,22 +25,49 @@ void
 PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
+
+    if (expr_->vals_.empty()) {
+        auto next_batch_size = GetNextBatchSize();
+        auto real_batch_size = has_offset_input_
+                                   ? context.get_offset_input()->size()
+                                   : next_batch_size;
+        if (real_batch_size == 0) {
+            result = nullptr;
+            return;
+        }
+        auto res_vec =
+            std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                           TargetBitmap(real_batch_size, true));
+
+        TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+
+        res.set();
+        valid_res.set();
+
+        result = res_vec;
+        current_data_chunk_pos_ += real_batch_size;
+        return;
+    }
+
     switch (expr_->column_.data_type_) {
         case DataType::ARRAY: {
             if (is_index_mode_ && !has_offset_input_) {
-                result = EvalArrayContainsForIndexSegment();
+                result = EvalArrayContainsForIndexSegment(
+                    expr_->column_.element_type_);
             } else {
                 result = EvalJsonContainsForDataSegment(context);
             }
             break;
         }
         case DataType::JSON: {
-            if (is_index_mode_ && !context.get_offset_input()) {
-                PanicInfo(ExprInvalid,
-                          "exists expr for json or array index mode not "
-                          "supported");
+            if (is_index_mode_ && !has_offset_input_) {
+                result = EvalArrayContainsForIndexSegment(
+                    value_type_ == DataType::INT64 ? DataType::DOUBLE
+                                                   : value_type_);
+            } else {
+                result = EvalJsonContainsForDataSegment(context);
             }
-            result = EvalJsonContainsForDataSegment(context);
             break;
         }
         default:
@@ -401,8 +428,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
 
                 if (array.error()) {
@@ -586,8 +612,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
                     return false;
@@ -865,8 +890,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
                     return false;
@@ -1114,8 +1138,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 std::set<int> tmp_elements_index(elements_index);
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
@@ -1366,8 +1389,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
                     return false;
@@ -1602,8 +1624,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
                 if (!json_pair.second) {
                     return false;
                 }
-                auto json = milvus::Json(json_pair.first.data(),
-                                         json_pair.first.size());
+                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
                     return false;
@@ -1694,8 +1715,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
 }
 
 VectorPtr
-PhyJsonContainsFilterExpr::EvalArrayContainsForIndexSegment() {
-    switch (expr_->column_.element_type_) {
+PhyJsonContainsFilterExpr::EvalArrayContainsForIndexSegment(
+    DataType data_type) {
+    switch (data_type) {
         case DataType::BOOL: {
             return ExecArrayContainsForIndexSegmentImpl<bool>();
         }
@@ -1744,7 +1766,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
 
     std::unordered_set<GetType> elements;
     for (auto const& element : expr_->vals_) {
-        elements.insert(GetValueFromProto<GetType>(element));
+        elements.insert(GetValueWithCastNumber<GetType>(element));
     }
     boost::container::vector<GetType> elems(elements.begin(), elements.end());
     auto execute_sub_batch =

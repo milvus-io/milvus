@@ -221,7 +221,7 @@ TEST_F(StringIndexMarisaTest, Query) {
             auto ds = std::make_shared<knowhere::DataSet>();
             ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
                                     milvus::OpType::PrefixMatch);
-            ds->Set<std::string>(milvus::index::PREFIX_VALUE,
+            ds->Set<std::string>(milvus::index::MATCH_VALUE,
                                  std::move(strs[i]));
             auto bitset = index->Query(ds);
             ASSERT_EQ(bitset.size(), strs.size());

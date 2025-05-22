@@ -274,8 +274,8 @@ class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
     """
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                             ct.default_all_indexes_params[:7]))
+                             zip(ct.all_index_types[:8],
+                             ct.default_all_indexes_params[:8]))
     async def test_async_milvus_client_create_drop_index_default(self, index, params, metric_type):
         """
         target: test create and drop index normal case
@@ -323,7 +323,8 @@ class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
                                check_task=CheckTasks.check_search_results,
                                check_items={"enable_milvus_client_api": True,
                                             "nq": len(vectors_to_search),
-                                            "limit": default_limit})
+                                            "limit": default_limit,
+                                            "pk_name": default_primary_key_field_name})
         tasks.append(search_task)
         # 6. query
         query_task = self.async_milvus_client_wrap. \
@@ -331,7 +332,7 @@ class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
                               check_task=CheckTasks.check_query_results,
                               check_items={"exp_res": rows,
                                            "with_vec": True,
-                                           "primary_field": default_primary_key_field_name})
+                                           "pk_name": default_primary_key_field_name})
         tasks.append(query_task)
         res = await asyncio.gather(*tasks)
 

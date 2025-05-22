@@ -517,9 +517,12 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Uint64("schemaVersion", req.GetVersion()),
 	)
 
-	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema())
+	log.Info("querynode received update schema request")
+
+	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetVersion())
 	if err != nil {
 		log.Warn("failed to update schema", zap.Error(err))
 	}
@@ -1250,14 +1253,18 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			numOfGrowingRows += segment.InsertCount()
 		}
 
+		queryView := delegator.GetQueryView()
 		leaderViews = append(leaderViews, &querypb.LeaderView{
 			Collection:             delegator.Collection(),
 			Channel:                key,
 			SegmentDist:            sealedSegments,
 			GrowingSegments:        growingSegments,
-			TargetVersion:          delegator.GetTargetVersion(),
 			NumOfGrowingRows:       numOfGrowingRows,
 			PartitionStatsVersions: delegator.GetPartitionStatsVersions(ctx),
+			TargetVersion:          queryView.GetVersion(),
+			Status: &querypb.LeaderViewStatus{
+				Serviceable: queryView.Serviceable(),
+			},
 		})
 		return true
 	})

@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/mock_client"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -29,9 +30,14 @@ const (
 	vChannel3 = "by-dev-rootcoord-dml_3"
 )
 
-func TestWAL(t *testing.T) {
+func createMockWAL(t *testing.T) (
+	*walAccesserImpl,
+	*mock_client.MockClient,
+	*mock_client.MockBroadcastService,
+	*mock_handler.MockHandlerClient,
+) {
 	coordClient := mock_client.NewMockClient(t)
-	coordClient.EXPECT().Close().Return()
+	coordClient.EXPECT().Close().Return().Maybe()
 	broadcastServce := mock_client.NewMockBroadcastService(t)
 	broadcastServce.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, bmm message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
@@ -46,11 +52,13 @@ func TestWAL(t *testing.T) {
 			return &types.BroadcastAppendResult{
 				AppendResults: result,
 			}, nil
-		})
-	broadcastServce.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil)
-	coordClient.EXPECT().Broadcast().Return(broadcastServce)
+		}).Maybe()
+	broadcastServce.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil).Maybe()
+	coordClient.EXPECT().Broadcast().Return(broadcastServce).Maybe()
 	handler := mock_handler.NewMockHandlerClient(t)
-	handler.EXPECT().Close().Return()
+	c := mock_consumer.NewMockConsumer(t)
+	handler.EXPECT().CreateConsumer(mock.Anything, mock.Anything).Return(c, nil).Maybe()
+	handler.EXPECT().Close().Return().Maybe()
 
 	w := &walAccesserImpl{
 		lifetime:              typeutil.NewLifetime(),
@@ -61,8 +69,12 @@ func TestWAL(t *testing.T) {
 		appendExecutionPool:   conc.NewPool[struct{}](10),
 		dispatchExecutionPool: conc.NewPool[struct{}](10),
 	}
+	return w, coordClient, broadcastServce, handler
+}
 
+func TestWAL(t *testing.T) {
 	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
 
 	available := make(chan struct{})
 	p := mock_producer.NewMockProducer(t)

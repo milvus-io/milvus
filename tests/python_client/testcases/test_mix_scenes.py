@@ -591,10 +591,10 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         expected:
             1. search output fields with Hybrid index
         """
-        search_params, vector_field, limit, nq = {"metric_type": "L2", "ef": 32}, DataType.FLOAT16_VECTOR.name, 3, 1
+        search_params, vector_field, limit, nq = {"metric_type": "L2", "ef": 32}, DataType.FLOAT16_VECTOR, 3, 1
 
         self.collection_wrap.search(
-            cf.gen_vectors(nb=nq, dim=3, vector_data_type=vector_field), vector_field, search_params, limit,
+            cf.gen_vectors(nb=nq, dim=3, vector_data_type=vector_field), vector_field.name, search_params, limit,
             output_fields=['*'], check_task=CheckTasks.check_search_results,
             check_items={"nq": nq, "ids": self.insert_data.get(self.primary_field),
                          "limit": limit, "output_fields": self.all_fields})
@@ -898,7 +898,8 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         expr_count = len([i for i in self.insert_data.get(expr_field, []) if len(i) == length])
 
         # query count(*)
-        self.collection_wrap.query(expr=expr, output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+        self.collection_wrap.query(expr=expr, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": expr_count}]})
 
 
@@ -1223,7 +1224,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         expr_count = len([i for i in self.insert_data.get(expr_field, []) if len(i) == length])
 
         # query count(*)
-        self.collection_wrap.query(expr=expr, output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+        self.collection_wrap.query(expr=expr, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": expr_count}]})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1239,7 +1241,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
             1. query response equal to insert nb
         """
         # query count(*)
-        self.collection_wrap.query(expr='', output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+        self.collection_wrap.query(expr='', output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": self.nb}]})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1247,8 +1250,8 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
     @pytest.mark.parametrize("group_by_field", ['INT8', 'INT16', 'INT32', 'INT64', 'BOOL', 'VARCHAR'])
     @pytest.mark.parametrize(
         "dim, search_params, vector_field",
-        [(3, {"metric_type": MetricType.L2, "ef": 32}, DataType.FLOAT16_VECTOR.name),
-         (1000, {"metric_type": MetricType.IP, "drop_ratio_search": 0.2}, DataType.SPARSE_FLOAT_VECTOR.name)])
+        [(3, {"metric_type": MetricType.L2, "ef": 32}, DataType.FLOAT16_VECTOR),
+         (1000, {"metric_type": MetricType.IP, "drop_ratio_search": 0.2}, DataType.SPARSE_FLOAT_VECTOR)])
     def test_bitmap_index_search_group_by(self, limit, group_by_field, dim, search_params, vector_field):
         """
         target:
@@ -1259,7 +1262,7 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         expected:
             1. search group by with BITMAP index
         """
-        res, _ = self.collection_wrap.search(cf.gen_vectors(nb=1, dim=dim, vector_data_type=vector_field), vector_field,
+        res, _ = self.collection_wrap.search(cf.gen_vectors(nb=1, dim=dim, vector_data_type=vector_field), vector_field.name,
                                              search_params, limit, group_by_field=group_by_field,
                                              output_fields=[group_by_field])
         output_values = [i.fields for r in res for i in r]
@@ -1285,9 +1288,9 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
             1. search iterator with BITMAP index
         """
         ef = 32 if batch_size <= 32 else batch_size  # ef must be larger than or equal to batch size
-        search_params, vector_field = {"metric_type": "L2", "ef": ef}, DataType.FLOAT16_VECTOR.name
+        search_params, vector_field = {"metric_type": "L2", "ef": ef}, DataType.FLOAT16_VECTOR
         self.collection_wrap.search_iterator(
-            cf.gen_vectors(nb=1, dim=3, vector_data_type=vector_field), vector_field, search_params, batch_size,
+            cf.gen_vectors(nb=1, dim=3, vector_data_type=vector_field), vector_field.name, search_params, batch_size,
             expr='INT16 > 15', check_task=CheckTasks.check_search_iterator, check_items={"batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1301,10 +1304,10 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         expected:
             1. search output fields with BITMAP index
         """
-        search_params, vector_field, limit, nq = {"metric_type": "L2", "ef": 32}, DataType.FLOAT16_VECTOR.name, 3, 1
+        search_params, vector_field, limit, nq = {"metric_type": "L2", "ef": 32}, DataType.FLOAT16_VECTOR, 3, 1
 
         self.collection_wrap.search(
-            cf.gen_vectors(nb=nq, dim=3, vector_data_type=vector_field), vector_field, search_params, limit,
+            cf.gen_vectors(nb=nq, dim=3, vector_data_type=vector_field), vector_field.name, search_params, limit,
             output_fields=['*'], check_task=CheckTasks.check_search_results,
             check_items={"nq": nq, "ids": self.insert_data.get(self.primary_field),
                          "limit": limit, "output_fields": self.all_fields})
@@ -1637,7 +1640,8 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         expr_count = len([i for i in self.insert_data.get(expr_field, []) if len(i) == length])
 
         # query count(*)
-        self.collection_wrap.query(expr=expr, output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+        self.collection_wrap.query(expr=expr, output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": expr_count}]})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1653,7 +1657,8 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
             1. query response equal to insert nb
         """
         # query count(*)
-        self.collection_wrap.query(expr='', output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+        self.collection_wrap.query(expr='', output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": self.nb}]})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1667,11 +1672,11 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         expected:
             1. search output fields with BITMAP index
         """
-        search_params, vector_field, limit, nq = {"metric_type": "L2", "ef": 32}, DataType.FLOAT_VECTOR.name, 3, 1
+        search_params, vector_field, limit, nq = {"metric_type": "L2", "ef": 32}, DataType.FLOAT_VECTOR, 3, 1
 
         self.collection_wrap.search(
             cf.gen_vectors(nb=nq, dim=ct.default_dim, vector_data_type=vector_field),
-            vector_field, search_params, limit, output_fields=['*'], check_task=CheckTasks.check_search_results,
+            vector_field.name, search_params, limit, output_fields=['*'], check_task=CheckTasks.check_search_results,
             check_items={"nq": nq, "ids": self.insert_data.get(self.primary_field),
                          "limit": limit, "output_fields": self.all_fields})
 
@@ -1908,7 +1913,8 @@ class TestBitmapIndexMmap(TestCaseClassBase):
             1. query response equal to insert nb
         """
         # query count(*)
-        self.collection_wrap.query(expr='', output_fields=['count(*)'], check_task=CheckTasks.check_query_results,
+        self.collection_wrap.query(expr='', output_fields=['count(*)'],
+                                   check_task=CheckTasks.check_query_results,
                                    check_items={"exp_res": [{"count(*)": self.nb}]})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1922,11 +1928,11 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         expected:
             1. search output fields with BITMAP index
         """
-        search_params, vector_field, limit, nq = {"metric_type": "L2", "ef": 32}, DataType.FLOAT_VECTOR.name, 3, 1
+        search_params, vector_field, limit, nq = {"metric_type": "L2", "ef": 32}, DataType.FLOAT_VECTOR, 3, 1
 
         self.collection_wrap.search(
             cf.gen_vectors(nb=nq, dim=ct.default_dim, vector_data_type=vector_field),
-            vector_field, search_params, limit, output_fields=['*'], check_task=CheckTasks.check_search_results,
+            vector_field.name, search_params, limit, output_fields=['*'], check_task=CheckTasks.check_search_results,
             check_items={"nq": nq, "ids": self.insert_data.get(self.primary_field),
                          "limit": limit, "output_fields": self.all_fields})
 
@@ -2132,8 +2138,10 @@ class TestMixScenes(TestcaseBase):
 
         # query before upsert
         expected_res = [{k: v[10] for k, v in insert_data.items() if k != DataType.FLOAT_VECTOR.name}]
-        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": expected_res, "primary_field": primary_field})
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": expected_res, 
+                                                "pk_name": primary_field})
 
         # upsert int64_pk = 10
         upsert_data = cf.gen_field_values(self.collection_wrap.schema, nb=1,
@@ -2141,14 +2149,18 @@ class TestMixScenes(TestcaseBase):
         self.collection_wrap.upsert(data=list(upsert_data.values()))
         # re-query
         expected_upsert_res = [{k: v[0] for k, v in upsert_data.items() if k != DataType.FLOAT_VECTOR.name}]
-        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": expected_upsert_res, "primary_field": primary_field})
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": expected_upsert_res, 
+                                                "pk_name": primary_field})
 
         # delete int64_pk = 10
         self.collection_wrap.delete(expr=expr)
         # re-query
-        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": []})
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [],
+                                                "pk_name": primary_field})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_bitmap_offset_cache_and_mmap(self, request):
@@ -2207,8 +2219,10 @@ class TestMixScenes(TestcaseBase):
         self.collection_wrap.load()
 
         # query before upsert
-        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": []})
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [],
+                                                "pk_name": primary_field})
 
         # upsert int64_pk = 33333
         upsert_data = cf.gen_field_values(self.collection_wrap.schema, nb=1,
@@ -2216,14 +2230,18 @@ class TestMixScenes(TestcaseBase):
         self.collection_wrap.upsert(data=list(upsert_data.values()))
         # re-query
         expected_upsert_res = [{k: v[0] for k, v in upsert_data.items() if k != DataType.FLOAT_VECTOR.name}]
-        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": expected_upsert_res, "primary_field": primary_field})
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": expected_upsert_res, 
+                                                "pk_name": primary_field})
 
         # delete int64_pk = 33333
         self.collection_wrap.delete(expr=expr)
         # re-query
-        self.collection_wrap.query(expr=expr, output_fields=scalar_fields, check_task=CheckTasks.check_query_results,
-                                   check_items={"exp_res": []})
+        self.collection_wrap.query(expr=expr, output_fields=scalar_fields,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={"exp_res": [],
+                                                "pk_name": primary_field})
 
         # search
         expr_left, expr_right = Expr.GT(Expr.SUB('INT64', 37).subset, 13).value, Expr.LIKE('VARCHAR', '%a').value
@@ -2326,7 +2344,11 @@ class TestGroupSearch(TestCaseClassBase):
                     self.primary_field: FieldParams(is_primary=True).to_dict,
                     DataType.FLOAT16_VECTOR.name: FieldParams(dim=31).to_dict,
                     DataType.FLOAT_VECTOR.name: FieldParams(dim=64).to_dict,
-                    DataType.BFLOAT16_VECTOR.name: FieldParams(dim=24).to_dict
+                    DataType.BFLOAT16_VECTOR.name: FieldParams(dim=24).to_dict,
+                    DataType.VARCHAR.name: FieldParams(nullable=True).to_dict,
+                    DataType.INT8.name: FieldParams(nullable=True).to_dict,
+                    DataType.INT64.name: FieldParams(nullable=True).to_dict,
+                    DataType.BOOL.name: FieldParams(nullable=True).to_dict
                 },
                 auto_id=True
             )
@@ -2345,11 +2367,20 @@ class TestGroupSearch(TestCaseClassBase):
             string_values = pd.Series(data=[str(i) for i in range(nb)], dtype="string")
             data = [string_values]
             for i in range(len(self.vector_fields)):
-                data.append(cf.gen_vectors(dim=self.dims[i], nb=nb, vector_data_type=self.vector_fields[i]))
-            data.append(pd.Series(data=[np.int8(i) for i in range(nb)], dtype="int8"))
-            data.append(pd.Series(data=[np.int64(i) for i in range(nb)], dtype="int64"))
-            data.append(pd.Series(data=[np.bool_(i) for i in range(nb)], dtype="bool"))
-            data.append(pd.Series(data=[str(i) for i in range(nb)], dtype="string"))
+                data.append(cf.gen_vectors(dim=self.dims[i],
+                                           nb=nb,
+                                           vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap,
+                                                                                             self.vector_fields[i])))
+            if i%5 != 0:
+                data.append(pd.Series(data=[np.int8(i)  for i in range(nb)], dtype="int8"))
+                data.append(pd.Series(data=[np.int64(i) for i in range(nb)], dtype="int64"))
+                data.append(pd.Series(data=[np.bool_(i) for i in range(nb)], dtype="bool"))
+                data.append(pd.Series(data=[str(i) for i in range(nb)], dtype="string"))
+            else:
+                data.append(pd.Series(data=[None for _ in range(nb)], dtype="int8"))
+                data.append(pd.Series(data=[None for _ in range(nb)], dtype="int64"))
+                data.append(pd.Series(data=[None for _ in range(nb)], dtype="bool"))
+                data.append(pd.Series(data=[None for _ in range(nb)], dtype="string"))
             self.collection_wrap.insert(data)
 
         # flush collection, segment sealed
@@ -2384,7 +2415,7 @@ class TestGroupSearch(TestCaseClassBase):
         limit = 50
         group_size = 5
         for j in range(len(self.vector_fields)):
-            search_vectors = cf.gen_vectors(nq, dim=self.dims[j], vector_data_type=self.vector_fields[j])
+            search_vectors = cf.gen_vectors(nq, dim=self.dims[j], vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap, self.vector_fields[j]))
             search_params = {"params": cf.get_search_params_params(self.index_types[j])}
             # when strict_group_size=true, it shall return results with entities = limit * group_size
             res1 = self.collection_wrap.search(data=search_vectors, anns_field=self.vector_fields[j],
@@ -2424,7 +2455,7 @@ class TestGroupSearch(TestCaseClassBase):
         req_list = []
         for j in range(len(self.vector_fields)):
             search_params = {
-                "data": cf.gen_vectors(nq, dim=self.dims[j], vector_data_type=self.vector_fields[j]),
+                "data": cf.gen_vectors(nq, dim=self.dims[j], vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap, self.vector_fields[j])),
                 "anns_field": self.vector_fields[j],
                 "param": {"params": cf.get_search_params_params(self.index_types[j])},
                 "limit": limit,
@@ -2473,7 +2504,9 @@ class TestGroupSearch(TestCaseClassBase):
         req_list = []
         for i in range(len(self.vector_fields)):
             search_param = {
-                "data": cf.gen_vectors(ct.default_nq, dim=self.dims[i], vector_data_type=self.vector_fields[i]),
+                "data": cf.gen_vectors(ct.default_nq, dim=self.dims[i],
+                                       vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap,
+                                                                                         self.vector_fields[i])),
                 "anns_field": self.vector_fields[i],
                 "param": {},
                 "limit": ct.default_limit,
@@ -2497,7 +2530,7 @@ class TestGroupSearch(TestCaseClassBase):
         req_list = []
         for i in range(1, len(self.vector_fields)):
             search_param = {
-                "data": cf.gen_vectors(ct.default_nq, dim=self.dims[i], vector_data_type=self.vector_fields[i]),
+                "data": cf.gen_vectors(ct.default_nq, dim=self.dims[i], vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap, self.vector_fields[i])),
                 "anns_field": self.vector_fields[i],
                 "param": {},
                 "limit": ct.default_limit,
@@ -2519,7 +2552,9 @@ class TestGroupSearch(TestCaseClassBase):
         nq = 2
         limit = 15
         for j in range(len(self.vector_fields)):
-            search_vectors = cf.gen_vectors(nq, dim=self.dims[j], vector_data_type=self.vector_fields[j])
+            search_vectors = cf.gen_vectors(nq, dim=self.dims[j],
+                                            vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap,
+                                                                                              self.vector_fields[j]))
             search_params = {"params": cf.get_search_params_params(self.index_types[j])}
             res1 = self.collection_wrap.search(data=search_vectors, anns_field=self.vector_fields[j],
                                                param=search_params, limit=limit,
@@ -2561,7 +2596,7 @@ class TestGroupSearch(TestCaseClassBase):
         default_search_exp = f"{self.primary_field} >= 0"
         grpby_field = self.inverted_string_field
         default_search_field = self.vector_fields[1]
-        search_vectors = cf.gen_vectors(1, dim=self.dims[1], vector_data_type=self.vector_fields[1])
+        search_vectors = cf.gen_vectors(1, dim=self.dims[1], vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap, self.vector_fields[1]))
         all_pages_ids = []
         all_pages_grpby_field_values = []
         for r in range(page_rounds):
@@ -2603,7 +2638,7 @@ class TestGroupSearch(TestCaseClassBase):
         default_search_exp = f"{self.primary_field} >= 0"
         grpby_field = self.inverted_string_field
         default_search_field = self.vector_fields[1]
-        search_vectors = cf.gen_vectors(1, dim=self.dims[1], vector_data_type=self.vector_fields[1])
+        search_vectors = cf.gen_vectors(1, dim=self.dims[1], vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap, self.vector_fields[1]))
         all_pages_ids = []
         all_pages_grpby_field_values = []
         res_count = limit * group_size
@@ -2655,7 +2690,7 @@ class TestGroupSearch(TestCaseClassBase):
         """
         group_by_field = self.inverted_string_field
         default_search_field = self.vector_fields[1]
-        search_vectors = cf.gen_vectors(1, dim=self.dims[1], vector_data_type=self.vector_fields[1])
+        search_vectors = cf.gen_vectors(1, dim=self.dims[1], vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap, self.vector_fields[1]))
         search_params = {}
         limit = 10
         max_group_size = 10

@@ -17,6 +17,8 @@
 #include <string>
 #include <vector>
 
+#include "cachinglayer/Manager.h"
+#include "common/type_c.h"
 #include "common/Common.h"
 #include "common/FieldData.h"
 #include "common/Types.h"
@@ -972,5 +974,18 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
         }
     }
     return first;
+}
+
+// Get the globally configured cache warmup policy for the given content type.
+CacheWarmupPolicy
+getCacheWarmupPolicy(bool is_vector, bool is_index) {
+    auto& manager = milvus::cachinglayer::Manager::GetInstance();
+    if (is_index) {
+        return is_vector ? manager.getVectorIndexCacheWarmupPolicy()
+                         : manager.getScalarIndexCacheWarmupPolicy();
+    } else {
+        return is_vector ? manager.getVectorFieldCacheWarmupPolicy()
+                         : manager.getScalarFieldCacheWarmupPolicy();
+    }
 }
 }  // namespace milvus::segcore

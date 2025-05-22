@@ -1,27 +1,11 @@
-import numpy as np
-from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
-from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
-from pymilvus import (
-    FieldSchema, CollectionSchema, DataType,
-    Collection
-)
-from common.constants import *
+
 from utils.util_pymilvus import *
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
 from utils.util_log import test_log as log
 from base.client_base import TestcaseBase
-import heapq
-from time import sleep
-from decimal import Decimal, getcontext
-import decimal
-import multiprocessing
-import numbers
 import random
-import math
-import numpy
-import threading
 import pytest
 import pandas as pd
 from faker import Faker
@@ -64,7 +48,6 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:7]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -124,7 +107,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
     def random_primary_key(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.fixture(scope="function", params=ct.all_dense_vector_types)
     def vector_data_type(self, request):
         yield request.param
 
@@ -165,7 +148,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          vector_data_type=vector_data_type,
                                          nullable_fields={ct.default_float_field_name: null_data_percent})[0:5]
         # 2. generate search data
-        vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
+        vectors = cf.gen_vectors(nq, dim, vector_data_type)
         # 3. search after insert
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, default_limit,
@@ -176,6 +159,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": default_limit,
                                          "output_fields": [default_int64_field_name,
                                                            default_float_field_name]})
@@ -233,6 +217,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": limit,
+                                         "pk_name": ct.default_int64_field_name,
                                          "_async": _async,
                                          "output_fields": [ct.default_string_field_name,
                                                            ct.default_float_field_name]})
@@ -251,7 +236,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          vector_data_type=vector_data_type,
                                          default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:5]
         # 2. generate search data
-        vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
+        vectors = cf.gen_vectors(nq, dim, vector_data_type)
         # 3. search after insert
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, default_limit,
@@ -262,6 +247,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": default_limit,
                                          "output_fields": [default_int64_field_name,
                                                            default_float_field_name]})
@@ -280,7 +266,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                                     default_value_fields={
                                                         ct.default_float_field_name: np.float32(10.0)})[0]
         # 2. generate search data
-        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim, "FLOAT_VECTOR")
+        vectors = cf.gen_vectors(default_nq, default_dim, vector_data_type=DataType.FLOAT_VECTOR)
         # 3. search after insert
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
@@ -345,6 +331,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": limit,
                                          "_async": _async,
                                          "output_fields": output_fields})
@@ -365,7 +352,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          nullable_fields={ct.default_float_field_name: 1},
                                          default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:5]
         # 2. generate search data
-        vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
+        vectors = cf.gen_vectors(nq, dim, vector_data_type)
         # 3. search after insert
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, default_limit,
@@ -376,6 +363,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": default_limit,
                                          "output_fields": [default_int64_field_name,
                                                            default_float_field_name]})
@@ -410,6 +398,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": default_limit,
                                          "_async": _async,
                                          "output_fields": [ct.default_float_field_name,
@@ -458,6 +447,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": limit,
+                                         "pk_name": ct.default_int64_field_name,
                                          "_async": _async,
                                          "output_fields": [ct.default_string_field_name,
                                                            ct.default_float_field_name]})
@@ -479,7 +469,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         collection_w.load()
         # 2. search iterator
         search_params = {"metric_type": "L2"}
-        vectors = cf.gen_vectors_based_on_vector_type(1, dim, "FLOAT_VECTOR")
+        vectors = cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)
         collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
                                      check_task=CheckTasks.check_search_iterator,
                                      check_items={"batch_size": batch_size})
@@ -503,7 +493,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
             loaded_fields.append(default_float_field_name)
         collection_w.load(load_fields=loaded_fields)
         # 3. generate search data
-        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim)
+        vectors = cf.gen_vectors(default_nq, default_dim)
         # 4. search after partial load field with None data
         output_fields = [default_int64_field_name, default_float_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -513,6 +503,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
+                                         "pk_name": ct.default_int64_field_name,
                                          "limit": default_limit,
                                          "output_fields": output_fields})
 
@@ -536,7 +527,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                          nullable_fields={ct.default_float_field_name: 0.5})[0:5]
         collection_name = collection_w.name
         # 2. generate search data
-        vectors = cf.gen_vectors_based_on_vector_type(default_nq, default_dim)
+        vectors = cf.gen_vectors(default_nq, default_dim)
         # 3. search with expr "nullableFid == 0"
         search_exp = f"{ct.default_float_field_name} == 0"
         output_fields = [default_int64_field_name, default_float_field_name]
@@ -548,6 +539,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
                                          "limit": 1,
+                                         "pk_name": ct.default_int64_field_name,
                                          "output_fields": output_fields})
         # 4. drop collection
         collection_w.drop()

@@ -138,6 +138,14 @@ PostfixMatch(const std::string_view str, const std::string_view postfix) {
     return true;
 }
 
+inline bool
+InnerMatch(const std::string_view str, const std::string_view pattern) {
+    if (pattern.length() > str.length()) {
+        return false;
+    }
+    return str.find(pattern) != std::string::npos;
+}
+
 inline int64_t
 upper_align(int64_t value, int64_t align) {
     Assert(align > 0);

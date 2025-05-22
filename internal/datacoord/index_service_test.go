@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -31,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	"github.com/milvus-io/milvus/internal/datacoord/session"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -266,7 +266,6 @@ func TestServer_CreateIndex(t *testing.T) {
 				Value: "DISKANN",
 			},
 		}
-		s.indexNodeManager = session.NewNodeManager(ctx, defaultDataNodeCreatorFunc)
 		resp, err := s.CreateIndex(ctx, req)
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
@@ -284,10 +283,6 @@ func TestServer_CreateIndex(t *testing.T) {
 				Value: "true",
 			},
 		}
-		nodeManager := session.NewNodeManager(ctx, defaultDataNodeCreatorFunc)
-		s.indexNodeManager = nodeManager
-		mockNode := mocks.NewMockDataNodeClient(t)
-		nodeManager.SetClient(1001, mockNode)
 
 		resp, err := s.CreateIndex(ctx, req)
 		assert.Error(t, merr.CheckRPCCall(resp, err))
@@ -763,6 +758,7 @@ func TestServer_GetIndexState(t *testing.T) {
 		fieldID    = UniqueID(10)
 		indexID    = UniqueID(100)
 		segID      = UniqueID(1000)
+		buildID    = UniqueID(10000)
 		indexName  = "default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
@@ -1472,6 +1468,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 		IndexFileKeys:       nil,
 		IndexSerializedSize: 0,
 		WriteHandoff:        false,
+		CurrentIndexVersion: 7,
 	})
 	segIdx1.Insert(indexID+1, &model.SegmentIndex{
 		SegmentID:           segID,
@@ -1489,6 +1486,8 @@ func TestServer_DescribeIndex(t *testing.T) {
 		IndexFileKeys:       nil,
 		IndexSerializedSize: 0,
 		WriteHandoff:        false,
+		// deleted index
+		CurrentIndexVersion: 6,
 	})
 	segIdx1.Insert(indexID+3, &model.SegmentIndex{
 		SegmentID:           segID,
@@ -1545,28 +1544,30 @@ func TestServer_DescribeIndex(t *testing.T) {
 
 	segIdx2 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segIdx2.Insert(indexID, &model.SegmentIndex{
-		SegmentID:      segID - 1,
-		CollectionID:   collID,
-		PartitionID:    partID,
-		NumRows:        10000,
-		IndexID:        indexID,
-		BuildID:        buildID,
-		NodeID:         0,
-		IndexVersion:   1,
-		IndexState:     commonpb.IndexState_Finished,
-		CreatedUTCTime: createTS,
+		SegmentID:           segID - 1,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID,
+		BuildID:             buildID,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		CreatedUTCTime:      createTS,
+		CurrentIndexVersion: 6,
 	})
 	segIdx2.Insert(indexID+1, &model.SegmentIndex{
-		SegmentID:      segID - 1,
-		CollectionID:   collID,
-		PartitionID:    partID,
-		NumRows:        10000,
-		IndexID:        indexID + 1,
-		BuildID:        buildID + 1,
-		NodeID:         0,
-		IndexVersion:   1,
-		IndexState:     commonpb.IndexState_Finished,
-		CreatedUTCTime: createTS,
+		SegmentID:           segID - 1,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 1,
+		BuildID:             buildID + 1,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		CreatedUTCTime:      createTS,
+		CurrentIndexVersion: 6,
 	})
 	segIdx2.Insert(indexID+3, &model.SegmentIndex{
 		SegmentID:      segID - 1,
@@ -1594,16 +1595,17 @@ func TestServer_DescribeIndex(t *testing.T) {
 		CreatedUTCTime: createTS,
 	})
 	segIdx2.Insert(indexID+5, &model.SegmentIndex{
-		SegmentID:      segID - 1,
-		CollectionID:   collID,
-		PartitionID:    partID,
-		NumRows:        10000,
-		IndexID:        indexID + 5,
-		BuildID:        buildID + 5,
-		NodeID:         0,
-		IndexVersion:   1,
-		IndexState:     commonpb.IndexState_Finished,
-		CreatedUTCTime: createTS,
+		SegmentID:           segID - 1,
+		CollectionID:        collID,
+		PartitionID:         partID,
+		NumRows:             10000,
+		IndexID:             indexID + 5,
+		BuildID:             buildID + 5,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		CreatedUTCTime:      createTS,
+		CurrentIndexVersion: 6,
 	})
 	s.meta.indexMeta.segmentIndexes.Insert(segID-1, segIdx2)
 
@@ -1625,6 +1627,18 @@ func TestServer_DescribeIndex(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 5, len(resp.GetIndexInfos()))
+		minIndexVersion := int32(math.MaxInt32)
+		maxIndexVersion := int32(math.MinInt32)
+		for _, indexInfo := range resp.GetIndexInfos() {
+			if indexInfo.GetMinIndexVersion() < minIndexVersion {
+				minIndexVersion = indexInfo.GetMinIndexVersion()
+			}
+			if indexInfo.GetMaxIndexVersion() > maxIndexVersion {
+				maxIndexVersion = indexInfo.GetMaxIndexVersion()
+			}
+		}
+		assert.Equal(t, int32(7), minIndexVersion)
+		assert.Equal(t, int32(7), maxIndexVersion)
 	})
 
 	t.Run("describe after drop index", func(t *testing.T) {
@@ -2401,6 +2415,14 @@ func TestServer_GetIndexInfos(t *testing.T) {
 }
 
 func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
+	var (
+		collID    = UniqueID(1)
+		partID    = UniqueID(2)
+		segID     = UniqueID(1000)
+		indexID   = UniqueID(100)
+		fieldID   = UniqueID(10)
+		indexName = "default_idx"
+	)
 	segments := map[UniqueID]*SegmentInfo{
 		segID: {
 			SegmentInfo: &datapb.SegmentInfo{
@@ -2473,10 +2495,12 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 	for id, segment := range segments {
 		m.segments.SetSegment(id, segment)
 	}
-	s := &Server{meta: m}
+	indexInspector := &indexInspector{
+		meta: m,
+	}
 
 	t.Run("normal", func(t *testing.T) {
-		segments := s.getUnIndexTaskSegments(context.TODO())
+		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
 		assert.Equal(t, 1, len(segments))
 		assert.Equal(t, segID, segments[0].ID)
 
@@ -2499,7 +2523,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segments := s.getUnIndexTaskSegments(context.TODO())
+		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
 		assert.Equal(t, 1, len(segments))
 		assert.Equal(t, segID, segments[0].ID)
 	})
@@ -2512,7 +2536,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segments := s.getUnIndexTaskSegments(context.TODO())
+		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
 		assert.Equal(t, 0, len(segments))
 	})
 }
@@ -2624,6 +2648,7 @@ func TestValidateIndexParams(t *testing.T) {
 }
 
 func TestJsonIndex(t *testing.T) {
+	collID := UniqueID(1)
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
 	mock0Allocator := newMockAllocator(t)

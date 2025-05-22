@@ -74,7 +74,7 @@ func createAzureOpenAIEmbeddingClient(apiKey string, url string, resourceName st
 	return c, nil
 }
 
-func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, isAzure bool, credentials *credentials.CredentialsManager) (*OpenAIEmbeddingProvider, error) {
+func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, isAzure bool, credentials *credentials.Credentials) (*OpenAIEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
@@ -131,11 +131,11 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 	return &provider, nil
 }
 
-func NewOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.CredentialsManager) (*OpenAIEmbeddingProvider, error) {
+func NewOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials) (*OpenAIEmbeddingProvider, error) {
 	return newOpenAIEmbeddingProvider(fieldSchema, functionSchema, params, false, credentials)
 }
 
-func NewAzureOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.CredentialsManager) (*OpenAIEmbeddingProvider, error) {
+func NewAzureOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials) (*OpenAIEmbeddingProvider, error) {
 	return newOpenAIEmbeddingProvider(fieldSchema, functionSchema, params, true, credentials)
 }
 

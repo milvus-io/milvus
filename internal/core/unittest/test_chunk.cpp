@@ -67,7 +67,8 @@ TEST(chunk, test_int64_field) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, 1, array_vec);
-    auto span = std::dynamic_pointer_cast<FixedWidthChunk>(chunk)->Span();
+    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
+    auto span = fixed_chunk->Span();
     EXPECT_EQ(span.row_count(), data.size());
     for (size_t i = 0; i < data.size(); ++i) {
         auto n = *(int64_t*)((char*)span.data() + i * span.element_sizeof());
@@ -109,8 +110,8 @@ TEST(chunk, test_variable_field) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, 1, array_vec);
-    auto views = std::dynamic_pointer_cast<StringChunk>(chunk)->StringViews(
-        std::nullopt);
+    auto string_chunk = static_cast<StringChunk*>(chunk.get());
+    auto views = string_chunk->StringViews(std::nullopt);
     for (size_t i = 0; i < data.size(); ++i) {
         EXPECT_EQ(views.first[i], data[i]);
     }
@@ -154,8 +155,8 @@ TEST(chunk, test_variable_field_nullable) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, 1, array_vec);
-    auto views = std::dynamic_pointer_cast<StringChunk>(chunk)->StringViews(
-        std::nullopt);
+    auto string_chunk = static_cast<StringChunk*>(chunk.get());
+    auto views = string_chunk->StringViews(std::nullopt);
     for (size_t i = 0; i < data.size(); ++i) {
         EXPECT_EQ(views.second[i], validity[i]);
         if (validity[i]) {
@@ -211,10 +212,9 @@ TEST(chunk, test_json_field) {
                              std::nullopt);
         arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
         auto chunk = create_chunk(field_meta, 1, array_vec);
+        auto json_chunk = static_cast<JSONChunk*>(chunk.get());
         {
-            auto [views, valid] =
-                std::dynamic_pointer_cast<JSONChunk>(chunk)->StringViews(
-                    std::nullopt);
+            auto [views, valid] = json_chunk->StringViews(std::nullopt);
             EXPECT_EQ(row_num, views.size());
             for (size_t i = 0; i < row_num; ++i) {
                 EXPECT_EQ(views[i], data[i].data());
@@ -225,8 +225,7 @@ TEST(chunk, test_json_field) {
             auto start = 10;
             auto len = 20;
             auto [views, valid] =
-                std::dynamic_pointer_cast<JSONChunk>(chunk)->StringViews(
-                    std::make_pair(start, len));
+                json_chunk->StringViews(std::make_pair(start, len));
             EXPECT_EQ(len, views.size());
             for (size_t i = 0; i < len; ++i) {
                 EXPECT_EQ(views[i], data[i].data());
@@ -243,10 +242,9 @@ TEST(chunk, test_json_field) {
                              std::nullopt);
         arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
         auto chunk = create_chunk(field_meta, 1, array_vec);
+        auto json_chunk = static_cast<JSONChunk*>(chunk.get());
         {
-            auto [views, valid] =
-                std::dynamic_pointer_cast<JSONChunk>(chunk)->StringViews(
-                    std::nullopt);
+            auto [views, valid] = json_chunk->StringViews(std::nullopt);
             EXPECT_EQ(row_num, views.size());
             for (size_t i = 0; i < row_num; ++i) {
                 EXPECT_EQ(views[i], data[i].data());
@@ -257,8 +255,7 @@ TEST(chunk, test_json_field) {
             auto start = 10;
             auto len = 20;
             auto [views, valid] =
-                std::dynamic_pointer_cast<JSONChunk>(chunk)->StringViews(
-                    std::make_pair(start, len));
+                json_chunk->StringViews(std::make_pair(start, len));
             EXPECT_EQ(len, views.size());
             for (size_t i = 0; i < len; ++i) {
                 EXPECT_EQ(views[i], data[i].data());
@@ -268,26 +265,20 @@ TEST(chunk, test_json_field) {
         {
             auto start = -1;
             auto len = 5;
-            EXPECT_THROW(
-                std::dynamic_pointer_cast<JSONChunk>(chunk)->StringViews(
-                    std::make_pair(start, len)),
-                milvus::SegcoreError);
+            EXPECT_THROW(json_chunk->StringViews(std::make_pair(start, len)),
+                         milvus::SegcoreError);
         }
         {
             auto start = 0;
             auto len = row_num + 1;
-            EXPECT_THROW(
-                std::dynamic_pointer_cast<JSONChunk>(chunk)->StringViews(
-                    std::make_pair(start, len)),
-                milvus::SegcoreError);
+            EXPECT_THROW(json_chunk->StringViews(std::make_pair(start, len)),
+                         milvus::SegcoreError);
         }
         {
             auto start = 95;
             auto len = 11;
-            EXPECT_THROW(
-                std::dynamic_pointer_cast<JSONChunk>(chunk)->StringViews(
-                    std::make_pair(start, len)),
-                milvus::SegcoreError);
+            EXPECT_THROW(json_chunk->StringViews(std::make_pair(start, len)),
+                         milvus::SegcoreError);
         }
     }
 }
@@ -329,7 +320,7 @@ TEST(chunk, test_null_int64) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, 1, array_vec);
-    auto fixed_chunk = std::dynamic_pointer_cast<FixedWidthChunk>(chunk);
+    auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
     auto span = fixed_chunk->Span();
     EXPECT_EQ(span.row_count(), data.size());
 
@@ -390,8 +381,8 @@ TEST(chunk, test_array) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, 1, array_vec);
-    auto [views, valid] =
-        std::dynamic_pointer_cast<ArrayChunk>(chunk)->Views(std::nullopt);
+    auto array_chunk = static_cast<ArrayChunk*>(chunk.get());
+    auto [views, valid] = array_chunk->Views(std::nullopt);
     EXPECT_EQ(views.size(), 1);
     auto& arr = views[0];
     for (size_t i = 0; i < arr.length(); ++i) {
@@ -453,8 +444,8 @@ TEST(chunk, test_null_array) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, 1, array_vec);
-    auto [views, valid] =
-        std::dynamic_pointer_cast<ArrayChunk>(chunk)->Views(std::nullopt);
+    auto array_chunk = static_cast<ArrayChunk*>(chunk.get());
+    auto [views, valid] = array_chunk->Views(std::nullopt);
 
     EXPECT_EQ(views.size(), array_count);
     EXPECT_EQ(valid.size(), array_count);
@@ -527,10 +518,9 @@ TEST(chunk, test_array_views) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, 1, array_vec);
-
+    auto array_chunk = static_cast<ArrayChunk*>(chunk.get());
     {
-        auto [views, valid] =
-            std::dynamic_pointer_cast<ArrayChunk>(chunk)->Views(std::nullopt);
+        auto [views, valid] = array_chunk->Views(std::nullopt);
         EXPECT_EQ(views.size(), array_count);
         for (auto i = 0; i < array_count; i++) {
             auto& arr = views[i];
@@ -543,9 +533,7 @@ TEST(chunk, test_array_views) {
     {
         auto start = 2;
         auto len = 5;
-        auto [views, valid] =
-            std::dynamic_pointer_cast<ArrayChunk>(chunk)->Views(
-                std::make_pair(start, len));
+        auto [views, valid] = array_chunk->Views(std::make_pair(start, len));
         EXPECT_EQ(views.size(), len);
         for (auto i = 0; i < len; i++) {
             auto& arr = views[i];
@@ -558,22 +546,19 @@ TEST(chunk, test_array_views) {
     {
         auto start = -1;
         auto len = 5;
-        EXPECT_THROW(std::dynamic_pointer_cast<ArrayChunk>(chunk)->Views(
-                         std::make_pair(start, len)),
+        EXPECT_THROW(array_chunk->Views(std::make_pair(start, len)),
                      milvus::SegcoreError);
     }
     {
         auto start = 0;
         auto len = array_count + 1;
-        EXPECT_THROW(std::dynamic_pointer_cast<ArrayChunk>(chunk)->Views(
-                         std::make_pair(start, len)),
+        EXPECT_THROW(array_chunk->Views(std::make_pair(start, len)),
                      milvus::SegcoreError);
     }
     {
         auto start = 5;
         auto len = 7;
-        EXPECT_THROW(std::dynamic_pointer_cast<ArrayChunk>(chunk)->Views(
-                         std::make_pair(start, len)),
+        EXPECT_THROW(array_chunk->Views(std::make_pair(start, len)),
                      milvus::SegcoreError);
     }
 }
@@ -615,7 +600,8 @@ TEST(chunk, test_sparse_float) {
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, kTestSparseDim, array_vec);
-    auto vec = std::dynamic_pointer_cast<SparseFloatVectorChunk>(chunk)->Vec();
+    auto vec_chunk = static_cast<SparseFloatVectorChunk*>(chunk.get());
+    auto vec = vec_chunk->Vec();
     for (size_t i = 0; i < n_rows; ++i) {
         auto v1 = vec[i];
         auto v2 = vecs[i];

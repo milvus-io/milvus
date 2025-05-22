@@ -42,11 +42,11 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	rocksmqimpl "github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/nmq"
 	"github.com/milvus-io/milvus/pkg/v2/tracer"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
@@ -70,8 +70,11 @@ func init() {
 	metrics.RegisterStorageMetrics(Registry.GoRegistry)
 }
 
-func stopRocksmq() {
-	rocksmqimpl.CloseRocksMQ()
+// stopRocksmqIfUsed closes the RocksMQ if it is used.
+func stopRocksmqIfUsed() {
+	if name := util.MustSelectWALName(); name == util.WALTypeRocksmq {
+		rocksmqimpl.CloseRocksMQ()
+	}
 }
 
 type component interface {
@@ -332,13 +335,6 @@ func (mr *MilvusRoles) Run() {
 		}
 
 		params := paramtable.Get()
-		if paramtable.Get().RocksmqEnable() {
-			defer stopRocksmq()
-		} else if paramtable.Get().NatsmqEnable() {
-			defer nmq.CloseNatsMQ()
-		} else {
-			panic("only support Rocksmq and Natsmq in standalone mode")
-		}
 		if params.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 			// Start etcd server.
 			etcd.InitEtcdServer(
@@ -350,6 +346,7 @@ func (mr *MilvusRoles) Run() {
 			defer etcd.StopEtcdServer()
 		}
 		paramtable.SetRole(typeutil.StandaloneRole)
+		defer stopRocksmqIfUsed()
 	} else {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode); err != nil {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
@@ -506,13 +503,22 @@ func (mr *MilvusRoles) Run() {
 	log.Info("All coordinators have stopped")
 
 	// stop nodes
-	nodes := []component{queryNode, dataNode, streamingNode}
-	for idx, node := range nodes {
+	nodes := []component{streamingNode, queryNode, dataNode}
+	stopNodeWG := &sync.WaitGroup{}
+	for _, node := range nodes {
 		if node != nil {
-			log.Info("stop node", zap.Int("idx", idx), zap.Any("node", node))
-			node.Stop()
+			stopNodeWG.Add(1)
+			go func() {
+				defer func() {
+					stopNodeWG.Done()
+					log.Info("stop node done", zap.Any("node", node))
+				}()
+				log.Info("stop node...", zap.Any("node", node))
+				node.Stop()
+			}()
 		}
 	}
+	stopNodeWG.Wait()
 	log.Info("All nodes have stopped")
 
 	if proxy != nil {

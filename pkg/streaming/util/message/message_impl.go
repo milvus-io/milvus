@@ -33,7 +33,7 @@ func (m *messageImpl) Version() Version {
 func (m *messageImpl) Payload() []byte {
 	if ch := m.cipherHeader(); ch != nil {
 		cipher := mustGetCipher()
-		decryptor, err := cipher.GetDecryptor(ch.EzId, ch.SafeKey)
+		decryptor, err := cipher.GetDecryptor(ch.EzId, ch.CollectionId, ch.SafeKey)
 		if err != nil {
 			panic(fmt.Sprintf("can not get decryptor for message: %s", err))
 		}
@@ -49,6 +49,11 @@ func (m *messageImpl) Payload() []byte {
 // Properties returns the message properties.
 func (m *messageImpl) Properties() RProperties {
 	return m.properties
+}
+
+// IsPersisted returns true if the message is persisted.
+func (m *messageImpl) IsPersisted() bool {
+	return !m.properties.Exist(messageNotPersisteted)
 }
 
 // EstimateSize returns the estimated size of current message.
@@ -197,6 +202,9 @@ func (m *messageImpl) VChannel() string {
 // BroadcastHeader returns the broadcast header of current message.
 func (m *messageImpl) BroadcastHeader() *BroadcastHeader {
 	header := m.broadcastHeader()
+	if header == nil {
+		return nil
+	}
 	return newBroadcastHeaderFromProto(header)
 }
 

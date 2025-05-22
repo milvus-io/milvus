@@ -23,10 +23,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
@@ -359,121 +357,6 @@ func TestPrintBinlogFiles(t *testing.T) {
 	binlogFiles = append(binlogFiles, "test")
 
 	PrintBinlogFiles(binlogFiles)
-	for _, file := range binlogFiles {
-		_ = os.RemoveAll(file)
-	}
-}
-
-func TestPrintDDFiles(t *testing.T) {
-	dataDefinitionCodec := NewDataDefinitionCodec(int64(1))
-	ts := []Timestamp{
-		1,
-		2,
-		3,
-		4,
-	}
-	collID := int64(1)
-	partitionID := int64(1)
-	collName := "test"
-	partitionName := "test"
-	createCollReq := msgpb.CreateCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_CreateCollection,
-			MsgID:     1,
-			Timestamp: 1,
-			SourceID:  1,
-		},
-		CollectionID:   collID,
-		Schema:         make([]byte, 0),
-		CollectionName: collName,
-		DbName:         "DbName",
-		DbID:           UniqueID(0),
-	}
-	createCollString, err := proto.Marshal(&createCollReq)
-	assert.NoError(t, err)
-
-	dropCollReq := msgpb.DropCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_DropCollection,
-			MsgID:     2,
-			Timestamp: 2,
-			SourceID:  2,
-		},
-		CollectionID:   collID,
-		CollectionName: collName,
-		DbName:         "DbName",
-		DbID:           UniqueID(0),
-	}
-	dropCollString, err := proto.Marshal(&dropCollReq)
-	assert.NoError(t, err)
-
-	createPartitionReq := msgpb.CreatePartitionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_CreatePartition,
-			MsgID:     3,
-			Timestamp: 3,
-			SourceID:  3,
-		},
-		CollectionID:   collID,
-		PartitionID:    partitionID,
-		CollectionName: collName,
-		PartitionName:  partitionName,
-		DbName:         "DbName",
-		DbID:           UniqueID(0),
-	}
-	createPartitionString, err := proto.Marshal(&createPartitionReq)
-	assert.NoError(t, err)
-
-	dropPartitionReq := msgpb.DropPartitionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_DropPartition,
-			MsgID:     4,
-			Timestamp: 4,
-			SourceID:  4,
-		},
-		CollectionID:   collID,
-		PartitionID:    partitionID,
-		CollectionName: collName,
-		PartitionName:  partitionName,
-		DbName:         "DbName",
-		DbID:           UniqueID(0),
-	}
-	dropPartitionString, err := proto.Marshal(&dropPartitionReq)
-	assert.NoError(t, err)
-	ddRequests := []string{
-		string(createCollString),
-		string(dropCollString),
-		string(createPartitionString),
-		string(dropPartitionString),
-	}
-	eventTypeCodes := []EventTypeCode{
-		CreateCollectionEventType,
-		DropCollectionEventType,
-		CreatePartitionEventType,
-		DropPartitionEventType,
-	}
-	blobs, err := dataDefinitionCodec.Serialize(ts, ddRequests, eventTypeCodes)
-	assert.NoError(t, err)
-	var binlogFiles []string
-	for index, blob := range blobs {
-		blob.Key = fmt.Sprintf("1/data_definition/3/4/5/%d", 99)
-		fileName := fmt.Sprintf("/tmp/ddblob_%d.db", index)
-		binlogFiles = append(binlogFiles, fileName)
-		fd, err := os.Create(fileName)
-		assert.NoError(t, err)
-		num, err := fd.Write(blob.GetValue())
-		assert.NoError(t, err)
-		assert.Equal(t, num, len(blob.GetValue()))
-		err = fd.Close()
-		assert.NoError(t, err)
-	}
-	resultTs, resultRequests, err := dataDefinitionCodec.Deserialize(blobs)
-	assert.NoError(t, err)
-	assert.Equal(t, resultTs, ts)
-	assert.Equal(t, resultRequests, ddRequests)
-
-	PrintBinlogFiles(binlogFiles)
-
 	for _, file := range binlogFiles {
 		_ = os.RemoveAll(file)
 	}

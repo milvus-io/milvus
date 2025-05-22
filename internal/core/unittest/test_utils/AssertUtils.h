@@ -15,10 +15,11 @@
 #include <vector>
 #include <memory>
 
+#include "common/QueryResult.h"
 #include "common/Types.h"
+#include "index/ScalarIndex.h"
 
 using milvus::index::ScalarIndex;
-
 namespace {
 
 bool

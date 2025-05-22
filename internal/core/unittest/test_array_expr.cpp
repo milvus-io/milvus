@@ -1430,6 +1430,73 @@ TEST(Expr, TestArrayContains) {
     }
 }
 
+TEST(Expr, TestArrayContainsEmptyValues) {
+    auto schema = std::make_shared<Schema>();
+    auto int_array_fid =
+        schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT8);
+    auto long_array_fid =
+        schema->AddDebugField("long_array", DataType::ARRAY, DataType::INT64);
+    auto bool_array_fid =
+        schema->AddDebugField("bool_array", DataType::ARRAY, DataType::BOOL);
+    auto float_array_fid =
+        schema->AddDebugField("float_array", DataType::ARRAY, DataType::FLOAT);
+    auto double_array_fid = schema->AddDebugField(
+        "double_array", DataType::ARRAY, DataType::DOUBLE);
+    auto string_array_fid = schema->AddDebugField(
+        "string_array", DataType::ARRAY, DataType::VARCHAR);
+    schema->set_primary_field_id(schema->AddDebugField("id", DataType::INT64));
+    std::vector<FieldId> fields = {
+        int_array_fid,
+        long_array_fid,
+        bool_array_fid,
+        float_array_fid,
+        double_array_fid,
+        string_array_fid,
+    };
+
+    auto dummy_seg = CreateGrowingSegment(schema, empty_index_meta);
+
+    int N = 1000;
+    std::vector<int> age_col;
+    int num_iters = 100;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        dummy_seg->PreInsert(N);
+        dummy_seg->Insert(iter * N,
+                          N,
+                          raw_data.row_ids_.data(),
+                          raw_data.timestamps_.data(),
+                          raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(dummy_seg.get());
+    std::vector<proto::plan::GenericValue> empty_values;
+
+    for (auto field_id : fields) {
+        auto start = std::chrono::steady_clock::now();
+        auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
+            expr::ColumnInfo(field_id, DataType::ARRAY),
+            proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+            true,
+            empty_values);
+
+        BitsetType final;
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        final =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
+        std::cout << "cost"
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         std::chrono::steady_clock::now() - start)
+                         .count()
+                  << std::endl;
+        EXPECT_EQ(final.size(), N * num_iters);
+        for (int i = 0; i < N * num_iters; ++i) {
+            ASSERT_EQ(final[i], true);
+        }
+    }
+}
+
 TEST(Expr, TestArrayBinaryArith) {
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);

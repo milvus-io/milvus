@@ -61,13 +61,13 @@ func TestCreateCollectionFast(t *testing.T) {
 	prepare, _ := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), hp.TNewDataOption())
 	prepare.FlushData(ctx, t, mc, collName)
 
-	countRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter("").WithOutputFields(common.QueryCountFieldName))
+	countRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter("").WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ := countRes.Fields[0].GetAsInt64(0)
 	require.EqualValues(t, common.DefaultNb, count)
 
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-	resSearch, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, vectors))
+	resSearch, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
 }

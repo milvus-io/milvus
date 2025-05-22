@@ -24,7 +24,7 @@
 
 #include "common/FieldDataInterface.h"
 #include "common/Channel.h"
-#include "parquet/arrow/reader.h"
+#include "common/ArrowDataWrapper.h"
 
 namespace milvus {
 
@@ -155,24 +155,6 @@ class FieldData<Int8Vector> : public FieldDataImpl<int8, false> {
 using FieldDataPtr = std::shared_ptr<FieldDataBase>;
 using FieldDataChannel = Channel<FieldDataPtr>;
 using FieldDataChannelPtr = std::shared_ptr<FieldDataChannel>;
-
-struct ArrowDataWrapper {
-    ArrowDataWrapper() = default;
-    ArrowDataWrapper(std::shared_ptr<arrow::RecordBatchReader> reader,
-                     std::shared_ptr<parquet::arrow::FileReader> arrow_reader,
-                     std::shared_ptr<uint8_t[]> file_data)
-        : reader(std::move(reader)),
-          arrow_reader(std::move(arrow_reader)),
-          file_data(std::move(file_data)) {
-    }
-    std::shared_ptr<arrow::RecordBatchReader> reader;
-    // file reader must outlive the record batch reader
-    std::shared_ptr<parquet::arrow::FileReader> arrow_reader;
-    // underlying file data memory, must outlive the arrow reader
-    std::shared_ptr<uint8_t[]> file_data;
-    std::vector<std::shared_ptr<arrow::Table>> arrow_tables;
-};
-using ArrowReaderChannel = Channel<std::shared_ptr<milvus::ArrowDataWrapper>>;
 
 FieldDataPtr
 InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows);

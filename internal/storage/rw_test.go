@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -75,6 +76,7 @@ type PackedBinlogRecordSuite struct {
 	partitionID  UniqueID
 	segmentID    UniqueID
 	schema       *schemapb.CollectionSchema
+	bucketName   string
 	rootPath     string
 	maxRowNum    int64
 	chunkSize    uint64
@@ -93,6 +95,7 @@ func (s *PackedBinlogRecordSuite) SetupTest() {
 	s.segmentID = UniqueID(0)
 	s.schema = generateTestSchema()
 	s.rootPath = "/tmp"
+	s.bucketName = "a-bucket"
 	s.maxRowNum = int64(1000)
 	s.chunkSize = uint64(1024)
 }
@@ -114,6 +117,7 @@ func genTestColumnGroups(schema *schemapb.CollectionSchema) []storagecommon.Colu
 }
 
 func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	rows := 10000
 	readBatchSize := 1024
@@ -128,7 +132,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 		WithColumnGroups(columnGroups),
 	}
 
-	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
+	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.bucketName, s.rootPath, s.maxRowNum, wOption...)
 	s.NoError(err)
 
 	blobs, err := generateTestData(rows)
@@ -212,7 +216,7 @@ func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 	rec, err := ValueSerializer([]*Value{v}, s.schema.Fields)
 	s.NoError(err)
 
-	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
+	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.bucketName, s.rootPath, s.maxRowNum, wOption...)
 	s.NoError(err)
 	err = w.Write(rec)
 	s.NoError(err)
@@ -233,7 +237,7 @@ func (s *PackedBinlogRecordSuite) TestUnsuportedStorageVersion() {
 	wOption := []RwOption{
 		WithVersion(-1),
 	}
-	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
+	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.bucketName, s.rootPath, s.maxRowNum, wOption...)
 	s.Error(err)
 
 	rOption := []RwOption{
@@ -252,7 +256,7 @@ func (s *PackedBinlogRecordSuite) TestNoPrimaryKeyError() {
 		WithVersion(StorageV2),
 		WithColumnGroups(columnGroups),
 	}
-	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
+	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.bucketName, s.rootPath, s.maxRowNum, wOption...)
 	s.Error(err)
 }
 
@@ -265,7 +269,7 @@ func (s *PackedBinlogRecordSuite) TestConvertArrowSchemaError() {
 		WithVersion(StorageV2),
 		WithColumnGroups(columnGroups),
 	}
-	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
+	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.bucketName, s.rootPath, s.maxRowNum, wOption...)
 	s.Error(err)
 }
 
@@ -284,7 +288,7 @@ func (s *PackedBinlogRecordSuite) TestAllocIDExhausedError() {
 		WithColumnGroups(columnGroups),
 	}
 	logIDAlloc := allocator.NewLocalAllocator(1, 1)
-	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, logIDAlloc, s.chunkSize, s.rootPath, s.maxRowNum, wOption...)
+	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, logIDAlloc, s.chunkSize, s.bucketName, s.rootPath, s.maxRowNum, wOption...)
 	s.NoError(err)
 
 	size := 10

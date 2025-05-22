@@ -72,20 +72,6 @@ func TestCompactionExecutor(t *testing.T) {
 		executor.stopTask(planID)
 	})
 
-	t.Run("Test execute task slot usage larger than free slop", func(t *testing.T) {
-		paramtable.Get().Init(paramtable.NewBaseTable())
-		mockC := NewMockCompactor(t)
-		mockC.EXPECT().GetSlotUsage().Return(100)
-		executor := NewExecutor()
-
-		succeed, err := executor.Execute(mockC)
-		assert.Equal(t, false, succeed)
-		assert.True(t, errors.Is(err, merr.ErrDataNodeSlotExhausted))
-
-		assert.EqualValues(t, 0, len(executor.taskCh))
-		assert.EqualValues(t, 0, executor.executing.Len())
-	})
-
 	t.Run("Test execute task with slot=0", func(t *testing.T) {
 		paramtable.Get().Init(paramtable.NewBaseTable())
 		planID := int64(1)
@@ -99,8 +85,8 @@ func TestCompactionExecutor(t *testing.T) {
 		succeed, err := executor.Execute(mockC)
 		assert.Equal(t, true, succeed)
 		assert.NoError(t, err)
-		assert.Equal(t, int64(8), executor.Slots())
-		assert.Equal(t, int64(8), executor.usingSlots)
+		assert.Equal(t, int64(4), executor.Slots())
+		assert.Equal(t, int64(4), executor.usingSlots)
 
 		assert.EqualValues(t, 1, len(executor.taskCh))
 		assert.EqualValues(t, 1, executor.executing.Len())

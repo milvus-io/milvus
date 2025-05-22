@@ -89,6 +89,82 @@ func (s *GenericBaseSuite) TestIndexAccess() {
 	})
 }
 
+func (s *GenericBaseSuite) TestIndexAccess_Nullable() {
+	name := fmt.Sprintf("test_%d", rand.Intn(10))
+
+	s.Run("compact_mode", func() {
+		values := []int64{1, 2, 3}
+		validData := []bool{true, false, true, false, true}
+		gb := &genericColumnBase[int64]{
+			name:       name,
+			fieldType:  entity.FieldTypeInt64,
+			values:     values,
+			nullable:   true,
+			validData:  validData,
+			sparseMode: false,
+		}
+
+		err := gb.ValidateNullable()
+		s.NoError(err)
+
+		for idx, valid := range validData {
+			if valid {
+				v, err := gb.Value(idx)
+				s.NoError(err)
+				s.Equal(values[gb.indexMapping[idx]], v)
+
+				s.NotPanics(func() {
+					v = gb.MustValue(idx)
+				})
+				s.Equal(values[gb.indexMapping[idx]], v)
+			} else {
+				result, err := gb.IsNull(idx)
+				s.NoError(err)
+				s.True(result)
+
+				_, err = gb.Value(idx)
+				s.Error(err)
+			}
+		}
+	})
+
+	s.Run("sparse_mode", func() {
+		values := []int64{1, 0, 2, 0, 3}
+		validData := []bool{true, false, true, false, true}
+		gb := &genericColumnBase[int64]{
+			name:       name,
+			fieldType:  entity.FieldTypeInt64,
+			values:     values,
+			nullable:   true,
+			validData:  validData,
+			sparseMode: true,
+		}
+
+		err := gb.ValidateNullable()
+		s.NoError(err)
+
+		for idx, valid := range validData {
+			if valid {
+				v, err := gb.Value(idx)
+				s.NoError(err)
+				s.Equal(values[idx], v)
+
+				s.NotPanics(func() {
+					v = gb.MustValue(idx)
+				})
+				s.Equal(values[idx], v)
+			} else {
+				result, err := gb.IsNull(idx)
+				s.NoError(err)
+				s.True(result)
+
+				_, err = gb.Value(idx)
+				s.NoError(err)
+			}
+		}
+	})
+}
+
 func (s *GenericBaseSuite) TestSlice() {
 	name := fmt.Sprintf("test_%d", rand.Intn(10))
 	values := []int64{1, 2, 3}
@@ -144,8 +220,21 @@ func (s *GenericBaseSuite) TestConversion() {
 	_, err = gb.GetAsBool(0)
 	s.Error(err)
 
-	_, err = gb.GetAsBool(0)
+	_, err = gb.GetAsString(0)
 	s.Error(err)
+
+	_, err = gb.GetAsDouble(0)
+	s.Error(err)
+
+	strValues := []string{"1", "2", "3"}
+	strGb := &genericColumnBase[string]{
+		name:      name,
+		fieldType: entity.FieldTypeVarChar,
+		values:    strValues,
+	}
+	sv, err := strGb.GetAsString(0)
+	s.NoError(err)
+	s.Equal("1", sv)
 }
 
 func (s *GenericBaseSuite) TestNullable() {
@@ -170,6 +259,16 @@ func (s *GenericBaseSuite) TestNullable() {
 	gb.SetNullable(false)
 	s.NoError(gb.ValidateNullable())
 	s.EqualValues(0, gb.Len())
+
+	gb = &genericColumnBase[int64]{
+		name:       name,
+		fieldType:  entity.FieldTypeInt64,
+		values:     []int64{0},
+		validData:  []bool{true, false},
+		sparseMode: true,
+		nullable:   true,
+	}
+	s.Error(gb.ValidateNullable())
 }
 
 func TestGenericBase(t *testing.T) {

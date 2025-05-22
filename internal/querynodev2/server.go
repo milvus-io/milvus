@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
@@ -57,11 +58,13 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -256,6 +259,9 @@ func (node *QueryNode) InitSegcore() error {
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
 
+	cEnableConfigParamTypeCheck := C.bool(paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.GetAsBool())
+	C.InitDefaultConfigParamTypeCheck(cEnableConfigParamTypeCheck)
+
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
 
@@ -264,10 +270,82 @@ func (node *QueryNode) InitSegcore() error {
 		return err
 	}
 
+	err = initcore.InitStorageV2FileSystem(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	err = initcore.InitMmapManager(paramtable.Get())
 	if err != nil {
 		return err
 	}
+
+	// init tiered storage
+	scalarFieldCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.GetValue())
+	if err != nil {
+		return err
+	}
+	vectorFieldCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.GetValue())
+	if err != nil {
+		return err
+	}
+	scalarIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
+	if err != nil {
+		return err
+	}
+	vectorIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.GetValue())
+	if err != nil {
+		return err
+	}
+	osMemBytes := hardware.GetMemoryCount()
+	osDiskBytes := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
+
+	memoryLowWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredMemoryLowWatermarkRatio.GetAsFloat()
+	memoryHighWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredMemoryHighWatermarkRatio.GetAsFloat()
+	memoryMaxRatio := paramtable.Get().QueryNodeCfg.TieredMemoryMaxRatio.GetAsFloat()
+	diskLowWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredDiskLowWatermarkRatio.GetAsFloat()
+	diskHighWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredDiskHighWatermarkRatio.GetAsFloat()
+	diskMaxRatio := paramtable.Get().QueryNodeCfg.TieredDiskMaxRatio.GetAsFloat()
+
+	if memoryLowWatermarkRatio > memoryHighWatermarkRatio {
+		return errors.New("memoryLowWatermarkRatio should not be greater than memoryHighWatermarkRatio")
+	}
+	if memoryHighWatermarkRatio > memoryMaxRatio {
+		return errors.New("memoryHighWatermarkRatio should not be greater than memoryMaxRatio")
+	}
+	if memoryMaxRatio >= 1 {
+		return errors.New("memoryMaxRatio should not be greater than 1")
+	}
+
+	if diskLowWatermarkRatio > diskHighWatermarkRatio {
+		return errors.New("diskLowWatermarkRatio should not be greater than diskHighWatermarkRatio")
+	}
+	if diskHighWatermarkRatio > diskMaxRatio {
+		return errors.New("diskHighWatermarkRatio should not be greater than diskMaxRatio")
+	}
+	if diskMaxRatio >= 1 {
+		return errors.New("diskMaxRatio should not be greater than 1")
+	}
+
+	memoryLowWatermarkBytes := C.int64_t(memoryLowWatermarkRatio * float64(osMemBytes))
+	memoryHighWatermarkBytes := C.int64_t(memoryHighWatermarkRatio * float64(osMemBytes))
+	memoryMaxBytes := C.int64_t(memoryMaxRatio * float64(osMemBytes))
+
+	diskLowWatermarkBytes := C.int64_t(diskLowWatermarkRatio * float64(osDiskBytes))
+	diskHighWatermarkBytes := C.int64_t(diskHighWatermarkRatio * float64(osDiskBytes))
+	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
+
+	evictionEnabled := C.bool(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
+	cacheTouchWindowMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
+	evictionIntervalMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredEvictionIntervalMs.GetAsInt64())
+
+	C.ConfigureTieredStorage(C.CacheWarmupPolicy(scalarFieldCacheWarmupPolicy),
+		C.CacheWarmupPolicy(vectorFieldCacheWarmupPolicy),
+		C.CacheWarmupPolicy(scalarIndexCacheWarmupPolicy),
+		C.CacheWarmupPolicy(vectorIndexCacheWarmupPolicy),
+		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
+		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
+		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs)
 
 	initcore.InitTraceConfig(paramtable.Get())
 	C.InitExecExpressionFunctionFactory()
@@ -386,7 +464,11 @@ func (node *QueryNode) Init() error {
 		node.manager = segments.NewManager()
 		node.loader = segments.NewLoader(node.ctx, node.manager, node.chunkManager)
 		node.manager.SetLoader(node.loader)
-		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, node.GetNodeID())
+		if streamingutil.IsStreamingServiceEnabled() {
+			node.dispClient = msgdispatcher.NewClient(streaming.NewDelegatorMsgstreamFactory(), typeutil.QueryNodeRole, node.GetNodeID())
+		} else {
+			node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, node.GetNodeID())
+		}
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.dispClient, node.delegators)
 
@@ -420,7 +502,6 @@ func (node *QueryNode) Start() error {
 		mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 		mmapScalarIndex := paramtable.Get().QueryNodeCfg.MmapScalarIndex.GetAsBool()
 		mmapScalarField := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
-		mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
@@ -434,7 +515,6 @@ func (node *QueryNode) Start() error {
 			zap.Bool("mmapVectorField", mmapVectorField),
 			zap.Bool("mmapScalarIndex", mmapScalarIndex),
 			zap.Bool("mmapScalarField", mmapScalarField),
-			zap.Bool("mmapChunkCache", mmapChunkCache),
 		)
 	})
 
@@ -557,6 +637,8 @@ func (node *QueryNode) initHook() error {
 	}
 	log.Info("start to load plugin", zap.String("path", path))
 
+	hookutil.LockHookInit()
+	defer hookutil.UnlockHookInit()
 	p, err := plugin.Open(path)
 	if err != nil {
 		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())

@@ -86,7 +86,7 @@ func (c *CCollection) IndexMeta() *segcorepb.CollectionIndexMeta {
 	return c.indexMeta
 }
 
-func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema) error {
+func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint64) error {
 	if sch == nil {
 		return merr.WrapErrServiceInternal("update collection schema with nil")
 	}
@@ -96,7 +96,7 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema) error {
 		return err
 	}
 
-	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)))
+	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), (C.uint64_t)(version))
 	return ConsumeCStatusIntoError(&status)
 }
 

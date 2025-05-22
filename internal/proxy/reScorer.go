@@ -66,8 +66,12 @@ type rrfScorer struct {
 }
 
 func (rs *rrfScorer) reScore(input *milvuspb.SearchResults) {
-	for i := range input.Results.GetScores() {
-		input.Results.Scores[i] = 1 / (rs.k + float32(i+1))
+	index := 0
+	for _, topk := range input.Results.GetTopks() {
+		for i := int64(0); i < topk; i++ {
+			input.Results.Scores[index] = 1 / (rs.k + float32(i+1))
+			index++
+		}
 	}
 }
 

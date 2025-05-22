@@ -85,7 +85,7 @@ const (
 
 const (
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(1)
+	CurrentScalarIndexEngineVersion = int32(2)
 )
 
 // Endian is type alias of binary.LittleEndian.
@@ -166,6 +166,7 @@ const (
 const (
 	CollectionTTLConfigKey      = "collection.ttl.seconds"
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
+	CollectionDescription       = "collection.description"
 
 	// rate limit
 	CollectionInsertRateMaxKey   = "collection.insertRate.max.mb"

@@ -68,7 +68,6 @@ func (s *ManagerSuite) SetupTest() {
 				InsertChannel: s.channels[i],
 				Level:         s.levels[i],
 			},
-			nil,
 		)
 		s.Require().NoError(err)
 		s.segments = append(s.segments, segment)

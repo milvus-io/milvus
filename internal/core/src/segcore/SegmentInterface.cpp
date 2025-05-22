@@ -18,6 +18,7 @@
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
+#include "monitor/prometheus_client.h"
 #include "query/ExecPlanNodeVisitor.h"
 
 namespace milvus::segcore {
@@ -408,17 +409,6 @@ SegmentInternalInterface::timestamp_filter(BitsetType& bitset,
 const SkipIndex&
 SegmentInternalInterface::GetSkipIndex() const {
     return skip_index_;
-}
-
-void
-SegmentInternalInterface::LoadPrimitiveSkipIndex(milvus::FieldId field_id,
-                                                 int64_t chunk_id,
-                                                 milvus::DataType data_type,
-                                                 const void* chunk_data,
-                                                 const bool* valid_data,
-                                                 int64_t count) {
-    skip_index_.LoadPrimitive(
-        field_id, chunk_id, data_type, chunk_data, valid_data, count);
 }
 
 index::TextMatchIndex*

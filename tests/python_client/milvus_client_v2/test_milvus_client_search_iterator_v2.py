@@ -64,7 +64,6 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:7]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -85,8 +84,8 @@ class TestSearchIterator(TestcaseBase):
     """ Test case of search iterator """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("metric_type", ct.float_metrics)
-    @pytest.mark.parametrize("vector_data_type", ["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.mark.parametrize("metric_type", ct.dense_metrics)
+    @pytest.mark.parametrize("vector_data_type", ct.all_dense_vector_types)
     def test_range_search_iterator_default(self, metric_type, vector_data_type):
         """
         target: test iterator range search
@@ -151,7 +150,7 @@ class TestSearchIterator(TestcaseBase):
                                      check_items={"batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("metrics", ct.float_metrics)
+    @pytest.mark.parametrize("metrics", ct.dense_metrics)
     def test_search_iterator_with_expression(self, metrics):
         """
         target: test search iterator normal

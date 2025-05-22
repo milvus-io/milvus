@@ -158,6 +158,8 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 	backoff.InitialInterval = 100 * time.Millisecond
 	backoff.MaxInterval = 10 * time.Second
 	backoff.MaxElapsedTime = 0
+	backoff.Reset()
+
 	for {
 		assign := hc.watcher.Get(ctx, pchannel)
 		if assign != nil {

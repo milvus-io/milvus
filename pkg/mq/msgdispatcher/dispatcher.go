@@ -249,9 +249,10 @@ func (d *Dispatcher) work() {
 			for vchannel, p := range targetPacks {
 				var err error
 				t, _ := d.targets.Get(vchannel)
+				isReplicateChannel := strings.Contains(vchannel, paramtable.Get().CommonCfg.ReplicateMsgChannel.GetValue())
 				// The dispatcher seeks from the oldest target,
 				// so for each target, msg before the target position must be filtered out.
-				if p.EndTs <= t.pos.GetTimestamp() {
+				if p.EndTs <= t.pos.GetTimestamp() && !isReplicateChannel {
 					log.Info("skip msg",
 						zap.String("vchannel", vchannel),
 						zap.Int("msgCount", len(p.Msgs)),

@@ -51,7 +51,7 @@ func (id wpID) WoodpeckerMsgId() *wp.LogMessageId {
 }
 
 func (id wpID) WALName() string {
-	return walName
+	return WALName
 }
 
 func (id wpID) LT(other message.MessageID) bool {

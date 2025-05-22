@@ -75,7 +75,7 @@ func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey stri
 	return bedrockruntime.NewFromConfig(cfg), nil
 }
 
-func parseAKSKInfo(credentials *milvusCredentials.CredentialsManager, params []*commonpb.KeyValuePair, confParams map[string]string) (string, string, error) {
+func parseAKSKInfo(credentials *milvusCredentials.Credentials, params []*commonpb.KeyValuePair, confParams map[string]string) (string, string, error) {
 	// function param > yaml > env
 	var awsAccessKeyId, awsSecretAccessKey string
 	var err error
@@ -111,7 +111,7 @@ func parseAKSKInfo(credentials *milvusCredentials.CredentialsManager, params []*
 	return awsAccessKeyId, awsSecretAccessKey, nil
 }
 
-func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c BedrockClient, params map[string]string, credentials *milvusCredentials.CredentialsManager) (*BedrockEmbeddingProvider, error) {
+func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c BedrockClient, params map[string]string, credentials *milvusCredentials.Credentials) (*BedrockEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err

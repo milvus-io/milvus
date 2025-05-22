@@ -99,8 +99,8 @@ func TestCiper(t *testing.T) {
 	d.EXPECT().Decrypt(mock.Anything).RunAndReturn(func(b []byte) ([]byte, error) {
 		return b[3:], nil
 	})
-	c.EXPECT().GetEncryptor(mock.Anything).Return(e, []byte("123"), nil)
-	c.EXPECT().GetDecryptor(mock.Anything, mock.Anything).Return(d, nil)
+	c.EXPECT().GetEncryptor(mock.Anything, mock.Anything).Return(e, []byte("123"), nil)
+	c.EXPECT().GetDecryptor(mock.Anything, mock.Anything, mock.Anything).Return(d, nil)
 	RegisterCipher(c)
 
 	msg, _ := builder.WithCipher(&CipherConfig{

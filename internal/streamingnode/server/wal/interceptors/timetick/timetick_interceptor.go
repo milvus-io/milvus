@@ -145,12 +145,10 @@ func (impl *timeTickAppendInterceptor) handleBegin(ctx context.Context, msg mess
 		return nil, nil, err
 	}
 	// Begin transaction will generate a txn context.
-	session, err := impl.txnManager.BeginNewTxn(ctx, msg.TimeTick(), time.Duration(beginTxnMsg.Header().KeepaliveMilliseconds)*time.Millisecond)
+	session, err := impl.txnManager.BeginNewTxn(ctx, beginTxnMsg)
 	if err != nil {
-		session.BeginRollback()
 		return nil, nil, err
 	}
-	session.BeginDone()
 	return session, msg.WithTxnContext(session.TxnContext()), nil
 }
 

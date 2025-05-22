@@ -12,20 +12,16 @@
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
 
-#include <array>
 #include <boost/format.hpp>
 #include <chrono>
 #include <iostream>
 #include <memory>
-#include <random>
 #include <string>
-#include <unordered_set>
 
 #include "segcore/DeletedRecord.h"
-#include "segcore/SegmentGrowingImpl.h"
-
-#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/Record.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -34,17 +30,16 @@ TEST(DeleteMVCC, common_case) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk);
-    auto segment = CreateSealedSegment(schema);
-    ASSERT_EQ(0, segment->get_real_count());
 
     // load insert:     pk (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
     // with timestamp   ts (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
     int64_t c = 10;
     auto dataset = DataGen(schema, c);
     auto pks = dataset.get_col<int64_t>(pk);
-    SealedLoadFieldData(dataset, *segment);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     ASSERT_EQ(c, segment->get_real_count());
     auto& insert_record = segment->get_insert_record();
+    auto segment_ptr = segment.get();
     DeletedRecord<true> delete_record(
         &insert_record,
         [&insert_record](const PkType& pk, Timestamp timestamp) {
@@ -160,7 +155,7 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
     schema->set_primary_field_id(i64_fid);
     auto N = 10;
     uint64_t seg_id = 101;
-    InsertRecord insert_record(*schema, N);
+    InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
         [&insert_record](const PkType& pk, Timestamp timestamp) {
@@ -275,7 +270,7 @@ TEST(DeleteMVCC, snapshot) {
     schema->set_primary_field_id(i64_fid);
     auto N = 50000;
     uint64_t seg_id = 101;
-    InsertRecord insert_record(*schema, N);
+    InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
         [&insert_record](const PkType& pk, Timestamp timestamp) {
@@ -323,7 +318,7 @@ TEST(DeleteMVCC, insert_after_snapshot) {
     schema->set_primary_field_id(i64_fid);
     auto N = 11000;
     uint64_t seg_id = 101;
-    InsertRecord insert_record(*schema, N);
+    InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
         [&insert_record](const PkType& pk, Timestamp timestamp) {
@@ -418,7 +413,7 @@ TEST(DeleteMVCC, perform) {
     schema->set_primary_field_id(i64_fid);
     auto N = 1000000;
     uint64_t seg_id = 101;
-    InsertRecord insert_record(*schema, N);
+    InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
         [&insert_record](const PkType& pk, Timestamp timestamp) {

@@ -21,7 +21,6 @@
 #include <vector>
 
 #include "Types.h"
-#include "common/CDataType.h"
 
 // NOTE: field_id can be system field
 // NOTE: Refer to common/SystemProperty.cpp for details
@@ -38,7 +37,6 @@ struct LoadFieldDataInfo {
     // Set empty to disable mmap,
     // mmap file path will be {mmap_dir_path}/{segment_id}/{field_id}
     std::string mmap_dir_path = "";
-    std::string url;
     int64_t storage_version = 0;
 };
 

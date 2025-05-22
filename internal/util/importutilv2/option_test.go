@@ -88,3 +88,69 @@ func TestOption_ParseTimeRange(t *testing.T) {
 	_, _, err = ParseTimeRange(options)
 	assert.ErrorIs(t, err, merr.ErrImportFailed)
 }
+
+func TestOption_SkipDiskQuotaCheck(t *testing.T) {
+	// Neither backup nor l0_import, should return false
+	options := []*commonpb.KeyValuePair{}
+	assert.False(t, SkipDiskQuotaCheck(options))
+
+	// backup = true, skip_disk_quota_check = true
+	options = []*commonpb.KeyValuePair{
+		{Key: BackupFlag, Value: "true"},
+		{Key: SkipDQC, Value: "true"},
+	}
+	assert.True(t, SkipDiskQuotaCheck(options))
+
+	// backup = true, skip_disk_quota_check = false
+	options = []*commonpb.KeyValuePair{
+		{Key: BackupFlag, Value: "true"},
+		{Key: SkipDQC, Value: "false"},
+	}
+	assert.False(t, SkipDiskQuotaCheck(options))
+
+	// l0_import = true, skip_disk_quota_check = true
+	options = []*commonpb.KeyValuePair{
+		{Key: L0Import, Value: "true"},
+		{Key: SkipDQC, Value: "true"},
+	}
+	assert.True(t, SkipDiskQuotaCheck(options))
+
+	// l0_import = true, skip_disk_quota_check = false
+	options = []*commonpb.KeyValuePair{
+		{Key: L0Import, Value: "true"},
+		{Key: SkipDQC, Value: "false"},
+	}
+	assert.False(t, SkipDiskQuotaCheck(options))
+
+	// backup = false, l0_import = true, skip_disk_quota_check = true
+	options = []*commonpb.KeyValuePair{
+		{Key: BackupFlag, Value: "false"},
+		{Key: L0Import, Value: "true"},
+		{Key: SkipDQC, Value: "true"},
+	}
+	assert.True(t, SkipDiskQuotaCheck(options))
+
+	// backup = true, l0_import = false, skip_disk_quota_check = true
+	options = []*commonpb.KeyValuePair{
+		{Key: BackupFlag, Value: "true"},
+		{Key: L0Import, Value: "false"},
+		{Key: SkipDQC, Value: "true"},
+	}
+	assert.True(t, SkipDiskQuotaCheck(options))
+
+	// backup = false, l0_import = false, skip_disk_quota_check = true
+	options = []*commonpb.KeyValuePair{
+		{Key: BackupFlag, Value: "false"},
+		{Key: L0Import, Value: "false"},
+		{Key: SkipDQC, Value: "true"},
+	}
+	assert.False(t, SkipDiskQuotaCheck(options))
+
+	// backup = true, l0_import = true, skip_disk_quota_check = true
+	options = []*commonpb.KeyValuePair{
+		{Key: BackupFlag, Value: "true"},
+		{Key: L0Import, Value: "true"},
+		{Key: SkipDQC, Value: "true"},
+	}
+	assert.True(t, SkipDiskQuotaCheck(options))
+}

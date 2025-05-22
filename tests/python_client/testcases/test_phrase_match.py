@@ -8,6 +8,7 @@ from common.common_type import CheckTasks
 from utils.util_log import test_log as log
 from common import common_func as cf
 from base.client_base import TestcaseBase
+import time
 
 prefix = "phrase_match"
 
@@ -43,7 +44,7 @@ class TestQueryPhraseMatch(TestcaseBase):
 
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
-    @pytest.mark.parametrize("tokenizer", ["standard", "jieba"])
+    @pytest.mark.parametrize("tokenizer", ["standard", "jieba", "icu"])
     def test_query_phrase_match_with_different_tokenizer(
             self, tokenizer, enable_inverted_index, enable_partition_key
     ):
@@ -58,13 +59,11 @@ class TestQueryPhraseMatch(TestcaseBase):
                  results for all queries and slop values
         note: Test is marked to xfail for jieba tokenizer due to known issues
         """
-        if tokenizer == "jieba":
-            pytest.xfail("Jieba tokenizer has known issues with phrase matching ")
-
         # Initialize parameters
         dim = 128
         data_size = 3000
         num_queries = 10
+        analyzer_params = {"tokenizer": tokenizer}
 
         # Initialize generator based on tokenizer
         language = "zh" if tokenizer == "jieba" else "en"
@@ -74,6 +73,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         collection_w = self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),
             schema=init_collection_schema(dim, tokenizer, enable_partition_key),
+            consistency_level="Strong",
         )
 
         # Generate test data
@@ -108,34 +108,44 @@ class TestQueryPhraseMatch(TestcaseBase):
 
             # Execute query
             results, _ = collection_w.query(expr=expr, output_fields=["id", "text"])
+            if tokenizer == "standard":
+                # Get expected matches using Tantivy
+                expected_matches = generator.get_query_results(
+                    query["query"], query["slop"]
+                )
+                # Get actual matches from Milvus
+                actual_matches = [r["id"] for r in results]
+                if set(actual_matches) != set(expected_matches):
+                    log.info(f"collection schema: {collection_w.schema}")
+                    for match_id in expected_matches:
+                        # query by id to get text
+                        res, _ = collection_w.query(
+                            expr=f"id == {match_id}", output_fields=["text"]
+                        )
+                        text = res[0]["text"]
+                        log.info(f"Expected match: {match_id}, text: {text}")
 
-            # Get expected matches using Tantivy
-            expected_matches = generator.get_query_results(
-                query["query"], query["slop"]
-            )
-            # Get actual matches from Milvus
-            actual_matches = [r["id"] for r in results]
-            if set(actual_matches) != set(expected_matches):
-                log.info(f"collection schema: {collection_w.schema}")
-                for match_id in expected_matches:
-                    # query by id to get text
-                    res, _ = collection_w.query(
-                        expr=f"id == {match_id}", output_fields=["text"]
-                    )
-                    text = res[0]["text"]
-                    log.info(f"Expected match: {match_id}, text: {text}")
+                    for match_id in actual_matches:
+                        # query by id to get text
+                        res, _ = collection_w.query(
+                            expr=f"id == {match_id}", output_fields=["text"]
+                        )
+                        text = res[0]["text"]
+                        log.info(f"Matched document: {match_id}, text: {text}")
+                # Assert results match
+                assert (
+                        set(actual_matches) == set(expected_matches)
+                ), f"Mismatch in results for query '{query['query']}' with slop {query['slop']}"
 
-                for match_id in actual_matches:
-                    # query by id to get text
-                    res, _ = collection_w.query(
-                        expr=f"id == {match_id}", output_fields=["text"]
-                    )
-                    text = res[0]["text"]
-                    log.info(f"Matched document: {match_id}, text: {text}")
-            # Assert results match
-            assert (
-                    set(actual_matches) == set(expected_matches)
-            ), f"Mismatch in results for query '{query['query']}' with slop {query['slop']}"
+            else:
+                log.info("Tokenizer is not standard, verify phrase match results by checking all query tokens in result")
+                for result in results:
+                    text = result["text"]
+                    tokens = self.get_tokens_by_analyzer(query["query"], analyzer_params)
+                    for token in tokens:
+                        if token not in text:
+                            log.info(f"Token {token} not in text {text}")
+                            assert False
 
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
@@ -166,6 +176,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         collection_w = self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),
             schema=init_collection_schema(dim, tokenizer, enable_partition_key),
+            consistency_level="Strong",
         )
 
         # Generate test data
@@ -243,6 +254,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         collection_w = self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),
             schema=init_collection_schema(dim, tokenizer, enable_partition_key),
+            consistency_level="Strong",
         )
 
         # Generate test data
@@ -319,7 +331,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         dim = 128
         collection_name = f"{prefix}_patterns"
         schema = init_collection_schema(dim, "standard", False)
-        collection = self.init_collection_wrap(name=collection_name, schema=schema)
+        collection = self.init_collection_wrap(name=collection_name, schema=schema, consistency_level="Strong")
 
         # Generate data with various patterns
         generator = PhraseMatchTestGenerator(language="en")
@@ -341,7 +353,7 @@ class TestQueryPhraseMatch(TestcaseBase):
         collection.insert(pattern_documents)
         df = pd.DataFrame(pattern_documents)[["id", "text"]]
         log.info(f"Test data:\n {df}")
-
+        collection.flush()
         collection.create_index(
             field_name="text", index_params={"index_type": "INVERTED"}
         )
@@ -354,10 +366,11 @@ class TestQueryPhraseMatch(TestcaseBase):
             },
         )
         collection.load()
+        time.sleep(1)
 
         for pattern, slop in test_patterns:
             results, _ = collection.query(
-                expr=f'phrase_match(text, "{pattern}", {slop})', output_fields=["text"]
+                expr=f'phrase_match(text, "{pattern}", {slop})', output_fields=["text"],
             )
             log.info(
                 f"Pattern '{pattern}' with slop {slop} found {len(results)} matches"
@@ -383,7 +396,7 @@ class TestQueryPhraseMatchNegative(TestcaseBase):
         dim = 128
         collection_name = f"{prefix}_invalid_slop"
         schema = init_collection_schema(dim, "standard", False)
-        collection = self.init_collection_wrap(name=collection_name, schema=schema)
+        collection = self.init_collection_wrap(name=collection_name, schema=schema, consistency_level="Strong")
 
         # Insert some test data
         generator = PhraseMatchTestGenerator(language="en")

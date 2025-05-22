@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -43,15 +42,15 @@ type msgHandlerImpl struct {
 	broker broker.Broker
 }
 
-func (m *msgHandlerImpl) HandleCreateSegment(ctx context.Context, vchannel string, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error {
+func (m *msgHandlerImpl) HandleCreateSegment(ctx context.Context, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error {
 	panic("unreachable code")
 }
 
-func (m *msgHandlerImpl) HandleFlush(vchannel string, flushMsg message.ImmutableFlushMessageV2) error {
+func (m *msgHandlerImpl) HandleFlush(flushMsg message.ImmutableFlushMessageV2) error {
 	panic("unreachable code")
 }
 
-func (m *msgHandlerImpl) HandleManualFlush(vchannel string, flushMsg message.ImmutableManualFlushMessageV2) error {
+func (m *msgHandlerImpl) HandleManualFlush(flushMsg message.ImmutableManualFlushMessageV2) error {
 	panic("unreachable code")
 }
 
@@ -90,11 +89,8 @@ func (m *msgHandlerImpl) HandleImport(ctx context.Context, vchannel string, impo
 	}, retry.AttemptAlways())
 }
 
-func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, vchannel string, msg *adaptor.SchemaChangeMessageBody) error {
-	return streaming.WAL().Broadcast().Ack(ctx, types.BroadcastAckRequest{
-		BroadcastID: msg.BroadcastID,
-		VChannel:    vchannel,
-	})
+func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.ImmutableSchemaChangeMessageV2) error {
+	panic("unreachable code")
 }
 
 func NewMsgHandlerImpl(broker broker.Broker) *msgHandlerImpl {

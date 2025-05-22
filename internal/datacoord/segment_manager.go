@@ -403,10 +403,14 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 }
 
 func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, req AllocNewGrowingSegmentRequest) (*SegmentInfo, error) {
-	maxNumOfRows, err := s.estimateMaxNumOfRows(req.CollectionID)
-	if err != nil {
-		log.Error("failed to open new segment while estimateMaxNumOfRows", zap.Error(err))
-		return nil, err
+	var maxNumOfRows int
+	if !req.IsCreatedByStreaming {
+		var err error
+		maxNumOfRows, err = s.estimateMaxNumOfRows(req.CollectionID)
+		if err != nil {
+			log.Error("failed to open new segment while estimateMaxNumOfRows", zap.Error(err))
+			return nil, err
+		}
 	}
 
 	segmentInfo := &datapb.SegmentInfo{
@@ -416,7 +420,7 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 		InsertChannel:        req.ChannelName,
 		NumOfRows:            0,
 		State:                commonpb.SegmentState_Growing,
-		MaxRowNum:            int64(maxNumOfRows),
+		MaxRowNum:            int64(maxNumOfRows), // deprecated properties, we use binary size to limit the segment size but not estimate rows.
 		Level:                datapb.SegmentLevel_L1,
 		LastExpireTime:       0,
 		StorageVersion:       req.StorageVersion,
@@ -432,7 +436,6 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 	log.Info("datacoord: estimateTotalRows: ",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
-		zap.Int("Rows", maxNumOfRows),
 		zap.String("Channel", segmentInfo.InsertChannel),
 		zap.Bool("IsCreatedByStreaming", segmentInfo.IsCreatedByStreaming),
 	)

@@ -7,5 +7,7 @@ import (
 )
 
 func TestWALImplsTest(t *testing.T) {
+	enableFenceError.Store(false)
+	defer enableFenceError.Store(true)
 	walimpls.NewWALImplsTestFramework(t, 100, &openerBuilder{}).Run()
 }

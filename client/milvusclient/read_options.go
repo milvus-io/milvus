@@ -441,7 +441,12 @@ func (opt *hybridSearchOption) WithConsistencyLevel(cl entity.ConsistencyLevel) 
 	return opt
 }
 
+// Deprecated: typo, use WithPartitions instead
 func (opt *hybridSearchOption) WithPartitons(partitions ...string) *hybridSearchOption {
+	return opt.WithPartitions(partitions...)
+}
+
+func (opt *hybridSearchOption) WithPartitions(partitions ...string) *hybridSearchOption {
 	opt.partitionNames = partitions
 	return opt
 }

@@ -78,7 +78,7 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	}
 
 	if nodeMsg.schema != nil {
-		dNode.delegator.UpdateSchema(context.Background(), nodeMsg.schema)
+		dNode.delegator.UpdateSchema(context.Background(), nodeMsg.schema, nodeMsg.schemaVersion)
 	}
 
 	// update tSafe

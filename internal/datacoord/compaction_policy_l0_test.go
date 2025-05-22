@@ -41,7 +41,7 @@ type L0CompactionPolicySuite struct {
 	mockTriggerManager *MockTriggerManager
 	testLabel          *CompactionGroupLabel
 	handler            Handler
-	mockPlanContext    *MockCompactionPlanContext
+	inspector          *MockCompactionInspector
 
 	l0_policy *l0CompactionPolicy
 }

@@ -100,58 +100,6 @@ class ThreadSafeValidData {
 };
 using ThreadSafeValidDataPtr = std::shared_ptr<ThreadSafeValidData>;
 
-template <typename Type>
-class ThreadSafeVector {
- public:
-    template <typename... Args>
-    void
-    emplace_to_at_least(int64_t size, Args... args) {
-        std::lock_guard lck(mutex_);
-        if (size <= size_) {
-            return;
-        }
-        while (vec_.size() < size) {
-            vec_.emplace_back(std::forward<Args...>(args...));
-            ++size_;
-        }
-    }
-    const Type&
-    operator[](int64_t index) const {
-        std::shared_lock lck(mutex_);
-        AssertInfo(index < size_,
-                   fmt::format(
-                       "index out of range, index={}, size_={}", index, size_));
-        return vec_[index];
-    }
-
-    Type&
-    operator[](int64_t index) {
-        std::shared_lock lck(mutex_);
-        AssertInfo(index < size_,
-                   fmt::format(
-                       "index out of range, index={}, size_={}", index, size_));
-        return vec_[index];
-    }
-
-    int64_t
-    size() const {
-        std::shared_lock lck(mutex_);
-        return size_;
-    }
-
-    void
-    clear() {
-        std::lock_guard lck(mutex_);
-        size_ = 0;
-        vec_.clear();
-    }
-
- private:
-    int64_t size_ = 0;
-    std::deque<Type> vec_;
-    mutable std::shared_mutex mutex_;
-};
-
 class VectorBase {
  public:
     explicit VectorBase(int64_t size_per_chunk)

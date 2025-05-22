@@ -517,6 +517,7 @@ func (t *searchTask) advancedPostProcess(ctx context.Context, span trace.Span, t
 	}
 
 	multipleMilvusResults := make([]*milvuspb.SearchResults, len(t.SearchRequest.GetSubReqs()))
+	searchMetrics := []string{}
 	for index, internalResults := range multipleInternalResults {
 		subReq := t.SearchRequest.GetSubReqs()[index]
 		// Since the metrictype in the request may be empty, it can only be obtained from the result
@@ -530,6 +531,7 @@ func (t *searchTask) advancedPostProcess(ctx context.Context, span trace.Span, t
 			t.reScorers[index].setMetricType(subMetricType)
 			t.reScorers[index].reScore(result)
 		}
+		searchMetrics = append(searchMetrics, subMetricType)
 		multipleMilvusResults[index] = result
 	}
 
@@ -538,7 +540,7 @@ func (t *searchTask) advancedPostProcess(ctx context.Context, span trace.Span, t
 			return err
 		}
 	} else {
-		if err := t.hybridSearchRank(ctx, span, multipleMilvusResults); err != nil {
+		if err := t.hybridSearchRank(ctx, span, multipleMilvusResults, searchMetrics); err != nil {
 			return err
 		}
 	}
@@ -591,7 +593,7 @@ func (t *searchTask) rank(ctx context.Context, span trace.Span, multipleMilvusRe
 			log.Warn("failed to requery", zap.Error(err))
 			return err
 		}
-		fields, err := t.reorganizeRequeryResults(ctx, queryResult, []*schemapb.IDs{t.result.Results.Ids})
+		fields, err := t.reorganizeRequeryResults(ctx, queryResult.GetFieldsData(), []*schemapb.IDs{t.result.Results.Ids})
 		if err != nil {
 			return err
 		}
@@ -635,7 +637,7 @@ func mergeIDs(idsList []*schemapb.IDs) (*schemapb.IDs, int) {
 	return uniqueIDs, count
 }
 
-func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, multipleMilvusResults []*milvuspb.SearchResults) error {
+func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, multipleMilvusResults []*milvuspb.SearchResults, searchMetrics []string) error {
 	var err error
 	// The first step of hybrid search is without meta information. If rerank requires meta data, we need to do requery.
 	// At this time, outputFields and rerank input_fields will be recalled.
@@ -666,7 +668,7 @@ func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, mult
 			log.Warn("failed to requery", zap.Error(err))
 			return err
 		}
-		fields, err := t.reorganizeRequeryResults(ctx, queryResult, idsList)
+		fields, err := t.reorganizeRequeryResults(ctx, queryResult.GetFieldsData(), idsList)
 		if err != nil {
 			return err
 		}
@@ -675,13 +677,13 @@ func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, mult
 		}
 		params := rerank.NewSearchParams(
 			t.Nq, t.rankParams.limit, t.rankParams.offset, t.rankParams.roundDecimal,
-			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize,
+			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize, searchMetrics,
 		)
 
 		if t.result, err = t.functionScore.Process(ctx, params, multipleMilvusResults); err != nil {
 			return err
 		}
-		if fields, err := t.reorganizeRequeryResults(ctx, queryResult, []*schemapb.IDs{t.result.Results.Ids}); err != nil {
+		if fields, err := t.reorganizeRequeryResults(ctx, queryResult.GetFieldsData(), []*schemapb.IDs{t.result.Results.Ids}); err != nil {
 			return err
 		} else {
 			t.result.Results.FieldsData = fields[0]
@@ -689,7 +691,7 @@ func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, mult
 	} else {
 		params := rerank.NewSearchParams(
 			t.Nq, t.rankParams.limit, t.rankParams.offset, t.rankParams.roundDecimal,
-			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize,
+			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize, searchMetrics,
 		)
 		if t.result, err = t.functionScore.Process(ctx, params, multipleMilvusResults); err != nil {
 			return err
@@ -752,8 +754,13 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if t.needRequery {
 		plan.OutputFieldIds = t.functionScore.GetAllInputFieldIDs()
 	} else {
+		primaryFieldSchema, err := t.schema.GetPkField()
+		if err != nil {
+			return err
+		}
 		allFieldIDs := typeutil.NewSet[int64](t.SearchRequest.OutputFieldsId...)
 		allFieldIDs.Insert(t.functionScore.GetAllInputFieldIDs()...)
+		allFieldIDs.Insert(primaryFieldSchema.FieldID)
 		plan.OutputFieldIds = allFieldIDs.Collect()
 		plan.DynamicFields = t.userDynamicFields
 	}
@@ -810,14 +817,21 @@ func (t *searchTask) searchPostProcess(ctx context.Context, span trace.Span, toR
 
 	if t.functionScore != nil && len(result.Results.FieldsData) != 0 {
 		params := rerank.NewSearchParams(t.Nq, t.SearchRequest.GetTopk(), t.SearchRequest.GetOffset(),
-			t.queryInfos[0].RoundDecimal, t.queryInfos[0].GroupByFieldId, t.queryInfos[0].GroupSize, t.queryInfos[0].StrictGroupSize)
+			t.queryInfos[0].RoundDecimal, t.queryInfos[0].GroupByFieldId, t.queryInfos[0].GroupSize, t.queryInfos[0].StrictGroupSize, []string{metricType})
+		// rank only returns id and score
 		if t.result, err = t.functionScore.Process(ctx, params, []*milvuspb.SearchResults{result}); err != nil {
 			return err
+		}
+		if !t.needRequery {
+			fields, err := t.reorganizeRequeryResults(ctx, result.Results.FieldsData, []*schemapb.IDs{t.result.Results.Ids})
+			if err != nil {
+				return err
+			}
+			t.result.Results.FieldsData = fields[0]
 		}
 	} else {
 		t.result = result
 	}
-
 	t.fillResult()
 	if t.needRequery {
 		if t.requeryFunc == nil {
@@ -828,7 +842,7 @@ func (t *searchTask) searchPostProcess(ctx context.Context, span trace.Span, toR
 			log.Warn("failed to requery", zap.Error(err))
 			return err
 		}
-		fields, err := t.reorganizeRequeryResults(ctx, queryResult, []*schemapb.IDs{t.result.Results.Ids})
+		fields, err := t.reorganizeRequeryResults(ctx, queryResult.GetFieldsData(), []*schemapb.IDs{t.result.Results.Ids})
 		if err != nil {
 			return err
 		}
@@ -853,9 +867,9 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		}
 		annsFieldName = vecFields[0].Name
 	}
-	searchInfo := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
-	if searchInfo.parseError != nil {
-		return nil, nil, 0, false, searchInfo.parseError
+	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
+	if err != nil {
+		return nil, nil, 0, false, err
 	}
 	if searchInfo.collectionID > 0 && searchInfo.collectionID != t.GetCollectionID() {
 		return nil, nil, 0, false, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
@@ -1215,7 +1229,21 @@ func requeryImpl(t *searchTask, span trace.Span, ids *schemapb.IDs, outputFields
 	return queryResult, err
 }
 
-func (t *searchTask) reorganizeRequeryResults(ctx context.Context, queryResult *milvuspb.QueryResults, idsList []*schemapb.IDs) ([][]*schemapb.FieldData, error) {
+func isEmpty(ids *schemapb.IDs) bool {
+	if ids == nil {
+		return true
+	}
+	if ids.GetIntId() != nil && len(ids.GetIntId().Data) != 0 {
+		return false
+	}
+
+	if ids.GetStrId() != nil && len(ids.GetStrId().Data) != 0 {
+		return false
+	}
+	return true
+}
+
+func (t *searchTask) reorganizeRequeryResults(ctx context.Context, fields []*schemapb.FieldData, idsList []*schemapb.IDs) ([][]*schemapb.FieldData, error) {
 	_, sp := otel.Tracer(typeutil.ProxyRole).Start(t.ctx, "reorganizeRequeryResults")
 	defer sp.End()
 
@@ -1223,23 +1251,33 @@ func (t *searchTask) reorganizeRequeryResults(ctx context.Context, queryResult *
 	if err != nil {
 		return nil, err
 	}
-	pkFieldData, err := typeutil.GetPrimaryFieldData(queryResult.GetFieldsData(), pkField)
+	pkFieldData, err := typeutil.GetPrimaryFieldData(fields, pkField)
 	if err != nil {
 		return nil, err
 	}
 	offsets := make(map[any]int)
+	pkItr := typeutil.GetDataIterator(pkFieldData)
 	for i := 0; i < typeutil.GetPKSize(pkFieldData); i++ {
-		pk := typeutil.GetData(pkFieldData, i)
+		pk := pkItr(i)
 		offsets[pk] = i
 	}
 
 	allFieldData := make([][]*schemapb.FieldData, len(idsList))
 	for idx, ids := range idsList {
-		if ids == nil {
-			allFieldData[idx] = []*schemapb.FieldData{}
+		if isEmpty(ids) {
+			emptyFields := []*schemapb.FieldData{}
+			for _, field := range fields {
+				emptyFields = append(emptyFields, &schemapb.FieldData{
+					Type:      field.Type,
+					FieldName: field.FieldName,
+					FieldId:   field.FieldId,
+					IsDynamic: field.IsDynamic,
+				})
+			}
+			allFieldData[idx] = emptyFields
 			continue
 		}
-		if fieldData, err := t.pickFieldData(ids, offsets, queryResult); err != nil {
+		if fieldData, err := t.pickFieldData(ids, offsets, fields); err != nil {
 			return nil, err
 		} else {
 			allFieldData[idx] = fieldData
@@ -1249,7 +1287,7 @@ func (t *searchTask) reorganizeRequeryResults(ctx context.Context, queryResult *
 }
 
 // pick field data from query results
-func (t *searchTask) pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, queryResult *milvuspb.QueryResults) ([]*schemapb.FieldData, error) {
+func (t *searchTask) pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.FieldData) ([]*schemapb.FieldData, error) {
 	// Reorganize Results. The order of query result ids will be altered and differ from queried ids.
 	// We should reorganize query results to keep the order of original queried ids. For example:
 	// ===========================================
@@ -1265,14 +1303,14 @@ func (t *searchTask) pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, quer
 	//  3  2  5  4  1  (result ids)
 	// v3 v2 v5 v4 v1  (result vectors)
 	// ===========================================
-	fieldsData := make([]*schemapb.FieldData, len(queryResult.GetFieldsData()))
+	fieldsData := make([]*schemapb.FieldData, len(fields))
 	for i := 0; i < typeutil.GetSizeOfIDs(ids); i++ {
 		id := typeutil.GetPK(ids, int64(i))
 		if _, ok := pkOffset[id]; !ok {
 			return nil, merr.WrapErrInconsistentRequery(fmt.Sprintf("incomplete query result, missing id %s, len(searchIDs) = %d, len(queryIDs) = %d, collection=%d",
 				id, typeutil.GetSizeOfIDs(ids), len(pkOffset), t.GetCollectionID()))
 		}
-		typeutil.AppendFieldData(fieldsData, queryResult.GetFieldsData(), int64(pkOffset[id]))
+		typeutil.AppendFieldData(fieldsData, fields, int64(pkOffset[id]))
 	}
 
 	return fieldsData, nil
@@ -1323,7 +1361,6 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 		if err != nil {
 			return nil, err
 		}
-
 		results = append(results, &partialResultData)
 	}
 	tr.CtxElapse(ctx, "decodeSearchResults done")

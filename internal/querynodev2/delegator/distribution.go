@@ -55,22 +55,34 @@ func getClosedCh() chan struct{} {
 	return closedCh
 }
 
+// channelQueryView maintains the sealed segment list which should be used for search/query.
+type channelQueryView struct {
+	sealedSegments []int64            // sealed segment list which should be used for search/query
+	partitions     typeutil.UniqueSet // partitions list which sealed segments belong to
+	version        int64              // version of current query view, same as targetVersion in qc
+
+	serviceable *atomic.Bool
+}
+
+func (q *channelQueryView) GetVersion() int64 {
+	return q.version
+}
+
+func (q *channelQueryView) Serviceable() bool {
+	return q.serviceable.Load()
+}
+
 // distribution is the struct to store segment distribution.
 // it contains both growing and sealed segments.
 type distribution struct {
 	// segments information
 	// map[SegmentID]=>segmentEntry
-	targetVersion   *atomic.Int64
 	growingSegments map[UniqueID]SegmentEntry
 	sealedSegments  map[UniqueID]SegmentEntry
 
 	// snapshotVersion indicator
 	snapshotVersion int64
-	// quick flag for current snapshot is serviceable
-	serviceable *atomic.Bool
-	offlines    typeutil.Set[int64]
-
-	snapshots *typeutil.ConcurrentMap[int64, *snapshot]
+	snapshots       *typeutil.ConcurrentMap[int64, *snapshot]
 	// current is the snapshot for quick usage for search/query
 	// generated for each change of distribution
 	current *atomic.Pointer[snapshot]
@@ -78,6 +90,10 @@ type distribution struct {
 	idfOracle IDFOracle
 	// protects current & segments
 	mut sync.RWMutex
+
+	// distribution info
+	channelName string
+	queryView   *channelQueryView
 }
 
 // SegmentEntry stores the segment meta information.
@@ -88,18 +104,22 @@ type SegmentEntry struct {
 	Version       int64
 	TargetVersion int64
 	Level         datapb.SegmentLevel
+	Offline       bool // if delegator failed to execute forwardDelete/Query/Search on segment, it will be offline
 }
 
 // NewDistribution creates a new distribution instance with all field initialized.
-func NewDistribution() *distribution {
+func NewDistribution(channelName string) *distribution {
 	dist := &distribution{
-		serviceable:     atomic.NewBool(false),
+		channelName:     channelName,
 		growingSegments: make(map[UniqueID]SegmentEntry),
 		sealedSegments:  make(map[UniqueID]SegmentEntry),
 		snapshots:       typeutil.NewConcurrentMap[int64, *snapshot](),
 		current:         atomic.NewPointer[snapshot](nil),
-		offlines:        typeutil.NewSet[int64](),
-		targetVersion:   atomic.NewInt64(initialTargetVersion),
+		queryView: &channelQueryView{
+			serviceable: atomic.NewBool(false),
+			partitions:  typeutil.NewSet[int64](),
+			version:     initialTargetVersion,
+		},
 	}
 
 	dist.genSnapshot()
@@ -142,13 +162,11 @@ func (d *distribution) PinOnlineSegments(partitions ...int64) (sealed []Snapshot
 
 	current := d.current.Load()
 	sealed, growing = current.Get(partitions...)
-	version = current.version
-
 	filterOnline := func(entry SegmentEntry, _ int) bool {
-		return !d.offlines.Contain(entry.SegmentID)
+		return !entry.Offline
 	}
 	sealed, growing = d.filterSegments(sealed, growing, filterOnline)
-
+	version = current.version
 	return
 }
 
@@ -195,7 +213,26 @@ func (d *distribution) getTargetVersion() int64 {
 
 // Serviceable returns wether current snapshot is serviceable.
 func (d *distribution) Serviceable() bool {
-	return d.serviceable.Load()
+	return d.queryView.serviceable.Load()
+}
+
+func (d *distribution) updateServiceable(triggerAction string) {
+	if d.queryView.version != initialTargetVersion {
+		serviceable := true
+		for _, s := range d.queryView.sealedSegments {
+			if entry, ok := d.sealedSegments[s]; !ok || entry.Offline {
+				serviceable = false
+				break
+			}
+		}
+		if serviceable != d.queryView.serviceable.Load() {
+			d.queryView.serviceable.Store(serviceable)
+			log.Info("channel distribution serviceable changed",
+				zap.String("channel", d.channelName),
+				zap.Bool("serviceable", serviceable),
+				zap.String("action", triggerAction))
+		}
+	}
 }
 
 // AddDistributions add multiple segment entries.
@@ -224,10 +261,10 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 			entry.TargetVersion = unreadableTargetVersion
 		}
 		d.sealedSegments[entry.SegmentID] = entry
-		d.offlines.Remove(entry.SegmentID)
 	}
 
 	d.genSnapshot()
+	d.updateServiceable("AddDistributions")
 }
 
 // AddGrowing adds growing segment distribution.
@@ -243,7 +280,7 @@ func (d *distribution) AddGrowing(entries ...SegmentEntry) {
 }
 
 // AddOffline set segmentIDs to offlines.
-func (d *distribution) AddOfflines(segmentIDs ...int64) {
+func (d *distribution) MarkOfflineSegments(segmentIDs ...int64) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
@@ -253,17 +290,19 @@ func (d *distribution) AddOfflines(segmentIDs ...int64) {
 		if !ok {
 			continue
 		}
-		// FIXME: remove offlie logic later
-		// mark segment distribution as offline, set verion to unreadable
-		entry.NodeID = wildcardNodeID
-		entry.Version = unreadableTargetVersion
-		d.sealedSegments[segmentID] = entry
 		updated = true
-		d.offlines.Insert(segmentID)
+		entry.Offline = true
+		entry.Version = unreadableTargetVersion
+		entry.NodeID = -1
+		d.sealedSegments[segmentID] = entry
 	}
 
 	if updated {
+		log.Info("mark sealed segment offline from distribution",
+			zap.String("channelName", d.channelName),
+			zap.Int64s("segmentIDs", segmentIDs))
 		d.genSnapshot()
+		d.updateServiceable("MarkOfflineSegments")
 	}
 }
 
@@ -292,25 +331,30 @@ func (d *distribution) SyncTargetVersion(newVersion int64, partitions []int64, g
 		d.growingSegments[segmentID] = entry
 	}
 
-	available := true
 	for _, segmentID := range sealedInTarget {
 		entry, ok := d.sealedSegments[segmentID]
 		if !ok {
-			log.Warn("readable sealed segment lost, make it unserviceable", zap.Int64("segmentID", segmentID))
-			available = false
 			continue
 		}
 		entry.TargetVersion = newVersion
 		d.sealedSegments[segmentID] = entry
 	}
 
-	oldValue := d.targetVersion.Load()
-	d.targetVersion.Store(newVersion)
+	oldValue := d.queryView.version
+	d.queryView = &channelQueryView{
+		sealedSegments: sealedInTarget,
+		partitions:     typeutil.NewUniqueSet(partitions...),
+		version:        newVersion,
+		serviceable:    d.queryView.serviceable,
+	}
+
 	// update working partition list
-	d.genSnapshot(WithPartitions(partitions))
+	d.genSnapshot()
 	// if sealed segment in leader view is less than sealed segment in target, set delegator to unserviceable
-	d.serviceable.Store(available)
-	log.Info("Update readable segment version",
+	d.updateServiceable("SyncTargetVersion")
+
+	log.Info("Update channel query view",
+		zap.String("channel", d.channelName),
 		zap.Int64s("partitions", partitions),
 		zap.Int64("oldVersion", oldValue),
 		zap.Int64("newVersion", newVersion),
@@ -325,9 +369,6 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 	defer d.mut.Unlock()
 
 	for _, sealed := range sealedSegments {
-		if d.offlines.Contain(sealed.SegmentID) {
-			d.offlines.Remove(sealed.SegmentID)
-		}
 		entry, ok := d.sealedSegments[sealed.SegmentID]
 		if !ok {
 			continue
@@ -346,6 +387,13 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 		delete(d.growingSegments, growing.SegmentID)
 	}
 
+	log.Info("remove segments from distribution",
+		zap.String("channelName", d.channelName),
+		zap.Int64s("growing", lo.Map(growingSegments, func(s SegmentEntry, _ int) int64 { return s.SegmentID })),
+		zap.Int64s("sealed", lo.Map(sealedSegments, func(s SegmentEntry, _ int) int64 { return s.SegmentID })),
+	)
+
+	d.updateServiceable("RemoveDistributions")
 	// wait previous read even not distribution changed
 	// in case of segment balance caused segment lost track
 	return d.genSnapshot()
@@ -354,20 +402,10 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 // getSnapshot converts current distribution to snapshot format.
 // in which, user could use found nodeID=>segmentID list.
 // mutex RLock is required before calling this method.
-func (d *distribution) genSnapshot(opts ...genSnapshotOpt) chan struct{} {
+func (d *distribution) genSnapshot() chan struct{} {
 	// stores last snapshot
 	// ok to be nil
 	last := d.current.Load()
-	option := &genSnapshotOption{
-		partitions: typeutil.NewSet[int64](), // if no working list provided, snapshot shall have no item
-	}
-	// use last snapshot working parition list by default
-	if last != nil {
-		option.partitions = last.partitions
-	}
-	for _, opt := range opts {
-		opt(option)
-	}
 
 	nodeSegments := make(map[int64][]SegmentEntry)
 	for _, entry := range d.sealedSegments {
@@ -380,7 +418,7 @@ func (d *distribution) genSnapshot(opts ...genSnapshotOpt) chan struct{} {
 		dist = append(dist, SnapshotItem{
 			NodeID: nodeID,
 			Segments: lo.Map(items, func(entry SegmentEntry, _ int) SegmentEntry {
-				if !option.partitions.Contain(entry.PartitionID) {
+				if !d.queryView.partitions.Contain(entry.PartitionID) {
 					entry.TargetVersion = unreadableTargetVersion
 				}
 				return entry
@@ -390,18 +428,16 @@ func (d *distribution) genSnapshot(opts ...genSnapshotOpt) chan struct{} {
 
 	growing := make([]SegmentEntry, 0, len(d.growingSegments))
 	for _, entry := range d.growingSegments {
-		if !option.partitions.Contain(entry.PartitionID) {
+		if !d.queryView.partitions.Contain(entry.PartitionID) {
 			entry.TargetVersion = unreadableTargetVersion
 		}
 		growing = append(growing, entry)
 	}
 
-	d.serviceable.Store(d.offlines.Len() == 0)
-
 	// update snapshot version
 	d.snapshotVersion++
-	newSnapShot := NewSnapshot(dist, growing, last, d.snapshotVersion, d.targetVersion.Load())
-	newSnapShot.partitions = option.partitions
+	newSnapShot := NewSnapshot(dist, growing, last, d.snapshotVersion, d.queryView.GetVersion())
+	newSnapShot.partitions = d.queryView.partitions
 
 	d.current.Store(newSnapShot)
 	// shall be a new one
@@ -433,17 +469,5 @@ func (d *distribution) readableFilter(targetVersion int64) func(entry SegmentEnt
 func (d *distribution) getCleanup(version int64) snapshotCleanup {
 	return func() {
 		d.snapshots.GetAndRemove(version)
-	}
-}
-
-type genSnapshotOption struct {
-	partitions typeutil.Set[int64]
-}
-
-type genSnapshotOpt func(*genSnapshotOption)
-
-func WithPartitions(partitions []int64) genSnapshotOpt {
-	return func(opt *genSnapshotOption) {
-		opt.partitions = typeutil.NewSet(partitions...)
 	}
 }

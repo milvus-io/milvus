@@ -69,6 +69,9 @@ type basicSegmentMethodSet interface {
 	// Delete deletes data from the segment.
 	Delete(ctx context.Context, request *DeleteRequest) (*DeleteResult, error)
 
+	// FinishLoad wraps up the load process and let segcore do the leftover jobs.
+	FinishLoad() error
+
 	// Release releases the segment.
 	Release()
 }

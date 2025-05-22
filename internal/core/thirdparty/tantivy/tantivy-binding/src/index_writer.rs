@@ -30,6 +30,7 @@ impl IndexWriterWrapper {
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         tanviy_index_version: TantivyIndexVersion,
+        enable_user_specified_doc_id: bool,
     ) -> Result<IndexWriterWrapper> {
         init_log();
         match tanviy_index_version {
@@ -50,6 +51,7 @@ impl IndexWriterWrapper {
                     path,
                     num_threads,
                     overall_memory_budget_in_bytes,
+                    enable_user_specified_doc_id,
                 )?;
                 Ok(IndexWriterWrapper::V7(writer))
             }
@@ -116,7 +118,7 @@ impl IndexWriterWrapper {
 
     pub fn add_json_key_stats(
         &mut self,
-        keys: &[*const i8],
+        keys: &[*const c_char],
         json_offsets: &[*const i64],
         json_offsets_len: &[usize],
     ) -> Result<()> {
@@ -182,6 +184,7 @@ mod tests {
                 1,
                 50_000_000,
                 TantivyIndexVersion::V5,
+                false,
             )
             .unwrap();
 
@@ -338,5 +341,30 @@ mod tests {
             .count()
             .unwrap();
         assert_eq!(count, total_count);
+    }
+
+    #[test]
+    fn test_control_user_specified_doc_id() {
+        let enabled = [true, false];
+        for enable in enabled {
+            let dir = TempDir::new().unwrap();
+            let mut index_wrapper = IndexWriterWrapper::new(
+                "test",
+                TantivyDataType::I64,
+                dir.path().to_str().unwrap().to_string(),
+                1,
+                100_000_000,
+                TantivyIndexVersion::V7,
+                enable,
+            )
+            .unwrap();
+
+            index_wrapper.add(1 as i64, Some(0)).unwrap();
+            index_wrapper.commit().unwrap();
+
+            let reader = index_wrapper.create_reader(set_bitset).unwrap();
+            let count = reader.count().unwrap();
+            assert_eq!(count, 1);
+        }
     }
 }

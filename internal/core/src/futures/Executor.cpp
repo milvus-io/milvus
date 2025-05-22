@@ -24,7 +24,7 @@ getGlobalCPUExecutor() {
     static folly::CPUThreadPoolExecutor executor(
         thread_num,
         folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(kNumPriority),
-        std::make_shared<folly::NamedThreadFactory>("MILVUS_FUTURE_CPU_"));
+        std::make_shared<folly::NamedThreadFactory>("MILVUS_CPU_"));
     return &executor;
 }
 

@@ -32,10 +32,11 @@ func (buf *segmentBuffer) IsFull() bool {
 	return buf.insertBuffer.IsFull() || buf.deltaBuffer.IsFull()
 }
 
-func (buf *segmentBuffer) Yield() (insert []*storage.InsertData, bm25stats map[int64]*storage.BM25Stats, delete *storage.DeleteData) {
+func (buf *segmentBuffer) Yield() (insert []*storage.InsertData, bm25stats map[int64]*storage.BM25Stats, delete *storage.DeleteData, schema *schemapb.CollectionSchema) {
 	insert = buf.insertBuffer.Yield()
 	bm25stats = buf.insertBuffer.YieldStats()
 	delete = buf.deltaBuffer.Yield()
+	schema = buf.insertBuffer.collSchema
 	return
 }
 

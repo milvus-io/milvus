@@ -209,25 +209,27 @@ type JobIDReq struct {
 func (req *JobIDReq) GetJobID() string { return req.JobID }
 
 type QueryReqV2 struct {
-	DbName         string                 `json:"dbName"`
-	CollectionName string                 `json:"collectionName" binding:"required"`
-	PartitionNames []string               `json:"partitionNames"`
-	OutputFields   []string               `json:"outputFields"`
-	Filter         string                 `json:"filter"`
-	Limit          int32                  `json:"limit"`
-	Offset         int32                  `json:"offset"`
-	ExprParams     map[string]interface{} `json:"exprParams"`
+	DbName           string                 `json:"dbName"`
+	CollectionName   string                 `json:"collectionName" binding:"required"`
+	PartitionNames   []string               `json:"partitionNames"`
+	OutputFields     []string               `json:"outputFields"`
+	Filter           string                 `json:"filter"`
+	Limit            int32                  `json:"limit"`
+	Offset           int32                  `json:"offset"`
+	ExprParams       map[string]interface{} `json:"exprParams"`
+	ConsistencyLevel string                 `json:"consistencyLevel"`
 }
 
 func (req *QueryReqV2) GetDbName() string { return req.DbName }
 
 type CollectionIDReq struct {
-	DbName         string      `json:"dbName"`
-	CollectionName string      `json:"collectionName" binding:"required"`
-	PartitionName  string      `json:"partitionName"`
-	PartitionNames []string    `json:"partitionNames"`
-	OutputFields   []string    `json:"outputFields"`
-	ID             interface{} `json:"id" binding:"required"`
+	DbName           string      `json:"dbName"`
+	CollectionName   string      `json:"collectionName" binding:"required"`
+	PartitionName    string      `json:"partitionName"`
+	PartitionNames   []string    `json:"partitionNames"`
+	OutputFields     []string    `json:"outputFields"`
+	ID               interface{} `json:"id" binding:"required"`
+	ConsistencyLevel string      `json:"consistencyLevel"`
 }
 
 func (req *CollectionIDReq) GetDbName() string { return req.DbName }
@@ -267,6 +269,7 @@ type SearchReqV2 struct {
 	SearchParams     map[string]interface{} `json:"searchParams"`
 	ConsistencyLevel string                 `json:"consistencyLevel"`
 	ExprParams       map[string]interface{} `json:"exprParams"`
+	FunctionScore    FunctionScore          `json:"functionScore"`
 	// not use Params any more, just for compatibility
 	Params map[string]float64 `json:"params"`
 }
@@ -302,6 +305,7 @@ type HybridSearchReq struct {
 	StrictGroupSize  bool           `json:"strictGroupSize"`
 	OutputFields     []string       `json:"outputFields"`
 	ConsistencyLevel string         `json:"consistencyLevel"`
+	FunctionScore    FunctionScore  `json:"functionScore"`
 }
 
 func (req *HybridSearchReq) GetDbName() string { return req.DbName }
@@ -475,6 +479,11 @@ type FieldSchema struct {
 	ElementTypeParams map[string]interface{} `json:"elementTypeParams" binding:"required"`
 	Nullable          bool                   `json:"nullable" binding:"required"`
 	DefaultValue      interface{}            `json:"defaultValue" binding:"required"`
+}
+
+type FunctionScore struct {
+	Functions []FunctionSchema       `json:"functions"`
+	Params    map[string]interface{} `json:"params"`
 }
 
 type FunctionSchema struct {

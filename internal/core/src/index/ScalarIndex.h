@@ -130,7 +130,7 @@ class ScalarIndex : public IndexBase {
     }
 
     virtual const TargetBitmap
-    PatternMatch(const std::string& pattern) {
+    PatternMatch(const std::string& pattern, proto::plan::OpType op) {
         PanicInfo(Unsupported, "pattern match is not supported");
     }
 
@@ -149,6 +149,11 @@ class ScalarIndex : public IndexBase {
     virtual bool
     SupportRegexQuery() const {
         return false;
+    }
+
+    virtual bool
+    TryUseRegexQuery() const {
+        return true;
     }
 
     virtual const TargetBitmap

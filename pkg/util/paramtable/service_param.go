@@ -50,7 +50,6 @@ type ServiceParam struct {
 	PulsarCfg       PulsarConfig
 	KafkaCfg        KafkaConfig
 	RocksmqCfg      RocksmqConfig
-	NatsmqCfg       NatsmqConfig
 	MinioCfg        MinioConfig
 	ProfileCfg      ProfileConfig
 }
@@ -65,18 +64,12 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.PulsarCfg.Init(bt)
 	p.KafkaCfg.Init(bt)
 	p.RocksmqCfg.Init(bt)
-	p.NatsmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
 	p.ProfileCfg.Init(bt)
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {
 	return p.RocksmqCfg.Path.GetValue() != ""
-}
-
-// NatsmqEnable checks if NATS messaging queue is enabled.
-func (p *ServiceParam) NatsmqEnable() bool {
-	return p.NatsmqCfg.ServerStoreDir.GetValue() != ""
 }
 
 func (p *ServiceParam) PulsarEnable() bool {
@@ -321,6 +314,22 @@ We recommend using version 1.2 and above.`,
 	p.EtcdAuthPassword.Init(base.mgr)
 }
 
+func (p *EtcdConfig) GetAll() map[string]string {
+	return map[string]string{
+		"etcd.endpoints":         p.Endpoints.GetValue(),
+		"etcd.metaRootPath":      p.MetaRootPath.GetValue(),
+		"etcd.ssl.enabled":       p.EtcdUseSSL.GetValue(),
+		"etcd.ssl.tlsCert":       p.EtcdTLSCert.GetValue(),
+		"etcd.ssl.tlsKey":        p.EtcdTLSKey.GetValue(),
+		"etcd.ssl.tlsCACert":     p.EtcdTLSCACert.GetValue(),
+		"etcd.ssl.tlsMinVersion": p.EtcdTLSMinVersion.GetValue(),
+		"etcd.requestTimeout":    p.RequestTimeout.GetValue(),
+		"etcd.auth.enabled":      p.EtcdEnableAuth.GetValue(),
+		"etcd.auth.userName":     p.EtcdAuthUserName.GetValue(),
+		"etcd.auth.password":     p.EtcdAuthPassword.GetValue(),
+	}
+}
+
 // /////////////////////////////////////////////////////////////////////////////
 // --- tikv ---
 type TiKVConfig struct {
@@ -548,7 +557,7 @@ func (p *MQConfig) Init(base *BaseTable) {
 		Version:      "2.3.0",
 		DefaultValue: "default",
 		Doc: `Default value: "default"
-Valid values: [default, pulsar, kafka, rocksmq, natsmq, woodpecker]`,
+Valid values: [default, pulsar, kafka, rocksmq, woodpecker]`,
 		Export: true,
 	}
 	p.Type.Init(base.mgr)
@@ -720,7 +729,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SegmentRollingMaxSize = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
 		Version:      "2.6.0",
-		DefaultValue: "2000000000", // 1 GB
+		DefaultValue: "2GB",
 		Doc:          "Maximum entries count of a segment, default is 2GB",
 		Export:       true,
 	}
@@ -729,8 +738,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SegmentRollingMaxTime = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxInterval",
 		Version:      "2.6.0",
-		DefaultValue: "600",
-		Doc:          "Maximum interval between two segments in seconds, default is 10 minutes.",
+		DefaultValue: "10m",
+		Doc:          "Maximum interval between two segments, default is 10 minutes.",
 		Export:       true,
 	}
 	p.SegmentRollingMaxTime.Init(base.mgr)
@@ -738,8 +747,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.AuditorMaxInterval = ParamItem{
 		Key:          "woodpecker.client.auditor.maxInterval",
 		Version:      "2.6.0",
-		DefaultValue: "10",
-		Doc:          "Maximum interval between two auditing operations in seconds, default is 10 seconds.",
+		DefaultValue: "10s",
+		Doc:          "Maximum interval between two auditing operations, default is 10 seconds.",
 		Export:       true,
 	}
 	p.AuditorMaxInterval.Init(base.mgr)
@@ -747,8 +756,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SyncMaxInterval = ParamItem{
 		Key:          "woodpecker.logstore.logFileSyncPolicy.maxInterval",
 		Version:      "2.6.0",
-		DefaultValue: "1000",
-		Doc:          "Maximum interval between two sync operations in milliseconds.",
+		DefaultValue: "200ms",
+		Doc:          "Maximum interval between two sync operations, default is 200 milliseconds.",
 		Export:       true,
 	}
 	p.SyncMaxInterval.Init(base.mgr)
@@ -765,7 +774,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SyncMaxBytes = ParamItem{
 		Key:          "woodpecker.logstore.logFileSyncPolicy.maxBytes",
 		Version:      "2.6.0",
-		DefaultValue: "64000000",
+		DefaultValue: "64M",
 		Doc:          "Maximum size of write buffer in bytes.",
 		Export:       true,
 	}
@@ -783,7 +792,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FlushMaxSize = ParamItem{
 		Key:          "woodpecker.logstore.logFileSyncPolicy.maxFlushSize",
 		Version:      "2.6.0",
-		DefaultValue: "8000000",
+		DefaultValue: "8M",
 		Doc:          "Maximum size of a fragment in bytes to flush, default is 8M.",
 		Export:       true,
 	}
@@ -792,8 +801,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.RetryInterval = ParamItem{
 		Key:          "woodpecker.logstore.logFileSyncPolicy.retryInterval",
 		Version:      "2.6.0",
-		DefaultValue: "1000",
-		Doc:          "Maximum interval between two retries in milliseconds.",
+		DefaultValue: "1000ms",
+		Doc:          "Maximum interval between two retries. default is 1000 milliseconds.",
 		Export:       true,
 	}
 	p.RetryInterval.Init(base.mgr)
@@ -810,7 +819,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FragmentCachedMaxBytes = ParamItem{
 		Key:          "woodpecker.logstore.fragmentManager.maxBytes",
 		Version:      "2.6.0",
-		DefaultValue: "1000000000",
+		DefaultValue: "512M",
 		Doc:          "Maximum size of fragment cached data in bytes.",
 		Export:       true,
 	}
@@ -819,8 +828,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FragmentCachedInterval = ParamItem{
 		Key:          "woodpecker.logstore.fragmentManager.maxInterval",
 		Version:      "2.6.0",
-		DefaultValue: "1000",
-		Doc:          "Maximum interval between two fragment evicts in milliseconds.",
+		DefaultValue: "1s",
+		Doc:          "Maximum interval between two fragment evicts. default is 1 second",
 		Export:       true,
 	}
 	p.FragmentCachedInterval.Init(base.mgr)
@@ -829,7 +838,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Key:          "woodpecker.storage.type",
 		Version:      "2.6.0",
 		DefaultValue: "minio",
-		Doc:          "The Type of the storage provider. Valid values: [default, minio, local, service], default is minio.",
+		Doc:          "The Type of the storage provider. Valid values: [minio, local]",
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)
@@ -1214,141 +1223,6 @@ Set an easy-to-identify root key prefix for Milvus if etcd service already exist
 		Export:       true,
 	}
 	r.CompressionTypes.Init(base.mgr)
-}
-
-// NatsmqConfig describes the configuration options for the Nats message queue
-type NatsmqConfig struct {
-	ServerPort                ParamItem `refreshable:"false"`
-	ServerStoreDir            ParamItem `refreshable:"false"`
-	ServerMaxFileStore        ParamItem `refreshable:"false"`
-	ServerMaxPayload          ParamItem `refreshable:"false"`
-	ServerMaxPending          ParamItem `refreshable:"false"`
-	ServerInitializeTimeout   ParamItem `refreshable:"false"`
-	ServerMonitorTrace        ParamItem `refreshable:"false"`
-	ServerMonitorDebug        ParamItem `refreshable:"false"`
-	ServerMonitorLogTime      ParamItem `refreshable:"false"`
-	ServerMonitorLogFile      ParamItem `refreshable:"false"`
-	ServerMonitorLogSizeLimit ParamItem `refreshable:"false"`
-	ServerRetentionMaxAge     ParamItem `refreshable:"true"`
-	ServerRetentionMaxBytes   ParamItem `refreshable:"true"`
-	ServerRetentionMaxMsgs    ParamItem `refreshable:"true"`
-}
-
-// Init sets up a new NatsmqConfig instance using the provided BaseTable
-func (r *NatsmqConfig) Init(base *BaseTable) {
-	r.ServerPort = ParamItem{
-		Key:          "natsmq.server.port",
-		Version:      "2.3.0",
-		DefaultValue: "4222",
-		Doc:          "Listening port of the NATS server.",
-		Export:       true,
-	}
-	r.ServerPort.Init(base.mgr)
-	r.ServerStoreDir = ParamItem{
-		Key:          "natsmq.server.storeDir",
-		DefaultValue: "/var/lib/milvus/nats",
-		Version:      "2.3.0",
-		Doc:          `Directory to use for JetStream storage of nats`,
-		Export:       true,
-	}
-	r.ServerStoreDir.Init(base.mgr)
-	r.ServerMaxFileStore = ParamItem{
-		Key:          "natsmq.server.maxFileStore",
-		Version:      "2.3.0",
-		DefaultValue: "17179869184",
-		Doc:          `Maximum size of the 'file' storage`,
-		Export:       true,
-	}
-	r.ServerMaxFileStore.Init(base.mgr)
-	r.ServerMaxPayload = ParamItem{
-		Key:          "natsmq.server.maxPayload",
-		Version:      "2.3.0",
-		DefaultValue: "8388608",
-		Doc:          `Maximum number of bytes in a message payload`,
-		Export:       true,
-	}
-	r.ServerMaxPayload.Init(base.mgr)
-	r.ServerMaxPending = ParamItem{
-		Key:          "natsmq.server.maxPending",
-		Version:      "2.3.0",
-		DefaultValue: "67108864",
-		Doc:          `Maximum number of bytes buffered for a connection Applies to client connections`,
-		Export:       true,
-	}
-	r.ServerMaxPending.Init(base.mgr)
-	r.ServerInitializeTimeout = ParamItem{
-		Key:          "natsmq.server.initializeTimeout",
-		Version:      "2.3.0",
-		DefaultValue: "4000",
-		Doc:          `waiting for initialization of natsmq finished`,
-		Export:       true,
-	}
-	r.ServerInitializeTimeout.Init(base.mgr)
-	r.ServerMonitorTrace = ParamItem{
-		Key:          "natsmq.server.monitor.trace",
-		Version:      "2.3.0",
-		DefaultValue: "false",
-		Doc:          `If true enable protocol trace log messages`,
-		Export:       true,
-	}
-	r.ServerMonitorTrace.Init(base.mgr)
-	r.ServerMonitorDebug = ParamItem{
-		Key:          "natsmq.server.monitor.debug",
-		Version:      "2.3.0",
-		DefaultValue: "false",
-		Doc:          `If true enable debug log messages`,
-		Export:       true,
-	}
-	r.ServerMonitorDebug.Init(base.mgr)
-	r.ServerMonitorLogTime = ParamItem{
-		Key:          "natsmq.server.monitor.logTime",
-		Version:      "2.3.0",
-		DefaultValue: "true",
-		Doc:          `If set to false, log without timestamps.`,
-		Export:       true,
-	}
-	r.ServerMonitorLogTime.Init(base.mgr)
-	r.ServerMonitorLogFile = ParamItem{
-		Key:          "natsmq.server.monitor.logFile",
-		Version:      "2.3.0",
-		DefaultValue: "/tmp/milvus/logs/nats.log",
-		Doc:          `Log file path relative to .. of milvus binary if use relative path`,
-		Export:       true,
-	}
-	r.ServerMonitorLogFile.Init(base.mgr)
-	r.ServerMonitorLogSizeLimit = ParamItem{
-		Key:          "natsmq.server.monitor.logSizeLimit",
-		Version:      "2.3.0",
-		DefaultValue: "536870912",
-		Doc:          `Size in bytes after the log file rolls over to a new one`,
-		Export:       true,
-	}
-	r.ServerMonitorLogSizeLimit.Init(base.mgr)
-
-	r.ServerRetentionMaxAge = ParamItem{
-		Key:          "natsmq.server.retention.maxAge",
-		Version:      "2.3.0",
-		DefaultValue: "4320",
-		Doc:          `Maximum age of any message in the P-channel`,
-		Export:       true,
-	}
-	r.ServerRetentionMaxAge.Init(base.mgr)
-	r.ServerRetentionMaxBytes = ParamItem{
-		Key:          "natsmq.server.retention.maxBytes",
-		Version:      "2.3.0",
-		DefaultValue: "",
-		Doc:          `How many bytes the single P-channel may contain. Removing oldest messages if the P-channel exceeds this size`,
-		Export:       true,
-	}
-	r.ServerRetentionMaxBytes.Init(base.mgr)
-	r.ServerRetentionMaxMsgs = ParamItem{
-		Key:          "natsmq.server.retention.maxMsgs",
-		Version:      "2.3.0",
-		DefaultValue: "",
-		Doc:          `How many message the single P-channel may contain. Removing oldest messages if the P-channel exceeds this limit`,
-		Export:       true,
-	}
-	r.ServerRetentionMaxMsgs.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

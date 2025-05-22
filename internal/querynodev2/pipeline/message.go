@@ -28,17 +28,19 @@ import (
 )
 
 type insertNodeMsg struct {
-	insertMsgs  []*InsertMsg
-	deleteMsgs  []*DeleteMsg
-	insertDatas map[int64]*delegator.InsertData
-	timeRange   TimeRange
-	schema      *schemapb.CollectionSchema
+	insertMsgs    []*InsertMsg
+	deleteMsgs    []*DeleteMsg
+	insertDatas   map[int64]*delegator.InsertData
+	timeRange     TimeRange
+	schema        *schemapb.CollectionSchema
+	schemaVersion uint64
 }
 
 type deleteNodeMsg struct {
-	deleteMsgs []*DeleteMsg
-	timeRange  TimeRange
-	schema     *schemapb.CollectionSchema
+	deleteMsgs    []*DeleteMsg
+	timeRange     TimeRange
+	schema        *schemapb.CollectionSchema
+	schemaVersion uint64
 }
 
 func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
@@ -58,6 +60,7 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 			return err
 		}
 		msg.schema = body.GetSchema()
+		msg.schemaVersion = taskMsg.BeginTs()
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}

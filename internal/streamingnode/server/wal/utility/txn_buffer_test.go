@@ -72,6 +72,7 @@ func TestTxnBuffer(t *testing.T) {
 		assert.Len(t, msgs, 1)
 	}
 	createUnCommitted()
+	assert.Len(t, b.GetUncommittedMessageBuilder(), 1)
 	msgs = b.HandleImmutableMessages([]message.ImmutableMessage{
 		newCommitMessage(t, txnCtx, tsoutil.AddPhysicalDurationOnTs(baseTso, 500*time.Millisecond)),
 	}, tsoutil.AddPhysicalDurationOnTs(baseTso, 600*time.Millisecond))

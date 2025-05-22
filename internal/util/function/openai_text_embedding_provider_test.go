@@ -77,9 +77,9 @@ func createOpenAIProvider(url string, schema *schemapb.FieldSchema, providerName
 	}
 	switch providerName {
 	case openAIProvider:
-		return NewOpenAIEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
+		return NewOpenAIEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 	case azureOpenAIProvider:
-		return NewAzureOpenAIEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentialsManager(map[string]string{"mock.apikey": "mock"}))
+		return NewAzureOpenAIEmbeddingProvider(schema, functionSchema, map[string]string{embeddingURLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
 	default:
 		return nil, errors.New("Unknow provider")
 	}

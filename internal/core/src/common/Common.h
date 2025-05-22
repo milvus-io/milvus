@@ -32,6 +32,8 @@ extern int64_t EXEC_EVAL_EXPR_BATCH_SIZE;
 extern int64_t JSON_KEY_STATS_COMMIT_INTERVAL;
 extern bool OPTIMIZE_EXPR_ENABLED;
 extern bool GROWING_JSON_KEY_STATS_ENABLED;
+extern bool CONFIG_PARAM_TYPE_CHECK_ENABLED;
+
 void
 SetIndexSliceSize(const int64_t size);
 
@@ -58,6 +60,9 @@ SetDefaultJSONKeyStatsCommitInterval(int64_t val);
 
 void
 SetDefaultGrowingJSONKeyStatsEnable(bool val);
+
+void
+SetDefaultConfigParamTypeCheck(bool val);
 
 struct BufferView {
     struct Element {

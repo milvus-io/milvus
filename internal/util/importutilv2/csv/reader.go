@@ -37,6 +37,7 @@ type Row = map[storage.FieldID]any
 type reader struct {
 	ctx    context.Context
 	cm     storage.ChunkManager
+	cmr    storage.FileReader
 	schema *schemapb.CollectionSchema
 
 	cr     *csv.Reader
@@ -74,6 +75,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	return &reader{
 		ctx:        ctx,
 		cm:         cm,
+		cmr:        cmReader,
 		schema:     schema,
 		cr:         csvReader,
 		parser:     rowParser,
@@ -120,7 +122,11 @@ func (r *reader) Read() (*storage.InsertData, error) {
 	return insertData, nil
 }
 
-func (r *reader) Close() {}
+func (r *reader) Close() {
+	if r.cmr != nil {
+		r.cmr.Close()
+	}
+}
 
 func (r *reader) Size() (int64, error) {
 	if size := r.fileSize.Load(); size != 0 {

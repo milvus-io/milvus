@@ -16,6 +16,7 @@
 
 #include "ExistsExpr.h"
 #include "common/Json.h"
+#include "common/JsonCastType.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "index/JsonInvertedIndex.h"
@@ -57,22 +58,22 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
         auto* index = segment_->GetJsonIndex(expr_->column_.field_id_, pointer);
         AssertInfo(index != nullptr,
                    "Cannot find json index with path: " + pointer);
-        switch (index->JsonCastType()) {
-            case DataType::DOUBLE: {
+        switch (index->GetCastType().data_type()) {
+            case JsonCastType::DataType::DOUBLE: {
                 auto* json_index =
                     dynamic_cast<index::JsonInvertedIndex<double>*>(index);
                 cached_index_chunk_res_ = json_index->IsNotNull().clone();
                 break;
             }
 
-            case DataType::VARCHAR: {
+            case JsonCastType::DataType::VARCHAR: {
                 auto* json_index =
                     dynamic_cast<index::JsonInvertedIndex<std::string>*>(index);
                 cached_index_chunk_res_ = json_index->IsNotNull().clone();
                 break;
             }
 
-            case DataType::BOOL: {
+            case JsonCastType::DataType::BOOL: {
                 auto* json_index =
                     dynamic_cast<index::JsonInvertedIndex<bool>*>(index);
                 cached_index_chunk_res_ = json_index->IsNotNull().clone();
@@ -82,7 +83,7 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
             default:
                 PanicInfo(DataTypeInvalid,
                           "unsupported data type: {}",
-                          index->JsonCastType());
+                          index->GetCastType());
         }
     }
     TargetBitmap res;

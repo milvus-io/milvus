@@ -1749,6 +1749,19 @@ func RequestHandlerFunc(c *gin.Context) {
 	c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
 	c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH")
+	c.Writer.Header().Set("X-Content-Type-Options", "nosniff") // Prevents MIME sniffing
+
+	enableHSTS := paramtable.Get().HTTPCfg.EnableHSTS.GetAsBool()
+	if enableHSTS {
+		maxAge := paramtable.Get().HTTPCfg.HSTSMaxAge.GetValue()
+		hstsValue := fmt.Sprintf("max-age=%s", maxAge)
+		includeSubDomains := paramtable.Get().HTTPCfg.HSTSIncludeSubDomains.GetAsBool()
+		if includeSubDomains {
+			hstsValue += "; includeSubDomains"
+		}
+		c.Writer.Header().Set("Strict-Transport-Security", hstsValue)
+	}
+
 	if c.Request.Method == "OPTIONS" {
 		c.AbortWithStatus(204)
 		return
@@ -1988,4 +2001,44 @@ func generateSearchParams(reqSearchParams map[string]interface{}) ([]*commonpb.K
 	// need to exposure ParamRoundDecimal in req?
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamRoundDecimal, Value: "-1"})
 	return searchParams, nil
+}
+
+func genFunctionSchema(ctx context.Context, function *FunctionSchema) (*schemapb.FunctionSchema, error) {
+	functionTypeValue, ok := schemapb.FunctionType_value[function.FunctionType]
+	if !ok {
+		log.Ctx(ctx).Warn("function's data type is invalid(case sensitive).", zap.Any("function.DataType", function.FunctionType), zap.Any("function", function))
+		return nil, merr.WrapErrParameterInvalidMsg("Unsupported function type: %s", function.FunctionType)
+	}
+	functionType := schemapb.FunctionType(functionTypeValue)
+	description := function.Description
+	params := []*commonpb.KeyValuePair{}
+	for key, value := range function.Params {
+		params = append(params, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+	}
+	return &schemapb.FunctionSchema{
+		Name:             function.FunctionName,
+		Description:      description,
+		Type:             functionType,
+		InputFieldNames:  function.InputFieldNames,
+		OutputFieldNames: function.OutputFieldNames,
+		Params:           params,
+	}, nil
+}
+
+func genFunctionScore(ctx context.Context, functionScore *FunctionScore) (*schemapb.FunctionScore, error) {
+	fScore := schemapb.FunctionScore{
+		Functions: []*schemapb.FunctionSchema{},
+		Params:    []*commonpb.KeyValuePair{},
+	}
+	for _, function := range functionScore.Functions {
+		f, err := genFunctionSchema(ctx, &function)
+		if err != nil {
+			return nil, err
+		}
+		fScore.Functions = append(fScore.Functions, f)
+	}
+	for key, value := range functionScore.Params {
+		fScore.Params = append(fScore.Params, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
+	}
+	return &fScore, nil
 }

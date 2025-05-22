@@ -28,18 +28,24 @@ function milvus_ci_release_name(){
     if [[ "${MILVUS_SERVER_TYPE:-}" == "distributed-pulsar" ]]; then
         # Distributed pulsar mode
        name+="dp"
+    elif [[ "${MILVUS_SERVER_TYPE:-}" == "distributed-pulsar-mmap" ]]; then
+        # Distributed pulsar mode with mmap
+       name+="dpm"
     elif [[ "${MILVUS_SERVER_TYPE:-}" == "distributed-kafka" ]]; then
         # Distributed kafka mode
        name+="dk"
+    elif [[ "${MILVUS_SERVER_TYPE:-}" == "distributed-woodpecker" ]]; then
+        # Distributed woodpecker mode
+       name+="dw"
     elif [[ "${MILVUS_SERVER_TYPE:-}" == "standalone-kafka-mmap" ]]; then
         # Standalone kafka mode
-        name+="sk"
+        name+="skm" 
     elif [[ "${MILVUS_SERVER_TYPE:-}" == "distributed" ]]; then
         # Distributed mode
        name+="d"
-    elif [[ "${MILVUS_SERVER_TYPE:-}" == "standalone-authentication" ]]; then
-        # Standalone authentication mode
-       name+="a"
+    elif [[ "${MILVUS_SERVER_TYPE:-}" == "standalone-authentication-mmap" ]]; then
+        # Standalone authentication mode with mmap
+       name+="sam"
     elif [[ "${MILVUS_SERVER_TYPE:-}" == "standalone-one-pod" ]]; then
         # Standalone mode with one pod
        name+="sop"

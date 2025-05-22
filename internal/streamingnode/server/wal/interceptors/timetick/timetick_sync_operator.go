@@ -32,7 +32,7 @@ func newTimeTickSyncOperator(param *interceptors.InterceptorBuildParam) *timeTic
 			zap.Any("pchannel", param.ChannelInfo),
 		),
 		interceptorBuildParam: param,
-		ackManager:            ack.NewAckManager(param.InitializedTimeTick, param.InitializedMessageID, metrics),
+		ackManager:            ack.NewAckManager(param.LastTimeTickMessage.TimeTick(), param.LastTimeTickMessage.LastConfirmedMessageID(), metrics),
 		ackDetails:            ack.NewAckDetails(),
 		sourceID:              paramtable.GetNodeID(),
 		metrics:               metrics,
@@ -123,11 +123,7 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 	persist bool,
 	appender func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error),
 ) error {
-	msg, err := NewTimeTickMsg(ts, lastConfirmedMessageID, impl.sourceID)
-	if err != nil {
-		return errors.Wrap(err, "at build time tick msg")
-	}
-
+	msg := NewTimeTickMsg(ts, lastConfirmedMessageID, impl.sourceID, persist)
 	if !persist {
 		// there's no persisted message, so no need to send persistent time tick message.
 		// With the hint of not persisted message, the underlying wal will not persist it.

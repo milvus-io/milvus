@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/remeh/sizedwaitgroup"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -19,18 +20,20 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/segment"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
@@ -44,14 +47,18 @@ type walTestFramework struct {
 	messageCount int
 }
 
+func TestFencedError(t *testing.T) {
+	assert.True(t, errors.IsAny(errors.Mark(errors.New("test"), walimpls.ErrFenced), context.Canceled, walimpls.ErrFenced))
+	assert.True(t, errors.IsAny(errors.Wrap(walimpls.ErrFenced, "some message"), context.Canceled, walimpls.ErrFenced))
+}
+
 func TestWAL(t *testing.T) {
 	initResourceForTest(t)
 	b := registry.MustGetBuilder(walimplstest.WALName,
 		redo.NewInterceptorBuilder(),
-		// TODO: current flusher interceptor cannot work well with the walimplstest.
-		// flusher.NewInterceptorBuilder(),
+		lock.NewInterceptorBuilder(),
 		timetick.NewInterceptorBuilder(),
-		segment.NewInterceptorBuilder(),
+		shard.NewInterceptorBuilder(),
 	)
 	f := &walTestFramework{
 		b:            b,
@@ -70,11 +77,13 @@ func initResourceForTest(t *testing.T) {
 	rc := idalloc.NewMockRootCoordClient(t)
 	rc.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{}, nil)
 
-	rc.EXPECT().AllocSegment(mock.Anything, mock.Anything).Return(&datapb.AllocSegmentResponse{}, nil)
-
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveVChannels(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	fMixCoordClient := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	fMixCoordClient.Set(rc)
 	resource.InitForTest(
@@ -131,7 +140,8 @@ func (f *testOneWALFramework) Run() {
 			Term: int64(f.term),
 		}
 		rwWAL, err := f.opener.Open(ctx, &wal.OpenOption{
-			Channel: pChannel,
+			Channel:        pChannel,
+			DisableFlusher: true,
 		})
 		assert.NoError(f.t, err)
 		assert.NotNil(f.t, rwWAL)
@@ -139,13 +149,30 @@ func (f *testOneWALFramework) Run() {
 
 		pChannel.AccessMode = types.AccessModeRO
 		roWAL, err := f.opener.Open(ctx, &wal.OpenOption{
-			Channel: pChannel,
+			Channel:        pChannel,
+			DisableFlusher: true,
 		})
 		assert.NoError(f.t, err)
 		f.testReadAndWrite(ctx, rwWAL, roWAL)
 		// close the wal
-		rwWAL.Close()
 		roWAL.Close()
+		walimplstest.EnableFenced(pChannel.Name)
+
+		// create collection before start test
+		createMsg := message.NewCreateCollectionMessageBuilderV1().
+			WithHeader(&message.CreateCollectionMessageHeader{
+				CollectionId: 100,
+				PartitionIds: []int64{200},
+			}).
+			WithBody(&msgpb.CreateCollectionRequest{}).
+			WithVChannel(testVChannel).
+			MustBuildMutable()
+
+		result, err := rwWAL.Append(ctx, createMsg)
+		assert.Nil(f.t, result)
+		assert.True(f.t, status.AsStreamingError(err).IsFenced())
+		walimplstest.DisableFenced(pChannel.Name)
+		rwWAL.Close()
 	}
 }
 
@@ -264,9 +291,13 @@ func (f *testOneWALFramework) testSendDropCollection(ctx context.Context, w wal.
 		BuildMutable()
 	assert.NoError(f.t, err)
 
-	msgID, err := w.Append(ctx, dropMsg)
-	assert.NoError(f.t, err)
-	assert.NotNil(f.t, msgID)
+	done := make(chan struct{})
+	w.AppendAsync(ctx, dropMsg, func(ar *wal.AppendResult, err error) {
+		assert.NoError(f.t, err)
+		assert.NotNil(f.t, ar)
+		close(done)
+	})
+	<-done
 }
 
 func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]message.ImmutableMessage, error) {
@@ -293,8 +324,7 @@ func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]mess
 				assert.NotNil(f.t, appendResult)
 
 				immutableMsg := msg.IntoImmutableMessage(appendResult.MessageID)
-				begin, err := message.AsImmutableBeginTxnMessageV2(immutableMsg)
-				assert.NoError(f.t, err)
+				begin := message.MustAsImmutableBeginTxnMessageV2(immutableMsg)
 				b := message.NewImmutableTxnMessageBuilder(begin)
 				txnCtx := appendResult.TxnCtx
 				for i := 0; i < int(rand.Int31n(5)); i++ {

@@ -381,6 +381,10 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, 10, Params.CollectionChannelCountFactor.GetAsInt())
 		assert.Equal(t, 3000, Params.AutoBalanceInterval.GetAsInt())
+
+		assert.Equal(t, 5, Params.BalanceSegmentBatchSize.GetAsInt())
+		assert.Equal(t, 1, Params.BalanceChannelBatchSize.GetAsInt())
+		assert.Equal(t, true, Params.EnableBalanceOnMultipleCollections.GetAsBool())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -412,7 +416,6 @@ func TestComponentParam(t *testing.T) {
 
 		// chunk cache
 		assert.Equal(t, "willneed", Params.ReadAheadPolicy.GetValue())
-		assert.Equal(t, "disable", Params.ChunkCacheWarmingUp.GetValue())
 
 		// test small indexNlist/NProbe default
 		params.Remove("queryNode.segcore.smallIndex.nlist")
@@ -485,7 +488,6 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 
-		assert.Equal(t, true, Params.MmapChunkCache.GetAsBool())
 		assert.Equal(t, 60*time.Second, Params.DiskSizeFetchInterval.GetAsDuration(time.Second))
 	})
 
@@ -626,6 +628,16 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
 		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse())
 		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
+		assert.Equal(t, 1*time.Second, params.StreamingCfg.LoggingAppendSlowThreshold.GetAsDurationByParse())
+		assert.Equal(t, 3*time.Second, params.StreamingCfg.WALRecoveryGracefulCloseTimeout.GetAsDurationByParse())
+		assert.Equal(t, 100, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
+		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
+		assert.Equal(t, float64(0.6), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())
+		assert.Equal(t, float64(0.4), params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.GetAsFloat())
+		assert.Equal(t, float64(0.2), params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat())
+		assert.Equal(t, 1*time.Minute, params.StreamingCfg.WALTruncateSampleInterval.GetAsDurationByParse())
+		assert.Equal(t, 5*time.Minute, params.StreamingCfg.WALTruncateRetentionInterval.GetAsDurationByParse())
+
 		params.Save(params.StreamingCfg.WALBalancerTriggerInterval.Key, "50s")
 		params.Save(params.StreamingCfg.WALBalancerBackoffInitialInterval.Key, "50s")
 		params.Save(params.StreamingCfg.WALBalancerBackoffMultiplier.Key, "3.5")
@@ -639,6 +651,15 @@ func TestComponentParam(t *testing.T) {
 		params.Save(params.StreamingCfg.WALBalancerPolicyVChannelFairAntiAffinityWeight.Key, "0.02")
 		params.Save(params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceTolerance.Key, "0.02")
 		params.Save(params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceMaxStep.Key, "4")
+		params.Save(params.StreamingCfg.LoggingAppendSlowThreshold.Key, "3s")
+		params.Save(params.StreamingCfg.WALRecoveryGracefulCloseTimeout.Key, "4s")
+		params.Save(params.StreamingCfg.WALRecoveryMaxDirtyMessage.Key, "200")
+		params.Save(params.StreamingCfg.WALRecoveryPersistInterval.Key, "20s")
+		params.Save(params.StreamingCfg.FlushMemoryThreshold.Key, "0.7")
+		params.Save(params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.Key, "0.25")
+		params.Save(params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.Key, "0.15")
+		params.Save(params.StreamingCfg.WALTruncateSampleInterval.Key, "1m")
+		params.Save(params.StreamingCfg.WALTruncateRetentionInterval.Key, "30m")
 		assert.Equal(t, 50*time.Second, params.StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse())
 		assert.Equal(t, 50*time.Second, params.StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse())
 		assert.Equal(t, 3.5, params.StreamingCfg.WALBalancerBackoffMultiplier.GetAsFloat())
@@ -652,6 +673,15 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 3500*time.Millisecond, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse())
 		assert.Equal(t, int64(128*1024), params.StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
+		assert.Equal(t, 3*time.Second, params.StreamingCfg.LoggingAppendSlowThreshold.GetAsDurationByParse())
+		assert.Equal(t, 4*time.Second, params.StreamingCfg.WALRecoveryGracefulCloseTimeout.GetAsDurationByParse())
+		assert.Equal(t, 200, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
+		assert.Equal(t, 20*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
+		assert.Equal(t, float64(0.7), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())
+		assert.Equal(t, float64(0.25), params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.GetAsFloat())
+		assert.Equal(t, float64(0.15), params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat())
+		assert.Equal(t, 1*time.Minute, params.StreamingCfg.WALTruncateSampleInterval.GetAsDurationByParse())
+		assert.Equal(t, 30*time.Minute, params.StreamingCfg.WALTruncateRetentionInterval.GetAsDurationByParse())
 	})
 
 	t.Run("channel config priority", func(t *testing.T) {

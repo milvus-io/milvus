@@ -152,7 +152,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 	// empty inputs
 	{
 		nq := int64(1)
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*milvuspb.SearchResults{})
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE"}}, []*milvuspb.SearchResults{})
 		s.NoError(err)
 		s.Equal(int64(3), ret.Results.TopK)
 		s.Equal(0, len(ret.Results.FieldsData))
@@ -166,7 +166,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		searchData := &milvuspb.SearchResults{
 			Results: data,
 		}
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*milvuspb.SearchResults{searchData})
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE"}}, []*milvuspb.SearchResults{searchData})
 		s.NoError(err)
 		s.Equal(int64(3), ret.Results.TopK)
 		s.Equal([]int64{3}, ret.Results.Topks)
@@ -178,7 +178,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		searchData := &milvuspb.SearchResults{
 			Results: data,
 		}
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*milvuspb.SearchResults{searchData})
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE"}}, []*milvuspb.SearchResults{searchData})
 		s.NoError(err)
 		s.Equal(int64(3), ret.Results.TopK)
 		s.Equal([]int64{0}, ret.Results.Topks)
@@ -190,7 +190,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		searchData := &milvuspb.SearchResults{
 			Results: data,
 		}
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*milvuspb.SearchResults{searchData})
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE"}}, []*milvuspb.SearchResults{searchData})
 		s.NoError(err)
 		s.Equal(int64(3), ret.Results.TopK)
 		s.Equal([]int64{3, 3, 3}, ret.Results.Topks)
@@ -202,7 +202,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		searchData := &milvuspb.SearchResults{
 			Results: data,
 		}
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*milvuspb.SearchResults{searchData})
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE"}}, []*milvuspb.SearchResults{searchData})
 		s.NoError(err)
 		s.Equal(int64(3), ret.Results.TopK)
 		s.Equal([]int64{0, 0, 0}, ret.Results.Topks)
@@ -219,7 +219,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		searchData2 := &milvuspb.SearchResults{
 			Results: genSearchResultData(nq, 20, schemapb.DataType_Int64, "ts", 102),
 		}
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*milvuspb.SearchResults{searchData1, searchData2})
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE", "COSINE"}}, []*milvuspb.SearchResults{searchData1, searchData2})
 		s.NoError(err)
 		s.Equal(int64(3), ret.Results.TopK)
 		s.Equal([]int64{3}, ret.Results.Topks)
@@ -234,7 +234,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		searchData2 := &milvuspb.SearchResults{
 			Results: genSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
 		}
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*milvuspb.SearchResults{searchData1, searchData2})
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE", "COSINE"}}, []*milvuspb.SearchResults{searchData1, searchData2})
 		s.NoError(err)
 		s.Equal(int64(3), ret.Results.TopK)
 		s.Equal([]int64{0}, ret.Results.Topks)
@@ -249,7 +249,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		searchData2 := &milvuspb.SearchResults{
 			Results: genSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102),
 		}
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*milvuspb.SearchResults{searchData1, searchData2})
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE", "COSINE"}}, []*milvuspb.SearchResults{searchData1, searchData2})
 		s.NoError(err)
 		s.Equal(int64(3), ret.Results.TopK)
 		s.Equal([]int64{3}, ret.Results.Topks)
@@ -264,7 +264,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		searchData2 := &milvuspb.SearchResults{
 			Results: genSearchResultData(nq, 20, schemapb.DataType_Int64, "ts", 102),
 		}
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*milvuspb.SearchResults{searchData1, searchData2})
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE", "COSINE"}}, []*milvuspb.SearchResults{searchData1, searchData2})
 		s.NoError(err)
 		s.Equal(int64(3), ret.Results.TopK)
 		s.Equal([]int64{3, 3, 3}, ret.Results.Topks)
@@ -279,7 +279,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		searchData2 := &milvuspb.SearchResults{
 			Results: genSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102),
 		}
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*milvuspb.SearchResults{searchData1, searchData2})
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE", "COSINE"}}, []*milvuspb.SearchResults{searchData1, searchData2})
 		s.NoError(err)
 		s.Equal(int64(3), ret.Results.TopK)
 		s.Equal([]int64{0, 0, 0}, ret.Results.Topks)
@@ -294,7 +294,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		searchData2 := &milvuspb.SearchResults{
 			Results: genSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102),
 		}
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*milvuspb.SearchResults{searchData1, searchData2})
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE", "COSINE"}}, []*milvuspb.SearchResults{searchData1, searchData2})
 		s.NoError(err)
 		s.Equal(int64(3), ret.Results.TopK)
 		s.Equal([]int64{3, 3, 3}, ret.Results.Topks)

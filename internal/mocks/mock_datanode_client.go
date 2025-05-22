@@ -374,6 +374,80 @@ func (_c *MockDataNodeClient_CreateJobV2_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// CreateTask provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) CreateTask(ctx context.Context, in *workerpb.CreateTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateTask")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *workerpb.CreateTaskRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *workerpb.CreateTaskRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *workerpb.CreateTaskRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNodeClient_CreateTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateTask'
+type MockDataNodeClient_CreateTask_Call struct {
+	*mock.Call
+}
+
+// CreateTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *workerpb.CreateTaskRequest
+//   - opts ...grpc.CallOption
+func (_e *MockDataNodeClient_Expecter) CreateTask(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_CreateTask_Call {
+	return &MockDataNodeClient_CreateTask_Call{Call: _e.mock.On("CreateTask",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataNodeClient_CreateTask_Call) Run(run func(ctx context.Context, in *workerpb.CreateTaskRequest, opts ...grpc.CallOption)) *MockDataNodeClient_CreateTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*workerpb.CreateTaskRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataNodeClient_CreateTask_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNodeClient_CreateTask_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNodeClient_CreateTask_Call) RunAndReturn(run func(context.Context, *workerpb.CreateTaskRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataNodeClient_CreateTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropCompactionPlan provides a mock function with given fields: ctx, in, opts
 func (_m *MockDataNodeClient) DropCompactionPlan(ctx context.Context, in *datapb.DropCompactionPlanRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
@@ -666,6 +740,80 @@ func (_c *MockDataNodeClient_DropJobsV2_Call) Return(_a0 *commonpb.Status, _a1 e
 }
 
 func (_c *MockDataNodeClient_DropJobsV2_Call) RunAndReturn(run func(context.Context, *workerpb.DropJobsV2Request, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataNodeClient_DropJobsV2_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropTask provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) DropTask(ctx context.Context, in *workerpb.DropTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropTask")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *workerpb.DropTaskRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *workerpb.DropTaskRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *workerpb.DropTaskRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNodeClient_DropTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropTask'
+type MockDataNodeClient_DropTask_Call struct {
+	*mock.Call
+}
+
+// DropTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *workerpb.DropTaskRequest
+//   - opts ...grpc.CallOption
+func (_e *MockDataNodeClient_Expecter) DropTask(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_DropTask_Call {
+	return &MockDataNodeClient_DropTask_Call{Call: _e.mock.On("DropTask",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataNodeClient_DropTask_Call) Run(run func(ctx context.Context, in *workerpb.DropTaskRequest, opts ...grpc.CallOption)) *MockDataNodeClient_DropTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*workerpb.DropTaskRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataNodeClient_DropTask_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataNodeClient_DropTask_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNodeClient_DropTask_Call) RunAndReturn(run func(context.Context, *workerpb.DropTaskRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataNodeClient_DropTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1776,6 +1924,80 @@ func (_c *MockDataNodeClient_QuerySlot_Call) Return(_a0 *datapb.QuerySlotRespons
 }
 
 func (_c *MockDataNodeClient_QuerySlot_Call) RunAndReturn(run func(context.Context, *datapb.QuerySlotRequest, ...grpc.CallOption) (*datapb.QuerySlotResponse, error)) *MockDataNodeClient_QuerySlot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryTask provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) QueryTask(ctx context.Context, in *workerpb.QueryTaskRequest, opts ...grpc.CallOption) (*workerpb.QueryTaskResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryTask")
+	}
+
+	var r0 *workerpb.QueryTaskResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *workerpb.QueryTaskRequest, ...grpc.CallOption) (*workerpb.QueryTaskResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *workerpb.QueryTaskRequest, ...grpc.CallOption) *workerpb.QueryTaskResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*workerpb.QueryTaskResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *workerpb.QueryTaskRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNodeClient_QueryTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryTask'
+type MockDataNodeClient_QueryTask_Call struct {
+	*mock.Call
+}
+
+// QueryTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *workerpb.QueryTaskRequest
+//   - opts ...grpc.CallOption
+func (_e *MockDataNodeClient_Expecter) QueryTask(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_QueryTask_Call {
+	return &MockDataNodeClient_QueryTask_Call{Call: _e.mock.On("QueryTask",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataNodeClient_QueryTask_Call) Run(run func(ctx context.Context, in *workerpb.QueryTaskRequest, opts ...grpc.CallOption)) *MockDataNodeClient_QueryTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*workerpb.QueryTaskRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataNodeClient_QueryTask_Call) Return(_a0 *workerpb.QueryTaskResponse, _a1 error) *MockDataNodeClient_QueryTask_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNodeClient_QueryTask_Call) RunAndReturn(run func(context.Context, *workerpb.QueryTaskRequest, ...grpc.CallOption) (*workerpb.QueryTaskResponse, error)) *MockDataNodeClient_QueryTask_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -57,7 +57,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         collections = self.list_collections(client)[0]
@@ -103,7 +103,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -116,13 +116,13 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         # 4. query using filter
         self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -133,7 +133,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -146,7 +146,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         # 4. query using filter
         res = self.query(client, collection_name, filter=default_search_exp,
                          output_fields=[default_primary_key_field_name, default_float_field_name,
@@ -154,7 +154,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                          check_task=CheckTasks.check_query_results,
                          check_items={exp_res: rows,
                                       "with_vec": True,
-                                      "primary_field": default_primary_key_field_name})[0]
+                                      "pk_name": default_primary_key_field_name})[0]
         assert set(res[0].keys()) == {default_primary_key_field_name, default_vector_field_name,
                                       default_float_field_name, default_string_field_name}
         self.drop_collection(client, collection_name)
@@ -167,7 +167,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -180,14 +180,14 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         # 4. query using filter
         res = self.query(client, collection_name, filter=default_search_exp,
                          output_fields=["*"],
                          check_task=CheckTasks.check_query_results,
                          check_items={exp_res: rows,
                                       "with_vec": True,
-                                      "primary_field": default_primary_key_field_name})[0]
+                                      "pk_name": default_primary_key_field_name})[0]
         assert set(res[0].keys()) == {default_primary_key_field_name, default_vector_field_name,
                                       default_float_field_name, default_string_field_name}
         self.drop_collection(client, collection_name)
@@ -200,7 +200,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -215,14 +215,14 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows[:limit],
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name[:limit]})
+                                "pk_name": default_primary_key_field_name[:limit]})
         # 4. query using filter
         self.query(client, collection_name, filter=default_search_exp,
                    limit=limit,
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows[:limit],
                                 "with_vec": True,
-                                "primary_field": default_primary_key_field_name[:limit]})
+                                "pk_name": default_primary_key_field_name[:limit]})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -234,7 +234,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         expected: query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -269,7 +269,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         expected: query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -312,7 +312,7 @@ class TestMilvusClientGetInvalid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -336,7 +336,7 @@ class TestMilvusClientGetInvalid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -362,7 +362,7 @@ class TestMilvusClientGetInvalid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -403,7 +403,7 @@ class TestMilvusClientGetValid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -428,7 +428,7 @@ class TestMilvusClientGetValid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
@@ -458,7 +458,7 @@ class TestMilvusClientGetValid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, id_type="string", max_length=ct.default_length)
         # 2. insert
@@ -485,7 +485,7 @@ class TestMilvusClientGetValid(TestMilvusClientV2Base):
         expected: search/query successfully without deleted data
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, id_type="string", max_length=ct.default_length)
         # 2. insert
@@ -551,7 +551,7 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
                   with that without json path index
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         json_field_name = "json_field"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]

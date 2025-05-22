@@ -73,6 +73,8 @@ func initHook() error {
 	}
 
 	log.Info("start to load plugin", zap.String("path", path))
+	LockHookInit()
+	defer UnlockHookInit()
 	p, err := plugin.Open(path)
 	if err != nil {
 		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())

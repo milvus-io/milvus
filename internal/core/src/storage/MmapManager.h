@@ -16,9 +16,8 @@
 
 #pragma once
 
-#include <shared_mutex>
-#include "ChunkCache.h"
-#include "RemoteChunkManagerSingleton.h"
+#include "storage/MmapChunkManager.h"
+#include "storage/Types.h"
 
 namespace milvus::storage {
 /**
@@ -42,9 +41,6 @@ class MmapManager {
         return instance;
     }
     ~MmapManager() {
-        if (cc_ != nullptr) {
-            cc_ = nullptr;
-        }
         // delete mmap chunk manager at last
         if (mcm_ != nullptr) {
             mcm_ = nullptr;
@@ -62,27 +58,12 @@ class MmapManager {
                     mmap_config_.disk_limit,
                     mmap_config_.fix_file_size);
             }
-            if (cc_ == nullptr) {
-                auto rcm = RemoteChunkManagerSingleton::GetInstance()
-                               .GetRemoteChunkManager();
-                cc_ = std::make_shared<ChunkCache>(
-                    mmap_config_.mmap_path,
-                    std::move(mmap_config_.cache_read_ahead_policy),
-                    rcm,
-                    mcm_);
-            }
             LOG_INFO("Init MmapConfig with MmapConfig: {}",
                      mmap_config_.ToString());
             init_flag_ = true;
         } else {
             LOG_WARN("mmap manager has been inited.");
         }
-    }
-
-    ChunkCachePtr
-    GetChunkCache() {
-        AssertInfo(init_flag_ == true, "Mmap manager has not been init.");
-        return cc_;
     }
 
     MmapChunkManagerPtr
@@ -119,7 +100,6 @@ class MmapManager {
     mutable std::mutex init_mutex_;
     MmapConfig mmap_config_;
     MmapChunkManagerPtr mcm_ = nullptr;
-    ChunkCachePtr cc_ = nullptr;
     std::atomic<bool> init_flag_ = false;
 };
 

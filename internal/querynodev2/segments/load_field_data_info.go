@@ -37,7 +37,7 @@ func newLoadFieldDataInfo(ctx context.Context) (*LoadFieldDataInfo, error) {
 	var status C.CStatus
 	var cLoadFieldDataInfo C.CLoadFieldDataInfo
 	GetDynamicPool().Submit(func() (any, error) {
-		status = C.NewLoadFieldDataInfo(&cLoadFieldDataInfo)
+		status = C.NewLoadFieldDataInfo(&cLoadFieldDataInfo, C.int64_t(0))
 		return nil, nil
 	}).Await()
 	if err := HandleCStatus(ctx, &status, "newLoadFieldDataInfo failed"); err != nil {
@@ -97,16 +97,6 @@ func (ld *LoadFieldDataInfo) appendMMapDirPath(dir string) {
 		defer C.free(unsafe.Pointer(cDir))
 
 		C.AppendMMapDirPath(ld.cLoadFieldDataInfo, cDir)
-		return nil, nil
-	}).Await()
-}
-
-func (ld *LoadFieldDataInfo) appendURI(uri string) {
-	GetDynamicPool().Submit(func() (any, error) {
-		cURI := C.CString(uri)
-		defer C.free(unsafe.Pointer(cURI))
-		C.SetUri(ld.cLoadFieldDataInfo, cURI)
-
 		return nil, nil
 	}).Await()
 }

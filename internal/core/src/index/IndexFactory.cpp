@@ -21,6 +21,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/JsonCastType.h"
 #include "common/Types.h"
+#include "index/Index.h"
 #include "index/VectorMemIndex.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
@@ -103,7 +104,7 @@ IndexFactory::IndexLoadResource(
     DataType field_type,
     IndexVersion index_version,
     float index_size,
-    std::map<std::string, std::string>& index_params,
+    const std::map<std::string, std::string>& index_params,
     bool mmap_enable) {
     if (milvus::IsVectorDataType(field_type)) {
         return VecIndexLoadResource(
@@ -119,7 +120,7 @@ IndexFactory::VecIndexLoadResource(
     DataType field_type,
     IndexVersion index_version,
     float index_size,
-    std::map<std::string, std::string>& index_params,
+    const std::map<std::string, std::string>& index_params,
     bool mmap_enable) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
@@ -228,7 +229,7 @@ IndexFactory::ScalarIndexLoadResource(
     DataType field_type,
     IndexVersion index_version,
     float index_size,
-    std::map<std::string, std::string>& index_params,
+    const std::map<std::string, std::string>& index_params,
     bool mmap_enable) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
@@ -263,17 +264,10 @@ IndexFactory::ScalarIndexLoadResource(
         }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::INVERTED_INDEX_TYPE) {
-        if (mmap_enable) {
-            request.final_memory_cost = 0;
-            request.final_disk_cost = index_size_gb;
-            request.max_memory_cost = index_size_gb;
-            request.max_disk_cost = index_size_gb;
-        } else {
-            request.final_memory_cost = index_size_gb;
-            request.final_disk_cost = 0;
-            request.max_memory_cost = 2 * index_size_gb;
-            request.max_disk_cost = 0;
-        }
+        request.final_memory_cost = 0;
+        request.final_disk_cost = index_size_gb;
+        request.max_memory_cost = index_size_gb;
+        request.max_disk_cost = index_size_gb;
 
         request.has_raw_data = false;
     } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
@@ -289,11 +283,7 @@ IndexFactory::ScalarIndexLoadResource(
             request.max_disk_cost = 0;
         }
 
-        if (field_type == milvus::DataType::ARRAY) {
-            request.has_raw_data = false;
-        } else {
-            request.has_raw_data = true;
-        }
+        request.has_raw_data = false;
     } else if (index_type == milvus::index::HYBRID_INDEX_TYPE) {
         request.final_memory_cost = index_size_gb;
         request.final_disk_cost = index_size_gb;
@@ -304,7 +294,7 @@ IndexFactory::ScalarIndexLoadResource(
         LOG_ERROR(
             "invalid index type to estimate scalar index load resource: {}",
             index_type);
-        return LoadResourceRequest{0, 0, 0, 0, true};
+        return LoadResourceRequest{0, 0, 0, 0, false};
     }
     return request;
 }
@@ -312,9 +302,11 @@ IndexFactory::ScalarIndexLoadResource(
 IndexBasePtr
 IndexFactory::CreateIndex(
     const CreateIndexInfo& create_index_info,
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    bool use_build_pool) {
     if (IsVectorDataType(create_index_info.field_type)) {
-        return CreateVectorIndex(create_index_info, file_manager_context);
+        return CreateVectorIndex(
+            create_index_info, file_manager_context, use_build_pool);
     }
 
     return CreateScalarIndex(create_index_info, file_manager_context);
@@ -395,22 +387,17 @@ IndexFactory::CreateJsonIndex(
     const storage::FileManagerContext& file_manager_context) {
     AssertInfo(index_type == INVERTED_INDEX_TYPE,
                "Invalid index type for json index");
-    switch (cast_dtype) {
-        case JsonCastType::BOOL:
+
+    switch (cast_dtype.element_type()) {
+        case JsonCastType::DataType::BOOL:
             return std::make_unique<index::JsonInvertedIndex<bool>>(
-                proto::schema::DataType::Bool,
-                nested_path,
-                file_manager_context);
-        case JsonCastType::DOUBLE:
+                cast_dtype, nested_path, file_manager_context);
+        case JsonCastType::DataType::DOUBLE:
             return std::make_unique<index::JsonInvertedIndex<double>>(
-                proto::schema::DataType::Double,
-                nested_path,
-                file_manager_context);
-        case JsonCastType::VARCHAR:
+                cast_dtype, nested_path, file_manager_context);
+        case JsonCastType::DataType::VARCHAR:
             return std::make_unique<index::JsonInvertedIndex<std::string>>(
-                proto::schema::DataType::VarChar,
-                nested_path,
-                file_manager_context);
+                cast_dtype, nested_path, file_manager_context);
         default:
             PanicInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
     }
@@ -451,7 +438,8 @@ IndexFactory::CreateScalarIndex(
 IndexBasePtr
 IndexFactory::CreateVectorIndex(
     const CreateIndexInfo& create_index_info,
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    bool use_knowhere_build_pool) {
     auto index_type = create_index_info.index_type;
     auto metric_type = create_index_info.metric_type;
     auto version = create_index_info.index_engine_version;
@@ -493,23 +481,43 @@ IndexFactory::CreateVectorIndex(
             case DataType::VECTOR_FLOAT:
             case DataType::VECTOR_SPARSE_FLOAT: {
                 return std::make_unique<VectorMemIndex<float>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    use_knowhere_build_pool,
+                    file_manager_context);
             }
             case DataType::VECTOR_BINARY: {
                 return std::make_unique<VectorMemIndex<bin1>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    use_knowhere_build_pool,
+                    file_manager_context);
             }
             case DataType::VECTOR_FLOAT16: {
                 return std::make_unique<VectorMemIndex<float16>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    use_knowhere_build_pool,
+                    file_manager_context);
             }
             case DataType::VECTOR_BFLOAT16: {
                 return std::make_unique<VectorMemIndex<bfloat16>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    use_knowhere_build_pool,
+                    file_manager_context);
             }
             case DataType::VECTOR_INT8: {
                 return std::make_unique<VectorMemIndex<int8>>(
-                    index_type, metric_type, version, file_manager_context);
+                    index_type,
+                    metric_type,
+                    version,
+                    use_knowhere_build_pool,
+                    file_manager_context);
             }
             default:
                 PanicInfo(

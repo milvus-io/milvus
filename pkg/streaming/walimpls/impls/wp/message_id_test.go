@@ -14,7 +14,7 @@ func TestMessageID(t *testing.T) {
 	wpId := message.MessageID(newMessageIDOfWoodpecker(1, 2)).(interface {
 		WoodpeckerID() *woodpecker.LogMessageId
 	}).WoodpeckerID()
-	assert.Equal(t, walName, newMessageIDOfWoodpecker(1, 2).WALName())
+	assert.Equal(t, WALName, newMessageIDOfWoodpecker(1, 2).WALName())
 
 	assert.Equal(t, int64(1), wpId.SegmentId)
 	assert.Equal(t, int64(2), wpId.EntryId)

@@ -176,15 +176,12 @@ func NewLoader(
 	duf := NewDiskUsageFetcher(ctx)
 	go duf.Start()
 
-	warmupDispatcher := NewWarmupDispatcher()
-	go warmupDispatcher.Run(ctx)
 	loader := &segmentLoader{
 		manager:                   manager,
 		cm:                        cm,
 		loadingSegments:           typeutil.NewConcurrentMap[int64, *loadResult](),
 		committedResourceNotifier: syncutil.NewVersionedNotifier(),
 		duf:                       duf,
-		warmupDispatcher:          warmupDispatcher,
 	}
 
 	return loader
@@ -227,11 +224,21 @@ type segmentLoader struct {
 	committedResource         LoadResource
 	committedResourceNotifier *syncutil.VersionedNotifier
 
-	duf              *diskUsageFetcher
-	warmupDispatcher *AsyncWarmupDispatcher
+	duf *diskUsageFetcher
 }
 
 var _ Loader = (*segmentLoader)(nil)
+
+func addBucketNameStorageV2(segmentInfo *querypb.SegmentLoadInfo) {
+	if segmentInfo.GetStorageVersion() == 2 {
+		bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+		for _, fieldBinlog := range segmentInfo.GetBinlogPaths() {
+			for _, binlog := range fieldBinlog.GetBinlogs() {
+				binlog.LogPath = path.Join(bucketName, binlog.LogPath)
+			}
+		}
+	}
+}
 
 func (loader *segmentLoader) Load(ctx context.Context,
 	collectionID int64,
@@ -248,13 +255,11 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		log.Info("no segment to load")
 		return nil, nil
 	}
-	coll := loader.manager.Collection.Get(collectionID)
-	// filter field schema which need to be loaded
-	for _, info := range segments {
-		info.BinlogPaths = lo.Filter(info.GetBinlogPaths(), func(fbl *datapb.FieldBinlog, _ int) bool {
-			return coll.loadFields.Contain(fbl.GetFieldID()) || common.IsSystemField(fbl.GetFieldID())
-		})
+	for _, segmentInfo := range segments {
+		addBucketNameStorageV2(segmentInfo)
 	}
+
+	coll := loader.manager.Collection.Get(collectionID)
 
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)
@@ -311,7 +316,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			segmentType,
 			version,
 			loadInfo,
-			loader.warmupDispatcher,
 		)
 		if err != nil {
 			log.Warn("load segment failed when create new segment",
@@ -357,6 +361,10 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		}
 		if err = loader.loadDeltalogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
 			return errors.Wrap(err, "At LoadDeltaLogs")
+		}
+
+		if err = segment.FinishLoad(); err != nil {
+			return errors.Wrap(err, "At FinishLoad")
 		}
 
 		if segment.Level() != datapb.SegmentLevel_L0 {
@@ -820,7 +828,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		if err != nil {
 			return err
 		}
-		if (!typeutil.IsVectorType(field.GetDataType()) && !segment.HasRawData(fieldID)) || field.GetIsPrimaryKey() {
+		if !segment.HasRawData(fieldID) || field.GetIsPrimaryKey() {
 			log.Info("field index doesn't include raw data, load binlog...",
 				zap.Int64("fieldID", fieldID),
 				zap.String("index", info.IndexInfo.GetIndexName()),
@@ -1572,8 +1580,8 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 						fieldIndexInfo.GetBuildID())
 				}
 				if metricType != metric.BM25 {
-					mmapChunkCache := paramtable.Get().QueryNodeCfg.MmapChunkCache.GetAsBool()
-					if mmapChunkCache {
+					mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
+					if mmapVectorField {
 						segmentDiskSize += binlogSize
 					} else {
 						segmentMemorySize += binlogSize

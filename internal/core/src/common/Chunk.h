@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <sys/types.h>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -54,6 +55,11 @@ class Chunk {
         return size_;
     }
 
+    size_t
+    CellByteSize() const {
+        return size_;
+    }
+
     int64_t
     RowNums() const {
         return row_nums_;
@@ -73,7 +79,7 @@ class Chunk {
     }
 
     virtual bool
-    isValid(int offset) {
+    isValid(int offset) const {
         if (nullable_) {
             return valid_[offset];
         }
@@ -160,7 +166,7 @@ class StringChunk : public Chunk {
 
     std::string_view
     operator[](const int i) const {
-        if (i < 0 || i > row_nums_) {
+        if (i < 0 || i >= row_nums_) {
             PanicInfo(ErrorCode::OutOfRange, "index out of range");
         }
 

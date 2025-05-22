@@ -36,6 +36,7 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "mmap/Types.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
@@ -123,6 +124,8 @@ AsyncSearch(CTraceContext c_trace,
             auto span = milvus::tracer::StartSpan("SegCoreSearch", &trace_ctx);
             milvus::tracer::SetRootSpan(span);
 
+            segment->LazyCheckSchema(plan->schema_);
+
             auto search_result =
                 segment->Search(plan, phg_ptr, timestamp, consistency_level);
             if (!milvus::PositivelyRelated(
@@ -190,6 +193,8 @@ AsyncRetrieve(CTraceContext c_trace,
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
+
+            segment->LazyCheckSchema(plan->schema_);
 
             auto retrieve_result = segment->Retrieve(&trace_ctx,
                                                      plan,
@@ -317,7 +322,6 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
 
 CStatus
 Delete(CSegmentInterface c_segment,
-       int64_t reserved_offset,  // deprecated
        int64_t size,
        const uint8_t* ids,
        const uint64_t ids_size,
@@ -327,8 +331,7 @@ Delete(CSegmentInterface c_segment,
     auto suc = pks->ParseFromArray(ids, ids_size);
     AssertInfo(suc, "failed to parse pks from ids");
     try {
-        auto res =
-            segment->Delete(reserved_offset, size, pks.get(), timestamps);
+        auto res = segment->Delete(size, pks.get(), timestamps);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -345,49 +348,6 @@ LoadFieldData(CSegmentInterface c_segment,
         AssertInfo(segment != nullptr, "segment conversion failed");
         auto load_info = (LoadFieldDataInfo*)c_load_field_data_info;
         segment->LoadFieldData(*load_info);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-// just for test
-CStatus
-LoadFieldRawData(CSegmentInterface c_segment,
-                 int64_t field_id,
-                 const void* data,
-                 int64_t row_count) {
-    try {
-        auto segment_interface =
-            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        auto segment =
-            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
-        AssertInfo(segment != nullptr, "segment conversion failed");
-        milvus::DataType data_type;
-        int64_t dim = 1;
-        if (milvus::SystemProperty::Instance().IsSystem(
-                milvus::FieldId(field_id))) {
-            data_type = milvus::DataType::INT64;
-        } else {
-            auto field_meta = segment->get_schema()[milvus::FieldId(field_id)];
-            data_type = field_meta.get_data_type();
-
-            if (milvus::IsVectorDataType(data_type) &&
-                !milvus::IsSparseFloatVectorDataType(data_type)) {
-                dim = field_meta.get_dim();
-            }
-        }
-        auto field_data =
-            milvus::storage::CreateFieldData(data_type, false, dim);
-        field_data->FillFieldData(data, row_count);
-        auto arrow_data_wrapper =
-            milvus::storage::ConvertFieldDataToArrowDataWrapper(field_data);
-        auto field_data_info = milvus::FieldDataInfo{
-            field_id,
-            static_cast<size_t>(row_count),
-            std::vector<std::shared_ptr<milvus::ArrowDataWrapper>>{
-                arrow_data_wrapper}};
-        segment->LoadFieldData(milvus::FieldId(field_id), field_data_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -657,23 +617,6 @@ AddFieldDataInfoForSealed(CSegmentInterface c_segment,
     }
 }
 
-CStatus
-WarmupChunkCache(CSegmentInterface c_segment,
-                 int64_t field_id,
-                 bool mmap_enabled) {
-    try {
-        auto segment_interface =
-            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        auto segment =
-            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
-        AssertInfo(segment != nullptr, "segment conversion failed");
-        segment->WarmupChunkCache(milvus::FieldId(field_id), mmap_enabled);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
-    }
-}
-
 void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id) {
     auto segment = reinterpret_cast<milvus::segcore::SegmentSealed*>(c_segment);
@@ -686,6 +629,18 @@ CreateTextIndex(CSegmentInterface c_segment, int64_t field_id) {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         segment_interface->CreateTextIndex(milvus::FieldId(field_id));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+    }
+}
+
+CStatus
+FinishLoad(CSegmentInterface c_segment) {
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        segment_interface->FinishLoad();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());

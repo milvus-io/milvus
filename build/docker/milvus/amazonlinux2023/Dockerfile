@@ -32,7 +32,7 @@ COPY --chown=root:root --chmod=774 ./lib/ /milvus/lib/
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:/milvus/lib/libjemalloc.so
-ENV MALLOC_CONF=background_thread:true,prof:true
+ENV MALLOC_CONF=background_thread:true
 
 ENTRYPOINT ["/tini", "--"]
 

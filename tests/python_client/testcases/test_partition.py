@@ -397,16 +397,20 @@ class TestPartitionParams(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
 
         partition_w.load(replica_number=1)
-        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': [{'int64': 0}]})
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]",
+                           check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': [{'int64': 0}],
+                                        "pk_name": collection_w.primary_field.name})
         error = {ct.err_code: 1100, ct.err_msg: "can't change the replica number for loaded partitions: "
                                                 "invalid parameter[expected=1][actual=2]"}
         partition_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
 
         partition_w.release()
         partition_w.load(replica_number=2)
-        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': [{'int64': 0}]})
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]",
+                           check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': [{'int64': 0}],
+                                        "pk_name": collection_w.primary_field.name})
 
         two_replicas, _ = collection_w.get_replicas()
         assert len(two_replicas.groups) == 2

@@ -229,8 +229,6 @@ func (s *cSegmentImpl) preInsert(numOfRecords int) (int64, error) {
 
 // Delete deletes entities from the segment.
 func (s *cSegmentImpl) Delete(ctx context.Context, request *DeleteRequest) (*DeleteResult, error) {
-	cOffset := C.int64_t(0) // depre
-
 	cSize := C.int64_t(request.PrimaryKeys.Len())
 	cTimestampsPtr := (*C.uint64_t)(&(request.Timestamps)[0])
 
@@ -244,7 +242,6 @@ func (s *cSegmentImpl) Delete(ctx context.Context, request *DeleteRequest) (*Del
 		return nil, fmt.Errorf("failed to marshal ids: %s", err)
 	}
 	status := C.Delete(s.ptr,
-		cOffset,
 		cSize,
 		(*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
 		(C.uint64_t)(len(dataBlob)),
@@ -283,7 +280,29 @@ func (s *cSegmentImpl) AddFieldDataInfo(ctx context.Context, request *AddFieldDa
 	return &AddFieldDataInfoResult{}, nil
 }
 
+// FinishLoad wraps up the load process and let segcore do the leftover jobs.
+func (s *cSegmentImpl) FinishLoad() error {
+	status := C.FinishLoad(s.ptr)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return errors.Wrap(err, "failed to finish load segment")
+	}
+	return nil
+}
+
 // Release releases the segment.
 func (s *cSegmentImpl) Release() {
 	C.DeleteSegment(s.ptr)
+}
+
+func ConvertCacheWarmupPolicy(policy string) (C.CacheWarmupPolicy, error) {
+	switch policy {
+	case "sync":
+		return C.CacheWarmupPolicy_Sync, nil
+	case "async":
+		return C.CacheWarmupPolicy_Async, nil
+	case "disable":
+		return C.CacheWarmupPolicy_Disable, nil
+	default:
+		return C.CacheWarmupPolicy_Disable, fmt.Errorf("invalid Tiered Storage cache warmup policy: %s", policy)
+	}
 }

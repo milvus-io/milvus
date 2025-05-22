@@ -470,6 +470,9 @@ func (m *BM25Stats) BuildIDF(tf []byte) (idf []byte) {
 }
 
 func (m *BM25Stats) GetAvgdl() float64 {
+	if m.numRow == 0 || m.numToken == 0 {
+		return 0
+	}
 	return float64(m.numToken) / float64(m.numRow)
 }
 

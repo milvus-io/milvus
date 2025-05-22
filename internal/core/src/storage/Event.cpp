@@ -359,7 +359,7 @@ BaseEvent::Serialize() {
     int header_size = header.size();
 
     int len = header_size + data_size;
-    std::vector<uint8_t> res(len);
+    std::vector<uint8_t> res(len, 0);
     int offset = 0;
     memcpy(res.data() + offset, header.data(), header_size);
     offset += header_size;
@@ -384,7 +384,7 @@ DescriptorEvent::Serialize() {
     int header_size = header.size();
 
     int len = header_size + data_size + sizeof(MAGIC_NUM);
-    std::vector<uint8_t> res(len);
+    std::vector<uint8_t> res(len, 0);
     int offset = 0;
     memcpy(res.data(), &MAGIC_NUM, sizeof(MAGIC_NUM));
     offset += sizeof(MAGIC_NUM);

@@ -21,6 +21,7 @@
 #include <vector>
 #include <utility>
 
+#include "cachinglayer/CacheSlot.h"
 #include "AckResponder.h"
 #include "ConcurrentVector.h"
 #include "DeletedRecord.h"
@@ -35,6 +36,8 @@
 
 namespace milvus::segcore {
 
+using namespace milvus::cachinglayer;
+
 class SegmentGrowingImpl : public SegmentGrowing {
  public:
     int64_t
@@ -45,7 +48,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
            int64_t size,
            const int64_t* row_ids,
            const Timestamp* timestamps,
-           const InsertRecordProto* insert_record_proto) override;
+           InsertRecordProto* insert_record_proto) override;
 
     bool
     Contain(const PkType& pk) const override {
@@ -54,8 +57,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // TODO: add id into delete log, possibly bitmap
     SegcoreError
-    Delete(int64_t reserved_offset,
-           int64_t size,
+    Delete(int64_t size,
            const IdArray* pks,
            const Timestamp* timestamps) override;
 
@@ -97,8 +99,17 @@ class SegmentGrowingImpl : public SegmentGrowing {
                            FieldId primary_field_id,
                            size_t num_rows);
 
+    void
+    Reopen(SchemaPtr sch) override;
+
+    void
+    LazyCheckSchema(const Schema& sch) override;
+
+    void
+    FinishLoad() override;
+
  public:
-    const InsertRecord<>&
+    const InsertRecord<false>&
     get_insert_record() const {
         return insert_record_;
     }
@@ -132,10 +143,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     // deprecated
-    const index::IndexBase*
+    PinWrapper<const index::IndexBase*>
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const final {
-        return indexing_record_.get_field_indexing(field_id).get_chunk_indexing(
-            chunk_id);
+        return PinWrapper<const index::IndexBase*>(
+            indexing_record_.get_field_indexing(field_id)
+                .get_chunk_indexing(chunk_id)
+                .get());
     }
 
     int64_t
@@ -189,12 +202,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
                         int64_t count,
                         T* output) const;
 
-    template <typename S, typename T = S>
+    template <typename S>
     void
-    bulk_subscript_ptr_impl(const VectorBase* vec_raw,
-                            const int64_t* seg_offsets,
-                            int64_t count,
-                            google::protobuf::RepeatedPtrField<T>* dst) const;
+    bulk_subscript_ptr_impl(
+        const VectorBase* vec_raw,
+        const int64_t* seg_offsets,
+        int64_t count,
+        google::protobuf::RepeatedPtrField<std::string>* dst) const;
 
     // for scalar array vectors
     template <typename T>
@@ -239,7 +253,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const override;
 
-    virtual std::pair<std::string_view, bool>
+    virtual std::pair<milvus::Json, bool>
     GetJsonData(FieldId field_id, size_t offset) const override;
 
  public:
@@ -365,11 +379,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return insert_record_.search_pk(pk, timestamp);
     }
 
-    std::vector<SegOffset>
-    search_pk(const PkType& pk, int64_t insert_barrier) const override {
-        return insert_record_.search_pk(pk, insert_barrier);
-    }
-
     bool
     is_field_exist(FieldId field_id) const override {
         return schema_->get_fields().find(field_id) !=
@@ -380,35 +389,25 @@ class SegmentGrowingImpl : public SegmentGrowing {
     int64_t
     num_chunk(FieldId field_id) const override;
 
-    SpanBase
+    PinWrapper<SpanBase>
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
 
-    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_string_view_impl(
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
-    std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
     chunk_array_view_impl(
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
-    std::pair<std::vector<std::string_view>, FixedVector<bool>>
+    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     chunk_view_by_offsets(FieldId field_id,
                           int64_t chunk_id,
                           const FixedVector<int32_t>& offsets) const override;
-
-    std::pair<BufferView, FixedVector<bool>>
-    get_chunk_buffer(FieldId field_id,
-                     int64_t chunk_id,
-                     int64_t start_offset,
-                     int64_t length) const override {
-        PanicInfo(
-            ErrorCode::Unsupported,
-            "get_chunk_buffer interface not supported for growing segment");
-    }
 
     void
     check_search(const query::Plan* plan) const override {
@@ -419,6 +418,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     get_timestamps() const override {
         return insert_record_.timestamps_;
     }
+
+    void
+    fill_empty_field(const FieldMeta& field_meta);
 
  private:
     void
@@ -465,10 +467,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     SegmentStats stats_{};
 };
-
-const static IndexMetaPtr empty_index_meta =
-    std::make_shared<CollectionIndexMeta>(1024,
-                                          std::map<FieldId, FieldIndexMeta>());
 
 inline SegmentGrowingPtr
 CreateGrowingSegment(

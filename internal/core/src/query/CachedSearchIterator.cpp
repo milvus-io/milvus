@@ -9,12 +9,14 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
+
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
-#include <algorithm>
 
 namespace milvus::query {
 
+// For sealed segment with vector index
 CachedSearchIterator::CachedSearchIterator(
     const milvus::index::VectorIndex& index,
     const knowhere::DataSetPtr& query_ds,
@@ -33,26 +35,6 @@ CachedSearchIterator::CachedSearchIterator(
 
     auto expected_iterators =
         index.VectorIterators(query_ds, search_json, bitset);
-    if (expected_iterators.has_value()) {
-        iterators_ = std::move(expected_iterators.value());
-    } else {
-        PanicInfo(ErrorCode::UnexpectedError,
-                  "Failed to create iterators from index");
-    }
-}
-
-CachedSearchIterator::CachedSearchIterator(
-    const dataset::SearchDataset& query_ds,
-    const dataset::RawDataset& raw_ds,
-    const SearchInfo& search_info,
-    const std::map<std::string, std::string>& index_info,
-    const BitsetView& bitset,
-    const milvus::DataType& data_type) {
-    nq_ = query_ds.num_queries;
-    Init(search_info);
-
-    auto expected_iterators = GetBruteForceSearchIterators(
-        query_ds, raw_ds, search_info, index_info, bitset, data_type);
     if (expected_iterators.has_value()) {
         iterators_ = std::move(expected_iterators.value());
     } else {
@@ -91,6 +73,7 @@ CachedSearchIterator::InitializeChunkedIterators(
     }
 }
 
+// For growing segment with chunked data, BF
 CachedSearchIterator::CachedSearchIterator(
     const dataset::SearchDataset& query_ds,
     const segcore::VectorBase* vec_data,
@@ -121,17 +104,18 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [&vec_data, vec_size_per_chunk, row_count](
-            int64_t chunk_id) -> std::pair<const void*, int64_t> {
-            const auto chunk_data = vec_data->get_chunk_data(chunk_id);
+        [&vec_data, vec_size_per_chunk, row_count](int64_t chunk_id) {
+            const void* chunk_data = vec_data->get_chunk_data(chunk_id);
+            // no need to store a PinWrapper for growing, because vec_data is guaranteed to not be evicted.
             int64_t chunk_size = std::min(
                 vec_size_per_chunk, row_count - chunk_id * vec_size_per_chunk);
-            return {chunk_data, chunk_size};
+            return std::make_pair(chunk_data, chunk_size);
         });
 }
 
+// For sealed segment with chunked data, BF
 CachedSearchIterator::CachedSearchIterator(
-    const std::shared_ptr<ChunkedColumnBase>& column,
+    ChunkedColumnInterface* column,
     const dataset::SearchDataset& query_ds,
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
@@ -147,17 +131,22 @@ CachedSearchIterator::CachedSearchIterator(
     Init(search_info);
 
     iterators_.reserve(nq_ * num_chunks_);
+    pin_wrappers_.reserve(num_chunks_);
+
     InitializeChunkedIterators(
         query_ds,
         search_info,
         index_info,
         bitset,
         data_type,
-        [&column](int64_t chunk_id) {
-            const char* chunk_data = column->Data(chunk_id);
+        [this, column](int64_t chunk_id) {
+            auto pw = column->DataOfChunk(chunk_id).transform<const void*>(
+                [](const auto& x) { return static_cast<const void*>(x); });
             int64_t chunk_size = column->chunk_row_nums(chunk_id);
-            return std::make_pair(static_cast<const void*>(chunk_data),
-                                  chunk_size);
+            // pw guarantees chunk_data is kept alive.
+            auto chunk_data = pw.get();
+            pin_wrappers_.emplace_back(std::move(pw));
+            return std::make_pair(chunk_data, chunk_size);
         });
 }
 

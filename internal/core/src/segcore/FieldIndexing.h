@@ -20,8 +20,8 @@
 #include <index/Index.h>
 #include <index/ScalarIndex.h>
 
-#include "AckResponder.h"
 #include "InsertRecord.h"
+#include "cachinglayer/CacheSlot.h"
 #include "common/FieldMeta.h"
 #include "common/Schema.h"
 #include "common/IndexMeta.h"
@@ -29,6 +29,7 @@
 #include "knowhere/config.h"
 #include "log/Log.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/InsertRecord.h"
 #include "index/VectorIndex.h"
 
 namespace milvus::segcore {
@@ -93,10 +94,10 @@ class FieldIndexing {
         return segcore_config_.get_chunk_rows();
     }
 
-    virtual index::IndexBase*
+    virtual PinWrapper<index::IndexBase*>
     get_chunk_indexing(int64_t chunk_id) const = 0;
 
-    virtual index::IndexBase*
+    virtual PinWrapper<index::IndexBase*>
     get_segment_indexing() const = 0;
 
  protected:
@@ -154,13 +155,13 @@ class ScalarFieldIndexing : public FieldIndexing {
     }
 
     // concurrent
-    index::ScalarIndex<T>*
+    PinWrapper<index::IndexBase*>
     get_chunk_indexing(int64_t chunk_id) const override {
         Assert(!field_meta_.is_vector());
         return data_.at(chunk_id).get();
     }
 
-    index::IndexBase*
+    PinWrapper<index::IndexBase*>
     get_segment_indexing() const override {
         return nullptr;
     }
@@ -211,14 +212,15 @@ class VectorFieldIndexing : public FieldIndexing {
     }
 
     // concurrent
-    index::IndexBase*
+    PinWrapper<index::IndexBase*>
     get_chunk_indexing(int64_t chunk_id) const override {
         Assert(field_meta_.is_vector());
-        return data_.at(chunk_id).get();
+        return PinWrapper<index::IndexBase*>(data_.at(chunk_id).get());
     }
-    index::IndexBase*
+
+    PinWrapper<index::IndexBase*>
     get_segment_indexing() const override {
-        return index_.get();
+        return PinWrapper<index::IndexBase*>(index_.get());
     }
 
     bool
@@ -306,13 +308,12 @@ class IndexingRecord {
     }
 
     // concurrent, reentrant
-    template <bool is_sealed>
     void
     AppendingIndex(int64_t reserved_offset,
                    int64_t size,
                    FieldId fieldId,
                    const DataArray* stream_data,
-                   const InsertRecord<is_sealed>& record) {
+                   const InsertRecord<false>& record) {
         if (!is_in(fieldId)) {
             return;
         }
@@ -339,13 +340,12 @@ class IndexingRecord {
     }
 
     // concurrent, reentrant
-    template <bool is_sealed>
     void
     AppendingIndex(int64_t reserved_offset,
                    int64_t size,
                    FieldId fieldId,
                    const FieldDataPtr data,
-                   const InsertRecord<is_sealed>& record) {
+                   const InsertRecord<false>& record) {
         if (!is_in(fieldId)) {
             return;
         }

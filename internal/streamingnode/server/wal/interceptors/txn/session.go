@@ -14,10 +14,30 @@ type txnSessionKeyType int
 
 var txnSessionKeyValue txnSessionKeyType = 1
 
+// newTxnSession creates a new transaction session.
+func newTxnSession(
+	vchannel string,
+	txnContext message.TxnContext,
+	timetick uint64,
+	metricsGuard *metricsutil.TxnMetricsGuard,
+) *TxnSession {
+	return &TxnSession{
+		mu:            sync.Mutex{},
+		vchannel:      vchannel,
+		lastTimetick:  timetick,
+		txnContext:    txnContext,
+		inFlightCount: 0,
+		state:         message.TxnStateInFlight,
+		doneWait:      nil,
+		rollback:      false,
+		metricsGuard:  metricsGuard,
+	}
+}
+
 // TxnSession is a session for a transaction.
 type TxnSession struct {
-	mu sync.Mutex
-
+	mu               sync.Mutex
+	vchannel         string                       // The vchannel of the session.
 	lastTimetick     uint64                       // session last timetick.
 	expired          bool                         // The flag indicates the transaction has trigger expired once.
 	txnContext       message.TxnContext           // transaction id of the session
@@ -29,33 +49,14 @@ type TxnSession struct {
 	metricsGuard     *metricsutil.TxnMetricsGuard // The metrics guard for the session.
 }
 
+// VChannel returns the vchannel of the session.
+func (s *TxnSession) VChannel() string {
+	return s.vchannel
+}
+
 // TxnContext returns the txn context of the session.
 func (s *TxnSession) TxnContext() message.TxnContext {
 	return s.txnContext
-}
-
-// BeginDone marks the transaction as in flight.
-func (s *TxnSession) BeginDone() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.state != message.TxnStateBegin {
-		// unreachable code here.
-		panic("invalid state for in flight")
-	}
-	s.state = message.TxnStateInFlight
-}
-
-// BeginRollback marks the transaction as rollbacked at begin state.
-func (s *TxnSession) BeginRollback() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.state != message.TxnStateBegin {
-		// unreachable code here.
-		panic("invalid state for rollback")
-	}
-	s.state = message.TxnStateRollbacked
 }
 
 // AddNewMessage adds a new message to the session.
@@ -245,13 +246,13 @@ func (s *TxnSession) getDoneChan(timetick uint64, state message.TxnState) (<-cha
 // checkIfExpired checks if the session is expired.
 func (s *TxnSession) checkIfExpired(tt uint64) error {
 	if s.expired {
-		return status.NewTransactionExpired("some message has been expired, expired at %d, current %d", s.expiredTimeTick(), tt)
+		return status.NewTransactionExpired("some message of txn %d has been expired, expired at %d, current %d", s.txnContext.TxnID, s.expiredTimeTick(), tt)
 	}
 	expiredTimeTick := s.expiredTimeTick()
 	if tt >= expiredTimeTick {
 		// once the session is expired, it will never be active again.
 		s.expired = true
-		return status.NewTransactionExpired("transaction expired at %d, current %d", expiredTimeTick, tt)
+		return status.NewTransactionExpired("txn %d expired at %d, current %d", s.txnContext.TxnID, expiredTimeTick, tt)
 	}
 	return nil
 }

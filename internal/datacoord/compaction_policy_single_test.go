@@ -41,7 +41,7 @@ type SingleCompactionPolicySuite struct {
 	mockTriggerManager *MockTriggerManager
 	testLabel          *CompactionGroupLabel
 	handler            *NMockHandler
-	mockPlanContext    *MockCompactionPlanContext
+	inspector          *MockCompactionInspector
 
 	singlePolicy *singleCompactionPolicy
 }

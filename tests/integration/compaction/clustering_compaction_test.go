@@ -49,7 +49,7 @@ func (s *ClusteringCompactionSuite) SetupSuite() {
 	paramtable.Init()
 
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TaskCheckInterval.Key, "1")
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexTaskSchedulerInterval.Key, "100")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TaskScheduleInterval.Key, "100")
 
 	s.Require().NoError(s.SetupEmbedEtcd())
 }

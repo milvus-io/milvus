@@ -132,10 +132,6 @@ func (suite *IDFOracleSuite) TestSealed() {
 	suite.idfOracle.SyncDistribution(suite.snapshot)
 	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
 
-	for _, segID := range releasedSeg {
-		suite.idfOracle.Remove(segID, commonpb.SegmentState_Sealed)
-	}
-
 	sparse := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{4: 1})
 	bytes, avgdl, err := suite.idfOracle.BuildIDF(102, &schemapb.SparseFloatArray{Contents: [][]byte{sparse}, Dim: 1})
 	suite.NoError(err)
@@ -165,10 +161,6 @@ func (suite *IDFOracleSuite) TestGrow() {
 
 	suite.idfOracle.UpdateGrowing(4, suite.genStats(5, 6))
 	suite.Equal(int64(2), suite.idfOracle.current.NumRow())
-
-	for _, segID := range releasedSeg {
-		suite.idfOracle.Remove(segID, commonpb.SegmentState_Growing)
-	}
 }
 
 func (suite *IDFOracleSuite) TestStats() {
