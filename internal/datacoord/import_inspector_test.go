@@ -40,12 +40,12 @@ type ImportInspectorSuite struct {
 
 	collectionID int64
 
-	catalog   *mocks.DataCoordCatalog
-	alloc     *allocator.MockAllocator
-	cluster   *MockCluster
-	meta      *meta
-	imeta     ImportMeta
-	inspector *importInspector
+	catalog    *mocks.DataCoordCatalog
+	alloc      *allocator.MockAllocator
+	cluster    *MockCluster
+	meta       *meta
+	importMeta ImportMeta
+	inspector  *importInspector
 }
 
 func (s *ImportInspectorSuite) SetupTest() {
@@ -75,10 +75,10 @@ func (s *ImportInspectorSuite) SetupTest() {
 		ID:     s.collectionID,
 		Schema: newTestSchema(),
 	})
-	s.imeta, err = NewImportMeta(context.TODO(), s.catalog, s.alloc, s.meta)
+	s.importMeta, err = NewImportMeta(context.TODO(), s.catalog, s.alloc, s.meta)
 	s.NoError(err)
 	scheduler := task2.NewMockGlobalScheduler(s.T())
-	s.inspector = NewImportInspector(s.meta, s.imeta, scheduler).(*importInspector)
+	s.inspector = NewImportInspector(s.meta, s.importMeta, scheduler).(*importInspector)
 }
 
 func (s *ImportInspectorSuite) TestProcessPreImport() {
@@ -93,11 +93,11 @@ func (s *ImportInspectorSuite) TestProcessPreImport() {
 	}
 
 	var task ImportTask = &preImportTask{
-		imeta: s.imeta,
-		tr:    timerecord.NewTimeRecorder("preimport task"),
+		importMeta: s.importMeta,
+		tr:         timerecord.NewTimeRecorder("preimport task"),
 	}
 	task.(*preImportTask).task.Store(taskProto)
-	err := s.imeta.AddTask(context.TODO(), task)
+	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -108,7 +108,7 @@ func (s *ImportInspectorSuite) TestProcessPreImport() {
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
-	err = s.imeta.AddJob(context.TODO(), job)
+	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// pending -> inProgress
@@ -118,7 +118,7 @@ func (s *ImportInspectorSuite) TestProcessPreImport() {
 		task.CreateTaskOnWorker(1, cluster)
 	})
 	s.inspector.inspect()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_InProgress, task.GetState())
 
 	// inProgress -> completed
@@ -126,7 +126,7 @@ func (s *ImportInspectorSuite) TestProcessPreImport() {
 		State: datapb.ImportTaskStateV2_Completed,
 	}, nil)
 	task.QueryTaskOnWorker(cluster)
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_Completed, task.GetState())
 }
 
@@ -156,13 +156,13 @@ func (s *ImportInspectorSuite) TestProcessImport() {
 	}
 
 	var task ImportTask = &importTask{
-		alloc: s.alloc,
-		meta:  s.meta,
-		imeta: s.imeta,
-		tr:    timerecord.NewTimeRecorder("import task"),
+		alloc:      s.alloc,
+		meta:       s.meta,
+		importMeta: s.importMeta,
+		tr:         timerecord.NewTimeRecorder("import task"),
 	}
 	task.(*importTask).task.Store(taskProto)
-	err := s.imeta.AddTask(context.TODO(), task)
+	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -175,7 +175,7 @@ func (s *ImportInspectorSuite) TestProcessImport() {
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
-	err = s.imeta.AddJob(context.TODO(), job)
+	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// pending -> inProgress
@@ -188,7 +188,7 @@ func (s *ImportInspectorSuite) TestProcessImport() {
 		task.CreateTaskOnWorker(nodeID, cluster)
 	})
 	s.inspector.inspect()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_InProgress, task.GetState())
 
 	// inProgress -> completed
@@ -196,7 +196,7 @@ func (s *ImportInspectorSuite) TestProcessImport() {
 		State: datapb.ImportTaskStateV2_Completed,
 	}, nil)
 	task.QueryTaskOnWorker(cluster)
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_Completed, task.GetState())
 }
 
@@ -218,7 +218,7 @@ func (s *ImportInspectorSuite) TestProcessFailed() {
 		tr: timerecord.NewTimeRecorder("import task"),
 	}
 	task.(*importTask).task.Store(taskProto)
-	err := s.imeta.AddTask(context.TODO(), task)
+	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -231,7 +231,7 @@ func (s *ImportInspectorSuite) TestProcessFailed() {
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
-	err = s.imeta.AddJob(context.TODO(), job)
+	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
@@ -253,7 +253,7 @@ func (s *ImportInspectorSuite) TestProcessFailed() {
 		segment := s.meta.GetSegment(context.TODO(), id)
 		s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
 	}
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_Failed, task.GetState())
 	s.Equal(0, len(task.(*importTask).GetSegmentIDs()))
 }

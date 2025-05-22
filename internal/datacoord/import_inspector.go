@@ -41,21 +41,21 @@ type ImportInspector interface {
 }
 
 type importInspector struct {
-	meta      *meta
-	alloc     allocator.Allocator
-	imeta     ImportMeta
-	scheduler task.GlobalScheduler
+	meta       *meta
+	alloc      allocator.Allocator
+	importMeta ImportMeta
+	scheduler  task.GlobalScheduler
 
 	closeOnce sync.Once
 	closeChan chan struct{}
 }
 
-func NewImportInspector(meta *meta, imeta ImportMeta, scheduler task.GlobalScheduler) ImportInspector {
+func NewImportInspector(meta *meta, importMeta ImportMeta, scheduler task.GlobalScheduler) ImportInspector {
 	return &importInspector{
-		meta:      meta,
-		imeta:     imeta,
-		scheduler: scheduler,
-		closeChan: make(chan struct{}),
+		meta:       meta,
+		importMeta: importMeta,
+		scheduler:  scheduler,
+		closeChan:  make(chan struct{}),
 	}
 }
 
@@ -81,12 +81,12 @@ func (s *importInspector) Close() {
 }
 
 func (s *importInspector) inspect() {
-	jobs := s.imeta.GetJobBy(context.TODO())
+	jobs := s.importMeta.GetJobBy(context.TODO())
 	sort.Slice(jobs, func(i, j int) bool {
 		return jobs[i].GetJobID() < jobs[j].GetJobID()
 	})
 	for _, job := range jobs {
-		tasks := s.imeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()))
+		tasks := s.importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()))
 		for _, task := range tasks {
 			switch task.GetState() {
 			case datapb.ImportTaskStateV2_Pending:
@@ -125,7 +125,7 @@ func (s *importInspector) processFailed(task ImportTask) {
 			}
 		}
 		if len(segments) > 0 {
-			err := s.imeta.UpdateTask(context.TODO(), task.GetTaskID(), UpdateSegmentIDs(nil), UpdateStatsSegmentIDs(nil))
+			err := s.importMeta.UpdateTask(context.TODO(), task.GetTaskID(), UpdateSegmentIDs(nil), UpdateStatsSegmentIDs(nil))
 			if err != nil {
 				log.Ctx(context.TODO()).Warn("update import task segments failed", WrapTaskLog(task, zap.Error(err))...)
 			}

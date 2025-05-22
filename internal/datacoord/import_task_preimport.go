@@ -41,9 +41,9 @@ var _ ImportTask = (*preImportTask)(nil)
 type preImportTask struct {
 	task atomic.Pointer[datapb.PreImportTask]
 
-	imeta ImportMeta
-	tr    *timerecord.TimeRecorder
-	times *taskcommon.Times
+	importMeta ImportMeta
+	tr         *timerecord.TimeRecorder
+	times      *taskcommon.Times
 }
 
 func (p *preImportTask) GetJobID() int64 {
@@ -104,7 +104,7 @@ func (p *preImportTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 
 func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log.Info("processing pending preimport task...", WrapTaskLog(p)...)
-	job := p.imeta.GetJob(context.TODO(), p.GetJobID())
+	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
 	req := AssemblePreImportRequest(p, job)
 
 	err := cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
@@ -112,7 +112,7 @@ func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 		log.Warn("preimport failed", WrapTaskLog(p, zap.Error(err))...)
 		return
 	}
-	err = p.imeta.UpdateTask(context.TODO(), p.GetTaskID(),
+	err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),
 		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
@@ -131,7 +131,7 @@ func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	resp, err := cluster.QueryPreImport(p.GetNodeID(), req)
 	if err != nil {
-		updateErr := p.imeta.UpdateTask(context.TODO(), p.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
+		updateErr := p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		if updateErr != nil {
 			log.Warn("failed to update preimport task state to pending", WrapTaskLog(p, zap.Error(updateErr))...)
 		}
@@ -139,7 +139,7 @@ func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
-		err = p.imeta.UpdateJob(context.TODO(), p.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
+		err = p.importMeta.UpdateJob(context.TODO(), p.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
 			UpdateJobReason(resp.GetReason()))
 		if err != nil {
 			log.Warn("failed to update job state to Failed", zap.Int64("jobID", p.GetJobID()), zap.Error(err))
@@ -151,7 +151,7 @@ func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		actions = append(actions, UpdateState(datapb.ImportTaskStateV2_Completed))
 	}
-	err = p.imeta.UpdateTask(context.TODO(), p.GetTaskID(), actions...)
+	err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(), actions...)
 	if err != nil {
 		log.Warn("update preimport task failed", WrapTaskLog(p, zap.Error(err))...)
 		return
@@ -166,7 +166,7 @@ func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
 }
 
 func (p *preImportTask) DropTaskOnWorker(cluster session.Cluster) {
-	err := DropImportTask(p, cluster, p.imeta)
+	err := DropImportTask(p, cluster, p.importMeta)
 	if err != nil {
 		log.Warn("drop import failed", WrapTaskLog(p, zap.Error(err))...)
 		return
@@ -184,9 +184,9 @@ func (p *preImportTask) GetTR() *timerecord.TimeRecorder {
 
 func (p *preImportTask) Clone() ImportTask {
 	cloned := &preImportTask{
-		imeta: p.imeta,
-		tr:    p.tr,
-		times: p.times,
+		importMeta: p.importMeta,
+		tr:         p.tr,
+		times:      p.times,
 	}
 	cloned.task.Store(typeutil.Clone(p.task.Load()))
 	return cloned

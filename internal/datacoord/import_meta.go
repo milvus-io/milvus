@@ -111,24 +111,24 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, allo
 	}
 
 	tasks := newImportTasks()
-	imeta := &importMeta{}
+	importMeta := &importMeta{}
 
 	for _, task := range restoredPreImportTasks {
 		t := &preImportTask{
-			imeta: imeta,
-			tr:    timerecord.NewTimeRecorder("preimport task"),
-			times: taskcommon.NewTimes(),
+			importMeta: importMeta,
+			tr:         timerecord.NewTimeRecorder("preimport task"),
+			times:      taskcommon.NewTimes(),
 		}
 		t.task.Store(task)
 		tasks.add(t)
 	}
 	for _, task := range restoredImportTasks {
 		t := &importTask{
-			alloc: alloc,
-			meta:  meta,
-			imeta: imeta,
-			tr:    timerecord.NewTimeRecorder("import task"),
-			times: taskcommon.NewTimes(),
+			alloc:      alloc,
+			meta:       meta,
+			importMeta: importMeta,
+			tr:         timerecord.NewTimeRecorder("import task"),
+			times:      taskcommon.NewTimes(),
 		}
 		t.task.Store(task)
 		tasks.add(t)
@@ -142,10 +142,10 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, allo
 		}
 	}
 
-	imeta.jobs = jobs
-	imeta.tasks = tasks
-	imeta.catalog = catalog
-	return imeta, nil
+	importMeta.jobs = jobs
+	importMeta.tasks = tasks
+	importMeta.catalog = catalog
+	return importMeta, nil
 }
 
 func (m *importMeta) AddJob(ctx context.Context, job ImportJob) error {

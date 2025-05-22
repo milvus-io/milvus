@@ -45,11 +45,11 @@ var _ ImportTask = (*importTask)(nil)
 type importTask struct {
 	task atomic.Pointer[datapb.ImportTaskV2]
 
-	alloc allocator.Allocator
-	meta  *meta
-	imeta ImportMeta
-	tr    *timerecord.TimeRecorder
-	times *taskcommon.Times
+	alloc      allocator.Allocator
+	meta       *meta
+	importMeta ImportMeta
+	tr         *timerecord.TimeRecorder
+	times      *taskcommon.Times
 }
 
 func (t *importTask) GetJobID() int64 {
@@ -133,7 +133,7 @@ func (t *importTask) GetTaskSlot() int64 {
 
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log.Info("processing pending import task...", WrapTaskLog(t)...)
-	job := t.imeta.GetJob(context.TODO(), t.GetJobID())
+	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
 		log.Warn("assemble import request failed", WrapTaskLog(t, zap.Error(err))...)
@@ -144,7 +144,7 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		log.Warn("import failed", WrapTaskLog(t, zap.Error(err))...)
 		return
 	}
-	err = t.imeta.UpdateTask(context.TODO(), t.GetTaskID(),
+	err = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
 		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
@@ -163,7 +163,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	resp, err := cluster.QueryImport(t.GetNodeID(), req)
 	if err != nil {
-		updateErr := t.imeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
+		updateErr := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		if updateErr != nil {
 			log.Warn("failed to update import task state to pending", WrapTaskLog(t, zap.Error(updateErr))...)
 		}
@@ -171,7 +171,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
-		err = t.imeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(resp.GetReason()))
+		err = t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(resp.GetReason()))
 		if err != nil {
 			log.Warn("failed to update job state to Failed", zap.Int64("jobID", t.GetJobID()), zap.Error(err))
 		}
@@ -216,7 +216,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			op2 := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
 			err = t.meta.UpdateSegmentsInfo(context.TODO(), op1, op2)
 			if err != nil {
-				updateErr := t.imeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
+				updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
 				if updateErr != nil {
 					log.Warn("failed to update job state to Failed", zap.Int64("jobID", t.GetJobID()), zap.Error(updateErr))
 				}
@@ -225,7 +225,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			}
 		}
 		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
-		err = t.imeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))
+		err = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))
 		if err != nil {
 			log.Warn("update import task failed", WrapTaskLog(t, zap.Error(err))...)
 			return
@@ -239,7 +239,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 }
 
 func (t *importTask) DropTaskOnWorker(cluster session.Cluster) {
-	err := DropImportTask(t, cluster, t.imeta)
+	err := DropImportTask(t, cluster, t.importMeta)
 	if err != nil {
 		log.Warn("drop import failed", WrapTaskLog(t, zap.Error(err))...)
 		return
@@ -257,11 +257,11 @@ func (t *importTask) GetTR() *timerecord.TimeRecorder {
 
 func (t *importTask) Clone() ImportTask {
 	cloned := &importTask{
-		alloc: t.alloc,
-		meta:  t.meta,
-		imeta: t.imeta,
-		tr:    t.tr,
-		times: t.times,
+		alloc:      t.alloc,
+		meta:       t.meta,
+		importMeta: t.importMeta,
+		tr:         t.tr,
+		times:      t.times,
 	}
 	cloned.task.Store(typeutil.Clone(t.task.Load()))
 	return cloned

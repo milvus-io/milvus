@@ -31,12 +31,12 @@ func TestCompactionTriggerManagerSuite(t *testing.T) {
 type CompactionTriggerManagerSuite struct {
 	suite.Suite
 
-	mockAlloc *allocator.MockAllocator
-	handler   Handler
-	inspector *MockCompactionInspector
-	testLabel *CompactionGroupLabel
-	meta      *meta
-	imeta     ImportMeta
+	mockAlloc  *allocator.MockAllocator
+	handler    Handler
+	inspector  *MockCompactionInspector
+	testLabel  *CompactionGroupLabel
+	meta       *meta
+	importMeta ImportMeta
 
 	triggerManager *CompactionTriggerManager
 }
@@ -62,8 +62,8 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{}, nil)
 	importMeta, err := NewImportMeta(context.TODO(), catalog, s.mockAlloc, s.meta)
 	s.Require().NoError(err)
-	s.imeta = importMeta
-	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.inspector, s.meta, s.imeta)
+	s.importMeta = importMeta
+	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.inspector, s.meta, s.importMeta)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
@@ -368,8 +368,7 @@ func TestCompactionAndImport(t *testing.T) {
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	importMeta, err := NewImportMeta(context.TODO(), catalog, mockAlloc, meta)
 	assert.NoError(t, err)
-	imeta := importMeta
-	triggerManager := NewCompactionTriggerManager(mockAlloc, handler, inspector, meta, imeta)
+	triggerManager := NewCompactionTriggerManager(mockAlloc, handler, inspector, meta, importMeta)
 
 	Params.Save(Params.DataCoordCfg.L0CompactionTriggerInterval.Key, "1")
 	defer Params.Reset(Params.DataCoordCfg.L0CompactionTriggerInterval.Key)
