@@ -1954,3 +1954,16 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 	}
 	return resp, nil
 }
+
+// NotifyDropPartition notifies DataCoord to drop segments of specified partition
+func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return err
+	}
+	log.Ctx(ctx).Info("receive NotifyDropPartition request",
+		zap.String("channelname", channel),
+		zap.Any("partitionID", partitionIDs))
+	s.segmentManager.DropSegmentsOfPartition(ctx, channel, partitionIDs)
+	// release all segments of the partition.
+	return s.meta.DropSegmentsOfPartition(ctx, partitionIDs)
+}
