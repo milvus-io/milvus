@@ -128,6 +128,8 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, snapsho
 }
 
 func (rs *recoveryStorageImpl) sampleTruncateCheckpoint(checkpoint *WALCheckpoint) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
 	if rs.flusherCheckpoint == nil {
 		return
 	}
