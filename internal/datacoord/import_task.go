@@ -165,7 +165,11 @@ func (p *preImportTask) GetTR() *timerecord.TimeRecorder {
 }
 
 func (p *preImportTask) GetSlots() int64 {
-	return int64(len(p.GetFileStats()))
+	slots := int64(len(p.GetFileStats()))
+	if slots < 1 {
+		slots = 1
+	}
+	return slots
 }
 
 func (p *preImportTask) Clone() ImportTask {
@@ -211,7 +215,11 @@ func (t *importTask) GetSlots() int64 {
 	//    making segment count unsuitable as a slot number.
 	// Taking these factors into account, we've decided to use the
 	// minimum value between segment count and file count as the slot number.
-	return int64(funcutil.Min(len(t.GetFileStats()), len(t.GetSegmentIDs())))
+	slots := int64(funcutil.Min(len(t.GetFileStats()), len(t.GetSegmentIDs())))
+	if slots < 1 {
+		slots = 1
+	}
+	return slots
 }
 
 func (t *importTask) Clone() ImportTask {

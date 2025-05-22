@@ -102,7 +102,11 @@ func (t *PreImportTask) GetSchema() *schemapb.CollectionSchema {
 }
 
 func (t *PreImportTask) GetSlots() int64 {
-	return int64(len(t.GetFileStats()))
+	slots := int64(len(t.GetFileStats()))
+	if slots < 1 {
+		slots = 1
+	}
+	return slots
 }
 
 func (t *PreImportTask) Cancel() {
