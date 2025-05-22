@@ -41,11 +41,6 @@ class ThreadPools {
     }
 
  private:
-    ThreadPools() {
-        name_map[HIGH] = "high_priority_thread_pool";
-        name_map[MIDDLE] = "middle_priority_thread_pool";
-        name_map[LOW] = "low_priority_thread_pool";
-    }
     void
     ShutDown();
     static std::map<ThreadPoolPriority, std::unique_ptr<ThreadPool>>
