@@ -112,7 +112,7 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 
 	// set bucketName
 	wpConfig.Minio.BucketName = paramtable.Get().MinioCfg.BucketName.GetValue()
-	wpConfig.Minio.RootPath = paramtable.Get().MinioCfg.RootPath.GetValue()
+	wpConfig.Minio.RootPath = fmt.Sprintf("%s/wp", paramtable.Get().MinioCfg.RootPath.GetValue())
 
 	// set log
 	wpConfig.Log.Level = paramtable.Get().LogCfg.Level.GetValue()
