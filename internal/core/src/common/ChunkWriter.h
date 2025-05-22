@@ -132,7 +132,7 @@ class ChunkWriter final : public ChunkWriterBase {
     finish() override {
         auto [data, size] = target_->get();
         return std::make_unique<FixedWidthChunk>(
-            row_nums_, dim_, data, size, sizeof(T), nullable_);
+            row_nums_, dim_, data, size, sizeof(T), nullable_, mcm_ != nullptr);
     }
 
  private:
