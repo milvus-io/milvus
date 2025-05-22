@@ -364,6 +364,8 @@ class TestcaseBase(Base):
                     # Unlike dense vectors, sparse vectors cannot create flat index.
                     if DataType.SPARSE_FLOAT_VECTOR.name in vector_name:
                         collection_w.create_index(vector_name, ct.default_sparse_inverted_index)
+                    elif vector_data_type == DataType.INT8_VECTOR:
+                        collection_w.create_index(vector_name, ct.int8_vector_index)
                     else:
                         collection_w.create_index(vector_name, ct.default_flat_index)
 
