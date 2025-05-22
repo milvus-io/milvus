@@ -372,16 +372,10 @@ RustResult tantivy_index_add_json_key_stats_data_by_batch(void *ptr,
 
 RustResult tantivy_index_add_json(void *ptr, const char *s, int64_t offset);
 
-RustResult tantivy_index_add_json_by_single_segment_writer(void *ptr, const char *s);
-
 RustResult tantivy_index_add_array_json(void *ptr,
                                         const char *const *array,
                                         uintptr_t len,
                                         int64_t offset);
-
-RustResult tantivy_index_add_array_json_by_single_segment_writer(void *ptr,
-                                                                 const char *const *array,
-                                                                 uintptr_t len);
 
 RustResult tantivy_index_add_array_int8s(void *ptr,
                                          const int8_t *array,
