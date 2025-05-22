@@ -176,9 +176,9 @@ func (action *ChannelAction) Desc() string {
 }
 
 func (action *ChannelAction) IsFinished(distMgr *meta.DistributionManager) bool {
-	views := distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(action.ChannelName()))
-	_, hasNode := lo.Find(views, func(v *meta.LeaderView) bool {
-		return v.ID == action.Node()
+	delegator := distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(action.ChannelName()))
+	_, hasNode := lo.Find(delegator, func(v *meta.DmChannel) bool {
+		return v.Node == action.Node()
 	})
 	isGrow := action.Type() == ActionTypeGrow
 

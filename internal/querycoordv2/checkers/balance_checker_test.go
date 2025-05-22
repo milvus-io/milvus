@@ -77,6 +77,7 @@ func (suite *BalanceCheckerTestSuite) SetupTest() {
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.scheduler = task.NewMockScheduler(suite.T())
+	suite.scheduler.EXPECT().Add(mock.Anything).Return(nil).Maybe()
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 
 	suite.balancer = balance.NewMockBalancer(suite.T())
@@ -326,8 +327,15 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	}
 	segPlans = append(segPlans, mockPlan)
 	suite.balancer.EXPECT().BalanceReplica(mock.Anything, mock.Anything).Return(segPlans, chanPlans)
-	tasks := suite.checker.Check(context.TODO())
-	suite.Len(tasks, 1)
+
+	tasks := make([]task.Task, 0)
+	suite.scheduler.ExpectedCalls = nil
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(task task.Task) error {
+		tasks = append(tasks, task)
+		return nil
+	})
+	suite.checker.Check(context.TODO())
+	suite.Len(tasks, 2)
 }
 
 func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
@@ -848,6 +856,156 @@ func (suite *BalanceCheckerTestSuite) TestHasUnbalancedCollectionFlag() {
 	suite.Equal(1, suite.checker.stoppingBalanceCollectionsCurrentRound.Len())
 	suite.True(suite.checker.stoppingBalanceCollectionsCurrentRound.Contain(cid1),
 		"stoppingBalanceCollectionsCurrentRound should contain the collection when it has RO nodes")
+}
+
+func (suite *BalanceCheckerTestSuite) TestCheckBatchSizesAndMultiCollection() {
+	ctx := context.Background()
+
+	// Set up nodes
+	nodeID1, nodeID2 := int64(1), int64(2)
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID1)
+	suite.checker.meta.ResourceManager.HandleNodeUp(ctx, nodeID2)
+
+	// Create 3 collections
+	for i := 1; i <= 3; i++ {
+		cid := int64(i)
+		replicaID := int64(100 + i)
+
+		collection := utils.CreateTestCollection(cid, int32(replicaID))
+		collection.Status = querypb.LoadStatus_Loaded
+		replica := utils.CreateTestReplica(replicaID, cid, []int64{})
+		mutableReplica := replica.CopyForWrite()
+		mutableReplica.AddRWNode(nodeID1)
+		mutableReplica.AddRONode(nodeID2)
+
+		suite.checker.meta.CollectionManager.PutCollection(ctx, collection)
+		suite.checker.meta.ReplicaManager.Put(ctx, mutableReplica.IntoReplica())
+	}
+
+	// Mock target manager
+	mockTargetManager := meta.NewMockTargetManager(suite.T())
+	suite.checker.targetMgr = mockTargetManager
+
+	// All collections have same row count for simplicity
+	mockTargetManager.EXPECT().GetCollectionRowCount(mock.Anything, mock.Anything, mock.Anything).Return(int64(100)).Maybe()
+	mockTargetManager.EXPECT().IsCurrentTargetReady(mock.Anything, mock.Anything).Return(true).Maybe()
+	mockTargetManager.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
+	mockTargetManager.EXPECT().IsCurrentTargetExist(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
+
+	// For each collection, return different segment plans
+	suite.balancer.EXPECT().BalanceReplica(mock.Anything, mock.AnythingOfType("*meta.Replica")).RunAndReturn(
+		func(ctx context.Context, replica *meta.Replica) ([]balance.SegmentAssignPlan, []balance.ChannelAssignPlan) {
+			// Create 2 segment plans and 1 channel plan per replica
+			collID := replica.GetCollectionID()
+			segPlans := make([]balance.SegmentAssignPlan, 0)
+			chanPlans := make([]balance.ChannelAssignPlan, 0)
+
+			// Create 2 segment plans
+			for j := 1; j <= 2; j++ {
+				segID := collID*100 + int64(j)
+				segPlan := balance.SegmentAssignPlan{
+					Segment: utils.CreateTestSegment(segID, collID, 1, 1, 1, "test-channel"),
+					Replica: replica,
+					From:    nodeID1,
+					To:      nodeID2,
+				}
+				segPlans = append(segPlans, segPlan)
+			}
+
+			// Create 1 channel plan
+			chanPlan := balance.ChannelAssignPlan{
+				Channel: &meta.DmChannel{
+					VchannelInfo: &datapb.VchannelInfo{
+						CollectionID: collID,
+						ChannelName:  "test-channel",
+					},
+				},
+				Replica: replica,
+				From:    nodeID1,
+				To:      nodeID2,
+			}
+			chanPlans = append(chanPlans, chanPlan)
+
+			return segPlans, chanPlans
+		}).Maybe()
+
+	// Add tasks to check batch size limits
+	var addedTasks []task.Task
+	suite.scheduler.ExpectedCalls = nil
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		addedTasks = append(addedTasks, t)
+		return nil
+	}).Maybe()
+
+	// Test 1: Balance with multiple collections disabled
+	paramtable.Get().Save(Params.QueryCoordCfg.AutoBalance.Key, "true")
+	paramtable.Get().Save(Params.QueryCoordCfg.EnableBalanceOnMultipleCollections.Key, "false")
+	// Set batch sizes to large values to test single-collection case
+	paramtable.Get().Save(Params.QueryCoordCfg.BalanceSegmentBatchSize.Key, "10")
+	paramtable.Get().Save(Params.QueryCoordCfg.BalanceChannelBatchSize.Key, "10")
+
+	// Reset test state
+	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
+	suite.checker.autoBalanceTs = time.Time{} // Reset to trigger auto balance
+	addedTasks = nil
+
+	// Run the Check method
+	suite.checker.Check(ctx)
+
+	// Should have tasks for a single collection (2 segment tasks + 1 channel task)
+	suite.Equal(3, len(addedTasks), "Should have tasks for a single collection when multiple collections balance is disabled")
+
+	// Test 2: Balance with multiple collections enabled
+	paramtable.Get().Save(Params.QueryCoordCfg.EnableBalanceOnMultipleCollections.Key, "true")
+
+	// Reset test state
+	suite.checker.autoBalanceTs = time.Time{}
+	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
+	addedTasks = nil
+
+	// Run the Check method
+	suite.checker.Check(ctx)
+
+	// Should have tasks for all collections (3 collections * (2 segment tasks + 1 channel task) = 9 tasks)
+	suite.Equal(9, len(addedTasks), "Should have tasks for all collections when multiple collections balance is enabled")
+
+	// Test 3: Batch size limits
+	paramtable.Get().Save(Params.QueryCoordCfg.BalanceSegmentBatchSize.Key, "2")
+	paramtable.Get().Save(Params.QueryCoordCfg.BalanceChannelBatchSize.Key, "1")
+
+	// Reset test state
+	suite.checker.stoppingBalanceCollectionsCurrentRound.Clear()
+	addedTasks = nil
+
+	// Run the Check method
+	suite.checker.Check(ctx)
+
+	// Should respect batch size limits: 2 segment tasks + 1 channel task = 3 tasks
+	suite.Equal(3, len(addedTasks), "Should respect batch size limits")
+
+	// Count segment tasks and channel tasks
+	segmentTaskCount := 0
+	channelTaskCount := 0
+	for _, t := range addedTasks {
+		if _, ok := t.(*task.SegmentTask); ok {
+			segmentTaskCount++
+		} else {
+			channelTaskCount++
+		}
+	}
+
+	suite.LessOrEqual(segmentTaskCount, 2, "Should have at most 2 segment tasks due to batch size limit")
+	suite.LessOrEqual(channelTaskCount, 1, "Should have at most 1 channel task due to batch size limit")
 }
 
 func TestBalanceCheckerSuite(t *testing.T) {

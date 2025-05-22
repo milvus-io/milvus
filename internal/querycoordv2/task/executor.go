@@ -18,6 +18,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -215,18 +216,18 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		log.Warn(msg, zap.Error(err))
 		return err
 	}
-	view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard))
+	view := ex.dist.ChannelDistManager.GetShardLeader(task.Shard(), replica)
 	if view == nil {
 		msg := "no shard leader for the segment to execute loading"
 		err = merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
 		log.Warn(msg, zap.Error(err))
 		return err
 	}
-	log = log.With(zap.Int64("shardLeader", view.ID))
+	log = log.With(zap.Int64("shardLeader", view.Node))
 
 	startTs := time.Now()
 	log.Info("load segments...")
-	status, err := ex.cluster.LoadSegments(task.Context(), view.ID, req)
+	status, err := ex.cluster.LoadSegments(task.Context(), view.Node, req)
 	err = merr.CheckRPCCall(status, err)
 	if err != nil {
 		log.Warn("failed to load segment", zap.Error(err))
@@ -282,15 +283,15 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 				dstNode = action.Node()
 				req.NeedTransfer = false
 			} else {
-				view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard))
+				view := ex.dist.ChannelDistManager.GetShardLeader(task.Shard(), replica)
 				if view == nil {
 					msg := "no shard leader for the segment to execute releasing"
 					err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
 					log.Warn(msg, zap.Error(err))
 					return
 				}
-				dstNode = view.ID
-				log = log.With(zap.Int64("shardLeader", view.ID))
+				dstNode = view.Node
+				log = log.With(zap.Int64("shardLeader", view.Node))
 				req.NeedTransfer = true
 			}
 		}
@@ -376,6 +377,13 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		log.Warn(msg, zap.String("channelName", action.ChannelName()))
 		return merr.WrapErrChannelReduplicate(action.ChannelName())
 	}
+
+	partitions, err = utils.GetPartitions(ctx, ex.targetMgr, task.collectionID)
+	if err != nil {
+		log.Warn("failed to get partitions", zap.Error(err))
+		return merr.WrapErrServiceInternal(fmt.Sprintf("failed to get partitions for collection=%d", task.CollectionID()))
+	}
+
 	req := packSubChannelRequest(
 		task,
 		action,
@@ -383,6 +391,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		loadMeta,
 		dmChannel,
 		indexInfo,
+		partitions,
 	)
 	err = fillSubChannelRequest(ctx, req, ex.broker, ex.shouldIncludeFlushedSegmentInfo(action.Node()))
 	if err != nil {

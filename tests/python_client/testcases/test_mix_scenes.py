@@ -2344,7 +2344,11 @@ class TestGroupSearch(TestCaseClassBase):
                     self.primary_field: FieldParams(is_primary=True).to_dict,
                     DataType.FLOAT16_VECTOR.name: FieldParams(dim=31).to_dict,
                     DataType.FLOAT_VECTOR.name: FieldParams(dim=64).to_dict,
-                    DataType.BFLOAT16_VECTOR.name: FieldParams(dim=24).to_dict
+                    DataType.BFLOAT16_VECTOR.name: FieldParams(dim=24).to_dict,
+                    DataType.VARCHAR.name: FieldParams(nullable=True).to_dict,
+                    DataType.INT8.name: FieldParams(nullable=True).to_dict,
+                    DataType.INT64.name: FieldParams(nullable=True).to_dict,
+                    DataType.BOOL.name: FieldParams(nullable=True).to_dict
                 },
                 auto_id=True
             )
@@ -2363,11 +2367,20 @@ class TestGroupSearch(TestCaseClassBase):
             string_values = pd.Series(data=[str(i) for i in range(nb)], dtype="string")
             data = [string_values]
             for i in range(len(self.vector_fields)):
-                data.append(cf.gen_vectors(dim=self.dims[i], nb=nb, vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap, self.vector_fields[i])))
-            data.append(pd.Series(data=[np.int8(i) for i in range(nb)], dtype="int8"))
-            data.append(pd.Series(data=[np.int64(i) for i in range(nb)], dtype="int64"))
-            data.append(pd.Series(data=[np.bool_(i) for i in range(nb)], dtype="bool"))
-            data.append(pd.Series(data=[str(i) for i in range(nb)], dtype="string"))
+                data.append(cf.gen_vectors(dim=self.dims[i],
+                                           nb=nb,
+                                           vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap,
+                                                                                             self.vector_fields[i])))
+            if i%5 != 0:
+                data.append(pd.Series(data=[np.int8(i)  for i in range(nb)], dtype="int8"))
+                data.append(pd.Series(data=[np.int64(i) for i in range(nb)], dtype="int64"))
+                data.append(pd.Series(data=[np.bool_(i) for i in range(nb)], dtype="bool"))
+                data.append(pd.Series(data=[str(i) for i in range(nb)], dtype="string"))
+            else:
+                data.append(pd.Series(data=[None for _ in range(nb)], dtype="int8"))
+                data.append(pd.Series(data=[None for _ in range(nb)], dtype="int64"))
+                data.append(pd.Series(data=[None for _ in range(nb)], dtype="bool"))
+                data.append(pd.Series(data=[None for _ in range(nb)], dtype="string"))
             self.collection_wrap.insert(data)
 
         # flush collection, segment sealed
@@ -2491,7 +2504,9 @@ class TestGroupSearch(TestCaseClassBase):
         req_list = []
         for i in range(len(self.vector_fields)):
             search_param = {
-                "data": cf.gen_vectors(ct.default_nq, dim=self.dims[i], vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap, self.vector_fields[i])),
+                "data": cf.gen_vectors(ct.default_nq, dim=self.dims[i],
+                                       vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap,
+                                                                                         self.vector_fields[i])),
                 "anns_field": self.vector_fields[i],
                 "param": {},
                 "limit": ct.default_limit,
@@ -2537,7 +2552,9 @@ class TestGroupSearch(TestCaseClassBase):
         nq = 2
         limit = 15
         for j in range(len(self.vector_fields)):
-            search_vectors = cf.gen_vectors(nq, dim=self.dims[j], vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap, self.vector_fields[j]))
+            search_vectors = cf.gen_vectors(nq, dim=self.dims[j],
+                                            vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap,
+                                                                                              self.vector_fields[j]))
             search_params = {"params": cf.get_search_params_params(self.index_types[j])}
             res1 = self.collection_wrap.search(data=search_vectors, anns_field=self.vector_fields[j],
                                                param=search_params, limit=limit,

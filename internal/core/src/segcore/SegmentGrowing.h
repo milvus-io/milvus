@@ -32,7 +32,7 @@ class SegmentGrowing : public SegmentInternalInterface {
            int64_t size,
            const int64_t* row_ids,
            const Timestamp* timestamps,
-           const InsertRecordProto* insert_record_proto) = 0;
+           InsertRecordProto* insert_record_proto) = 0;
 
     SegmentType
     type() const override {

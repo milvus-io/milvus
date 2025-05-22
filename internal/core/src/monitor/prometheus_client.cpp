@@ -454,17 +454,24 @@ DEFINE_PROMETHEUS_GAUGE(internal_cache_capacity_bytes_mixed,
                         cacheMixedLabel);
 
 // Eviction count and resource size
-DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cache_eviction_count,
-                                 "[cpp]cache eviction count");
-DEFINE_PROMETHEUS_COUNTER(internal_cache_eviction_count_memory,
-                          internal_cache_eviction_count,
+DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cache_cell_eviction_count,
+                                 "[cpp]cache cell eviction count");
+DEFINE_PROMETHEUS_COUNTER(internal_cache_cell_eviction_count_memory,
+                          internal_cache_cell_eviction_count,
                           cacheMemoryLabel);
-DEFINE_PROMETHEUS_COUNTER(internal_cache_eviction_count_disk,
-                          internal_cache_eviction_count,
+DEFINE_PROMETHEUS_COUNTER(internal_cache_cell_eviction_count_disk,
+                          internal_cache_cell_eviction_count,
                           cacheDiskLabel);
-DEFINE_PROMETHEUS_COUNTER(internal_cache_eviction_count_mixed,
-                          internal_cache_eviction_count,
+DEFINE_PROMETHEUS_COUNTER(internal_cache_cell_eviction_count_mixed,
+                          internal_cache_cell_eviction_count,
                           cacheMixedLabel);
+
+// Eviction event count
+DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cache_eviction_event_count,
+                                 "[cpp]cache eviction event count");
+DEFINE_PROMETHEUS_COUNTER(internal_cache_eviction_event_count_all,
+                          internal_cache_eviction_event_count,
+                          {});
 
 DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cache_evicted_bytes,
                                  "[cpp]total bytes evicted from cache");

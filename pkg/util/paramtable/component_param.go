@@ -2091,6 +2091,11 @@ type queryCoordConfig struct {
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
 	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
+
+	// balance batch size in one trigger
+	BalanceSegmentBatchSize            ParamItem `refreshable:"true"`
+	BalanceChannelBatchSize            ParamItem `refreshable:"true"`
+	EnableBalanceOnMultipleCollections ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2685,6 +2690,35 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.AutoBalanceInterval.Init(base.mgr)
+
+	p.BalanceSegmentBatchSize = ParamItem{
+		Key:          "queryCoord.balanceSegmentBatchSize",
+		FallbackKeys: []string{"queryCoord.collectionBalanceSegmentBatchSize"},
+		Version:      "2.5.14",
+		DefaultValue: "5",
+		Doc:          "the max balance task number for segment at each round, which is used for queryCoord to trigger balance on multiple collections",
+		Export:       false,
+	}
+	p.BalanceSegmentBatchSize.Init(base.mgr)
+
+	p.BalanceChannelBatchSize = ParamItem{
+		Key:          "queryCoord.balanceChannelBatchSize",
+		FallbackKeys: []string{"queryCoord.collectionBalanceChannelBatchSize"},
+		Version:      "2.5.14",
+		DefaultValue: "1",
+		Doc:          "the max balance task number for channel at each round, which is used for queryCoord to trigger balance on multiple collections",
+		Export:       false,
+	}
+	p.BalanceChannelBatchSize.Init(base.mgr)
+
+	p.EnableBalanceOnMultipleCollections = ParamItem{
+		Key:          "queryCoord.enableBalanceOnMultipleCollections",
+		Version:      "2.5.14",
+		DefaultValue: "true",
+		Doc:          "whether enable trigger balance on multiple collections at one time",
+		Export:       false,
+	}
+	p.EnableBalanceOnMultipleCollections.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3199,7 +3233,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapVectorField = ParamItem{
 		Key:          "queryNode.mmap.vectorField",
 		Version:      "2.4.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"

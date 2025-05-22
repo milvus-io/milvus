@@ -212,6 +212,7 @@ func (suite *ServiceSuite) TestGetStatistics_Normal() {
 	ctx := context.Background()
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
+	suite.syncDistribution(context.TODO())
 
 	req := &querypb.GetStatisticsRequest{
 		Req: &internalpb.GetStatisticsRequest{
