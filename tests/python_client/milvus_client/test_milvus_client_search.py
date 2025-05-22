@@ -1657,7 +1657,11 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_search_query_default(self):
+    @pytest.mark.parametrize("new_field_data_type", [DataType.INT64, DataType.INT8, DataType.INT16, DataType.INT32,
+                                                     DataType.FLOAT, DataType.DOUBLE, DataType.BOOL, DataType.VARCHAR,
+                                                     DataType.ARRAY, DataType.JSON])
+    @pytest.mark.parametrize("is_flush", [True, False])
+    def test_milvus_client_search_query_default(self, new_field_data_type, is_flush):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
@@ -1697,6 +1701,637 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 5. add field
+        if new_field_data_type == DataType.ARRAY:
+            self.add_collection_field(client, collection_name, field_name="field_new", data_type=new_field_data_type,
+                                      element_type=DataType.INT64, max_capacity=12, max_length=64, nullable=True)
+        else:
+            self.add_collection_field(client, collection_name, field_name="field_new", data_type=new_field_data_type,
+                                  nullable=True, max_length=100)
+        if is_flush:
+            self.flush(client, collection_name)
+        # 6. check the old search is not impacted after add field
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 7. check the old query is not impacted after add field
+        for row in rows:
+            row["field_new"] = None
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 8. search filtered with the new field
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new is null",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new is not null",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0})
+        # 9. query filtered with the new field
+        self.query(client, collection_name, filter="field_new is null",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        self.query(client, collection_name, filter="field_new is not null",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [],
+                                "pk_name": default_primary_key_field_name})
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("new_field_data_type", [DataType.INT64, DataType.INT8, DataType.INT16, DataType.INT32])
+    @pytest.mark.parametrize("is_flush", [True, False])
+    def test_milvus_client_search_query_add_new_field_with_default_value_int(self, new_field_data_type, is_flush):
+        """
+        target: test search with add field using default value
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.using_database(client, "default")
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.describe_collection(client, collection_name,
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "dim": default_dim,
+                                              "consistency_level": 0})
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # assert self.num_entities(client, collection_name)[0] == default_nb
+        # 3. search
+        vectors_to_search = rng.random((1, default_dim))
+        insert_ids = [i for i in range(default_nb)]
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 4. query
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 5. add field
+        default_value = 1
+        if new_field_data_type == DataType.INT8:
+            default_value = np.int8(1)
+        elif new_field_data_type == DataType.INT16:
+            default_value = np.int16(1)
+        elif new_field_data_type == DataType.INT32:
+            default_value = np.int32(1)
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=new_field_data_type,
+                                  nullable=True, default_value=default_value)
+        if is_flush:
+            self.flush(client, collection_name)
+        # 6. check the old search is not impacted after add field
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 7. check the old query is not impacted after add field
+        for row in rows:
+            row["field_new"] = default_value
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 8. search filtered with the new field
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new == 1",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new is null",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0})
+        # 9. query filtered with the new field
+        self.query(client, collection_name, filter="field_new == 1",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        self.query(client, collection_name, filter="field_new is null",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [],
+                                "pk_name": default_primary_key_field_name})
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("new_field_data_type", [DataType.FLOAT, DataType.DOUBLE])
+    @pytest.mark.parametrize("is_flush", [True, False])
+    def test_milvus_client_search_query_add_new_field_with_default_value_float(self, new_field_data_type, is_flush):
+        """
+        target: test search with add field using default value
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.using_database(client, "default")
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.describe_collection(client, collection_name,
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "dim": default_dim,
+                                              "consistency_level": 0})
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # assert self.num_entities(client, collection_name)[0] == default_nb
+        # 3. search
+        vectors_to_search = rng.random((1, default_dim))
+        insert_ids = [i for i in range(default_nb)]
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 4. query
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 5. add field
+        default_value = 1.0
+        if new_field_data_type == DataType.FLOAT:
+            default_value = np.float32(1.0)
+        elif new_field_data_type == DataType.DOUBLE:
+            default_value = np.float64(1.0)
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=new_field_data_type,
+                                  nullable=True, default_value=default_value)
+        if is_flush:
+            self.flush(client, collection_name)
+        # 6. check the old search is not impacted after add field
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 7. check the old query is not impacted after add field
+        for row in rows:
+            row["field_new"] = default_value
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 8. search filtered with the new field
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new == 1",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new is null",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0})
+        # 9. query filtered with the new field
+        self.query(client, collection_name, filter="field_new == 1",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        self.query(client, collection_name, filter="field_new is null",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [],
+                                "pk_name": default_primary_key_field_name})
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("new_field_data_type", [DataType.BOOL])
+    @pytest.mark.parametrize("is_flush", [True, False])
+    def test_milvus_client_search_query_add_new_field_with_default_value_bool(self, new_field_data_type, is_flush):
+        """
+        target: test search with add field using default value
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.using_database(client, "default")
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.describe_collection(client, collection_name,
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "dim": default_dim,
+                                              "consistency_level": 0})
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # assert self.num_entities(client, collection_name)[0] == default_nb
+        # 3. search
+        vectors_to_search = rng.random((1, default_dim))
+        insert_ids = [i for i in range(default_nb)]
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 4. query
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 5. add field
+        default_value = True
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=new_field_data_type,
+                                  nullable=True, default_value=default_value)
+        if is_flush:
+            self.flush(client, collection_name)
+        # 6. check the old search is not impacted after add field
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 7. check the old query is not impacted after add field
+        for row in rows:
+            row["field_new"] = default_value
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 8. search filtered with the new field
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new == True",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new is null",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0})
+        # 9. query filtered with the new field
+        self.query(client, collection_name, filter="field_new == True",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        self.query(client, collection_name, filter="field_new is null",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [],
+                                "pk_name": default_primary_key_field_name})
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("new_field_data_type", [DataType.VARCHAR])
+    @pytest.mark.parametrize("is_flush", [True, False])
+    def test_milvus_client_search_query_add_new_field_with_default_value_varchar(self, new_field_data_type, is_flush):
+        """
+        target: test search with add field using default value
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.using_database(client, "default")
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.describe_collection(client, collection_name,
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "dim": default_dim,
+                                              "consistency_level": 0})
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # assert self.num_entities(client, collection_name)[0] == default_nb
+        # 3. search
+        vectors_to_search = rng.random((1, default_dim))
+        insert_ids = [i for i in range(default_nb)]
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 4. query
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 5. add field
+        default_value = "1"
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=new_field_data_type,
+                                  nullable=True, max_length=100, default_value=default_value)
+        if is_flush:
+            self.flush(client, collection_name)
+        # 6. check the old search is not impacted after add field
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 7. check the old query is not impacted after add field
+        for row in rows:
+            row["field_new"] = default_value
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 8. search filtered with the new field
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new >='0'",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new is null",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0})
+        # 9. query filtered with the new field
+        self.query(client, collection_name, filter="field_new >='0'",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        self.query(client, collection_name, filter="field_new is null",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [],
+                                "pk_name": default_primary_key_field_name})
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("new_field_data_type", [DataType.JSON])
+    @pytest.mark.parametrize("is_flush", [True, False])
+    def test_milvus_client_search_query_add_new_field_with_default_value_json(self, new_field_data_type, is_flush):
+        """
+        target: test search with add field using default value
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.using_database(client, "default")
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.describe_collection(client, collection_name,
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "dim": default_dim,
+                                              "consistency_level": 0})
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # assert self.num_entities(client, collection_name)[0] == default_nb
+        # 3. search
+        vectors_to_search = rng.random((1, default_dim))
+        insert_ids = [i for i in range(default_nb)]
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 4. query
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 5. add field
+        default_value = None
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=new_field_data_type,
+                                  nullable=True, max_length=100, default_value=default_value)
+        if is_flush:
+            self.flush(client, collection_name)
+        # 6. check the old search is not impacted after add field
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 7. check the old query is not impacted after add field
+        for row in rows:
+            row["field_new"] = default_value
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 8. search filtered with the new field
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new is null",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new is not null",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0})
+        # 9. query filtered with the new field
+        self.query(client, collection_name, filter="field_new is null",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        self.query(client, collection_name, filter="field_new is not null",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [],
+                                "pk_name": default_primary_key_field_name})
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("new_field_data_type", [DataType.ARRAY])
+    @pytest.mark.parametrize("is_flush", [True, False])
+    def test_milvus_client_search_query_add_new_field_with_default_value_array(self, new_field_data_type, is_flush):
+        """
+        target: test search with add field using default value
+        method: create connection, collection, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.using_database(client, "default")
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.describe_collection(client, collection_name,
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "dim": default_dim,
+                                              "consistency_level": 0})
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # assert self.num_entities(client, collection_name)[0] == default_nb
+        # 3. search
+        vectors_to_search = rng.random((1, default_dim))
+        insert_ids = [i for i in range(default_nb)]
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 4. query
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 5. add field
+        default_value = None
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=new_field_data_type,
+                                  nullable=True, element_type=DataType.INT64, max_capacity=12, max_length=100, default_value=default_value)
+        if is_flush:
+            self.flush(client, collection_name)
+        # 6. check the old search is not impacted after add field
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 7. check the old query is not impacted after add field
+        for row in rows:
+            row["field_new"] = default_value
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 8. search filtered with the new field
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new is null",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new is not null",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0})
+        # 9. query filtered with the new field
+        self.query(client, collection_name, filter="field_new is null",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        self.query(client, collection_name, filter="field_new is not null",
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [],
                                 "pk_name": default_primary_key_field_name})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
@@ -1964,6 +2599,81 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_delete_after_add_field(self):
+        """
+        target: test delete (high level api)
+        method: create connection, collection, insert delete, and search
+        expected: search/query successfully without deleted data
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        # 2. insert
+        default_nb = 1000
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        pks = self.insert(client, collection_name, rows)[0]
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.INT64,
+                                  nullable=True, max_length=100)
+        for row in rows:
+            row["field_new"] = None
+        # 3. delete
+        delete_num = 3
+        self.delete(client, collection_name, ids=[i for i in range(delete_num)])
+        # 4. search
+        vectors_to_search = rng.random((1, default_dim))
+        insert_ids = [i for i in range(default_nb)]
+        for insert_id in range(delete_num):
+            if insert_id in insert_ids:
+                insert_ids.remove(insert_id)
+        limit = default_nb - delete_num
+        self.search(client, collection_name, vectors_to_search, limit=default_nb,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": limit})
+        # 5. query
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows[delete_num:],
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 6. insert to the new added field
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i), "field_new": i} for i in range(delete_num)]
+        pks = self.insert(client, collection_name, rows)[0]
+        # 7. flush
+        self.flush(client, collection_name)
+        limit = default_nb
+        insert_ids = [i for i in range(default_nb)]
+        self.search(client, collection_name, vectors_to_search, limit=default_nb,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": limit})
+        # 8. delete
+        self.delete(client, collection_name, filter=f"field_new >=0 and field_new <={delete_num}")
+        limit = default_nb - delete_num
+        for insert_id in range(delete_num):
+            if insert_id in insert_ids:
+                insert_ids.remove(insert_id)
+        limit = default_nb - delete_num
+        self.search(client, collection_name, vectors_to_search, limit=default_nb,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": limit})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_delete_with_filters(self):
         """
         target: test delete (high level api)
@@ -2043,7 +2753,8 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
-
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.VARCHAR,
+                                  nullable=True, max_length=100)
         # 3. search
         search_vector = list(rng.random((1, dim))[0])
         search_params = {'hints': "iterative_filter",
@@ -2186,6 +2897,35 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                                  "ids": insert_ids,
                                  "pk_name": default_primary_key_field_name,
                                  "limit": limit})
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.JSON,
+                                  nullable=True, max_length=100)
+        self.search(client, collection_name, vectors_to_search,
+                    filter=null_expr,
+                    consistency_level="Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": limit})
+        insert_ids = [str(i) for i in range(default_nb)]
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new is null",
+                    consistency_level="Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        self.search(client, collection_name, vectors_to_search,
+                    filter="field_new is not null",
+                    consistency_level="Strong",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("nullable", [True, False])
