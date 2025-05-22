@@ -155,8 +155,6 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
         std::make_unique<ParallelDegreeSplitStrategy>(parallel_degree);
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
 
     auto load_future = pool.Submit([&]() {
         return LoadWithStrategy(insert_files_,

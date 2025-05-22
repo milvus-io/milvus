@@ -79,7 +79,7 @@ class ListNode {
     bool
     manual_evict();
 
-    // TODO(tiered storage 1): pin on ERROR should re-trigger loading.
+    // TODO(tiered storage 2): pin on ERROR should re-trigger loading.
     // NOT_LOADED ---> LOADING ---> ERROR
     //      ^            |
     //      |            v

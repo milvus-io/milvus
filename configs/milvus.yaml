@@ -464,7 +464,7 @@ queryNode:
     memoryLimit: 2147483648 # Deprecated: 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
   mmap:
-    vectorField: false # Enable mmap for loading vector data
+    vectorField: true # Enable mmap for loading vector data
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index

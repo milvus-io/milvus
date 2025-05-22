@@ -3233,7 +3233,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapVectorField = ParamItem{
 		Key:          "queryNode.mmap.vectorField",
 		Version:      "2.4.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
