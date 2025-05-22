@@ -112,7 +112,11 @@ func (t *ImportTask) GetSlots() int64 {
 	//    making segment count unsuitable as a slot number.
 	// Taking these factors into account, we've decided to use the
 	// minimum value between segment count and file count as the slot number.
-	return int64(funcutil.Min(len(t.GetFileStats()), len(t.GetSegmentIDs()), paramtable.Get().DataNodeCfg.MaxTaskSlotNum.GetAsInt()))
+	slots := int64(funcutil.Min(len(t.GetFileStats()), len(t.GetSegmentIDs())))
+	if slots < 1 {
+		slots = 1
+	}
+	return slots
 }
 
 func (t *ImportTask) Cancel() {
