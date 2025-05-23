@@ -2750,8 +2750,13 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("is_flush", [True, False])
+    @pytest.mark.parametrize("is_release", [True, False])
+    @pytest.mark.parametrize("is_scalar_index", [True, False])
+    @pytest.mark.parametrize("scalar_index_type", ["AUTOINDEX", "INVERTED", "BITMAP"])
     @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
-    def test_milvus_client_search_null_expr_array(self, nullable, null_expr_op):
+    def test_milvus_client_search_null_expr_array(self, nullable, null_expr_op, is_flush, is_release,
+                                                  is_scalar_index, scalar_index_type):
         """
         target: test search with null expression on array fields
         method: create connection, collection, insert and search
@@ -2759,7 +2764,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        dim = 5
+        dim = 128
         # 1. create collection
         nullable_field_name = "nullable_field"
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -2771,6 +2776,8 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                          max_length=64, nullable=nullable)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        if is_scalar_index:
+            index_params.add_index(nullable_field_name, index_type=scalar_index_type)
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
@@ -2781,6 +2788,18 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
             rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
                      default_string_field_name: str(i), "nullable_field": [1, 2]} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
+        if is_flush:
+            self.flush(client, collection_name)
+        if is_release:
+            self.release_collection(client, collection_name)
+            self.drop_index(client, collection_name, default_vector_field_name)
+            self.drop_index(client, collection_name, nullable_field_name)
+            index_params = self.prepare_index_params(client)[0]
+            index_params.add_index(default_vector_field_name, metric_type="COSINE")
+            if is_scalar_index:
+                index_params.add_index(nullable_field_name, index_type=scalar_index_type)
+            self.create_index(client, collection_name, index_params)
+            self.load_collection(client, collection_name)
         # 3. search
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
@@ -2789,7 +2808,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
                 limit = 0
-
             else:
                 limit = default_limit
         else:
