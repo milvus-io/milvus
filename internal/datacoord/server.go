@@ -398,12 +398,18 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 
+<<<<<<< HEAD
 	s.importMeta, err = NewImportMeta(s.ctx, s.meta.catalog)
 	if err != nil {
 		return err
 	}
 	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta)
 	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.importMeta, s.jobManager)
+=======
+	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
+
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.statsInspector, s.compactionTriggerManager)
+>>>>>>> f71930e8db (enhance: Enhance import context (#42021))
 
 	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
 

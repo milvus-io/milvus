@@ -41,12 +41,12 @@ type ImportSchedulerSuite struct {
 
 	collectionID int64
 
-	catalog   *mocks.DataCoordCatalog
-	alloc     *allocator.MockAllocator
-	cluster   *MockCluster
-	meta      *meta
-	imeta     ImportMeta
-	scheduler *importScheduler
+	catalog    *mocks.DataCoordCatalog
+	alloc      *allocator.MockAllocator
+	cluster    *MockCluster
+	meta       *meta
+	importMeta ImportMeta
+	scheduler  *importScheduler
 }
 
 func (s *ImportSchedulerSuite) SetupTest() {
@@ -76,9 +76,9 @@ func (s *ImportSchedulerSuite) SetupTest() {
 		ID:     s.collectionID,
 		Schema: newTestSchema(),
 	})
-	s.imeta, err = NewImportMeta(context.TODO(), s.catalog)
+	s.importMeta, err = NewImportMeta(context.TODO(), s.catalog)
 	s.NoError(err)
-	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, s.imeta).(*importScheduler)
+	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, s.importMeta).(*importScheduler)
 }
 
 func (s *ImportSchedulerSuite) TestProcessPreImport() {
@@ -93,7 +93,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 		},
 		tr: timerecord.NewTimeRecorder("preimport task"),
 	}
-	err := s.imeta.AddTask(context.TODO(), task)
+	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -104,7 +104,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
-	err = s.imeta.AddJob(context.TODO(), job)
+	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// pending -> inProgress
@@ -120,7 +120,7 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 		return []*session.Session{sess}
 	})
 	s.scheduler.process()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_InProgress, task.GetState())
 	s.Equal(int64(nodeID), task.GetNodeID())
 
@@ -129,13 +129,13 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 		State: datapb.ImportTaskStateV2_Completed,
 	}, nil)
 	s.scheduler.process()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_Completed, task.GetState())
 
 	// drop import task
 	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
 	s.scheduler.process()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(int64(NullNodeID), task.GetNodeID())
 }
 
@@ -165,7 +165,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 		},
 		tr: timerecord.NewTimeRecorder("import task"),
 	}
-	err := s.imeta.AddTask(context.TODO(), task)
+	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -178,7 +178,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
-	err = s.imeta.AddJob(context.TODO(), job)
+	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// pending -> inProgress
@@ -196,7 +196,7 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 		return []*session.Session{sess}
 	})
 	s.scheduler.process()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_InProgress, task.GetState())
 	s.Equal(int64(nodeID), task.GetNodeID())
 
@@ -208,13 +208,13 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 		State: datapb.ImportTaskStateV2_Completed,
 	}, nil)
 	s.scheduler.process()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_Completed, task.GetState())
 
 	// drop import task
 	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
 	s.scheduler.process()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(int64(NullNodeID), task.GetNodeID())
 }
 
@@ -233,7 +233,7 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 		},
 		tr: timerecord.NewTimeRecorder("import task"),
 	}
-	err := s.imeta.AddTask(context.TODO(), task)
+	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -246,7 +246,7 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
-	err = s.imeta.AddJob(context.TODO(), job)
+	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
@@ -278,7 +278,7 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 		segment := s.meta.GetSegment(context.TODO(), id)
 		s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
 	}
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_Failed, task.GetState())
 	s.Equal(0, len(task.(*importTask).GetSegmentIDs()))
 	s.Equal(int64(NullNodeID), task.GetNodeID())
