@@ -52,6 +52,10 @@ ScalarIndexCreator::ScalarIndexCreator(
         index_info.json_cast_type = milvus::JsonCastType::FromString(
             config.at(JSON_CAST_TYPE).get<std::string>());
         index_info.json_path = config.at(JSON_PATH).get<std::string>();
+        if (config.contains(JSON_CAST_FUNCTION)) {
+            index_info.json_cast_function =
+                config.at(JSON_CAST_FUNCTION).get<std::string>();
+        }
     }
     index_ = index::IndexFactory::GetInstance().CreateIndex(
         index_info, file_manager_context);
