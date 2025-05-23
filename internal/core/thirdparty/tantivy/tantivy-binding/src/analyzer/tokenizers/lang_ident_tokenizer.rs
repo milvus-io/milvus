@@ -186,7 +186,6 @@ impl<'a> LangIdentTokenizer<'a> {
 
         // init sub analyzers
         for (name, params) in sub_analyzers {
-            println!("name = {:?}, params = {:?}", name, params);
             analyzer.add(
                 name,
                 fc(params.as_object().ok_or_else(|| {

@@ -360,37 +360,39 @@ type StatsTaskInfo struct {
 
 func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 	return &StatsTaskInfo{
-		Cancel:           s.Cancel,
-		State:            s.State,
-		FailReason:       s.FailReason,
-		CollID:           s.CollID,
-		PartID:           s.PartID,
-		SegID:            s.SegID,
-		InsertChannel:    s.InsertChannel,
-		NumRows:          s.NumRows,
-		InsertLogs:       s.CloneInsertLogs(),
-		StatsLogs:        s.CloneStatsLogs(),
-		TextStatsLogs:    s.CloneTextStatsLogs(),
-		Bm25Logs:         s.CloneBm25Logs(),
-		JSONKeyStatsLogs: s.CloneJSONKeyStatsLogs(),
+		Cancel:              s.Cancel,
+		State:               s.State,
+		FailReason:          s.FailReason,
+		CollID:              s.CollID,
+		PartID:              s.PartID,
+		SegID:               s.SegID,
+		InsertChannel:       s.InsertChannel,
+		NumRows:             s.NumRows,
+		InsertLogs:          s.CloneInsertLogs(),
+		StatsLogs:           s.CloneStatsLogs(),
+		TextStatsLogs:       s.CloneTextStatsLogs(),
+		Bm25Logs:            s.CloneBm25Logs(),
+		JSONKeyStatsLogs:    s.CloneJSONKeyStatsLogs(),
+		NgramIndexStatsLogs: s.CloneNgramIndexStatsLogs(),
 	}
 }
 
 func (s *StatsTaskInfo) ToStatsResult(taskID int64) *workerpb.StatsResult {
 	return &workerpb.StatsResult{
-		TaskID:           taskID,
-		State:            s.State,
-		FailReason:       s.FailReason,
-		CollectionID:     s.CollID,
-		PartitionID:      s.PartID,
-		SegmentID:        s.SegID,
-		Channel:          s.InsertChannel,
-		InsertLogs:       s.InsertLogs,
-		StatsLogs:        s.StatsLogs,
-		TextStatsLogs:    s.TextStatsLogs,
-		Bm25Logs:         s.Bm25Logs,
-		NumRows:          s.NumRows,
-		JsonKeyStatsLogs: s.JSONKeyStatsLogs,
+		TaskID:              taskID,
+		State:               s.State,
+		FailReason:          s.FailReason,
+		CollectionID:        s.CollID,
+		PartitionID:         s.PartID,
+		SegmentID:           s.SegID,
+		Channel:             s.InsertChannel,
+		InsertLogs:          s.InsertLogs,
+		StatsLogs:           s.StatsLogs,
+		TextStatsLogs:       s.TextStatsLogs,
+		Bm25Logs:            s.Bm25Logs,
+		NumRows:             s.NumRows,
+		JsonKeyStatsLogs:    s.JSONKeyStatsLogs,
+		NgramIndexStatsLogs: s.NgramIndexStatsLogs,
 	}
 }
 
@@ -429,6 +431,14 @@ func (s *StatsTaskInfo) CloneBm25Logs() []*datapb.FieldBinlog {
 func (s *StatsTaskInfo) CloneJSONKeyStatsLogs() map[int64]*datapb.JsonKeyStats {
 	clone := make(map[int64]*datapb.JsonKeyStats)
 	for k, v := range s.JSONKeyStatsLogs {
+		clone[k] = typeutil.Clone(v)
+	}
+	return clone
+}
+
+func (s *StatsTaskInfo) CloneNgramIndexStatsLogs() map[int64]*datapb.NgramIndexStats {
+	clone := make(map[int64]*datapb.NgramIndexStats)
+	for k, v := range s.NgramIndexStatsLogs {
 		clone[k] = typeutil.Clone(v)
 	}
 	return clone
@@ -565,26 +575,7 @@ func (m *TaskManager) GetStatsTaskInfo(clusterID string, taskID typeutil.UniqueI
 	defer m.stateLock.Unlock()
 
 	if info, ok := m.statsTasks[Key{ClusterID: clusterID, TaskID: taskID}]; ok {
-<<<<<<< HEAD
-		return &StatsTaskInfo{
-			Cancel:              info.Cancel,
-			State:               info.State,
-			FailReason:          info.FailReason,
-			CollID:              info.CollID,
-			PartID:              info.PartID,
-			SegID:               info.SegID,
-			InsertChannel:       info.InsertChannel,
-			NumRows:             info.NumRows,
-			InsertLogs:          info.InsertLogs,
-			StatsLogs:           info.StatsLogs,
-			TextStatsLogs:       info.TextStatsLogs,
-			Bm25Logs:            info.Bm25Logs,
-			JSONKeyStatsLogs:    info.JSONKeyStatsLogs,
-			NgramIndexStatsLogs: info.NgramIndexStatsLogs,
-		}
-=======
 		return info.Clone()
->>>>>>> master
 	}
 	return nil
 }

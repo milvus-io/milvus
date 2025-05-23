@@ -416,35 +416,7 @@ func (node *DataNode) QueryJobsV2(ctx context.Context, req *workerpb.QueryJobsV2
 			TaskIDs:   req.GetTaskIDs(),
 		})
 	case indexpb.JobType_JobTypeStatsJob:
-<<<<<<< HEAD
-		results := make([]*workerpb.StatsResult, 0, len(req.GetTaskIDs()))
-		for _, taskID := range req.GetTaskIDs() {
-			info := node.taskManager.GetStatsTaskInfo(req.GetClusterID(), taskID)
-			if info != nil {
-				results = append(results, &workerpb.StatsResult{
-					TaskID:              taskID,
-					State:               info.State,
-					FailReason:          info.FailReason,
-					CollectionID:        info.CollID,
-					PartitionID:         info.PartID,
-					SegmentID:           info.SegID,
-					Channel:             info.InsertChannel,
-					InsertLogs:          info.InsertLogs,
-					StatsLogs:           info.StatsLogs,
-					TextStatsLogs:       info.TextStatsLogs,
-					Bm25Logs:            info.Bm25Logs,
-					NumRows:             info.NumRows,
-					JsonKeyStatsLogs:    info.JSONKeyStatsLogs,
-					NgramIndexStatsLogs: info.NgramIndexStatsLogs,
-				})
-			}
-		}
-		log.Debug("query stats job result success", zap.Any("results", results))
-		return &workerpb.QueryJobsV2Response{
-			Status:    merr.Success(),
-=======
 		return node.queryStatsTask(ctx, &workerpb.QueryJobsRequest{
->>>>>>> master
 			ClusterID: req.GetClusterID(),
 			TaskIDs:   req.GetTaskIDs(),
 		})

@@ -32,7 +32,9 @@ pub(crate) struct IndexReaderWrapper {
 impl IndexReaderWrapper {
     pub fn load(path: &str, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
         init_log();
+
         let index = Index::open_in_dir(path)?;
+        
         IndexReaderWrapper::from_index(Arc::new(index), set_bitset)
     }
 

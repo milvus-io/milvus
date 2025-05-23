@@ -599,7 +599,6 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	return nil
 }
 
-<<<<<<< HEAD
 func (st *statsTask) createNgramIndex(ctx context.Context,
 	storageConfig *indexpb.StorageConfig,
 	collectionID int64,
@@ -702,7 +701,8 @@ func (st *statsTask) createNgramIndex(ctx context.Context,
 		st.req.GetInsertChannel(),
 		ngramIndexStats)
 	return nil
-=======
+}
+
 func buildIndexParams(
 	req *workerpb.CreateStatsRequest,
 	files []string,
@@ -734,5 +734,4 @@ func buildIndexParams(
 	}
 
 	return params
->>>>>>> master
 }

@@ -99,6 +99,10 @@ type Loader interface {
 	LoadJSONIndex(ctx context.Context,
 		segment Segment,
 		info *querypb.SegmentLoadInfo) error
+
+	LoadNgramIndex(ctx context.Context,
+		segment Segment,
+		info *querypb.SegmentLoadInfo) error
 }
 
 type ResourceEstimate struct {
@@ -1769,6 +1773,35 @@ func (loader *segmentLoader) LoadJSONIndex(ctx context.Context,
 	}
 	for _, info := range jsonKeyIndexInfo {
 		if err := segment.LoadJSONKeyIndex(ctx, info, schemaHelper); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (loader *segmentLoader) LoadNgramIndex(ctx context.Context,
+	seg Segment,
+	loadInfo *querypb.SegmentLoadInfo,
+) error {
+	segment, ok := seg.(*LocalSegment)
+	if !ok {
+		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
+	}
+
+	collection := segment.GetCollection()
+	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
+
+	ngramIndexInfo := make(map[int64]*datapb.NgramIndexStats, len(loadInfo.GetNgramStatsLogs()))
+	for _, fieldStatsLog := range loadInfo.GetNgramStatsLogs() {
+		ngramIndex, ok := ngramIndexInfo[fieldStatsLog.FieldID]
+		if !ok {
+			ngramIndexInfo[fieldStatsLog.FieldID] = fieldStatsLog
+		} else if fieldStatsLog.GetVersion() > ngramIndex.GetVersion() {
+			ngramIndexInfo[fieldStatsLog.FieldID] = fieldStatsLog
+		}
+	}
+	for _, info := range ngramIndexInfo {
+		if err := segment.LoadNgramIndex(ctx, info, schemaHelper); err != nil {
 			return err
 		}
 	}
