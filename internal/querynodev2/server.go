@@ -202,15 +202,6 @@ func (node *QueryNode) InitSegcore() error {
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
 
-	enableGrowingIndex := C.bool(paramtable.Get().QueryNodeCfg.EnableTempSegmentIndex.GetAsBool())
-	C.SegcoreSetEnableTempSegmentIndex(enableGrowingIndex)
-
-	nlist := C.int64_t(paramtable.Get().QueryNodeCfg.InterimIndexNlist.GetAsInt64())
-	C.SegcoreSetNlist(nlist)
-
-	nprobe := C.int64_t(paramtable.Get().QueryNodeCfg.InterimIndexNProbe.GetAsInt64())
-	C.SegcoreSetNprobe(nprobe)
-
 	// override segcore SIMD type
 	cSimdType := C.CString(paramtable.Get().CommonCfg.SimdType.GetValue())
 	C.SegcoreSetSimdType(cSimdType)
@@ -346,6 +337,11 @@ func (node *QueryNode) InitSegcore() error {
 		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
 		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
 		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs)
+
+	err = initcore.InitInterminIndexConfig(paramtable.Get())
+	if err != nil {
+		return err
+	}
 
 	initcore.InitTraceConfig(paramtable.Get())
 	C.InitExecExpressionFunctionFactory()
