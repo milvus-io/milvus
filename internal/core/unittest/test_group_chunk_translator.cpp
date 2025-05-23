@@ -109,6 +109,11 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     row_group_meta_list.push_back(
         fr->file_metadata()->GetRowGroupMetadataVector());
 
+    auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
+    auto desc = std::make_shared<storage::MmapChunkDescriptor>(
+        segment_id_, SegmentType::Sealed);
+    mcm->Register(desc);
+
     GroupChunkTranslator translator(segment_id_,
                                     field_metas,
                                     column_group_info,
@@ -145,8 +150,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
 
     // Verify mmap directory and files if in mmap mode
     if (use_mmap) {
-        std::string mmap_dir = std::to_string(segment_id_);
-        EXPECT_TRUE(std::filesystem::exists(mmap_dir));
+        EXPECT_TRUE(mcm->GetDiskUsage() > 0);
 
         // DO NOT Verify each field has a corresponding file: files are unlinked immediately after being mmaped.
         // for (size_t i = 0; i < field_id_list.size(); ++i) {

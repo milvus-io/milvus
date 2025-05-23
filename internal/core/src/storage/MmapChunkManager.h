@@ -31,6 +31,9 @@
 namespace milvus::storage {
 // use segment id and segment type to descripe a segment in mmap chunk manager, segment only in two type (growing or sealed) in mmap chunk manager
 struct MmapChunkDescriptor {
+    MmapChunkDescriptor(int64_t segment_id, SegmentType segment_type)
+        : segment_id(segment_id), segment_type(segment_type) {
+    }
     struct DescriptorHash {
         size_t
         operator()(const MmapChunkDescriptor& x) const {
