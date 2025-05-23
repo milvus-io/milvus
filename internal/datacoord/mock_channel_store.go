@@ -607,8 +607,7 @@ func (_c *MockRWChannelStore_UpdateState_Call) RunAndReturn(run func(error, int6
 func NewMockRWChannelStore(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockRWChannelStore {
+}) *MockRWChannelStore {
 	mock := &MockRWChannelStore{}
 	mock.Mock.Test(t)
 
