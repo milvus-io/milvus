@@ -22,6 +22,7 @@ import (
 
 type functionConfig struct {
 	TextEmbeddingProviders ParamGroup `refreshable:"true"`
+	RerankModelProviders   ParamGroup `refreshable:"true"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
@@ -73,6 +74,23 @@ func (p *functionConfig) init(base *BaseTable) {
 		},
 	}
 	p.TextEmbeddingProviders.Init(base.mgr)
+
+	p.RerankModelProviders = ParamGroup{
+		KeyPrefix: "function.rerank.model.providers.",
+		Version:   "2.6.0",
+		Export:    true,
+		DocFunc: func(key string) string {
+			switch key {
+			case "tei.enable":
+				return "Whether to enable TEI rerank service"
+			case "vllm.enable":
+				return "Whether to enable vllm rerank service"
+			default:
+				return ""
+			}
+		},
+	}
+	p.RerankModelProviders.Init(base.mgr)
 }
 
 const (
@@ -83,6 +101,20 @@ func (p *functionConfig) GetTextEmbeddingProviderConfig(providerName string) map
 	matchedParam := make(map[string]string)
 
 	params := p.TextEmbeddingProviders.GetValue()
+	prefix := providerName + "."
+
+	for k, v := range params {
+		if strings.HasPrefix(k, prefix) {
+			matchedParam[strings.TrimPrefix(k, prefix)] = v
+		}
+	}
+	return matchedParam
+}
+
+func (p *functionConfig) GetRerankModelProviders(providerName string) map[string]string {
+	matchedParam := make(map[string]string)
+
+	params := p.RerankModelProviders.GetValue()
 	prefix := providerName + "."
 
 	for k, v := range params {

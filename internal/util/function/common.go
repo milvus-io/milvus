@@ -109,16 +109,17 @@ const (
 	siliconflowAKEnvStr string = "MILVUSAI_SILICONFLOW_API_KEY"
 )
 
-// TEI
+// TEI and vllm
 
 const (
 	ingestionPromptParamKey     string = "ingestion_prompt"
 	searchPromptParamKey        string = "search_prompt"
 	maxClientBatchSizeParamKey  string = "max_client_batch_size"
 	truncationDirectionParamKey string = "truncation_direction"
-	endpointParamKey            string = "endpoint"
+	EndpointParamKey            string = "endpoint"
 
-	enableTeiEnvStr string = "MILVUSAI_ENABLE_TEI"
+	EnableTeiEnvStr  string = "MILVUSAI_ENABLE_TEI"
+	EnableVllmEnvStr string = "MILVUSAI_ENABLE_VLLM"
 )
 
 func parseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string) (string, string, error) {

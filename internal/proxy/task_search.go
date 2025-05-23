@@ -675,13 +675,16 @@ func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, mult
 		for i := 0; i < len(multipleMilvusResults); i++ {
 			multipleMilvusResults[i].Results.FieldsData = fields[i]
 		}
-		params := rerank.NewSearchParams(
-			t.Nq, t.rankParams.limit, t.rankParams.offset, t.rankParams.roundDecimal,
-			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize, searchMetrics,
-		)
-
-		if t.result, err = t.functionScore.Process(ctx, params, multipleMilvusResults); err != nil {
-			return err
+		{
+			ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-call-rerank-function-udf")
+			defer sp.End()
+			params := rerank.NewSearchParams(
+				t.Nq, t.rankParams.limit, t.rankParams.offset, t.rankParams.roundDecimal,
+				t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize, searchMetrics,
+			)
+			if t.result, err = t.functionScore.Process(ctx, params, multipleMilvusResults); err != nil {
+				return err
+			}
 		}
 		if fields, err := t.reorganizeRequeryResults(ctx, queryResult.GetFieldsData(), []*schemapb.IDs{t.result.Results.Ids}); err != nil {
 			return err
@@ -689,6 +692,9 @@ func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, mult
 			t.result.Results.FieldsData = fields[0]
 		}
 	} else {
+		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-call-rerank-function-udf")
+		defer sp.End()
+
 		params := rerank.NewSearchParams(
 			t.Nq, t.rankParams.limit, t.rankParams.offset, t.rankParams.roundDecimal,
 			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize, searchMetrics,
@@ -816,11 +822,15 @@ func (t *searchTask) searchPostProcess(ctx context.Context, span trace.Span, toR
 	}
 
 	if t.functionScore != nil && len(result.Results.FieldsData) != 0 {
-		params := rerank.NewSearchParams(t.Nq, t.SearchRequest.GetTopk(), t.SearchRequest.GetOffset(),
-			t.queryInfos[0].RoundDecimal, t.queryInfos[0].GroupByFieldId, t.queryInfos[0].GroupSize, t.queryInfos[0].StrictGroupSize, []string{metricType})
-		// rank only returns id and score
-		if t.result, err = t.functionScore.Process(ctx, params, []*milvuspb.SearchResults{result}); err != nil {
-			return err
+		{
+			ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-call-rerank-function-udf")
+			defer sp.End()
+			params := rerank.NewSearchParams(t.Nq, t.SearchRequest.GetTopk(), t.SearchRequest.GetOffset(),
+				t.queryInfos[0].RoundDecimal, t.queryInfos[0].GroupByFieldId, t.queryInfos[0].GroupSize, t.queryInfos[0].StrictGroupSize, []string{metricType})
+			// rank only returns id and score
+			if t.result, err = t.functionScore.Process(ctx, params, []*milvuspb.SearchResults{result}); err != nil {
+				return err
+			}
 		}
 		if !t.needRequery {
 			fields, err := t.reorganizeRequeryResults(ctx, result.Results.FieldsData, []*schemapb.IDs{t.result.Results.Ids})

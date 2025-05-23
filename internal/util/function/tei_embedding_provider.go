@@ -47,7 +47,7 @@ type TeiEmbeddingProvider struct {
 }
 
 func createTEIEmbeddingClient(apiKey string, endpoint string) (*tei.TEIEmbedding, error) {
-	enable := os.Getenv(enableTeiEnvStr)
+	enable := os.Getenv(EnableTeiEnvStr)
 	if strings.ToLower(enable) == "false" {
 		return nil, errors.New("TEI model serving is not enabled")
 	}
@@ -69,7 +69,7 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
-		case endpointParamKey:
+		case EndpointParamKey:
 			endpoint = param.Value
 		case ingestionPromptParamKey:
 			ingestionPrompt = param.Value
