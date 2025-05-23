@@ -28,13 +28,13 @@ void
 InitIndexSliceSize(const int64_t);
 
 void
-InitHighPriorityThreadCoreCoefficient(const int64_t);
+InitHighPriorityThreadCoreCoefficient(const float);
 
 void
-InitMiddlePriorityThreadCoreCoefficient(const int64_t);
+InitMiddlePriorityThreadCoreCoefficient(const float);
 
 void
-InitLowPriorityThreadCoreCoefficient(const int64_t);
+InitLowPriorityThreadCoreCoefficient(const float);
 
 void
 InitDefaultExprEvalBatchSize(int64_t val);
