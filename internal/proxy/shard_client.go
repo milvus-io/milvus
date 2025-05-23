@@ -153,8 +153,10 @@ func (n *shardClient) close() {
 // roundRobinSelectClient selects a client in a round-robin manner
 type shardClientMgr interface {
 	GetClient(ctx context.Context, nodeInfo nodeInfo) (types.QueryNodeClient, error)
-	Close()
 	SetClientCreatorFunc(creator queryNodeCreatorFunc)
+
+	Start()
+	Close()
 }
 
 type shardClientMgrImpl struct {
@@ -195,7 +197,6 @@ func newShardClientMgr(options ...shardClientMgrOpt) *shardClientMgrImpl {
 		opt(s)
 	}
 
-	go s.PurgeClient()
 	return s
 }
 
@@ -218,9 +219,6 @@ func (c *shardClientMgrImpl) PurgeClient() {
 		case <-c.closeCh:
 			return
 		case <-ticker.C:
-			if globalMetaCache == nil {
-				continue
-			}
 			shardLocations := globalMetaCache.ListShardLocation()
 			c.clients.Range(func(key UniqueID, value *shardClient) bool {
 				if _, ok := shardLocations[key]; !ok {
@@ -237,6 +235,10 @@ func (c *shardClientMgrImpl) PurgeClient() {
 			})
 		}
 	}
+}
+
+func (c *shardClientMgrImpl) Start() {
+	go c.PurgeClient()
 }
 
 // Close release clients
