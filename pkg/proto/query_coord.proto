@@ -366,6 +366,7 @@ message SegmentLoadInfo {
     map<int64, data.TextIndexStats> textStatsLogs = 20;
     repeated data.FieldBinlog bm25logs = 21;
     map<int64, data.JsonKeyStats> jsonKeyStatsLogs = 22;
+    map<int64, data.NgramIndexStats> ngramStatsLogs = 23;
 }
 
 message FieldIndexInfo {

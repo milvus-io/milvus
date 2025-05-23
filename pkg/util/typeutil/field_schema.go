@@ -10,6 +10,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
+const (
+	MinGramKey = "min_gram"
+	MaxGramKey = "max_gram"
+)
+
 type FieldSchemaHelper struct {
 	schema      *schemapb.FieldSchema
 	typeParams  *kvPairsHelper[string, string]
@@ -57,6 +62,38 @@ func (h *FieldSchemaHelper) EnableMatch() bool {
 
 func (h *FieldSchemaHelper) EnableJSONKeyStatsIndex() bool {
 	return IsJSONType(h.schema.GetDataType())
+}
+
+func (h *FieldSchemaHelper) EnableNgramIndex() bool {
+	if !IsStringType(h.schema.GetDataType()) {
+		return false
+	}
+	s, err := h.typeParams.Get("enable_ngram_index")
+	if err != nil {
+		return false
+	}
+	enable, err := strconv.ParseBool(s)
+	return err == nil && enable
+}
+
+func (h *FieldSchemaHelper) GetNgramParams() (int64, int64, error) {
+	minGram, err := h.typeParams.Get(MinGramKey)
+	if err != nil {
+		return 0, 0, err
+	}
+	maxGram, err := h.typeParams.Get(MaxGramKey)
+	if err != nil {
+		return 0, 0, err
+	}
+	minGramInt, err := strconv.ParseInt(minGram, 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	maxGramInt, err := strconv.ParseInt(maxGram, 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	return minGramInt, maxGramInt, nil
 }
 
 func (h *FieldSchemaHelper) EnableAnalyzer() bool {

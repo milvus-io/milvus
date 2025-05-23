@@ -412,6 +412,13 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
 			return err
 		}
+	case indexpb.StatsSubJob_NgramIndexJob:
+		err := st.meta.UpdateSegment(st.GetSegmentID(), SetNgramIndexLogs(result.GetNgramIndexStatsLogs()))
+		if err != nil {
+			log.Warn("save ngram index stats result failed", zap.Int64("taskId", st.GetTaskID()),
+				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
+			return err
+		}
 	case indexpb.StatsSubJob_BM25Job:
 		// bm25 logs are generated during with segment flush.
 	}
