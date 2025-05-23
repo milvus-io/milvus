@@ -88,6 +88,10 @@ func (t *clusteringCompactionTask) GetTaskTime(timeType taskcommon.TimeType) tim
 	return timeType.GetTaskTime(t.times)
 }
 
+func (t *clusteringCompactionTask) GetTaskVersion() int64 {
+	return int64(t.GetTaskProto().GetRetryTimes())
+}
+
 func (t *clusteringCompactionTask) retryOnError(err error) {
 	if err != nil {
 		log.Warn("clustering compaction task failed", zap.Error(err))

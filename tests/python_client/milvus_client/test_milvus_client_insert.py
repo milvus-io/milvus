@@ -332,6 +332,15 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
     def metric_type(self, request):
         yield request.param
 
+    @pytest.fixture(scope="function", params=[True, False])
+    def nullable(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR,
+                                              DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR])
+    def vector_type(self, request):
+        yield request.param
+
     """
     ******************************************************************
     #  The following are valid base cases
@@ -339,7 +348,7 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_insert_default(self):
+    def test_milvus_client_insert_default(self, vector_type, nullable):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
@@ -348,22 +357,25 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        collections = self.list_collections(client)[0]
-        assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 0})
+        dim = 8
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, max_length=64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, vector_type, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
+        schema.add_field(default_float_field_name, DataType.FLOAT, nullable=nullable)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+        vectors = cf.gen_vectors(default_nb, dim, vector_data_type=vector_type)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         results = self.insert(client, collection_name, rows)[0]
         assert results['insert_count'] == default_nb
         # 3. search
-        vectors_to_search = rng.random((1, default_dim))
+        vectors_to_search = [vectors[0]]
         insert_ids = [i for i in range(default_nb)]
         self.search(client, collection_name, vectors_to_search,
                     check_task=CheckTasks.check_search_results,
@@ -377,7 +389,8 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: rows,
                                 "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name,
+                                "vector_type": vector_type})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 

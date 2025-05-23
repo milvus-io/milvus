@@ -44,6 +44,7 @@ type preImportTask struct {
 	importMeta ImportMeta
 	tr         *timerecord.TimeRecorder
 	times      *taskcommon.Times
+	retryTimes int64
 }
 
 func (p *preImportTask) GetJobID() int64 {
@@ -102,6 +103,10 @@ func (p *preImportTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 	return timeType.GetTaskTime(p.times)
 }
 
+func (p *preImportTask) GetTaskVersion() int64 {
+	return p.retryTimes
+}
+
 func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log.Info("processing pending preimport task...", WrapTaskLog(p)...)
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
@@ -110,6 +115,7 @@ func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 	err := cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
 	if err != nil {
 		log.Warn("preimport failed", WrapTaskLog(p, zap.Error(err))...)
+		p.retryTimes++
 		return
 	}
 	err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),

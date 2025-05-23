@@ -1101,3 +1101,25 @@ class TestMilvusClientV2Base(Base):
                                        collection_name=collection_name, num_replicas=num_replicas,
                                        **kwargs).run()
         return res, check_result
+
+    @trace()
+    def create_field_schema(self, client, name, data_type, desc='', timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.create_field_schema, name, data_type, desc], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def add_collection_field(self, client, collection_name, field_schema, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.add_collection_field, collection_name, field_schema], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       **kwargs).run()
+        return res, check_result
