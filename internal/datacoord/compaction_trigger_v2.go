@@ -86,7 +86,7 @@ type CompactionTriggerManager struct {
 	allocator allocator.Allocator
 
 	meta             *meta
-	imeta            ImportMeta
+	importMeta       ImportMeta
 	l0Policy         *l0CompactionPolicy
 	clusteringPolicy *clusteringCompactionPolicy
 	singlePolicy     *singleCompactionPolicy
@@ -103,13 +103,13 @@ type CompactionTriggerManager struct {
 	compactionChanLock      sync.Mutex
 }
 
-func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, inspector CompactionInspector, meta *meta, imeta ImportMeta) *CompactionTriggerManager {
+func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, inspector CompactionInspector, meta *meta, importMeta ImportMeta) *CompactionTriggerManager {
 	m := &CompactionTriggerManager{
 		allocator:               alloc,
 		handler:                 handler,
 		inspector:               inspector,
 		meta:                    meta,
-		imeta:                   imeta,
+		importMeta:              importMeta,
 		pauseCompactionChanMap:  make(map[int64]chan struct{}),
 		resumeCompactionChanMap: make(map[int64]chan struct{}),
 	}
@@ -386,7 +386,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 
 func (m *CompactionTriggerManager) addL0ImportTaskForImport(ctx context.Context, collection *collectionInfo, view CompactionView) error {
 	// add l0 import task for the collection if the collection is importing
-	importJobs := m.imeta.GetJobBy(ctx,
+	importJobs := m.importMeta.GetJobBy(ctx,
 		WithCollectionID(collection.ID),
 		WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed),
 		WithoutL0Job(),
@@ -442,13 +442,13 @@ func (m *CompactionTriggerManager) addL0ImportTaskForImport(ctx context.Context,
 						},
 					},
 				},
-			}, job, m.allocator, m.meta, m.imeta)
+			}, job, m.allocator, m.meta, m.importMeta)
 			if err != nil {
 				log.Warn("new import tasks failed", zap.Error(err))
 				return err
 			}
 			for _, t := range newTasks {
-				err = m.imeta.AddTask(ctx, t)
+				err = m.importMeta.AddTask(ctx, t)
 				if err != nil {
 					log.Warn("add new l0 import task from l0 compaction failed", WrapTaskLog(t, zap.Error(err))...)
 					return err
