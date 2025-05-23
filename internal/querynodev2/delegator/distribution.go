@@ -363,6 +363,14 @@ func (d *distribution) SyncTargetVersion(newVersion int64, partitions []int64, g
 	)
 }
 
+// GetQueryView returns the current query view.
+func (d *distribution) GetQueryView() *channelQueryView {
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+
+	return d.queryView
+}
+
 // RemoveDistributions remove segments distributions and returns the clear signal channel.
 func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growingSegments []SegmentEntry) chan struct{} {
 	d.mut.Lock()
