@@ -140,7 +140,7 @@ JsonInvertedIndex<T>::build_index_for_json(
                 } else {
                     auto array_values = array_res.value();
                     for (auto value : array_values) {
-                        auto val = value.get<SIMDJSON_T>();
+                        auto val = value.template get<SIMDJSON_T>();
 
                         if (val.error() == simdjson::SUCCESS) {
                             values.push_back(static_cast<T>(val.value()));
