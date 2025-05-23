@@ -2851,6 +2851,9 @@ type queryNodeConfig struct {
 	// Json Key Stats
 	JSONKeyStatsCommitInterval        ParamItem `refreshable:"false"`
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
+
+	// partial search
+	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -3757,6 +3760,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.WorkerPoolingSize.Init(base.mgr)
+
+	p.PartialResultRequiredDataRatio = ParamItem{
+		Key:          "proxy.partialResultRequiredDataRatio",
+		Version:      "2.6.0",
+		DefaultValue: "1",
+		Doc:          `partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result`,
+		Export:       true,
+	}
+	p.PartialResultRequiredDataRatio.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

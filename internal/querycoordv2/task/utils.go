@@ -208,6 +208,7 @@ func packSubChannelRequest(
 	channel *meta.DmChannel,
 	indexInfo []*indexpb.IndexInfo,
 	partitions []int64,
+	targetVersion int64,
 ) *querypb.WatchDmChannelsRequest {
 	return &querypb.WatchDmChannelsRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -223,6 +224,7 @@ func packSubChannelRequest(
 		ReplicaID:     task.ReplicaID(),
 		Version:       time.Now().UnixNano(),
 		IndexInfoList: indexInfo,
+		TargetVersion: targetVersion,
 	}
 }
 
@@ -253,6 +255,7 @@ func fillSubChannelRequest(
 	req.SegmentInfos = lo.SliceToMap(segmentInfos, func(info *datapb.SegmentInfo) (int64, *datapb.SegmentInfo) {
 		return info.GetID(), info
 	})
+
 	return nil
 }
 
