@@ -97,6 +97,25 @@ func (s *statsInspectorSuite) SetupTest() {
 						},
 					},
 				},
+				{
+					FieldID:  102,
+					Name:     "ngram",
+					DataType: schemapb.DataType_String,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "enable_ngram_index",
+							Value: "true",
+						},
+						{
+							Key:   "min_gram",
+							Value: "2",
+						},
+						{
+							Key:   "max_gram",
+							Value: "3",
+						},
+					},
+				},
 			},
 		},
 	})
@@ -296,6 +315,19 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTask() {
 
 	// Test triggering text index stats task
 	s.inspector.triggerTextStatsTask()
+
+	// Verify task creation
+	s.alloc.AssertCalled(s.T(), "AllocID", mock.Anything)
+}
+
+func (s *statsInspectorSuite) TestTriggerNgramIndexStatsTask() {
+	// Set up a sorted segment without ngram index
+	segment := s.mt.segments.segments[20]
+	segment.IsSorted = true
+	segment.NgramIndexStats = nil
+
+	// Test triggering ngram index stats task
+	s.inspector.triggerNgramIndexStatsTask()
 
 	// Verify task creation
 	s.alloc.AssertCalled(s.T(), "AllocID", mock.Anything)

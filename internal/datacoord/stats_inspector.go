@@ -138,7 +138,7 @@ func (si *statsInspector) triggerStatsTaskLoop() {
 			si.triggerTextStatsTask()
 			si.triggerBM25StatsTask()
 			lastJSONStatsLastTrigger, maxJSONStatsTaskCount = si.triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger, maxJSONStatsTaskCount)
-			jm.triggerNgramIndexStatsTask()
+			si.triggerNgramIndexStatsTask()
 
 		case segID := <-getStatsTaskChSingleton():
 			log.Info("receive new segment to trigger stats task", zap.Int64("segmentID", segID))

@@ -394,71 +394,9 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		}
 		metricMutation.commit()
 
-<<<<<<< HEAD
-func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.DataNodeClient) bool {
-	ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
-	defer cancel()
-	resp, err := client.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
-		ClusterID: st.req.GetClusterID(),
-		TaskIDs:   []int64{st.GetTaskID()},
-		JobType:   indexpb.JobType_JobTypeStatsJob,
-	})
-
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Ctx(ctx).Warn("notify worker drop the stats task failed", zap.Int64("taskID", st.GetTaskID()),
-			zap.Int64("segmentID", st.segmentID), zap.Error(err))
-		return false
-	}
-	log.Ctx(ctx).Info("drop stats task success", zap.Int64("taskID", st.GetTaskID()),
-		zap.Int64("segmentID", st.segmentID))
-	return true
-}
-
-func (st *statsTask) SetJobInfo(meta *meta) error {
-	if st.GetState() == indexpb.JobState_JobStateFinished {
-		switch st.subJobType {
-		case indexpb.StatsSubJob_Sort:
-			// first update segment, failed state cannot generate new segment
-			metricMutation, err := meta.SaveStatsResultSegment(st.segmentID, st.taskInfo)
-			if err != nil {
-				log.Warn("save sort stats result failed", zap.Int64("taskID", st.taskID),
-					zap.Int64("segmentID", st.segmentID), zap.Error(err))
-				return err
-			}
-			metricMutation.commit()
-
-			select {
-			case getBuildIndexChSingleton() <- st.taskInfo.GetSegmentID():
-			default:
-			}
-		case indexpb.StatsSubJob_TextIndexJob:
-			err := meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetTextIndexLogs(st.taskInfo.GetTextStatsLogs()))
-			if err != nil {
-				log.Warn("save text index stats result failed", zap.Int64("taskID", st.taskID),
-					zap.Int64("segmentID", st.segmentID), zap.Error(err))
-				return err
-			}
-		case indexpb.StatsSubJob_JsonKeyIndexJob:
-			err := meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetJsonKeyIndexLogs(st.taskInfo.GetJsonKeyStatsLogs()))
-			if err != nil {
-				log.Warn("save json key index stats result failed", zap.Int64("taskId", st.taskID),
-					zap.Int64("segmentID", st.segmentID), zap.Error(err))
-				return err
-			}
-		case indexpb.StatsSubJob_NgramIndexJob:
-			err := meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetNgramIndexLogs(st.taskInfo.GetNgramIndexStatsLogs()))
-			if err != nil {
-				log.Warn("save ngram index stats result failed", zap.Int64("taskId", st.taskID),
-					zap.Int64("segmentID", st.segmentID), zap.Error(err))
-				return err
-			}
-		case indexpb.StatsSubJob_BM25Job:
-			// TODO: support bm25 job
-=======
 		select {
 		case getBuildIndexChSingleton() <- result.GetSegmentID():
 		default:
->>>>>>> master
 		}
 	case indexpb.StatsSubJob_TextIndexJob:
 		err := st.meta.UpdateSegment(st.GetSegmentID(), SetTextIndexLogs(result.GetTextStatsLogs()))
@@ -471,6 +409,13 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 		err := st.meta.UpdateSegment(st.GetSegmentID(), SetJsonKeyIndexLogs(result.GetJsonKeyStatsLogs()))
 		if err != nil {
 			log.Ctx(ctx).Warn("save json key index stats result failed", zap.Int64("taskId", st.GetTaskID()),
+				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
+			return err
+		}
+	case indexpb.StatsSubJob_NgramIndexJob:
+		err := st.meta.UpdateSegment(st.GetSegmentID(), SetNgramIndexLogs(result.GetNgramIndexStatsLogs()))
+		if err != nil {
+			log.Warn("save ngram index stats result failed", zap.Int64("taskId", st.GetTaskID()),
 				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
 			return err
 		}
