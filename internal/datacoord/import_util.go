@@ -428,7 +428,7 @@ func CheckDiskQuota(ctx context.Context, job ImportJob, meta *meta, importMeta I
 }
 
 func getPendingProgress(ctx context.Context, jobID int64, importMeta ImportMeta) float32 {
-	tasks := importMeta.GetTaskBy(context.TODO(), WithJob(jobID), WithType(PreImportTaskType))
+	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(PreImportTaskType))
 	preImportingFiles := lo.SumBy(tasks, func(task ImportTask) int {
 		return len(task.GetFileStats())
 	})
@@ -525,7 +525,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 // TODO: Wrap a function to map status to user status.
 // TODO: Save these progress to job instead of recalculating.
 func GetJobProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta, sjm StatsJobManager) (int64, internalpb.ImportJobState, int64, int64, string) {
-	job := importMeta.GetJob(context.TODO(), jobID)
+	job := importMeta.GetJob(ctx, jobID)
 	if job == nil {
 		return 0, internalpb.ImportJobState_Failed, 0, 0, fmt.Sprintf("import job does not exist, jobID=%d", jobID)
 	}

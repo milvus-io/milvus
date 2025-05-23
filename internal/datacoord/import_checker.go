@@ -423,7 +423,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 
 	// all finished, update import job state to `Completed`.
 	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
-	err = c.importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed), UpdateJobCompleteTime(completeTime))
+	err = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed), UpdateJobCompleteTime(completeTime))
 	if err != nil {
 		log.Warn("failed to update job state to Completed", zap.Error(err))
 		return
