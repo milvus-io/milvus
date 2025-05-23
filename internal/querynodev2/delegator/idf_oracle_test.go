@@ -18,6 +18,7 @@ package delegator
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -49,11 +50,25 @@ func (suite *IDFOracleSuite) SetupSuite() {
 }
 
 func (suite *IDFOracleSuite) SetupTest() {
-	suite.idfOracle = NewIDFOracle(suite.collectionSchema.GetFunctions()).(*idfOracle)
+	suite.idfOracle = NewIDFOracle(suite.collectionID, suite.collectionSchema.GetFunctions()).(*idfOracle)
+	suite.idfOracle.Start()
 	suite.snapshot = &snapshot{
 		dist: []SnapshotItem{{1, make([]SegmentEntry, 0)}},
 	}
 	suite.targetVersion = 0
+}
+
+func (suite *IDFOracleSuite) TearDownTest() {
+	suite.idfOracle.Close()
+}
+
+func (s *IDFOracleSuite) waitTargetVersion(targetVersion int64) {
+	for {
+		if s.idfOracle.TargetVersion() >= targetVersion {
+			return
+		}
+		time.Sleep(time.Millisecond * 100)
+	}
 }
 
 func (suite *IDFOracleSuite) genStats(start uint32, end uint32) map[int64]*storage.BM25Stats {
@@ -124,12 +139,14 @@ func (suite *IDFOracleSuite) TestSealed() {
 
 	// update and sync snapshot make all sealed activate
 	suite.updateSnapshot(sealedSegs, []int64{}, []int64{})
-	suite.idfOracle.SyncDistribution(suite.snapshot)
+	suite.idfOracle.SetNext(suite.snapshot)
+	suite.waitTargetVersion(suite.targetVersion)
 	suite.Equal(int64(4), suite.idfOracle.current.NumRow())
 
 	releasedSeg := []int64{1, 2, 3}
 	suite.updateSnapshot([]int64{}, []int64{}, releasedSeg)
-	suite.idfOracle.SyncDistribution(suite.snapshot)
+	suite.idfOracle.SetNext(suite.snapshot)
+	suite.waitTargetVersion(suite.targetVersion)
 	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
 
 	sparse := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{4: 1})
@@ -156,7 +173,9 @@ func (suite *IDFOracleSuite) TestGrow() {
 
 	releasedSeg := []int64{1, 2, 3}
 	suite.updateSnapshot([]int64{}, []int64{}, releasedSeg)
-	suite.idfOracle.SyncDistribution(suite.snapshot)
+	suite.idfOracle.LazyRemoveGrowings(suite.snapshot.targetVersion, releasedSeg...)
+	suite.idfOracle.SetNext(suite.snapshot)
+	suite.waitTargetVersion(suite.targetVersion)
 	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
 
 	suite.idfOracle.UpdateGrowing(4, suite.genStats(5, 6))
@@ -170,19 +189,47 @@ func (suite *IDFOracleSuite) TestStats() {
 		OutputFieldIds: []int64{102},
 	}})
 
-	suite.NotPanics(func() {
-		stats.Merge(map[int64]*storage.BM25Stats{103: storage.NewBM25Stats()})
-	})
-
-	suite.Panics(func() {
-		stats.Minus(map[int64]*storage.BM25Stats{104: storage.NewBM25Stats()})
-	})
-
 	_, err := stats.GetStats(104)
 	suite.Error(err)
 
 	_, err = stats.GetStats(102)
 	suite.NoError(err)
+}
+
+func (suite *IDFOracleSuite) TestLocalCache() {
+	// register sealed
+	sealedSegs := []int64{1, 2, 3, 4}
+	for _, segID := range sealedSegs {
+		suite.idfOracle.Register(segID, suite.genStats(uint32(segID), uint32(segID)+1), commonpb.SegmentState_Sealed)
+	}
+
+	// update and sync snapshot make all sealed activate
+	suite.updateSnapshot(sealedSegs, []int64{}, []int64{})
+	suite.idfOracle.SetNext(suite.snapshot)
+	suite.waitTargetVersion(suite.targetVersion)
+	suite.Equal(int64(4), suite.idfOracle.current.NumRow())
+
+	suite.Require().Eventually(func() bool {
+		allInLocal := true
+		suite.idfOracle.sealed.Range(func(id int64, stats *sealedBm25Stats) bool {
+			stats.RLock()
+			defer stats.RUnlock()
+			if stats.inmemory == true {
+				allInLocal = false
+				return false
+			}
+			return true
+		})
+
+		return allInLocal
+	}, time.Minute, time.Millisecond*100)
+
+	// release some segments
+	releasedSeg := []int64{1, 2, 3}
+	suite.updateSnapshot([]int64{}, []int64{}, releasedSeg)
+	suite.idfOracle.SetNext(suite.snapshot)
+	suite.waitTargetVersion(suite.targetVersion)
+	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
 }
 
 func TestIDFOracle(t *testing.T) {
