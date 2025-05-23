@@ -53,16 +53,15 @@ type trigger interface {
 }
 
 type compactionSignal struct {
-	id                       UniqueID
-	isForce                  bool
-	collectionID             UniqueID
-	partitionID              UniqueID
-	channel                  string
-	segmentIDs               []UniqueID
-	pos                      *msgpb.MsgPosition
-	resultCh                 chan error
-	waitResult               bool
-	doStrictExpiryCompaction bool
+	id           UniqueID
+	isForce      bool
+	collectionID UniqueID
+	partitionID  UniqueID
+	channel      string
+	segmentIDs   []UniqueID
+	pos          *msgpb.MsgPosition
+	resultCh     chan error
+	waitResult   bool
 }
 
 func NewCompactionSignal() *compactionSignal {
@@ -134,8 +133,6 @@ type compactionTrigger struct {
 	// A sloopy hack, so we can test with different segment row count without worrying that
 	// they are re-calculated in every compaction.
 	testingOnly bool
-	// no need to use mutex for this map, as all operations towards should be executed serially
-	lastStrictExpiryCompactionTsMap map[CompactionGroupLabel]time.Time
 }
 
 func newCompactionTrigger(
@@ -146,17 +143,16 @@ func newCompactionTrigger(
 	indexVersionManager IndexEngineVersionManager,
 ) *compactionTrigger {
 	return &compactionTrigger{
-		meta:                            meta,
-		allocator:                       allocator,
-		signals:                         make(chan *compactionSignal, 100),
-		manualSignals:                   make(chan *compactionSignal, 100),
-		compactionHandler:               compactionHandler,
-		indexEngineVersionManager:       indexVersionManager,
-		estimateDiskSegmentPolicy:       calBySchemaPolicyWithDiskIndex,
-		estimateNonDiskSegmentPolicy:    calBySchemaPolicy,
-		handler:                         handler,
-		closeCh:                         lifetime.NewSafeChan(),
-		lastStrictExpiryCompactionTsMap: make(map[CompactionGroupLabel]time.Time, 0),
+		meta:                         meta,
+		allocator:                    allocator,
+		signals:                      make(chan *compactionSignal, 100),
+		manualSignals:                make(chan *compactionSignal, 100),
+		compactionHandler:            compactionHandler,
+		indexEngineVersionManager:    indexVersionManager,
+		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+		handler:                      handler,
+		closeCh:                      lifetime.NewSafeChan(),
 	}
 }
 
@@ -325,29 +321,6 @@ func (t *compactionTrigger) allocSignalID(ctx context.Context) (UniqueID, error)
 	return t.allocator.AllocID(ctx)
 }
 
-func (t *compactionTrigger) shouldDoStrictExpiryCompaction(group *chanPartSegments) bool {
-	if group != nil && paramtable.Get().DataCoordCfg.CompactionForceExpiryInterval.GetAsInt() > 0 {
-		cate := CompactionGroupLabel{group.collectionID, group.partitionID, group.channelName}
-		lastExpiryCompactionTime, ok := t.lastStrictExpiryCompactionTsMap[cate]
-		if !ok || time.Since(lastExpiryCompactionTime) >= paramtable.Get().DataCoordCfg.CompactionForceExpiryInterval.GetAsDuration(time.Hour) {
-			log.Info("Try to do StrictExpiryCompaction",
-				zap.Duration("duration", time.Since(lastExpiryCompactionTime)),
-				zap.Int64("CollectionID", group.collectionID),
-				zap.Int64("PartitionID", group.partitionID),
-				zap.String("Channel", group.channelName))
-			return true
-		}
-	}
-	return false
-}
-
-func (t *compactionTrigger) mayUpdateStrictExpiryCompactionTs(signal *compactionSignal, plansSubmitted bool, group *chanPartSegments) {
-	if paramtable.Get().DataCoordCfg.CompactionForceExpiryInterval.GetAsInt() > 0 && signal.doStrictExpiryCompaction && plansSubmitted {
-		cate := CompactionGroupLabel{group.collectionID, group.partitionID, group.channelName}
-		t.lastStrictExpiryCompactionTsMap[cate] = time.Now()
-	}
-}
-
 // handleSignal is the internal logic to convert compactionSignal into compaction tasks.
 func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 	log := log.With(zap.Int64("compactionID", signal.id),
@@ -402,13 +375,10 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		}
 
 		expectedSize := getExpectedSegmentSize(t.meta, coll)
-		signal.doStrictExpiryCompaction = t.shouldDoStrictExpiryCompaction(&group)
 		plans := t.generatePlans(group.segments, signal, ct, expectedSize)
-		plansSubmitted := true
 		for _, plan := range plans {
 			if !signal.isForce && t.compactionHandler.isFull() {
 				log.Warn("compaction plan skipped due to handler full")
-				plansSubmitted = false
 				break
 			}
 			totalRows, inputSegmentIDs := plan.A, plan.B
@@ -452,7 +422,6 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 					zap.Int64("planID", task.GetPlanID()),
 					zap.Int64s("inputSegments", inputSegmentIDs),
 					zap.Error(err))
-				plansSubmitted = false
 				continue
 			}
 
@@ -460,7 +429,6 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 				zap.Int64("time cost", time.Since(start).Milliseconds()),
 				zap.Int64s("segmentIDs", inputSegmentIDs))
 		}
-		t.mayUpdateStrictExpiryCompactionTs(signal, plansSubmitted, &group)
 	}
 	return nil
 }
@@ -481,7 +449,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	for _, segment := range segments {
 		segment := segment.ShadowClone()
 		// TODO should we trigger compaction periodically even if the segment has no obvious reason to be compacted?
-		if signal.isForce || t.ShouldDoSingleCompaction(segment, compactTime, signal) {
+		if signal.isForce || t.ShouldDoSingleCompaction(segment, compactTime) {
 			prioritizedCandidates = append(prioritizedCandidates, segment)
 		} else if t.isSmallSegment(segment, expectedSize) {
 			smallCandidates = append(smallCandidates, segment)
@@ -685,22 +653,29 @@ func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
 	return is
 }
 
-func (t *compactionTrigger) ShouldStrictCompactExpiry(fromTs uint64, compactTime *compactTime, signal *compactionSignal, segment *SegmentInfo) bool {
-	if signal != nil && signal.doStrictExpiryCompaction && fromTs <= compactTime.expireTime {
-		log.Info("Trigger strict expiry compaction for segment",
-			zap.Int64("segmentID", segment.GetID()),
-			zap.Int64("collectionID", segment.GetCollectionID()),
-			zap.Int64("partition", segment.GetPartitionID()),
-			zap.String("channel", segment.GetInsertChannel()),
-			zap.Uint64("segment fromTs", fromTs),
-			zap.Uint64("expireTime", compactTime.expireTime),
-		)
-		return true
+func (t *compactionTrigger) ShouldCompactExpiry(fromTs uint64, compactTime *compactTime, segment *SegmentInfo) bool {
+	if Params.DataCoordCfg.CompactionExpiryTolerance.GetAsInt() >= 0 {
+		tolerantDuration := Params.DataCoordCfg.CompactionExpiryTolerance.GetAsDuration(time.Hour)
+		expireTime, _ := tsoutil.ParseTS(compactTime.expireTime)
+		earliestTolerance := expireTime.Add(-tolerantDuration)
+		earliestFromTime, _ := tsoutil.ParseTS(fromTs)
+		if earliestFromTime.Before(earliestTolerance) {
+			log.Info("Trigger strict expiry compaction for segment",
+				zap.Int64("segmentID", segment.GetID()),
+				zap.Int64("collectionID", segment.GetCollectionID()),
+				zap.Int64("partition", segment.GetPartitionID()),
+				zap.String("channel", segment.GetInsertChannel()),
+				zap.Time("compaction expire time", expireTime),
+				zap.Time("earliest tolerance", earliestTolerance),
+				zap.Time("segment earliest from time", earliestFromTime),
+			)
+			return true
+		}
 	}
 	return false
 }
 
-func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime, signal *compactionSignal) bool {
+func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
 	log := log.Ctx(context.TODO())
@@ -731,7 +706,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		}
 	}
 
-	if t.ShouldStrictCompactExpiry(earliestFromTs, compactTime, signal, segment) {
+	if t.ShouldCompactExpiry(earliestFromTs, compactTime, segment) {
 		return true
 	}
 
