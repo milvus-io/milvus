@@ -1452,7 +1452,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
                 fmt::format("match query does not support iterative filter"));
         }
         return ExecTextMatch();
-    } else if (expr_->op_type_ == proto::plan::OpType::Match &&
+    } else if (expr_->op_type_ == proto::plan::OpType::InnerMatch &&
                !has_offset_input_ && CanUseNgramIndex(field_id_)) {
         auto res = ExecNgramMatch();
         // If nullopt is returned, it means the query cannot be
@@ -1907,23 +1907,14 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
         arg_inited_ = true;
     }
 
-    auto pattern = value_arg_.GetValue<std::string>();
-    auto parsed_result_opt = parse_ngram_pattern(pattern);
-    if (!parsed_result_opt.has_value()) {
-        return std::nullopt;
-    }
-    auto parsed_result = parsed_result_opt.value();
-    // Only support InnerMatch now
-    if (parsed_result.type != MatchType::InnerMatch) {
-        return std::nullopt;
-    }
+    auto literal = value_arg_.GetValue<std::string>();
 
     TargetBitmap result;
     TargetBitmap valid_result;
 
     if (cached_ngram_match_res_ == nullptr) {
         auto index = segment_->GetNgramIndex(field_id_);
-        auto res_opt = index->InnerMatchQuery(parsed_result.literal, this);
+        auto res_opt = index->InnerMatchQuery(literal, this);
         if (!res_opt.has_value()) {
             return std::nullopt;
         }

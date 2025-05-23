@@ -186,13 +186,13 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     field_data->FillFieldData(data.data(), data.size());
 
     auto segment = CreateSealedSegment(schema);
-    auto arrow_data_wrapper =
-        storage::ConvertFieldDataToArrowDataWrapper(field_data);
-    auto field_data_info = FieldDataInfo{
-        field_id.get(),
-        nb,
-        std::vector<std::shared_ptr<ArrowDataWrapper>>{arrow_data_wrapper}};
-    segment->LoadFieldData(field_id, field_data_info);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          field_id.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
@@ -269,8 +269,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         }
 
         segment->LoadNgramIndex(field_id, std::move(index));
-        std::string operand = "%" + literal + "%";
-        auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
+        auto unary_range_expr = test::GenUnaryRangeExpr(OpType::InnerMatch, literal);
         auto column_info = test::GenColumnInfo(
             field_id.get(), proto::schema::DataType::VarChar, false, false);
         unary_range_expr->set_allocated_column_info(column_info);

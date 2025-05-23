@@ -673,23 +673,34 @@ class SegmentExpr : public Expr {
 
         return processed_size;
     }
+
+    // If process_all_chunks is true, all chunks will be processed and no inner state will be changed.
     template <typename T, typename FUNC, typename... ValTypes>
     int64_t
-    ProcessDataChunksForMultipleChunk(
+    ProcessMultipleChunksCommon(
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
         TargetBitmapView valid_res,
+        bool process_all_chunks,
         ValTypes... values) {
         int64_t processed_size = 0;
 
-        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+        size_t start_chunk = process_all_chunks ? 0 : current_data_chunk_;
+
+        for (size_t i = start_chunk; i < num_data_chunk_; i++) {
             auto data_pos =
-                (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
+                process_all_chunks
+                    ? 0
+                    : (i == current_data_chunk_ ? current_data_chunk_pos_ : 0);
 
             // if segment is chunked, type won't be growing
             int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
-            size = std::min(size, batch_size_ - processed_size);
+            // process a whole chunk if process_all_chunks is true
+            if (!process_all_chunks) {
+                size = std::min(size, batch_size_ - processed_size);
+            }
+
             if (size == 0)
                 continue;  //do not go empty-loop at the bound of the chunk
 
@@ -758,7 +769,8 @@ class SegmentExpr : public Expr {
             }
 
             processed_size += size;
-            if (processed_size >= batch_size_) {
+
+            if (!process_all_chunks && processed_size >= batch_size_) {
                 current_data_chunk_ = i;
                 current_data_chunk_pos_ = data_pos + size;
                 break;
@@ -766,6 +778,30 @@ class SegmentExpr : public Expr {
         }
 
         return processed_size;
+    }
+
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessDataChunksForMultipleChunk(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        ValTypes... values) {
+        return ProcessMultipleChunksCommon<T>(
+            func, skip_func, res, valid_res, false, values...);
+    }
+
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessAllChunksForMultipleChunk(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        ValTypes... values) {
+        return ProcessMultipleChunksCommon<T>(
+            func, skip_func, res, valid_res, true, values...);
     }
 
     template <typename T, typename FUNC, typename... ValTypes>
@@ -783,85 +819,6 @@ class SegmentExpr : public Expr {
             return ProcessDataChunksForSingleChunk<T>(
                 func, skip_func, res, valid_res, values...);
         }
-    }
-
-    template <typename T, typename FUNC, typename... ValTypes>
-    int64_t
-    ProcessAllChunksForMultipleChunk(
-        FUNC func,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        ValTypes... values) {
-        int64_t processed_size = 0;
-
-        for (size_t i = 0; i < num_data_chunk_; i++) {
-            // process one chunk at once per loop
-            int64_t size = segment_->chunk_size(field_id_, i);
-            if (size == 0)
-                continue;  //do not go empty-loop at the bound of the chunk
-
-            auto& skip_index = segment_->GetSkipIndex();
-            if (!skip_func || !skip_func(skip_index, field_id_, i)) {
-                bool is_seal = false;
-                if constexpr (std::is_same_v<T, std::string_view> ||
-                              std::is_same_v<T, Json> ||
-                              std::is_same_v<T, ArrayView>) {
-                    if (segment_->type() == SegmentType::Sealed) {
-                        // first is the raw data, second is valid_data
-                        // use valid_data to see if raw data is null
-                        auto pw = segment_->get_batch_views<T>(
-                            field_id_, i, 0, size);
-                        auto [data_vec, valid_data] = pw.get();
-
-                        func(data_vec.data(),
-                             valid_data.data(),
-                             nullptr,
-                             size,
-                             res + processed_size,
-                             valid_res + processed_size,
-                             values...);
-                        is_seal = true;
-                    }
-                }
-                if (!is_seal) {
-                    auto pw = segment_->chunk_data<T>(field_id_, i);
-                    auto chunk = pw.get();
-                    const T* data = chunk.data();
-                    const bool* valid_data = chunk.valid_data();
-                    func(data,
-                         valid_data,
-                         nullptr,
-                         size,
-                         res + processed_size,
-                         valid_res + processed_size,
-                         values...);
-                }
-            } else {
-                const bool* valid_data;
-                if constexpr (std::is_same_v<T, std::string_view> ||
-                              std::is_same_v<T, Json>) {
-                    auto pw = segment_->get_batch_views<T>(field_id_, i, 0, size);
-                    valid_data = pw.get().second.data();
-                    ApplyValidData(valid_data,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   size);
-                } else {
-                    auto pw = segment_->chunk_data<T>(field_id_, i);
-                    auto chunk = pw.get();
-                    valid_data = chunk.valid_data();
-                    ApplyValidData(valid_data,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   size);
-                }
-            }
-
-            processed_size += size;
-        }
-
-        return processed_size;
     }
 
     template <typename T, typename FUNC, typename... ValTypes>

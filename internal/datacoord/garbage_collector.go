@@ -964,8 +964,8 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
 			getStats := func(info *SegmentInfo) []segmentFieldStats {
 				textStatsLogs := info.GetTextStatsLogs()
 				stats := make([]segmentFieldStats, len(textStatsLogs))
-				for i, sLog := range textStatsLogs {
-					stats[i] = sLog
+				for _, sLog := range textStatsLogs {
+					stats = append(stats, sLog)
 				}
 				return stats
 			}
@@ -986,8 +986,8 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context) {
 			getStats := func(info *SegmentInfo) []segmentFieldStats {
 				jsonKeyStats := info.GetJsonKeyStats()
 				stats := make([]segmentFieldStats, len(jsonKeyStats))
-				for i, sLog := range jsonKeyStats {
-					stats[i] = sLog
+				for _, sLog := range jsonKeyStats {
+					stats = append(stats, sLog)
 				}
 				return stats
 			}
@@ -1008,8 +1008,8 @@ func (gc *garbageCollector) recycleUnusedNgramIndexFiles(ctx context.Context) {
 			getStats := func(info *SegmentInfo) []segmentFieldStats {
 				ngramIndexStats := info.GetNgramIndexStats()
 				stats := make([]segmentFieldStats, len(ngramIndexStats))
-				for i, sLog := range ngramIndexStats {
-					stats[i] = sLog
+				for _, sLog := range ngramIndexStats {
+					stats = append(stats, sLog)
 				}
 				return stats
 			}
