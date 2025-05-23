@@ -2,7 +2,8 @@ import time
 
 import pytest
 from time import sleep
-from pymilvus import connections
+import pymilvus
+from pymilvus import connections, utility
 from chaos.checker import (CollectionCreateChecker,
                            InsertChecker,
                            BulkInsertChecker,
@@ -19,6 +20,7 @@ from chaos.checker import (CollectionCreateChecker,
                            DeleteChecker,
                            CollectionDropChecker,
                            AlterCollectionChecker,
+                           AddFieldChecker,
                            Op,
                            EventRecords,
                            ResultAnalyzer
@@ -58,6 +60,10 @@ class TestOperations(TestBase):
         if connections.has_connection("default") is False:
             raise Exception("no connections")
         log.info("connect to milvus successfully")
+        pymilvus_version = pymilvus.__version__
+        server_version = utility.get_server_version()
+        log.info(f"server version: {server_version}")
+        log.info(f"pymilvus version: {pymilvus_version}")
         self.host = host
         self.port = port
         self.user = user
@@ -86,7 +92,8 @@ class TestOperations(TestBase):
             Op.json_query: JsonQueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
             Op.drop: CollectionDropChecker(collection_name=c_name),
-            Op.alter_collection: AlterCollectionChecker(collection_name=c_name)
+            Op.alter_collection: AlterCollectionChecker(collection_name=c_name),
+            Op.add_field: AddFieldChecker(collection_name=c_name)
         }
         if bool(self.enable_import):
             checkers[Op.bulk_insert] = BulkInsertChecker(collection_name=c_name,
