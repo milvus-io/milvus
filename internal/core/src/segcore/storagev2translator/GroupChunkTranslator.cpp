@@ -200,7 +200,7 @@ GroupChunkTranslator::load_column_group_in_memory() {
 
 void
 GroupChunkTranslator::load_column_group_in_mmap() {
-    std::vector<size_t> row_counts;
+    std::vector<size_t> row_counts(field_id_list_.size(), 0);
 
     std::shared_ptr<milvus::ArrowDataWrapper> r;
     while (column_group_info_.arrow_reader_channel->pop(r)) {
