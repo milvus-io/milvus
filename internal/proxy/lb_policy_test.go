@@ -414,7 +414,7 @@ func (s *LBPolicySuite) TestExecute() {
 		},
 	})
 	s.Error(err)
-	s.Equal(int64(11), counter.Load())
+	s.Equal(int64(51), counter.Load())
 
 	// test get shard leader failed
 	globalMetaCache.DeprecateShardCache(dbName, s.collectionName)
