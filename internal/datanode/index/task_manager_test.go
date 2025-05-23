@@ -107,6 +107,21 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 			})
 	})
 
+	s.Run("storeStatsNgramIndexResult", func() {
+		s.manager.StoreNgramIndexResult(s.cluster, s.taskID, 1, 2, 3, "ch1",
+			map[int64]*datapb.NgramIndexStats{
+				100: {
+					FieldID:    100,
+					Version:    1,
+					Files:      []string{"file1"},
+					LogSize:    1024,
+					MemorySize: 1024,
+					MinGram:    1,
+					MaxGram:    2,
+				},
+			})
+	})
+
 	s.Run("getStatsTaskInfo", func() {
 		taskInfo := s.manager.GetStatsTaskInfo(s.cluster, s.taskID)
 
@@ -116,6 +131,8 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 		s.Equal(int64(3), taskInfo.SegID)
 		s.Equal("ch1", taskInfo.InsertChannel)
 		s.Equal(int64(65535), taskInfo.NumRows)
+		s.Equal(int64(1), taskInfo.NgramIndexStatsLogs[100].MinGram)
+		s.Equal(int64(2), taskInfo.NgramIndexStatsLogs[100].MaxGram)
 	})
 
 	s.Run("deleteStatsTaskInfos", func() {
