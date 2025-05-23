@@ -207,6 +207,72 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
                           check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("not_supported_index", ct.all_index_types[:-2])
+    def test_milvus_client_int8_vector_create_not_supported_cpu_index(self, not_supported_index):
+        """
+        target: test create non-supported index on int8 vector
+        method: create non-supported index on int8 vector
+        expected: raise exception
+        """
+        if not_supported_index in ct.int8_vector_index:
+            pytest.skip("This index is supported by int8 vector")
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 128
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id_string", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
+        schema.add_field("embeddings", DataType.INT8_VECTOR, dim=dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("embeddings", metric_type="COSINE")
+        # 2. index_params.add_index("title")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "embeddings")
+        # 3. prepare index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="embeddings", index_type=not_supported_index, metric_type="L2")
+        # 4. create another index
+        error = {ct.err_code: 1100, ct.err_msg: f"data type Int8Vector can't build with this index {not_supported_index}: "
+                                                f"invalid parameter[expected=valid index params][actual=invalid index params]"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("not_supported_index", ct.all_index_types[-2:])
+    def test_milvus_client_int8_vector_create_not_supported_GPU_index(self, not_supported_index):
+        """
+        target: test create non-supported index on int8 vector
+        method: create non-supported index on int8 vector
+        expected: raise exception
+        """
+        if not_supported_index in ct.int8_vector_index:
+            pytest.skip("This index is supported by int8 vector")
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 128
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id_string", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
+        schema.add_field("embeddings", DataType.INT8_VECTOR, dim=dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("embeddings", metric_type="COSINE")
+        # 2. index_params.add_index("title")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "embeddings")
+        # 3. prepare index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="embeddings", index_type=not_supported_index, metric_type="L2")
+        # 4. create another index
+        error = {ct.err_code: 1100, ct.err_msg: f"invalid parameter[expected=valid index][actual=invalid "
+                                                f"index type: {not_supported_index}"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientIndexValid(TestMilvusClientV2Base):
     """ Test case of index interface """

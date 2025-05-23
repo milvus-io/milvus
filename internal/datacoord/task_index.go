@@ -100,6 +100,10 @@ func (it *indexBuildTask) GetTaskType() taskcommon.Type {
 	return taskcommon.Index
 }
 
+func (it *indexBuildTask) GetTaskVersion() int64 {
+	return it.IndexVersion
+}
+
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 	it.IndexState = commonpb.IndexState(state)
 	it.FailReason = failReason

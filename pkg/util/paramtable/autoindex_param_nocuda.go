@@ -14,16 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package taskcommon
+//go:build !cuda
+// +build !cuda
 
-type Type = string
+package paramtable
 
-const (
-	TypeNone   Type = "None"
-	PreImport  Type = "PreImport"
-	Import     Type = "Import"
-	Compaction Type = "Compaction"
-	Index      Type = "Index"
-	Stats      Type = "Stats"
-	Analyze    Type = "Analyze"
-)
+func GetIndexParam() ParamItem {
+	return ParamItem{
+		Key:          "autoIndex.params.build",
+		Version:      "2.2.0",
+		DefaultValue: `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE"}`,
+		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.build"),
+		Export:       true,
+	}
+}

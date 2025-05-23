@@ -38,6 +38,8 @@ type ShardManager interface {
 
 	AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error)
 
+	ApplyDelete(msg message.MutableDeleteMessageV1) error
+
 	WaitUntilGrowingSegmentReady(collectionID int64, partitonID int64) (<-chan struct{}, error)
 
 	FlushAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error)

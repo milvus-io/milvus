@@ -743,8 +743,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 101,
                                          "err_msg": err_msg})
         # 3. search collection without data after load
-        collection_w.create_index(
-            ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        if vector_data_type == DataType.INT8_VECTOR:
+            collection_w.create_index(ct.default_float_vec_field_name,
+                                      index_params={"index_type": "HNSW", "metric_type": "L2"})
+        else:
+            collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp,

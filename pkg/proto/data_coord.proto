@@ -984,7 +984,7 @@ message QuerySlotRequest {}
 
 message QuerySlotResponse {
   common.Status status = 1;
-  int64 num_slots = 2;
+  int64 available_slots = 2;
 }
 
 enum CompactionTaskState {

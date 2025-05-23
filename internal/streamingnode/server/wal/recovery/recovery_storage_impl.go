@@ -408,3 +408,11 @@ func (r *recoveryStorageImpl) detectInconsistency(msg message.ImmutableMessage, 
 	r.Logger().Warn("inconsistency detected", fields...)
 	r.metrics.ObserveInconsitentEvent()
 }
+
+// getFlusherCheckpoint returns flusher checkpoint concurrent-safe
+// NOTE: shall not be called with r.mu.Lock()!
+func (r *recoveryStorageImpl) getFlusherCheckpoint() *WALCheckpoint {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.flusherCheckpoint
+}
