@@ -78,7 +78,7 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	})
 	s.importMeta, err = NewImportMeta(context.TODO(), s.catalog)
 	s.NoError(err)
-	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, s.importMeta).(*importScheduler)
+	s.scheduler = NewImportScheduler(context.TODO(), s.meta, s.cluster, s.alloc, s.importMeta).(*importScheduler)
 }
 
 func (s *ImportSchedulerSuite) TestProcessPreImport() {

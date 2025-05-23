@@ -76,7 +76,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 
 	sjm := NewMockStatsJobManager(s.T())
 
-	checker := NewImportChecker(meta, broker, cluster, s.alloc, importMeta, sjm).(*importChecker)
+	checker := NewImportChecker(context.TODO(), meta, broker, cluster, s.alloc, importMeta, sjm).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{

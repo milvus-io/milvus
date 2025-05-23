@@ -356,7 +356,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 }
 
 func (s *importScheduler) processCompleted(task ImportTask) {
-	err := DropImportTask(task, s.cluster, s.imeta)
+	err := DropImportTask(task, s.cluster, s.importMeta)
 	if err != nil {
 		log.Warn("drop import failed", WrapTaskLog(task, zap.Error(err))...)
 	}
@@ -382,7 +382,7 @@ func (s *importScheduler) processFailed(task ImportTask) {
 			}
 		}
 	}
-	err := DropImportTask(task, s.cluster, s.imeta)
+	err := DropImportTask(task, s.cluster, s.importMeta)
 	if err != nil {
 		log.Warn("drop import failed", WrapTaskLog(task, zap.Error(err))...)
 	}
