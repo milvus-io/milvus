@@ -731,6 +731,12 @@ def gen_bfloat16_vec_field(name=ct.default_float_vec_field_name, is_primary=Fals
                                                                    is_primary=is_primary, **kwargs)
     return float_vec_field
 
+def gen_int8_vec_field(name=ct.default_int8_vec_field_name, is_primary=False, dim=ct.default_dim,
+                           description=ct.default_desc, **kwargs):
+    int8_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT8_VECTOR,
+                                                                   description=description, dim=dim,
+                                                                   is_primary=is_primary, **kwargs)
+    return int8_vec_field
 
 def gen_sparse_vec_field(name=ct.default_sparse_vec_field_name, is_primary=False, description=ct.default_desc, **kwargs):
     sparse_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.SPARSE_FLOAT_VECTOR,
@@ -821,7 +827,7 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         gen_array_field(name="array_varchar", element_type=DataType.VARCHAR, max_length=200),
         gen_array_field(name="array_bool", element_type=DataType.BOOL),
         gen_float_vec_field(dim=dim),
-        gen_float_vec_field(name="image_emb", dim=dim),
+        gen_int8_vec_field(name="image_emb", dim=dim),
         gen_float_vec_field(name="text_sparse_emb", vector_data_type=DataType.SPARSE_FLOAT_VECTOR),
         gen_float_vec_field(name="voice_emb", dim=dim),
     ]
@@ -1931,6 +1937,15 @@ def get_binary_vec_field_name_list(schema=None):
             vec_fields.append(field.name)
     return vec_fields
 
+def get_int8_vec_field_name_list(schema=None):
+    vec_fields = []
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype in [DataType.INT8_VECTOR]:
+            vec_fields.append(field.name)
+    return vec_fields
 
 def get_bm25_vec_field_name_list(schema=None):
     if not hasattr(schema, "functions"):
@@ -1954,6 +1969,20 @@ def get_dim_by_schema(schema=None):
             return dim
     return None
 
+def get_dense_anns_field_name_list(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    anns_fields = []
+    for field in fields:
+        if field.dtype in [DataType.FLOAT_VECTOR,DataType.FLOAT16_VECTOR,DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR, DataType.BINARY_VECTOR]:
+            item = {
+                "name": field.name,
+                "dtype": field.dtype,
+                "dim": field.params['dim']
+            }
+            anns_fields.append(item)
+    return anns_fields
 
 def gen_varchar_data(length: int, nb: int, text_mode=False):
     if text_mode:
@@ -2037,6 +2066,16 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         if nb is None:
             return np.array([random.random() for _ in range(int(dim))], dtype=np.float16)
         return [np.array([random.random() for _ in range(int(dim))], dtype=np.float16) for _ in range(int(nb))]
+    if data_type == DataType.INT8_VECTOR:
+        dim = field.params['dim']
+        if nb is None:
+            raw_vector = [random.randint(-128, 127) for _ in range(dim)]
+            int8_vector = np.array(raw_vector, dtype=np.int8)
+            return int8_vector
+        raw_vectors = [[random.randint(-128, 127) for _ in range(dim)] for _ in range(nb)]
+        int8_vectors = [np.array(raw_vector, dtype=np.int8) for raw_vector in raw_vectors]
+        return int8_vectors
+
     if data_type == DataType.BINARY_VECTOR:
         dim = field.params['dim']
         if nb is None:
