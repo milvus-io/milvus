@@ -146,6 +146,38 @@ func (_c *MockShardClientManager_SetClientCreatorFunc_Call) RunAndReturn(run fun
 	return _c
 }
 
+// Start provides a mock function with no fields
+func (_m *MockShardClientManager) Start() {
+	_m.Called()
+}
+
+// MockShardClientManager_Start_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Start'
+type MockShardClientManager_Start_Call struct {
+	*mock.Call
+}
+
+// Start is a helper method to define mock.On call
+func (_e *MockShardClientManager_Expecter) Start() *MockShardClientManager_Start_Call {
+	return &MockShardClientManager_Start_Call{Call: _e.mock.On("Start")}
+}
+
+func (_c *MockShardClientManager_Start_Call) Run(run func()) *MockShardClientManager_Start_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardClientManager_Start_Call) Return() *MockShardClientManager_Start_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardClientManager_Start_Call) RunAndReturn(run func()) *MockShardClientManager_Start_Call {
+	_c.Run(run)
+	return _c
+}
+
 // NewMockShardClientManager creates a new instance of MockShardClientManager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockShardClientManager(t interface {
