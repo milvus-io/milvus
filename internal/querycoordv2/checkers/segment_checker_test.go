@@ -388,66 +388,6 @@ func (suite *SegmentCheckerTestSuite) TestReleaseDirtySegments() {
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
 }
 
-func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
-	ctx := context.Background()
-	checker := suite.checker
-
-	collectionID := int64(1)
-	partitionID := int64(1)
-	// set meta
-	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(collectionID, 1))
-	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
-	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, collectionID, []int64{1, 2}))
-
-	// set target
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-			SeekPosition: &msgpb.MsgPosition{Timestamp: 10},
-		},
-	}
-	segments := []*datapb.SegmentInfo{}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
-	checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
-	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
-	checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
-	readableVersion := checker.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
-
-	// test less target version exist on leader,meet segment doesn't exit in target, segment shouldn't be released
-	nodeID := int64(2)
-	segmentID := int64(1)
-	checker.dist.SegmentDistManager.Update(nodeID, utils.CreateTestSegment(collectionID, partitionID, segmentID, nodeID, 2, "test-insert-channel"))
-	checker.dist.ChannelDistManager.Update(nodeID, &meta.DmChannel{
-		VchannelInfo: &datapb.VchannelInfo{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-		Node:    2,
-		Version: 1,
-		View: &meta.LeaderView{
-			ID:            nodeID,
-			CollectionID:  collectionID,
-			Channel:       "test-insert-channel",
-			TargetVersion: readableVersion - 1,
-			Segments:      map[int64]*querypb.SegmentDist{segmentID: {NodeID: nodeID}},
-		},
-	})
-
-	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
-	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
-	suite.Equal(task.ActionTypeReduce, action.Type())
-	suite.EqualValues(segmentID, action.GetSegmentID())
-	suite.EqualValues(nodeID, action.Node())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
-}
-
 func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	ctx := context.Background()
 	checker := suite.checker
@@ -687,6 +627,216 @@ func (suite *SegmentCheckerTestSuite) TestReleaseDroppedSegments() {
 	suite.EqualValues(1, action.GetSegmentID())
 	suite.EqualValues(1, action.Node())
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+}
+
+func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {
+	checker := suite.checker
+
+	// Setup test data
+	collectionID := int64(1)
+	partitionID := int64(1)
+	segmentID1 := int64(1)
+	segmentID2 := int64(2)
+	segmentID3 := int64(3)
+	nodeID1 := int64(1)
+	nodeID2 := int64(2)
+	channel := "test-insert-channel"
+
+	// Create test replica
+	replica := utils.CreateTestReplica(1, collectionID, []int64{nodeID1, nodeID2})
+
+	// Create test segments
+	segments := []*meta.Segment{
+		utils.CreateTestSegment(collectionID, partitionID, segmentID1, nodeID1, 1, channel),
+		utils.CreateTestSegment(collectionID, partitionID, segmentID2, nodeID2, 1, channel),
+		utils.CreateTestSegment(collectionID, partitionID, segmentID3, nodeID1, 1, channel),
+	}
+
+	// Test case 1: No leader views - should skip releasing segments
+	result := checker.filterOutExistedOnLeader(replica, segments)
+	suite.Equal(0, len(result), "Should return all segments when no leader views")
+
+	// Test case 2: Segment serving on leader - should be filtered out
+	leaderView1 := utils.CreateTestLeaderView(nodeID1, collectionID, channel,
+		map[int64]int64{segmentID1: nodeID1}, map[int64]*meta.Segment{})
+	checker.dist.ChannelDistManager.Update(nodeID1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node: nodeID1,
+		View: leaderView1,
+	})
+
+	result = checker.filterOutExistedOnLeader(replica, segments)
+	suite.Len(result, 2, "Should filter out segment serving on leader")
+
+	// Check that segmentID1 is filtered out
+	for _, seg := range result {
+		suite.NotEqual(segmentID1, seg.GetID(), "Segment serving on leader should be filtered out")
+	}
+
+	// Test case 3: Multiple leader views with segments serving on different nodes
+	leaderView2 := utils.CreateTestLeaderView(nodeID2, collectionID, channel,
+		map[int64]int64{segmentID2: nodeID2}, map[int64]*meta.Segment{})
+	checker.dist.ChannelDistManager.Update(nodeID2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node: nodeID2,
+		View: leaderView2,
+	})
+
+	result = checker.filterOutExistedOnLeader(replica, segments)
+	suite.Len(result, 1, "Should filter out segments serving on their respective leaders")
+	suite.Equal(segmentID3, result[0].GetID(), "Only non-serving segment should remain")
+
+	// Test case 4: Segment exists in leader view but on different node - should not be filtered
+	leaderView3 := utils.CreateTestLeaderView(nodeID1, collectionID, channel,
+		map[int64]int64{segmentID3: nodeID2}, map[int64]*meta.Segment{}) // segmentID3 exists but on nodeID2, not nodeID1
+	checker.dist.ChannelDistManager.Update(nodeID1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node: nodeID1,
+		View: leaderView3,
+	})
+
+	result = checker.filterOutExistedOnLeader(replica, []*meta.Segment{segments[2]}) // Only test segmentID3
+	suite.Len(result, 1, "Segment not serving on its actual node should not be filtered")
+}
+
+func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
+	ctx := context.Background()
+	checker := suite.checker
+
+	// Setup test data
+	collectionID := int64(1)
+	partitionID := int64(1)
+	segmentID1 := int64(1)
+	segmentID2 := int64(2)
+	segmentID3 := int64(3)
+	nodeID1 := int64(1)
+	nodeID2 := int64(2)
+	channel := "test-insert-channel"
+
+	// Setup meta data
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(collectionID, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
+
+	// Create test replica
+	replica := utils.CreateTestReplica(1, collectionID, []int64{nodeID1, nodeID2})
+
+	// Create test segments
+	segments := []*meta.Segment{
+		utils.CreateTestSegment(collectionID, partitionID, segmentID1, nodeID1, 1, channel),
+		utils.CreateTestSegment(collectionID, partitionID, segmentID2, nodeID2, 1, channel),
+		utils.CreateTestSegment(collectionID, partitionID, segmentID3, nodeID1, 1, channel),
+	}
+
+	// Setup target to have a current version
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		channels, []*datapb.SegmentInfo{}, nil).Maybe()
+	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+	currentTargetVersion := checker.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
+
+	// Test case 1: No leader views - should skip releasing segments
+	result := checker.filterOutSegmentInUse(ctx, replica, segments)
+	suite.Equal(0, len(result), "Should return all segments when no leader views")
+
+	// Test case 2: Leader view with outdated target version - segment should be filtered (still in use)
+	leaderView1 := utils.CreateTestLeaderView(nodeID1, collectionID, channel,
+		map[int64]int64{}, map[int64]*meta.Segment{})
+	leaderView1.TargetVersion = currentTargetVersion - 1 // Outdated version
+	checker.dist.ChannelDistManager.Update(nodeID1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node: nodeID1,
+		View: leaderView1,
+	})
+
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]})
+	suite.Len(result, 0, "Segment should be filtered out when delegator hasn't updated to latest version")
+
+	// Test case 3: Leader view with current target version - segment should not be filtered
+	leaderView2 := utils.CreateTestLeaderView(nodeID1, collectionID, channel,
+		map[int64]int64{}, map[int64]*meta.Segment{})
+	leaderView2.TargetVersion = currentTargetVersion
+	checker.dist.ChannelDistManager.Update(nodeID1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node: nodeID1,
+		View: leaderView2,
+	})
+
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]})
+	suite.Len(result, 1, "Segment should not be filtered when delegator has updated to latest version")
+
+	// Test case 4: Leader view with initial target version - segment should not be filtered
+	leaderView3 := utils.CreateTestLeaderView(nodeID2, collectionID, channel,
+		map[int64]int64{}, map[int64]*meta.Segment{})
+	leaderView3.TargetVersion = initialTargetVersion
+	checker.dist.ChannelDistManager.Update(nodeID2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node: nodeID2,
+		View: leaderView3,
+	})
+
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[1]})
+	suite.Len(result, 1, "Segment should not be filtered when leader has initial target version")
+
+	// Test case 5: Multiple leader views with mixed versions - segment should be filtered (still in use)
+	leaderView4 := utils.CreateTestLeaderView(nodeID1, collectionID, channel,
+		map[int64]int64{}, map[int64]*meta.Segment{})
+	leaderView4.TargetVersion = currentTargetVersion - 1 // Outdated
+
+	leaderView5 := utils.CreateTestLeaderView(nodeID2, collectionID, channel,
+		map[int64]int64{}, map[int64]*meta.Segment{})
+	leaderView5.TargetVersion = currentTargetVersion // Up to date
+
+	checker.dist.ChannelDistManager.Update(nodeID1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node: nodeID1,
+		View: leaderView4,
+	})
+	checker.dist.ChannelDistManager.Update(nodeID2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node: nodeID2,
+		View: leaderView5,
+	})
+	testSegments := []*meta.Segment{
+		utils.CreateTestSegment(collectionID, partitionID, segmentID1, nodeID1, 1, channel),
+		utils.CreateTestSegment(collectionID, partitionID, segmentID2, nodeID2, 1, channel),
+	}
+
+	result = checker.filterOutSegmentInUse(ctx, replica, testSegments)
+	suite.Len(result, 0, "Should release all segments when any delegator hasn't updated")
+
+	// Test case 6: Partition is nil - should release all segments (no partition info)
+	checker.meta.CollectionManager.RemovePartition(ctx, partitionID)
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]})
+	suite.Len(result, 0, "Should release all segments when partition is nil")
 }
 
 func TestSegmentCheckerSuite(t *testing.T) {
