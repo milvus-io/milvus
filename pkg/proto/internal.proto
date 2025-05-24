@@ -99,6 +99,7 @@ message SubSearchRequest {
   int64 group_size = 11;
   int64 field_id = 12;
   bool ignore_growing = 13;
+  string analyzer_name = 14;
 }
 
 message SearchRequest {
