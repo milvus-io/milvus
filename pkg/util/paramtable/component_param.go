@@ -3812,6 +3812,7 @@ type dataCoordConfig struct {
 	MixCompactionTriggerInterval     ParamItem `refreshable:"false"`
 	L0CompactionTriggerInterval      ParamItem `refreshable:"false"`
 	GlobalCompactionInterval         ParamItem `refreshable:"false"`
+	CompactionExpiryTolerance        ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -4281,6 +4282,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Doc:          "deprecated",
 	}
 	p.GlobalCompactionInterval.Init(base.mgr)
+
+	p.CompactionExpiryTolerance = ParamItem{
+		Key:          "dataCoord.compaction.expiry.tolerance",
+		Version:      "2.5.0",
+		DefaultValue: "-1",
+		Doc:          "tolerant duration in hours for expiry data, negative value means no toleration and equivalent to zero",
+		Export:       true,
+	}
+	p.CompactionExpiryTolerance.Init(base.mgr)
 
 	p.MixCompactionTriggerInterval = ParamItem{
 		Key:          "dataCoord.compaction.mix.triggerInterval",
