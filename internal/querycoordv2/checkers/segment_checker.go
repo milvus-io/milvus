@@ -360,53 +360,60 @@ func (c *SegmentChecker) findRepeatedSealedSegments(ctx context.Context, replica
 	return segments
 }
 
+// for duplicated segment, we should release the one which is not serving on leader
 func (c *SegmentChecker) filterExistedOnLeader(replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
-	filtered := make([]*meta.Segment, 0, len(segments))
+	notServing := make([]*meta.Segment, 0, len(segments))
 	for _, s := range segments {
-		leaderID, ok := c.dist.ChannelDistManager.GetShardLeader(replica, s.GetInsertChannel())
-		if !ok {
+		views := c.dist.LeaderViewManager.GetByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(s.GetInsertChannel()))
+		if len(views) == 0 {
 			continue
 		}
 
-		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
-		if view == nil {
-			continue
+		servingOnLeader := false
+		for _, view := range views {
+			segInView, ok := view.Segments[s.GetID()]
+			if ok && segInView.NodeID == s.Node {
+				servingOnLeader = true
+				break
+			}
 		}
-		seg, ok := view.Segments[s.GetID()]
-		if ok && seg.NodeID == s.Node {
-			// if this segment is serving on leader, do not remove it for search available
-			continue
+
+		if !servingOnLeader {
+			notServing = append(notServing, s)
 		}
-		filtered = append(filtered, s)
 	}
-	return filtered
+	return notServing
 }
 
+// for sealed segment which doesn't exist in target, we should release it after delegator has updated to latest readable version
 func (c *SegmentChecker) filterSegmentInUse(ctx context.Context, replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
-	filtered := make([]*meta.Segment, 0, len(segments))
+	notUsed := make([]*meta.Segment, 0, len(segments))
 	for _, s := range segments {
-		leaderID, ok := c.dist.ChannelDistManager.GetShardLeader(replica, s.GetInsertChannel())
-		if !ok {
-			continue
-		}
-
-		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
-		if view == nil {
-			continue
-		}
 		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, s.CollectionID, meta.CurrentTarget)
 		partition := c.meta.CollectionManager.GetPartition(ctx, s.PartitionID)
 
-		// if delegator has valid target version, and before it update to latest readable version, skip release it's sealed segment
-		// Notice: if syncTargetVersion stuck, segment on delegator won't be released
-		readableVersionNotUpdate := view.TargetVersion != initialTargetVersion && view.TargetVersion < currentTargetVersion
-		if partition != nil && readableVersionNotUpdate {
-			// leader view version hasn't been updated, segment maybe still in use
+		views := c.dist.LeaderViewManager.GetByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(s.GetInsertChannel()))
+		if len(views) == 0 {
 			continue
 		}
-		filtered = append(filtered, s)
+
+		stillInUseByDelegator := false
+		// if delegator has valid target version, and before it update to latest readable version, skip release it's sealed segment
+		for _, view := range views {
+			// Notice: if syncTargetVersion stuck, segment on delegator won't be released
+			readableVersionNotUpdate := view.TargetVersion != initialTargetVersion && view.TargetVersion < currentTargetVersion
+			if partition != nil && readableVersionNotUpdate {
+				// leader view version hasn't been updated, segment maybe still in use
+				stillInUseByDelegator = true
+				break
+			}
+		}
+
+		if !stillInUseByDelegator {
+			notUsed = append(notUsed, s)
+		}
 	}
-	return filtered
+	return notUsed
 }
 
 func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, replica *meta.Replica) []task.Task {
