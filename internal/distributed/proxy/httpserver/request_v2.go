@@ -468,15 +468,16 @@ func (req *DropIndexPropertiesReq) GetIndexName() string {
 }
 
 type FieldSchema struct {
-	FieldName         string                 `json:"fieldName" binding:"required"`
-	DataType          string                 `json:"dataType" binding:"required"`
-	ElementDataType   string                 `json:"elementDataType"`
-	IsPrimary         bool                   `json:"isPrimary"`
-	IsPartitionKey    bool                   `json:"isPartitionKey"`
-	IsClusteringKey   bool                   `json:"isClusteringKey"`
-	ElementTypeParams map[string]interface{} `json:"elementTypeParams" binding:"required"`
-	Nullable          bool                   `json:"nullable" binding:"required"`
-	DefaultValue      interface{}            `json:"defaultValue" binding:"required"`
+	FieldName          string                 `json:"fieldName" binding:"required"`
+	DataType           string                 `json:"dataType" binding:"required"`
+	ElementDataType    string                 `json:"elementDataType"`
+	IsPrimary          bool                   `json:"isPrimary"`
+	IsPartitionKey     bool                   `json:"isPartitionKey"`
+	IsClusteringKey    bool                   `json:"isClusteringKey"`
+	ElementTypeParams  map[string]interface{} `json:"elementTypeParams" binding:"required"`
+	Nullable           bool                   `json:"nullable" binding:"required"`
+	DefaultValue       interface{}            `json:"defaultValue" binding:"required"`
+	MultiAnalyzerParam interface{}            `json:"multiAnalyzerParam"`
 }
 
 type FunctionSchema struct {
