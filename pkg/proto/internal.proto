@@ -133,6 +133,7 @@ message SearchRequest {
   bool is_recall_evaluation = 27;
   bool is_iterator = 28;
   string analyzer_name = 29;
+  uint64 collection_ttl = 30;
 }
 
 message SubSearchResults {
@@ -199,6 +200,7 @@ message RetrieveRequest {
   int32 reduce_type = 17;
   common.ConsistencyLevel consistency_level = 18;
   bool is_iterator = 19;
+  uint64 collection_ttl = 20;
 }
 
 

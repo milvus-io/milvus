@@ -70,7 +70,7 @@ CRetrieve(CSegmentInterface c_segment,
           uint64_t timestamp,
           CRetrieveResult** result) {
     auto future = AsyncRetrieve(
-        {}, c_segment, c_plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false, 0);
+        {}, c_segment, c_plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false, 0, 0);
     auto futurePtr = static_cast<milvus::futures::IFuture*>(
         static_cast<void*>(static_cast<CFuture*>(future)));
 

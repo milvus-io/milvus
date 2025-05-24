@@ -197,6 +197,7 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 		[]byte(fmt.Sprintf("%d > 100", mock_segcore.RowIDField.ID)),
 		typeutil.MaxTimestamp,
 		0,
+		0,
 		0)
 	suite.Error(err)
 	suite.Nil(retrievePlan)
@@ -214,6 +215,7 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 		suite.collection,
 		expr,
 		typeutil.MaxTimestamp,
+		0,
 		0,
 		0)
 	suite.NotNil(retrievePlan)

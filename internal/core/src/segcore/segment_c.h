@@ -51,7 +51,8 @@ AsyncSearch(CTraceContext c_trace,
             CSearchPlan c_plan,
             CPlaceholderGroup c_placeholder_group,
             uint64_t timestamp,
-            int32_t consistency_level);
+            int32_t consistency_level,
+            uint64_t collection_ttl);
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);
@@ -63,7 +64,8 @@ AsyncRetrieve(CTraceContext c_trace,
               uint64_t timestamp,
               int64_t limit_size,
               bool ignore_non_pk,
-              int32_t consistency_level);
+              int32_t consistency_level,
+              uint64_t collection_ttl);
 
 CFuture*  // Future<CRetrieveResult>
 AsyncRetrieveByOffsets(CTraceContext c_trace,

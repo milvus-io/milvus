@@ -264,13 +264,16 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.SearchRequest.Username = username
 	}
 
+	t.CollectionTtl = collectionInfo.collectionTTL
+
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 
 	log.Debug("search PreExecute done.",
 		zap.Uint64("guarantee_ts", guaranteeTs),
 		zap.Bool("use_default_consistency", useDefaultConsistency),
 		zap.Any("consistency level", consistencyLevel),
-		zap.Uint64("timeout_ts", t.SearchRequest.GetTimeoutTimestamp()))
+		zap.Uint64("timeout_ts", t.SearchRequest.GetTimeoutTimestamp()),
+		zap.Uint64("collection_ttl", t.CollectionTtl))
 	return nil
 }
 

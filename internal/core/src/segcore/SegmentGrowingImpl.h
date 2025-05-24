@@ -268,7 +268,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     mask_with_timestamps(BitsetTypeView& bitset_chunk,
-                         Timestamp timestamp) const override;
+                         Timestamp timestamp,
+                         Timestamp ttl = 0) const override;
 
     void
     vector_search(SearchInfo& search_info,

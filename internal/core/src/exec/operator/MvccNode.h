@@ -72,6 +72,7 @@ class PhyMvccNode : public Operator {
     int64_t active_count_;
     bool is_finished_{false};
     bool is_source_node_{false};
+    milvus::Timestamp collection_ttl_;
 };
 
 }  // namespace exec

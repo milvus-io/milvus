@@ -862,7 +862,8 @@ SegmentGrowingImpl::get_active_count(Timestamp ts) const {
 
 void
 SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
-                                         Timestamp timestamp) const {
+                                         Timestamp timestamp,
+                                         Timestamp collection_ttl) const {
     // DO NOTHING
 }
 

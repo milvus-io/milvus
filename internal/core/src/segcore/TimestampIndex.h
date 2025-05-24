@@ -40,6 +40,11 @@ class TimestampIndex {
                    const Timestamp* timestamps,
                    int64_t size);
 
+    static BitsetType
+    GenerateTTLBitset(Timestamp collection_ttl,
+                      const Timestamp* timestamps,
+                      int64_t size);
+
  private:
     // numSlice
     std::vector<int64_t> lengths_;
