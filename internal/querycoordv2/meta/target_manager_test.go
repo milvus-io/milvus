@@ -257,7 +257,7 @@ func (suite *TargetManagerSuite) TestRemovePartition() {
 	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 
 	suite.mgr.RemovePartition(ctx, collectionID, 100)
-	suite.assertSegments(append([]int64{3, 4}, suite.level0Segments...), suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments([]int64{3, 4}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
 	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
 	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
 	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
@@ -303,7 +303,7 @@ func (suite *TargetManagerSuite) getAllSegment(collectionID int64, partitionIDs 
 		}
 	}
 
-	return append(allSegments, suite.level0Segments...)
+	return allSegments
 }
 
 func (suite *TargetManagerSuite) assertChannels(expected []string, actual map[string]*DmChannel) bool {

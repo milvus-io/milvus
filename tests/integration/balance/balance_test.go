@@ -182,7 +182,7 @@ func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
 		resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
-		return len(resp.Channels) == 1 && len(resp.Segments) >= 2
+		return len(resp.Channels) == 1 && len(resp.Segments) == 2
 	}, 30*time.Second, 1*time.Second)
 
 	// check total segment number and total channel number
@@ -195,7 +195,7 @@ func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
 			segNum += len(resp1.Segments)
 			chNum += len(resp1.Channels)
 		}
-		return segNum == 8 && chNum == 2
+		return segNum == 4 && chNum == 2
 	}, 30*time.Second, 1*time.Second)
 }
 
@@ -220,13 +220,13 @@ func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
 	s.Eventually(func() bool {
 		resp, err := qn1.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		s.NoError(err)
-		return len(resp.Channels) == 1 && len(resp.Segments) >= 2
+		return len(resp.Channels) == 1 && len(resp.Segments) == 2
 	}, 30*time.Second, 1*time.Second)
 
 	s.Eventually(func() bool {
 		resp, err := qn2.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		s.NoError(err)
-		return len(resp.Channels) == 1 && len(resp.Segments) >= 2
+		return len(resp.Channels) == 1 && len(resp.Segments) == 2
 	}, 30*time.Second, 1*time.Second)
 
 	// check total segment number and total channel number
@@ -239,7 +239,7 @@ func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
 			segNum += len(resp1.Segments)
 			chNum += len(resp1.Channels)
 		}
-		return segNum == 16 && chNum == 4
+		return segNum == 8 && chNum == 4
 	}, 30*time.Second, 1*time.Second)
 }
 
@@ -250,12 +250,12 @@ func (s *BalanceTestSuit) TestNodeDown() {
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoBalanceChannel.Key, "false")
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.EnableStoppingBalance.Key, "false")
 
-	// init collection with 3 channel, each channel has 15 segment, each segment has 2000 row
-	// and load it with 2 replicas on 2 nodes.
+	// init collection with 2 channel, each channel has 15 segment, each segment has 2000 row
+	// and load it with 1 replicas on 2 nodes.
 	name := "test_balance_" + funcutil.GenRandomStr()
 	s.initCollection(name, 1, 2, 15, 2000, 500)
 
-	// then we add 2 query node, after balance happens, expected each node have 1 channel and 2 segments
+	// then we add 2 query node, after balance happens, expected each node have 10 segments
 	qn1 := s.Cluster.AddQueryNode()
 	qn2 := s.Cluster.AddQueryNode()
 
@@ -264,7 +264,7 @@ func (s *BalanceTestSuit) TestNodeDown() {
 		resp, err := qn1.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
-		log.Info("resp", zap.Any("channel", resp.Channels), zap.Any("segments", resp.Segments))
+		log.Info("resp", zap.Any("channel", resp.Channels), zap.Any("segments", len(resp.Segments)))
 		return len(resp.Channels) == 0 && len(resp.Segments) >= 10
 	}, 30*time.Second, 1*time.Second)
 
@@ -295,7 +295,7 @@ func (s *BalanceTestSuit) TestNodeDown() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		log.Info("resp", zap.Any("channel", resp.Channels), zap.Any("segments", resp.Segments))
-		return len(resp.Channels) == 1 && len(resp.Segments) >= 15
+		return len(resp.Channels) == 1 && len(resp.Segments) == 15
 	}, 30*time.Second, 1*time.Second)
 
 	// expect all delegator will recover to healthy

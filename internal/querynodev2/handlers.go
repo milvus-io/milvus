@@ -68,18 +68,7 @@ func loadL0Segments(ctx context.Context, delegator delegator.ShardDelegator, req
 		}
 	}
 
-	return delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
-		Base:          req.GetBase(),
-		DstNodeID:     req.GetNodeID(),
-		Infos:         l0Segments,
-		Schema:        req.GetSchema(),
-		CollectionID:  req.GetCollectionID(),
-		LoadMeta:      req.GetLoadMeta(),
-		ReplicaID:     req.GetReplicaID(),
-		Version:       req.GetVersion(),
-		NeedTransfer:  false,
-		IndexInfoList: req.GetIndexInfoList(),
-	})
+	return delegator.LoadL0(ctx, l0Segments, req.GetVersion())
 }
 
 func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator, req *querypb.WatchDmChannelsRequest) error {

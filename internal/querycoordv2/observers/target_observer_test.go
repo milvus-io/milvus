@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -116,10 +117,16 @@ func (suite *TargetObserverSuite) SetupTest() {
 		{
 			CollectionID: suite.collectionID,
 			ChannelName:  "channel-1",
+			DeleteCheckpoint: &msgpb.MsgPosition{
+				Timestamp: 200,
+			},
 		},
 		{
 			CollectionID: suite.collectionID,
 			ChannelName:  "channel-2",
+			DeleteCheckpoint: &msgpb.MsgPosition{
+				Timestamp: 200,
+			},
 		},
 	}
 
@@ -197,25 +204,26 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
 	suite.NoError(err)
 
-	suite.distMgr.LeaderViewManager.Update(2,
-		&meta.LeaderView{
-			ID:           2,
-			CollectionID: suite.collectionID,
-			Channel:      "channel-1",
-			Segments: map[int64]*querypb.SegmentDist{
-				11: {NodeID: 2},
-				13: {NodeID: 2},
-			},
+	ch1View := &meta.LeaderView{
+		ID:           2,
+		CollectionID: suite.collectionID,
+		Channel:      "channel-1",
+		Segments: map[int64]*querypb.SegmentDist{
+			11: {NodeID: 2},
+			13: {NodeID: 2},
 		},
-		&meta.LeaderView{
-			ID:           2,
-			CollectionID: suite.collectionID,
-			Channel:      "channel-2",
-			Segments: map[int64]*querypb.SegmentDist{
-				12: {NodeID: 2},
-			},
+	}
+
+	ch2View := &meta.LeaderView{
+		ID:           2,
+		CollectionID: suite.collectionID,
+		Channel:      "channel-2",
+		Segments: map[int64]*querypb.SegmentDist{
+			12: {NodeID: 2},
 		},
-	)
+	}
+
+	suite.distMgr.LeaderViewManager.Update(2, ch1View, ch2View)
 
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -233,6 +241,9 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 			len(suite.targetMgr.GetSealedSegmentsByCollection(ctx, suite.collectionID, meta.CurrentTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.CurrentTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
+
+	action := suite.observer.checkNeedUpdateTargetVersion(ctx, ch1View, 100)
+	suite.Equal(action.GetDeleteCP().Timestamp, uint64(200))
 }
 
 func (suite *TargetObserverSuite) TestTriggerRelease() {

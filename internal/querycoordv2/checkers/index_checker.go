@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -130,12 +129,6 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	for _, segment := range segments {
 		// skip update index in read only node
 		if roNodeSet.Contain(segment.Node) {
-			continue
-		}
-
-		// skip update index for l0 segment
-		segmentInTarget := c.targetMgr.GetSealedSegment(ctx, collection.GetCollectionID(), segment.GetID(), meta.CurrentTargetFirst)
-		if segmentInTarget == nil || segmentInTarget.GetLevel() == datapb.SegmentLevel_L0 {
 			continue
 		}
 
