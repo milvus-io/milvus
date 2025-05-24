@@ -402,8 +402,8 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
-	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta)
-	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.importMeta, s.jobManager)
+	s.importScheduler = NewImportScheduler(s.ctx, s.meta, s.cluster, s.allocator, s.importMeta)
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.cluster, s.allocator, s.importMeta, s.jobManager)
 
 	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
 
