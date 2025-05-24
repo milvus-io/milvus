@@ -12,6 +12,7 @@ enum class TantivyDataType : uint8_t {
   I64,
   F64,
   Bool,
+  JSON,
 };
 
 struct RustArray {
@@ -202,6 +203,72 @@ RustResult tantivy_prefix_query_keyword(void *ptr, const char *prefix, void *bit
 
 RustResult tantivy_regex_query(void *ptr, const char *pattern, void *bitset);
 
+RustResult tantivy_json_term_query_i64(void *ptr,
+                                       const char *json_path,
+                                       int64_t term,
+                                       void *bitset);
+
+RustResult tantivy_json_term_query_f64(void *ptr, const char *json_path, double term, void *bitset);
+
+RustResult tantivy_json_term_query_bool(void *ptr, const char *json_path, bool term, void *bitset);
+
+RustResult tantivy_json_term_query_keyword(void *ptr,
+                                           const char *json_path,
+                                           const char *term,
+                                           void *bitset);
+
+RustResult tantivy_json_exist_query(void *ptr, const char *json_path, void *bitset);
+
+RustResult tantivy_json_range_query_i64(void *ptr,
+                                        const char *json_path,
+                                        int64_t lower_bound,
+                                        int64_t higher_bound,
+                                        bool lb_unbounded,
+                                        bool up_unbounded,
+                                        bool lb_inclusive,
+                                        bool ub_inclusive,
+                                        void *bitset);
+
+RustResult tantivy_json_range_query_f64(void *ptr,
+                                        const char *json_path,
+                                        double lower_bound,
+                                        double higher_bound,
+                                        bool lb_unbounded,
+                                        bool up_unbounded,
+                                        bool lb_inclusive,
+                                        bool ub_inclusive,
+                                        void *bitset);
+
+RustResult tantivy_json_range_query_bool(void *ptr,
+                                         const char *json_path,
+                                         bool lower_bound,
+                                         bool higher_bound,
+                                         bool lb_unbounded,
+                                         bool up_unbounded,
+                                         bool lb_inclusive,
+                                         bool ub_inclusive,
+                                         void *bitset);
+
+RustResult tantivy_json_range_query_keyword(void *ptr,
+                                            const char *json_path,
+                                            const char *lower_bound,
+                                            const char *higher_bound,
+                                            bool lb_unbounded,
+                                            bool up_unbounded,
+                                            bool lb_inclusive,
+                                            bool ub_inclusive,
+                                            void *bitset);
+
+RustResult tantivy_json_regex_query(void *ptr,
+                                    const char *json_path,
+                                    const char *pattern,
+                                    void *bitset);
+
+RustResult tantivy_json_prefix_query(void *ptr,
+                                     const char *json_path,
+                                     const char *prefix,
+                                     void *bitset);
+
 RustResult tantivy_match_query(void *ptr, const char *query, void *bitset);
 
 RustResult tantivy_phrase_match_query(void *ptr, const char *query, uint32_t slop, void *bitset);
@@ -302,6 +369,13 @@ RustResult tantivy_index_add_json_key_stats_data_by_batch(void *ptr,
                                                           const int64_t *const *json_offsets,
                                                           const uintptr_t *json_offsets_len,
                                                           uintptr_t len);
+
+RustResult tantivy_index_add_json(void *ptr, const char *s, int64_t offset);
+
+RustResult tantivy_index_add_array_json(void *ptr,
+                                        const char *const *array,
+                                        uintptr_t len,
+                                        int64_t offset);
 
 RustResult tantivy_index_add_array_int8s(void *ptr,
                                          const int8_t *array,
