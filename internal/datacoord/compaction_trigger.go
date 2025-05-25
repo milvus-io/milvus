@@ -658,6 +658,28 @@ func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
 	return is
 }
 
+func (t *compactionTrigger) ShouldCompactExpiry(fromTs uint64, compactTime *compactTime, segment *SegmentInfo) bool {
+	if Params.DataCoordCfg.CompactionExpiryTolerance.GetAsInt() >= 0 {
+		tolerantDuration := Params.DataCoordCfg.CompactionExpiryTolerance.GetAsDuration(time.Hour)
+		expireTime, _ := tsoutil.ParseTS(compactTime.expireTime)
+		earliestTolerance := expireTime.Add(-tolerantDuration)
+		earliestFromTime, _ := tsoutil.ParseTS(fromTs)
+		if earliestFromTime.Before(earliestTolerance) {
+			log.Info("Trigger strict expiry compaction for segment",
+				zap.Int64("segmentID", segment.GetID()),
+				zap.Int64("collectionID", segment.GetCollectionID()),
+				zap.Int64("partition", segment.GetPartitionID()),
+				zap.String("channel", segment.GetInsertChannel()),
+				zap.Time("compaction expire time", expireTime),
+				zap.Time("earliest tolerance", earliestTolerance),
+				zap.Time("segment earliest from time", earliestFromTime),
+			)
+			return true
+		}
+	}
+	return false
+}
+
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
@@ -672,6 +694,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 	// if expire time is enabled, put segment into compaction candidate
 	totalExpiredSize := int64(0)
 	totalExpiredRows := 0
+	var earliestFromTs uint64 = math.MaxUint64
 	for _, binlogs := range segment.GetBinlogs() {
 		for _, l := range binlogs.GetBinlogs() {
 			// TODO, we should probably estimate expired log entries by total rows in binlog and the ralationship of timeTo, timeFrom and expire time
@@ -684,7 +707,11 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 				totalExpiredRows += int(l.GetEntriesNum())
 				totalExpiredSize += l.GetMemorySize()
 			}
+			earliestFromTs = min(earliestFromTs, l.TimestampFrom)
 		}
+	}
+	if t.ShouldCompactExpiry(earliestFromTs, compactTime, segment) {
+		return true
 	}
 
 	if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
