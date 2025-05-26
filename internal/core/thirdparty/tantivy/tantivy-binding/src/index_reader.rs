@@ -34,7 +34,7 @@ impl IndexReaderWrapper {
         init_log();
 
         let index = Index::open_in_dir(path)?;
-        
+
         IndexReaderWrapper::from_index(Arc::new(index), set_bitset)
     }
 
@@ -299,9 +299,12 @@ impl IndexReaderWrapper {
         bitset: *mut c_void,
     ) -> Result<()> {
         // literal length should be larger or equal to min_gram.
-        if literal.len() < min_gram {
-            unreachable!("literal length should be larger or equal to min_gram.");
-        }
+        assert!(
+            literal.len() >= min_gram,
+            "literal length should be larger or equal to min_gram. literal: {}, min_gram: {}",
+            literal,
+            min_gram
+        );
 
         if literal.len() <= max_gram {
             return self.term_query_keyword(literal, bitset);

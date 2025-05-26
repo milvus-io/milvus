@@ -411,3 +411,23 @@ func (s *statsInspectorSuite) TestEnableBM25() {
 	result := s.inspector.enableBM25()
 	s.False(result, "BM25 should be disabled by default")
 }
+
+func (s *statsInspectorSuite) TestNeedDoNgramIndex() {
+	// Test case when ngram index is needed
+	segment := s.mt.segments.segments[20]
+	segment.IsSorted = true
+	result := needDoNgramIndex(segment, []int64{102})
+	s.True(result, "Segment should need ngram index")
+
+	// Test case when ngram index already exists
+	segment.NgramIndexStats = map[int64]*datapb.NgramIndexStats{
+		102: {},
+	}
+	result = needDoNgramIndex(segment, []int64{102})
+	s.False(result, "Segment should not need ngram index")
+
+	// Test case with unsorted segment
+	segment.IsSorted = false
+	result = needDoNgramIndex(segment, []int64{102})
+	s.False(result, "Unsorted segment should not need ngram index")
+}

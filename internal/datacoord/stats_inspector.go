@@ -216,6 +216,9 @@ func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	}
 
 	for _, fieldID := range fieldIDs {
+		if segment.GetJsonKeyStats() == nil {
+			return true
+		}
 		if segment.GetJsonKeyStats()[fieldID] == nil {
 			return true
 		}
@@ -235,6 +238,9 @@ func needDoNgramIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	}
 
 	for _, fieldID := range fieldIDs {
+		if segment.GetNgramIndexStats() == nil {
+			return true
+		}
 		if segment.GetNgramIndexStats()[fieldID] == nil {
 			return true
 		}
