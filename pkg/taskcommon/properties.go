@@ -62,7 +62,7 @@ func (p Properties) AppendTaskID(taskID int64) {
 
 func (p Properties) AppendType(t Type) {
 	switch t {
-	case QuerySlot, PreImport, Import, Compaction, Index, Stats, Analyze:
+	case PreImport, Import, Compaction, Index, Stats, Analyze:
 		p[TypeKey] = t
 	default:
 		p[TypeKey] = TypeNone
@@ -98,7 +98,7 @@ func (p Properties) GetTaskType() (Type, error) {
 		return "", WrapErrTaskPropertyLack(TypeKey, p[TaskIDKey])
 	}
 	switch p[TypeKey] {
-	case QuerySlot, PreImport, Import, Compaction, Index, Stats, Analyze:
+	case PreImport, Import, Compaction, Index, Stats, Analyze:
 		return p[TypeKey], nil
 	default:
 		return p[TypeKey], fmt.Errorf("unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])

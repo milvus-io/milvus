@@ -18,6 +18,12 @@ class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
         },
         {
             "tokenizer": "jieba",
+            "filter": [
+                {
+                    "type": "stop",
+                    "stop_words": ["is", "the", "this", "a", "an", "and", "or", "是", "的", "这", "一个", "和", "或"],
+                }
+            ],
         },
         {
             "tokenizer": "icu"

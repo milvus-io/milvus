@@ -81,8 +81,8 @@ func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_Pending,
 		}
 		task := &preImportTask{
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -120,8 +120,8 @@ func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_Pending,
 		}
 		task := &preImportTask{
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -132,7 +132,7 @@ func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 
 		catalog = mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(errors.New("mock err"))
-		task.imeta.(*importMeta).catalog = catalog
+		task.importMeta.(*importMeta).catalog = catalog
 		task.CreateTaskOnWorker(1, cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
 	})
@@ -163,8 +163,8 @@ func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_Pending,
 		}
 		task := &preImportTask{
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -196,8 +196,8 @@ func TestPreImportTask_QueryTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_InProgress,
 		}
 		task := &preImportTask{
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -236,8 +236,8 @@ func TestPreImportTask_QueryTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_InProgress,
 		}
 		task := &preImportTask{
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -271,8 +271,8 @@ func TestPreImportTask_QueryTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_InProgress,
 		}
 		task := &preImportTask{
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -306,8 +306,8 @@ func TestPreImportTask_DropTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_Completed,
 		}
 		task := &preImportTask{
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -338,8 +338,8 @@ func TestPreImportTask_DropTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_Completed,
 		}
 		task := &preImportTask{
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)

@@ -45,9 +45,11 @@ default_string_array_field_name = "string_array"
 default_float_vec_field_name = "float_vector"
 default_float16_vec_field_name = "float16_vector"
 default_bfloat16_vec_field_name = "bfloat16_vector"
+default_int8_vec_field_name = "int8_vector"
 another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
 text_sparse_vector = "TEXT_SPARSE_VECTOR"
+default_reranker_field_name = "reranker_field"
 
 all_vector_types = [
         DataType.FLOAT_VECTOR,
@@ -67,10 +69,11 @@ default_metric_for_vector_type = {
     DataType.BINARY_VECTOR: "HAMMING",
 }
 
-all_dense_vector_types = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR]
-all_float_vector_dtypes = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR]
 
-append_vector_type = [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR]
+append_vector_type = [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
+all_dense_vector_types = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR]
+all_float_vector_dtypes = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
+all_vector_data_types = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
 default_sparse_vec_field_name = "sparse_vector"
 default_partition_name = "_default"
 default_resource_group_name = '__default_resource_group'
@@ -252,6 +255,8 @@ all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
                    "GPU_IVF_FLAT", "GPU_IVF_PQ"]
 
 inverted_index_algo = ['TAAT_NAIVE', 'DAAT_WAND', 'DAAT_MAXSCORE']
+
+int8_vector_index = ["HNSW"]
 
 default_all_indexes_params = [{}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
                               {"nlist": 128, "refine": 'true', "refine_type": "SQ8"},

@@ -696,15 +696,16 @@ def gen_float_vec_field(name=ct.default_float_vec_field_name, is_primary=False, 
 
     if vector_data_type != DataType.SPARSE_FLOAT_VECTOR:
         float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=vector_data_type,
-                                                                   description=description, dim=dim,
-                                                                   is_primary=is_primary, **kwargs)
+                                                                       description=description, dim=dim,
+                                                                       is_primary=is_primary, **kwargs)
     else:
          # no dim for sparse vector
         float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.SPARSE_FLOAT_VECTOR,
-                                                                    description=description,
-                                                                    is_primary=is_primary, **kwargs)
+                                                                       description=description,
+                                                                       is_primary=is_primary, **kwargs)
 
     return float_vec_field
+
 
 
 def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False, dim=ct.default_dim,
@@ -730,6 +731,12 @@ def gen_bfloat16_vec_field(name=ct.default_float_vec_field_name, is_primary=Fals
                                                                    is_primary=is_primary, **kwargs)
     return float_vec_field
 
+def gen_int8_vec_field(name=ct.default_int8_vec_field_name, is_primary=False, dim=ct.default_dim,
+                           description=ct.default_desc, **kwargs):
+    int8_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT8_VECTOR,
+                                                                   description=description, dim=dim,
+                                                                   is_primary=is_primary, **kwargs)
+    return int8_vec_field
 
 def gen_sparse_vec_field(name=ct.default_sparse_vec_field_name, is_primary=False, description=ct.default_desc, **kwargs):
     sparse_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.SPARSE_FLOAT_VECTOR,
@@ -792,7 +799,8 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
 
     if len(multiple_dim_array) != 0:
         for other_dim in multiple_dim_array:
-            fields.append(gen_float_vec_field(gen_unique_str("multiple_vector"), dim=other_dim,
+            name_prefix = "multiple_vector"
+            fields.append(gen_float_vec_field(gen_unique_str(name_prefix), dim=other_dim,
                                               vector_data_type=vector_data_type))
 
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
@@ -819,7 +827,7 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         gen_array_field(name="array_varchar", element_type=DataType.VARCHAR, max_length=200),
         gen_array_field(name="array_bool", element_type=DataType.BOOL),
         gen_float_vec_field(dim=dim),
-        gen_float_vec_field(name="image_emb", dim=dim),
+        gen_int8_vec_field(name="image_emb", dim=dim),
         gen_float_vec_field(name="text_sparse_emb", vector_data_type=DataType.SPARSE_FLOAT_VECTOR),
         gen_float_vec_field(name="voice_emb", dim=dim),
     ]
@@ -1118,6 +1126,32 @@ def gen_schema_multi_string_fields(string_fields):
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=ct.default_desc,
                                                                     primary_field=primary_field, auto_id=False)
     return schema
+
+
+def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
+    vectors = []
+    if vector_data_type == DataType.FLOAT_VECTOR:
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
+    elif vector_data_type == DataType.FLOAT16_VECTOR:
+        vectors = gen_fp16_vectors(nb, dim)[1]
+    elif vector_data_type == DataType.BFLOAT16_VECTOR:
+        vectors = gen_bf16_vectors(nb, dim)[1]
+    elif vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
+        vectors = gen_sparse_vectors(nb, dim)
+    elif vector_data_type == ct.text_sparse_vector:
+        vectors = gen_text_vectors(nb) # for Full Text Search
+    elif vector_data_type == DataType.INT8_VECTOR:
+        vectors = gen_int8_vectors(nb, dim)[1]
+    elif vector_data_type == DataType.BINARY_VECTOR:
+        vectors = gen_binary_vectors(nb, dim)[1]
+    else:
+        log.error(f"Invalid vector data type: {vector_data_type}")
+        raise Exception(f"Invalid vector data type: {vector_data_type}")
+    if dim > 1:
+        if vector_data_type == DataType.FLOAT_VECTOR:
+            vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
+            vectors = vectors.tolist()
+    return vectors
 
 
 def gen_string(nb):
@@ -1903,6 +1937,15 @@ def get_binary_vec_field_name_list(schema=None):
             vec_fields.append(field.name)
     return vec_fields
 
+def get_int8_vec_field_name_list(schema=None):
+    vec_fields = []
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype in [DataType.INT8_VECTOR]:
+            vec_fields.append(field.name)
+    return vec_fields
 
 def get_bm25_vec_field_name_list(schema=None):
     if not hasattr(schema, "functions"):
@@ -1926,6 +1969,20 @@ def get_dim_by_schema(schema=None):
             return dim
     return None
 
+def get_dense_anns_field_name_list(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    anns_fields = []
+    for field in fields:
+        if field.dtype in [DataType.FLOAT_VECTOR,DataType.FLOAT16_VECTOR,DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR, DataType.BINARY_VECTOR]:
+            item = {
+                "name": field.name,
+                "dtype": field.dtype,
+                "dim": field.params['dim']
+            }
+            anns_fields.append(item)
+    return anns_fields
 
 def gen_varchar_data(length: int, nb: int, text_mode=False):
     if text_mode:
@@ -2009,6 +2066,16 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         if nb is None:
             return np.array([random.random() for _ in range(int(dim))], dtype=np.float16)
         return [np.array([random.random() for _ in range(int(dim))], dtype=np.float16) for _ in range(int(nb))]
+    if data_type == DataType.INT8_VECTOR:
+        dim = field.params['dim']
+        if nb is None:
+            raw_vector = [random.randint(-128, 127) for _ in range(dim)]
+            int8_vector = np.array(raw_vector, dtype=np.int8)
+            return int8_vector
+        raw_vectors = [[random.randint(-128, 127) for _ in range(dim)] for _ in range(nb)]
+        int8_vectors = [np.array(raw_vector, dtype=np.int8) for raw_vector in raw_vectors]
+        return int8_vectors
+
     if data_type == DataType.BINARY_VECTOR:
         dim = field.params['dim']
         if nb is None:
@@ -3141,7 +3208,8 @@ def extract_vector_field_name_list(collection_w):
         if field['type'] == DataType.FLOAT_VECTOR \
                 or field['type'] == DataType.FLOAT16_VECTOR \
                 or field['type'] == DataType.BFLOAT16_VECTOR \
-                or field['type'] == DataType.SPARSE_FLOAT_VECTOR:
+                or field['type'] == DataType.SPARSE_FLOAT_VECTOR\
+                or field['type'] == DataType.INT8_VECTOR:
             if field['name'] != ct.default_float_vec_field_name:
                 vector_name_list.append(field['name'])
 
@@ -3295,15 +3363,6 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok", empty_percentage=0):
         ]
     return vectors
 
-def gen_int8_vectors(num, dim):
-    raw_vectors = []
-    int8_vectors = []
-    for _ in range(num):
-        raw_vector = [random.randint(-128, 127) for _ in range(dim)]
-        raw_vectors.append(raw_vector)
-        int8_vector = np.array(raw_vector, dtype=np.int8)
-        int8_vectors.append(int8_vector)
-    return raw_vectors, int8_vectors
 
 def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
     vectors = []
@@ -3331,6 +3390,17 @@ def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
     return vectors
 
 
+def gen_int8_vectors(num, dim):
+    raw_vectors = []
+    int8_vectors = []
+    for _ in range(num):
+        raw_vector = [random.randint(-128, 127) for _ in range(dim)]
+        raw_vectors.append(raw_vector)
+        int8_vector = np.array(raw_vector, dtype=np.int8)
+        int8_vectors.append(int8_vector)
+    return raw_vectors, int8_vectors
+
+
 def gen_text_vectors(nb, language="en"):
 
     fake = Faker("en_US")
@@ -3338,6 +3408,7 @@ def gen_text_vectors(nb, language="en"):
         fake = Faker("zh_CN")
     vectors = [" milvus " + fake.text() for _ in range(nb)]
     return vectors
+
 
 def field_types() -> dict:
     return dict(sorted(dict(DataType.__members__).items(), key=lambda item: item[0], reverse=True))

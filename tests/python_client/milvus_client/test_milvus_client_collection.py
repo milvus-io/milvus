@@ -278,9 +278,10 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nullable", [True, False])
-    def test_milvus_client_collection_self_creation_default(self, nullable):
+    @pytest.mark.parametrize("vector_type", [DataType.FLOAT_VECTOR, DataType.INT8_VECTOR])
+    def test_milvus_client_collection_self_creation_default(self, nullable, vector_type):
         """
-        target: test fast create collection normal case
+        target: test self create collection normal case
         method: create collection
         expected: create collection with default schema, index, and load successfully
         """
@@ -290,7 +291,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("id_string", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
-        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("embeddings", vector_type, dim=dim)
         schema.add_field("title", DataType.VARCHAR, max_length=64, is_partition_key=True)
         schema.add_field("nullable_field", DataType.INT64, nullable=nullable, default_value=10)
         schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=12,
@@ -315,6 +316,46 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                                  check_items=check_items)
         index = self.list_indexes(client, collection_name)[0]
         assert index == ['embeddings']
+        if self.has_collection(client, collection_name)[0]:
+            self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_self_creation_multiple_vectors(self):
+        """
+        target: test self create collection with multiple vectors
+        method: create collection with multiple vectors
+        expected: create collection with default schema, index, and load successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 128
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id_int64", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("int8embeddings_1", DataType.INT8_VECTOR, dim=dim * 2)
+        schema.add_field("int8embeddings_2", DataType.FLOAT16_VECTOR, dim=int(dim / 2))
+        schema.add_field("int8embeddings_3", DataType.BFLOAT16_VECTOR, dim=int(dim / 2))
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("embeddings", metric_type="COSINE")
+        index_params.add_index("embeddings_1", metric_type="IP")
+        index_params.add_index("embeddings_2", metric_type="L2")
+        index_params.add_index("embeddings_3", metric_type="COSINE")
+        # index_params.add_index("title")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        check_items = {"collection_name": collection_name,
+                       "dim": [dim, dim * 2, dim / 2, dim / 2],
+                       "consistency_level": 0,
+                       "enable_dynamic_field": False,
+                       "id_name": "id_int64",
+                       "vector_name": ["embeddings", "embeddings_1", "embeddings_2", "embeddings_3"]}
+        self.describe_collection(client, collection_name,
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items=check_items)
+        index = self.list_indexes(client, collection_name)[0]
+        assert sorted(index) == sorted(['embeddings', 'embeddings_1', 'embeddings_2', 'embeddings_3'])
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
 

@@ -86,13 +86,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	}
 	p.EnableResultLimitCheck.Init(base.mgr)
 
-	p.IndexParams = ParamItem{
-		Key:          "autoIndex.params.build",
-		Version:      "2.2.0",
-		DefaultValue: `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "COSINE"}`,
-		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.build"),
-		Export:       true,
-	}
+	p.IndexParams = GetIndexParam()
 	p.IndexParams.Init(base.mgr)
 
 	p.SparseIndexParams = ParamItem{

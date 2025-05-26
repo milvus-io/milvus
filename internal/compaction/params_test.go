@@ -34,10 +34,12 @@ func TestGetJSONParams(t *testing.T) {
 	err = json.Unmarshal([]byte(jsonStr), &result)
 	assert.NoError(t, err)
 	assert.Equal(t, Params{
-		EnableStorageV2:     paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool(),
-		BinLogMaxSize:       paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
-		UseMergeSort:        paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
-		MaxSegmentMergeSort: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
+		EnableStorageV2:           paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool(),
+		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
+		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
+		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
+		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
 	}, result)
 }
 
@@ -46,14 +48,18 @@ func TestGetParamsFromJSON(t *testing.T) {
 		"enable_storage_v2": false,
 		"binlog_max_size": 4096,
 		"use_merge_sort": false,
-		"max_segment_merge_sort": 2
+		"max_segment_merge_sort": 2,
+		"prefer_segment_size_ratio": 0.1,
+		"bloom_filter_apply_batch_size": 1000
 	}`
 
 	expected := Params{
-		EnableStorageV2:     false,
-		BinLogMaxSize:       4096,
-		UseMergeSort:        false,
-		MaxSegmentMergeSort: 2,
+		EnableStorageV2:           false,
+		BinLogMaxSize:             4096,
+		UseMergeSort:              false,
+		MaxSegmentMergeSort:       2,
+		PreferSegmentSizeRatio:    0.1,
+		BloomFilterApplyBatchSize: 1000,
 	}
 
 	result, err := ParseParamsFromJSON(input)
@@ -73,9 +79,11 @@ func TestGetParamsFromJSON_EmptyJSON(t *testing.T) {
 	result, err := ParseParamsFromJSON(emptyJSON)
 	assert.NoError(t, err)
 	assert.Equal(t, Params{
-		EnableStorageV2:     paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool(),
-		BinLogMaxSize:       paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
-		UseMergeSort:        paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
-		MaxSegmentMergeSort: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
+		EnableStorageV2:           paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool(),
+		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
+		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
+		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
+		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
 	}, result)
 }

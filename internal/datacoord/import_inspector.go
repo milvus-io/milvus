@@ -41,32 +41,34 @@ type ImportInspector interface {
 }
 
 type importInspector struct {
-	meta      *meta
-	alloc     allocator.Allocator
-	imeta     ImportMeta
-	scheduler task.GlobalScheduler
+	ctx        context.Context
+	meta       *meta
+	alloc      allocator.Allocator
+	importMeta ImportMeta
+	scheduler  task.GlobalScheduler
 
 	closeOnce sync.Once
 	closeChan chan struct{}
 }
 
-func NewImportInspector(meta *meta, imeta ImportMeta, scheduler task.GlobalScheduler) ImportInspector {
+func NewImportInspector(ctx context.Context, meta *meta, importMeta ImportMeta, scheduler task.GlobalScheduler) ImportInspector {
 	return &importInspector{
-		meta:      meta,
-		imeta:     imeta,
-		scheduler: scheduler,
-		closeChan: make(chan struct{}),
+		ctx:        ctx,
+		meta:       meta,
+		importMeta: importMeta,
+		scheduler:  scheduler,
+		closeChan:  make(chan struct{}),
 	}
 }
 
 func (s *importInspector) Start() {
-	log.Ctx(context.TODO()).Info("start import inspector")
+	log.Ctx(s.ctx).Info("start import inspector")
 	ticker := time.NewTicker(Params.DataCoordCfg.ImportScheduleInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 	for {
 		select {
 		case <-s.closeChan:
-			log.Ctx(context.TODO()).Info("import inspector exited")
+			log.Ctx(s.ctx).Info("import inspector exited")
 			return
 		case <-ticker.C:
 			s.inspect()
@@ -81,12 +83,12 @@ func (s *importInspector) Close() {
 }
 
 func (s *importInspector) inspect() {
-	jobs := s.imeta.GetJobBy(context.TODO())
+	jobs := s.importMeta.GetJobBy(s.ctx)
 	sort.Slice(jobs, func(i, j int) bool {
 		return jobs[i].GetJobID() < jobs[j].GetJobID()
 	})
 	for _, job := range jobs {
-		tasks := s.imeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()))
+		tasks := s.importMeta.GetTaskBy(s.ctx, WithJob(job.GetJobID()))
 		for _, task := range tasks {
 			switch task.GetState() {
 			case datapb.ImportTaskStateV2_Pending:
@@ -118,16 +120,16 @@ func (s *importInspector) processFailed(task ImportTask) {
 		segments := append(originSegmentIDs, statsSegmentIDs...)
 		for _, segment := range segments {
 			op := UpdateStatusOperator(segment, commonpb.SegmentState_Dropped)
-			err := s.meta.UpdateSegmentsInfo(context.TODO(), op)
+			err := s.meta.UpdateSegmentsInfo(s.ctx, op)
 			if err != nil {
-				log.Ctx(context.TODO()).Warn("drop import segment failed", WrapTaskLog(task, zap.Int64("segment", segment), zap.Error(err))...)
+				log.Ctx(s.ctx).Warn("drop import segment failed", WrapTaskLog(task, zap.Int64("segment", segment), zap.Error(err))...)
 				return
 			}
 		}
 		if len(segments) > 0 {
-			err := s.imeta.UpdateTask(context.TODO(), task.GetTaskID(), UpdateSegmentIDs(nil), UpdateStatsSegmentIDs(nil))
+			err := s.importMeta.UpdateTask(s.ctx, task.GetTaskID(), UpdateSegmentIDs(nil), UpdateStatsSegmentIDs(nil))
 			if err != nil {
-				log.Ctx(context.TODO()).Warn("update import task segments failed", WrapTaskLog(task, zap.Error(err))...)
+				log.Ctx(s.ctx).Warn("update import task segments failed", WrapTaskLog(task, zap.Error(err))...)
 			}
 		}
 	}

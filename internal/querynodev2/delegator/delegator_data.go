@@ -1027,7 +1027,7 @@ func (sd *shardDelegator) SyncTargetVersion(
 }
 
 func (sd *shardDelegator) GetQueryView() *channelQueryView {
-	return sd.distribution.queryView
+	return sd.distribution.GetQueryView()
 }
 
 func (sd *shardDelegator) AddExcludedSegments(excludeInfo map[int64]uint64) {

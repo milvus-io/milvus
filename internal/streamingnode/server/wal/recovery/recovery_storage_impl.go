@@ -85,10 +85,11 @@ type recoveryStorageImpl struct {
 	flusherCheckpoint      *WALCheckpoint
 	dirtyCounter           int // records the message count since last persist snapshot.
 	// used to trigger the recovery persist operation.
-	persistNotifier chan struct{}
-	gracefulClosed  bool
-	truncator       *samplingTruncator
-	metrics         *recoveryMetrics
+	persistNotifier        chan struct{}
+	gracefulClosed         bool
+	truncator              *samplingTruncator
+	metrics                *recoveryMetrics
+	pendingPersistSnapshot *RecoverySnapshot
 }
 
 // UpdateFlusherCheckpoint updates the checkpoint of flusher.
@@ -134,6 +135,9 @@ func (r *recoveryStorageImpl) notifyPersist() {
 func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.dirtyCounter == 0 {
+		return nil
+	}
 
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta)
 	vchannels := make(map[string]*streamingpb.VChannelMeta)
@@ -178,16 +182,11 @@ func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
 	}
 	r.handleMessage(msg)
 
-	checkpointUpdates := !r.checkpoint.MessageID.EQ(msg.LastConfirmedMessageID())
 	r.checkpoint.TimeTick = msg.TimeTick()
 	r.checkpoint.MessageID = msg.LastConfirmedMessageID()
 	r.metrics.ObServeInMemMetrics(r.checkpoint.TimeTick)
 
-	if checkpointUpdates {
-		// only count the dirty if last confirmed message id is updated.
-		// we always recover from that point, the writeaheadtimetick is just a redundant information.
-		r.dirtyCounter++
-	}
+	r.dirtyCounter++
 	if r.dirtyCounter > r.cfg.maxDirtyMessages {
 		r.notifyPersist()
 	}
@@ -407,4 +406,12 @@ func (r *recoveryStorageImpl) detectInconsistency(msg message.ImmutableMessage, 
 	// because our meta is not atomic-updated, so these error may be logged if crashes when meta updated partially.
 	r.Logger().Warn("inconsistency detected", fields...)
 	r.metrics.ObserveInconsitentEvent()
+}
+
+// getFlusherCheckpoint returns flusher checkpoint concurrent-safe
+// NOTE: shall not be called with r.mu.Lock()!
+func (r *recoveryStorageImpl) getFlusherCheckpoint() *WALCheckpoint {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.flusherCheckpoint
 }

@@ -96,6 +96,10 @@ func (st *statsTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 	return timeType.GetTaskTime(st.times)
 }
 
+func (st *statsTask) GetTaskVersion() int64 {
+	return st.GetVersion()
+}
+
 func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
 	st.State = state
 	st.FailReason = failReason
@@ -398,6 +402,13 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		err := st.meta.UpdateSegment(st.GetSegmentID(), SetTextIndexLogs(result.GetTextStatsLogs()))
 		if err != nil {
 			log.Ctx(ctx).Warn("save text index stats result failed", zap.Int64("taskID", st.GetTaskID()),
+				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
+			return err
+		}
+	case indexpb.StatsSubJob_JsonKeyIndexJob:
+		err := st.meta.UpdateSegment(st.GetSegmentID(), SetJsonKeyIndexLogs(result.GetJsonKeyStatsLogs()))
+		if err != nil {
+			log.Ctx(ctx).Warn("save json key index stats result failed", zap.Int64("taskId", st.GetTaskID()),
 				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
 			return err
 		}

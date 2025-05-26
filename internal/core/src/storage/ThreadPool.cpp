@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "ThreadPool.h"
+#include "log/Log.h"
 
 namespace milvus {
 
@@ -65,6 +66,7 @@ void
 ThreadPool::Worker() {
     std::function<void()> func;
     bool dequeue;
+    SetThreadName(name_);
     while (!shutdown_) {
         std::unique_lock<std::mutex> lock(mutex_);
         idle_threads_size_++;

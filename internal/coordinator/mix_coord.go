@@ -1052,6 +1052,10 @@ func (s *mixCoordImpl) AllocSegment(ctx context.Context, req *datapb.AllocSegmen
 	return s.datacoordServer.AllocSegment(ctx, req)
 }
 
+func (s *mixCoordImpl) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
+	return s.datacoordServer.NotifyDropPartition(ctx, channel, partitionIDs)
+}
+
 // RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.
 func (s *mixCoordImpl) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 	s.streamingCoord.RegisterGRPCService(server)
