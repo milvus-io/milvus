@@ -394,5 +394,5 @@ func (it *indexBuildTask) SetJobInfo(meta *meta) error {
 }
 
 func (it *indexBuildTask) DropTaskMeta(ctx context.Context, meta *meta) error {
-	return meta.indexMeta.RemoveSegmentIndexByID(ctx, it.taskID)
+	return meta.indexMeta.RemoveSegmentIndex(ctx, it.taskID)
 }
