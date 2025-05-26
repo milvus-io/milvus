@@ -31,4 +31,13 @@ func TestPChannelInfo(t *testing.T) {
 	assert.Panics(t, func() {
 		NewPChannelInfoFromProto(&streamingpb.PChannelInfo{Name: "c", Term: -1})
 	})
+
+	c := PChannelInfoAssigned{
+		Channel: info,
+		Node: StreamingNodeInfo{
+			ServerID: 1,
+			Address:  "127.0.0.1",
+		},
+	}
+	assert.Equal(t, c.String(), "pchannel:ro@1>1@127.0.0.1")
 }

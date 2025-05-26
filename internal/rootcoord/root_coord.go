@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -69,6 +70,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -215,10 +217,28 @@ func (c *Core) sendMinDdlTsAsTt() {
 func (c *Core) startTimeTickLoop() {
 	log := log.Ctx(c.ctx)
 	defer c.wg.Done()
+
+	streamingNotifier := syncutil.NewAsyncTaskNotifier[struct{}]()
+	defer streamingNotifier.Finish(struct{}{})
+
+	if streamingutil.IsStreamingServiceEnabled() {
+		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(c.ctx, streamingNotifier); err != nil {
+			log.Info("register streaming enabled listener failed", zap.Error(err))
+			return
+		}
+		if streamingNotifier.Context().Err() != nil {
+			log.Info("streaming service has been enabled, ddl timetick from rootcoord should not start")
+			return
+		}
+	}
+
 	ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond))
 	defer ticker.Stop()
 	for {
 		select {
+		case <-streamingNotifier.Context().Done():
+			log.Info("streaming service has been enabled, ddl timetick from rootcoord should stop")
+			return
 		case <-c.ctx.Done():
 			log.Info("rootcoord's timetick loop quit!")
 			return
@@ -425,22 +445,13 @@ func (c *Core) initInternal() error {
 	c.garbageCollector = newBgGarbageCollector(c)
 	c.stepExecutor = newBgStepExecutor(c.ctx)
 
-	if !streamingutil.IsStreamingServiceEnabled() {
-		c.proxyWatcher = proxyutil.NewProxyWatcher(
-			c.etcdCli,
-			c.chanTimeTick.initSessions,
-			c.proxyClientManager.AddProxyClients,
-		)
-		c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
-		c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
-	} else {
-		c.proxyWatcher = proxyutil.NewProxyWatcher(
-			c.etcdCli,
-			c.proxyClientManager.AddProxyClients,
-		)
-		c.proxyWatcher.AddSessionFunc(c.proxyClientManager.AddProxyClient)
-		c.proxyWatcher.DelSessionFunc(c.proxyClientManager.DelProxyClient)
-	}
+	c.proxyWatcher = proxyutil.NewProxyWatcher(
+		c.etcdCli,
+		c.chanTimeTick.initSessions,
+		c.proxyClientManager.AddProxyClients,
+	)
+	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 	log.Info("init proxy manager done")
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
@@ -693,13 +704,10 @@ func (c *Core) startInternal() error {
 }
 
 func (c *Core) startServerLoop() {
-	c.wg.Add(1)
+	c.wg.Add(3)
 	go c.tsLoop()
-	if !streamingutil.IsStreamingServiceEnabled() {
-		c.wg.Add(2)
-		go c.startTimeTickLoop()
-		go c.chanTimeTick.startWatch(&c.wg)
-	}
+	go c.startTimeTickLoop()
+	go c.chanTimeTick.startWatch(&c.wg)
 }
 
 // Start starts RootCoord.

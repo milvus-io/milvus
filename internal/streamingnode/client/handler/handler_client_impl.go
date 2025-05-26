@@ -71,6 +71,9 @@ func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerO
 
 	logger := log.With(zap.String("pchannel", opts.PChannel), zap.String("handler", "producer"))
 	p, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+		if assign.Channel.AccessMode != types.AccessModeRW {
+			return nil, errors.New("producer can only be created for RW channel")
+		}
 		// Check if the localWAL is assigned at local
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
