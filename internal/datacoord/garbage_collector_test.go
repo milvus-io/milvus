@@ -525,6 +525,7 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 			segmentIndexes:   segIndexes,
 			indexes:          map[UniqueID]map[UniqueID]*model.Index{},
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			keyLock:          lock.NewKeyLock[UniqueID](),
 		},
 		channelCPs:   nil,
 		chunkManager: nil,

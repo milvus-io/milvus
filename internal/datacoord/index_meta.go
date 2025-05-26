@@ -629,7 +629,10 @@ func (m *indexMeta) GetIndexesForCollection(collID UniqueID, indexName string) [
 	return indexInfos
 }
 
-func (m *indexMeta) getFieldIndexes(collID, fieldID UniqueID, indexName string) []*model.Index {
+func (m *indexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) []*model.Index {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+
 	indexInfos := make([]*model.Index, 0)
 	for _, index := range m.indexes[collID] {
 		if index.IsDeleted || index.FieldID != fieldID {
@@ -640,13 +643,6 @@ func (m *indexMeta) getFieldIndexes(collID, fieldID UniqueID, indexName string) 
 		}
 	}
 	return indexInfos
-}
-
-func (m *indexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) []*model.Index {
-	m.fieldIndexLock.RLock()
-	defer m.fieldIndexLock.RUnlock()
-
-	return m.getFieldIndexes(collID, fieldID, indexName)
 }
 
 // MarkIndexAsDeleted will mark the corresponding index as deleted, and recycleUnusedIndexFiles will recycle these tasks.
@@ -973,36 +969,32 @@ func (m *indexMeta) SetStoredIndexFileSizeMetric(collections *typeutil.Concurren
 	return total
 }
 
-func (m *indexMeta) removeSegmentIndex(ctx context.Context, collID, partID, segID, indexID, buildID UniqueID) error {
-	err := m.catalog.DropSegmentIndex(ctx, collID, partID, segID, buildID)
-	if err != nil {
-		return err
-	}
+func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) error {
+	m.keyLock.Lock(buildID)
+	defer m.keyLock.Unlock(buildID)
 
-	segIndexes, ok := m.segmentIndexes.Get(segID)
-	if ok {
-		segIndexes.Remove(indexID)
-		m.segmentIndexes.Insert(segID, segIndexes)
-	}
-	if segIndexes.Len() == 0 {
-		m.segmentIndexes.Remove(segID)
-	}
-
-	m.segmentBuildInfo.Remove(buildID)
-	return nil
-}
-
-func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, collID, partID, segID, indexID, buildID UniqueID) error {
-	return m.removeSegmentIndex(ctx, collID, partID, segID, indexID, buildID)
-}
-
-func (m *indexMeta) RemoveSegmentIndexByID(ctx context.Context, buildID UniqueID) error {
 	segIdx, ok := m.segmentBuildInfo.Get(buildID)
 	if !ok {
 		return nil
 	}
 
-	return m.removeSegmentIndex(ctx, segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexID, buildID)
+	err := m.catalog.DropSegmentIndex(ctx, segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, buildID)
+	if err != nil {
+		return err
+	}
+
+	segIndexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
+	if ok {
+		segIndexes.Remove(segIdx.IndexID)
+		if segIndexes.Len() == 0 {
+			m.segmentIndexes.Remove(segIdx.SegmentID)
+		} else {
+			m.segmentIndexes.Insert(segIdx.SegmentID, segIndexes)
+		}
+	}
+
+	m.segmentBuildInfo.Remove(buildID)
+	return nil
 }
 
 func (m *indexMeta) GetDeletedIndexes() []*model.Index {
