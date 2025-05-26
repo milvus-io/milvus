@@ -132,6 +132,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 			utils.ManualBalance,
 			collectionID,
 			plan.Replica,
+			replica.LoadPriority(),
 			actions...,
 		)
 		if err != nil {

@@ -314,8 +314,10 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                  this->get_segment_id(),
                  field_id.get(),
                  num_rows);
-        auto load_future =
-            pool.Submit(LoadFieldDatasFromRemote, insert_files, channel);
+        auto load_future = pool.Submit(LoadFieldDatasFromRemote,
+                                       insert_files,
+                                       channel,
+                                       infos.load_priority);
 
         LOG_INFO("segment {} submits load field {} task to thread pool",
                  this->get_segment_id(),
@@ -468,7 +470,9 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     column_group_info.arrow_reader_channel,
                                     DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                     std::move(strategy),
-                                    row_group_lists);
+                                    row_group_lists,
+                                    nullptr,
+                                    infos.load_priority);
         });
 
         LOG_INFO("segment {} submits load fields {} task to thread pool",

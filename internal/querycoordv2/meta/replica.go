@@ -3,6 +3,7 @@ package meta
 import (
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -71,6 +72,7 @@ type Replica struct {
 	// always keep consistent with replicaPB.RoSqNodes.
 	// node used by replica but cannot add more channel on it.
 	// include the rebalance node.
+	loadPriority commonpb.LoadPriority
 }
 
 // Deprecated: may break the consistency of ReplicaManager, use `Spawn` of `ReplicaManager` or `newReplica` instead.
@@ -87,12 +89,26 @@ func NewReplica(replica *querypb.Replica, nodes ...typeutil.UniqueSet) *Replica 
 // newReplica creates a new replica from pb.
 func newReplica(replica *querypb.Replica) *Replica {
 	return &Replica{
-		replicaPB: proto.Clone(replica).(*querypb.Replica),
-		rwNodes:   typeutil.NewUniqueSet(replica.Nodes...),
-		roNodes:   typeutil.NewUniqueSet(replica.RoNodes...),
-		rwSQNodes: typeutil.NewUniqueSet(replica.RwSqNodes...),
-		roSQNodes: typeutil.NewUniqueSet(replica.RoSqNodes...),
+		replicaPB:    proto.Clone(replica).(*querypb.Replica),
+		rwNodes:      typeutil.NewUniqueSet(replica.Nodes...),
+		roNodes:      typeutil.NewUniqueSet(replica.RoNodes...),
+		rwSQNodes:    typeutil.NewUniqueSet(replica.RwSqNodes...),
+		roSQNodes:    typeutil.NewUniqueSet(replica.RoSqNodes...),
+		loadPriority: commonpb.LoadPriority_HIGH,
 	}
+}
+
+func NewReplicaWithPriority(replica *querypb.Replica, priority commonpb.LoadPriority) *Replica {
+	return &Replica{
+		replicaPB:    proto.Clone(replica).(*querypb.Replica),
+		rwNodes:      typeutil.NewUniqueSet(replica.Nodes...),
+		roNodes:      typeutil.NewUniqueSet(replica.RoNodes...),
+		loadPriority: priority,
+	}
+}
+
+func (replica *Replica) LoadPriority() commonpb.LoadPriority {
+	return replica.loadPriority
 }
 
 // GetID returns the id of the replica.
@@ -248,11 +264,12 @@ func (replica *Replica) CopyForWrite() *mutableReplica {
 
 	return &mutableReplica{
 		Replica: &Replica{
-			replicaPB: proto.Clone(replica.replicaPB).(*querypb.Replica),
-			rwNodes:   typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
-			roNodes:   typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
-			rwSQNodes: typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
-			roSQNodes: typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
+			replicaPB:    proto.Clone(replica.replicaPB).(*querypb.Replica),
+			rwNodes:      typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
+			roNodes:      typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
+			rwSQNodes:    typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
+			roSQNodes:    typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
+			loadPriority: replica.LoadPriority(),
 		},
 		exclusiveRWNodeToChannel: exclusiveRWNodeToChannel,
 	}
