@@ -48,7 +48,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
                         Timestamp collection_ttl = 0)
         : segment_(segment),
           timestamp_(timestamp),
-          collection_ttl_(collection_ttl),
+          collection_ttl_timestamp_(collection_ttl),
           placeholder_group_(placeholder_group),
           consystency_level_(consystency_level) {
     }
@@ -59,7 +59,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
                         Timestamp collection_ttl = 0)
         : segment_(segment),
           timestamp_(timestamp),
-          collection_ttl_(collection_ttl),
+          collection_ttl_timestamp_(collection_ttl),
           consystency_level_(consystency_level) {
         placeholder_group_ = nullptr;
     }
@@ -109,7 +109,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
  private:
     const segcore::SegmentInterface& segment_;
     Timestamp timestamp_;
-    Timestamp collection_ttl_;
+    Timestamp collection_ttl_timestamp_;
     const PlaceholderGroup* placeholder_group_;
 
     SearchResultOpt search_result_opt_;

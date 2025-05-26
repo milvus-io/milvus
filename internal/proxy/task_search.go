@@ -264,7 +264,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.SearchRequest.Username = username
 	}
 
-	t.CollectionTtl = collectionInfo.collectionTTL
+	physicalTime, _ := tsoutil.ParseTS(guaranteeTs)
+	expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
+	t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 
@@ -273,7 +275,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		zap.Bool("use_default_consistency", useDefaultConsistency),
 		zap.Any("consistency level", consistencyLevel),
 		zap.Uint64("timeout_ts", t.SearchRequest.GetTimeoutTimestamp()),
-		zap.Uint64("collection_ttl", t.CollectionTtl))
+		zap.Uint64("collection_ttl_timestamps", t.CollectionTtlTimestamps))
 	return nil
 }
 

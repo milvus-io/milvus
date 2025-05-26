@@ -2460,7 +2460,7 @@ func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 		if err != nil {
 			return 0
 		}
-		return uint64(time.Duration(ttl) * time.Millisecond)
+		return uint64(time.Duration(ttl) * time.Second)
 	}
 
 	return 0
