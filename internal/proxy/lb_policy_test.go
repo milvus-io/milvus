@@ -69,8 +69,9 @@ func (s *LBPolicySuite) SetupTest() {
 	for i := 1; i <= 5; i++ {
 		s.nodeIDs = append(s.nodeIDs, int64(i))
 		s.nodes = append(s.nodes, nodeInfo{
-			nodeID:  int64(i),
-			address: "localhost",
+			nodeID:      int64(i),
+			address:     "localhost",
+			serviceable: true,
 		})
 	}
 	s.channels = []string{"channel1", "channel2"}
@@ -84,11 +85,13 @@ func (s *LBPolicySuite) SetupTest() {
 					ChannelName: s.channels[0],
 					NodeIds:     s.nodeIDs,
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002", "localhost:9003", "localhost:9004"},
+					Serviceable: []bool{true, true, true, true, true},
 				},
 				{
 					ChannelName: s.channels[1],
 					NodeIds:     s.nodeIDs,
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002", "localhost:9003", "localhost:9004"},
+					Serviceable: []bool{true, true, true, true, true},
 				},
 			},
 		}, nil

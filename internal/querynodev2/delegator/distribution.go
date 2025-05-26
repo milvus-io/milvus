@@ -171,11 +171,14 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	filterReadable := d.readableFilter(targetVersion)
 	sealed, growing = d.filterSegments(sealed, growing, filterReadable)
 
-	// append distribution of unloaded segment
-	sealed = append(sealed, SnapshotItem{
-		NodeID:   -1,
-		Segments: d.queryView.unloadedSealedSegments,
-	})
+	if len(d.queryView.unloadedSealedSegments) > 0 {
+		// append distribution of unloaded segment
+		sealed = append(sealed, SnapshotItem{
+			NodeID:   -1,
+			Segments: d.queryView.unloadedSealedSegments,
+		})
+	}
+
 	return
 }
 

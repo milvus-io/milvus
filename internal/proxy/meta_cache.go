@@ -1041,7 +1041,7 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 		qns := make([]nodeInfo, len(leaders.GetNodeIds()))
 
 		for j := range qns {
-			qns[j] = nodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j]}
+			qns[j] = nodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j], leaders.GetServiceable()[j]}
 		}
 
 		shard2QueryNodes[leaders.GetChannelName()] = qns

@@ -125,9 +125,13 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 	// Select node using specified nodes
 	trySelectNode := func(nodes []nodeInfo) (nodeInfo, error) {
 		candidateNodes := make(map[int64]nodeInfo)
+		serviceableNodes := make(map[int64]nodeInfo)
 		// Filter nodes based on excludeNodes
 		for _, node := range nodes {
 			if !excludeNodes.Contain(node.nodeID) {
+				if node.serviceable {
+					serviceableNodes[node.nodeID] = node
+				}
 				candidateNodes[node.nodeID] = node
 			}
 		}
@@ -138,11 +142,15 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 				candidatesInStr := lo.Map(nodes, func(node nodeInfo, _ int) string {
 					return node.String()
 				})
+				serviceableNodesInStr := lo.Map(lo.Values(serviceableNodes), func(node nodeInfo, _ int) string {
+					return node.String()
+				})
 				log.Warn("failed to select shard",
 					zap.Int64("collectionID", workload.collectionID),
 					zap.String("channelName", workload.channel),
 					zap.Int64s("excluded", excludeNodes.Collect()),
 					zap.String("candidates", strings.Join(candidatesInStr, ", ")),
+					zap.String("serviceableNodes", strings.Join(serviceableNodesInStr, ", ")),
 					zap.Error(err))
 			}
 		}()
@@ -153,22 +161,18 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 		}
 
 		balancer.RegisterNodeInfo(lo.Values(candidateNodes))
+		// prefer serviceable nodes
 		var targetNodeID int64
-		targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(candidateNodes), workload.nq)
+		if len(serviceableNodes) > 0 {
+			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(serviceableNodes), workload.nq)
+		} else {
+			targetNodeID, err = balancer.SelectNode(ctx, lo.Keys(candidateNodes), workload.nq)
+		}
 		if err != nil {
 			return nodeInfo{}, err
 		}
 
 		if _, ok := candidateNodes[targetNodeID]; !ok {
-			nodeStr := lo.Map(lo.Values(candidateNodes), func(node nodeInfo, _ int) string {
-				return node.String()
-			})
-			log.Warn("target node not found",
-				zap.Int64("targetNodeID", targetNodeID),
-				zap.String("channel", workload.channel),
-				zap.String("candidateNodes", strings.Join(nodeStr, ", ")),
-				zap.Int64s("excluded", excludeNodes.Collect()),
-			)
 			err = merr.WrapErrNodeNotAvailable(targetNodeID)
 			return nodeInfo{}, err
 		}
