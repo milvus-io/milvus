@@ -11,7 +11,24 @@
 
 #include "TimestampIndex.h"
 
+using namespace std;
+using namespace std::chrono;
+
 namespace milvus::segcore {
+
+const int logicalBits = 18;
+const uint64_t logicalBitsMask = (1ULL << logicalBits) - 1;
+
+std::pair<system_clock::time_point, uint64_t>
+ParseTS(uint64_t ts) {
+    uint64_t logical = ts & logicalBitsMask;
+    uint64_t physical = ts >> logicalBits;
+    auto physicalTime = system_clock::from_time_t(physical / 1000);
+    auto ms = milliseconds(physical % 1000);
+    physicalTime += ms;
+
+    return make_pair(physicalTime, logical);
+}
 
 void
 TimestampIndex::set_length_meta(std::vector<int64_t> lengths) {
@@ -80,6 +97,25 @@ TimestampIndex::GenerateBitset(Timestamp query_timestamp,
     bitset.resize(size, true);
     for (int64_t i = beg; i < end; ++i) {
         bitset[i] = timestamps[i] > query_timestamp;
+    }
+    return bitset;
+}
+
+BitsetType
+TimestampIndex::GenerateTTLBitset(Timestamp collection_ttl,
+                                  const Timestamp* timestamps,
+                                  int64_t size) {
+    BitsetType bitset;
+    bitset.reserve(size);
+    bitset.resize(size, false);
+    auto cur = system_clock::now();
+    for (int64_t i = 0; i < size; ++i) {
+        auto [physicalTime, logical] = ParseTS(timestamps[i]);
+        bitset[i] =
+            (duration_cast<milliseconds>(physicalTime.time_since_epoch())
+                 .count() +
+             collection_ttl) >
+            duration_cast<milliseconds>(cur.time_since_epoch()).count();
     }
     return bitset;
 }

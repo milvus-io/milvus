@@ -326,7 +326,8 @@ class SegmentSealedImpl : public SegmentSealed {
 
     void
     mask_with_timestamps(BitsetTypeView& bitset_chunk,
-                         Timestamp timestamp) const override;
+                         Timestamp timestamp,
+                         Timestamp collection_ttl) const override;
 
     void
     vector_search(SearchInfo& search_info,

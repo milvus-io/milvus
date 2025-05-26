@@ -2447,3 +2447,21 @@ func GetReplicateID(ctx context.Context, database, collectionName string) (strin
 	replicateID, _ := common.GetReplicateID(dbInfo.properties)
 	return replicateID, nil
 }
+
+func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
+	properties := make(map[string]string)
+	for _, pair := range pairs {
+		properties[pair.Key] = pair.Value
+	}
+
+	v, ok := properties[common.CollectionTTLConfigKey]
+	if ok {
+		ttl, err := strconv.Atoi(v)
+		if err != nil {
+			return 0
+		}
+		return uint64(time.Duration(ttl) * time.Millisecond)
+	}
+
+	return 0
+}
